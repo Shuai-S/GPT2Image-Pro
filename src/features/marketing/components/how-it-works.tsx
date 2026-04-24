@@ -1,13 +1,12 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Check, Download, MessageSquare, Settings, Sparkles } from "lucide-react";
+import { Check, Download, MessageSquare, Settings } from "lucide-react";
 
 const stepConfig = [
-  { key: "configure" as const, icon: Settings, step: "01" },
-  { key: "chat" as const, icon: MessageSquare, step: "02" },
-  { key: "generate" as const, icon: Sparkles, step: "03" },
-  { key: "download" as const, icon: Download, step: "04" },
+  { key: "upload" as const, icon: Settings, step: "01" },
+  { key: "generate" as const, icon: MessageSquare, step: "02" },
+  { key: "export" as const, icon: Download, step: "03" },
 ];
 
 export function HowItWorks() {
