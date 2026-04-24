@@ -60,6 +60,13 @@ export interface StorageProvider {
    * @returns 文件内容 Buffer
    */
   getObject(key: string, bucket: string): Promise<Buffer>;
+
+  putObject(
+    key: string,
+    bucket: string,
+    data: Buffer,
+    contentType: string
+  ): Promise<void>;
 }
 
 // ============================================

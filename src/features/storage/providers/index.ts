@@ -1,5 +1,19 @@
-/**
- * 存储提供者导出
- */
+import type { StorageProvider } from "../types";
 
-export { s3Provider, getStorageProvider } from "./s3";
+let cachedProvider: StorageProvider | null = null;
+
+export function getStorageProvider(): StorageProvider {
+  if (cachedProvider) return cachedProvider;
+
+  if (process.env.STORAGE_ENDPOINT) {
+    const { s3Provider } = require("./s3") as { s3Provider: StorageProvider };
+    cachedProvider = s3Provider;
+  } else {
+    const { localProvider } = require("./local") as {
+      localProvider: StorageProvider;
+    };
+    cachedProvider = localProvider;
+  }
+
+  return cachedProvider;
+}

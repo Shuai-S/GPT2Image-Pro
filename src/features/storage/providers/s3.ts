@@ -196,6 +196,22 @@ export const s3Provider: StorageProvider = {
 
     return Buffer.concat(chunks);
   },
+
+  async putObject(
+    key: string,
+    bucket: string,
+    data: Buffer,
+    contentType: string
+  ): Promise<void> {
+    const client = getS3Client();
+    const command = new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: data,
+      ContentType: contentType,
+    });
+    await client.send(command);
+  },
 };
 
 // ============================================

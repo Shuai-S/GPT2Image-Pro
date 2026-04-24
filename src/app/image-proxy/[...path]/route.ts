@@ -23,8 +23,10 @@ import { DEFAULT_SIGNED_URL_EXPIRES } from "@/features/storage/types";
  */
 function getAllowedBuckets(): string[] {
   const avatarsBucket = process.env.NEXT_PUBLIC_AVATARS_BUCKET_NAME;
+  const generationsBucket =
+    process.env.NEXT_PUBLIC_GENERATIONS_BUCKET_NAME || "generations";
 
-  const buckets: string[] = [];
+  const buckets: string[] = [generationsBucket];
 
   if (avatarsBucket) {
     buckets.push(avatarsBucket);

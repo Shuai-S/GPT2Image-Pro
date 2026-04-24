@@ -515,6 +515,40 @@ export type UserApiConfig = typeof userApiConfig.$inferSelect;
 export type NewUserApiConfig = typeof userApiConfig.$inferInsert;
 
 // ============================================
+// Image Generation
+// ============================================
+
+export const generationStatusEnum = pgEnum("generation_status", [
+  "pending",
+  "completed",
+  "failed",
+]);
+
+export const generation = pgTable("generation", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  prompt: text("prompt").notNull(),
+  revisedPrompt: text("revised_prompt"),
+  model: text("model").notNull(),
+  size: text("size").notNull().default("1024x1024"),
+  status: generationStatusEnum("status").notNull().default("pending"),
+  storageKey: text("storage_key"),
+  storageBucket: text("storage_bucket").default("generations"),
+  fileSize: integer("file_size"),
+  creditsConsumed: integer("credits_consumed").notNull().default(0),
+  error: text("error"),
+  metadata: json("metadata").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+});
+
+export type Generation = typeof generation.$inferSelect;
+export type NewGeneration = typeof generation.$inferInsert;
+export type GenerationStatus = (typeof generationStatusEnum.enumValues)[number];
+
+// ============================================
 // 工单系统类型导出
 // ============================================
 
