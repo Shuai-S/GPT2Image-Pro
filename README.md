@@ -1,87 +1,276 @@
-# GPT2Image
+# NextDevTpl
 
-<p align="center">
-  <img src="src/assets/logo.png" alt="GPT2Image" height="64">
-</p>
+一个现代化的 SaaS 全栈开发模板，基于 Next.js 15 构建，包含认证、支付、积分、邮件、存储、工单、API 限流、日志、错误监控等完整的 SaaS 功能模块。
 
-<p align="center">
-  A lightweight, pure-frontend chat-to-image generation web app.<br>
-  Connect to any OpenAI-compatible API and create images through natural conversation.
-</p>
+> **开箱即用**：所有可选服务（限流、日志、监控）在未配置时自动降级为本地模式，不影响使用。配置对应环境变量即可启用完整功能。
 
-<p align="center">
-  <a href="README_CN.md">中文文档</a>
-</p>
+## 特性
 
-## Features
+- **Next.js 15** - App Router、Turbopack、React 19
+- **TypeScript** - 严格模式，完整类型安全
+- **Tailwind CSS 4** - 最新版样式系统
+- **Shadcn/UI** - 高质量组件库
+- **Better Auth** - 现代认证方案（邮箱密码 + OAuth）
+- **Drizzle ORM** - 类型安全的数据库操作
+- **Creem** - 订阅支付集成
+- **积分系统** - FIFO 过期 + 复式记账
+- **邮件系统** - Resend + React Email
+- **存储系统** - S3/R2 兼容
+- **工单系统** - 用户支持
+- **管理后台** - 用户管理、数据统计
+- **国际化** - next-intl 多语言支持
+- **API 限流** - Upstash Redis，全局自动保护（可选）
+- **结构化日志** - Pino + Axiom 云日志（可选）
+- **错误监控** - Sentry 自动捕获（可选）
 
-- **Conversational Image Generation** — Describe what you want, get images in a chat flow
-- **Image Editing** — Attach reference images for guided edits
-- **Flexible Sizing** — Auto, preset ratios (1:1, 3:2, 2:3, 16:9, 9:16), 2K, 4K, or fully custom dimensions
-- **Retry & Variants** — Regenerate any result; variants are kept as branches with `< 1/N >` navigation
-- **Gallery & History** — Browse all generated images or revisit past conversations
-- **Fullscreen Lightbox** — View images at full resolution with download support
-- **Zero Backend** — Runs entirely in the browser; data stored in localStorage
+## 技术栈
 
-## Preview
+| 分类 | 技术 |
+|------|------|
+| 框架 | Next.js 15, React 19, TypeScript |
+| 样式 | Tailwind CSS 4, Shadcn/UI, Radix UI |
+| 数据库 | PostgreSQL, Drizzle ORM, Neon |
+| 认证 | Better Auth |
+| 支付 | Creem |
+| 邮件 | Resend, React Email |
+| 存储 | AWS S3 / Cloudflare R2 |
+| 验证 | Zod, React Hook Form, next-safe-action |
+| 限流 | Upstash Redis, @upstash/ratelimit |
+| 日志 | Pino, Axiom |
+| 监控 | Sentry |
+| 工具 | Biome, pnpm |
 
-<p align="center">
-  <img src="docs/images/preview_en.png" alt="Preview" width="720">
-</p>
+## 快速开始
 
-## Quick Start
+只需 3 个环境变量即可启动。详见 **[Quick Start 文档](./docs/quick-start.md)**。
 
-1. Serve the `src/` directory with any static file server:
+```bash
+git clone git@github.com:evepupil/NextDevTpl.git
+cd NextDevTpl
+pnpm install
+cp .env.example .env.local
+# 编辑 .env.local 填入 DATABASE_URL、BETTER_AUTH_SECRET、BETTER_AUTH_URL
+pnpm db:push
+pnpm dev
+```
 
-   ```bash
-   cd src
-   python -m http.server 8090
-   ```
+访问 http://localhost:3000
 
-2. Open `http://localhost:8090` in your browser.
-
-3. Enter your **API Base URL** and **API Key** on the settings page, then start creating.
-
-## Project Structure
+## 项目结构
 
 ```
 src/
-├── index.html              # Entry point
-├── favicon.ico             # Browser tab icon
-├── assets/                 # Logo and icon images
-├── css/style.css           # Design tokens and styles
-└── js/
-    ├── app.js              # Bootstrap and routing
-    ├── router.js           # Hash-based SPA router
-    ├── store.js            # localStorage persistence
-    ├── api.js              # OpenAI Responses API client
-    ├── icons.js            # SVG icon library
-    ├── components/         # Reusable UI components
-    │   ├── header.js
-    │   ├── input-bar.js
-    │   ├── image-card.js
-    │   ├── lightbox.js
-    │   └── toast.js
-    └── views/              # Page views
-        ├── settings.js
-        ├── landing.js
-        ├── chat.js
-        ├── gallery.js
-        └── history.js
+├── app/                          # Next.js App Router
+│   └── [locale]/                 # 国际化路由
+│       ├── (marketing)/          # 营销页面（公开）
+│       ├── (dashboard)/          # 用户仪表盘（需登录）
+│       └── (admin)/              # 管理后台（需管理员）
+├── components/ui/                # Shadcn/UI 基础组件
+├── shared/                       # 全局共享组件
+│   ├── providers.tsx             # 主题等 Provider
+│   ├── mode-toggle.tsx           # 暗色模式切换
+│   ├── language-switcher.tsx     # 语言切换
+│   └── icons/                    # 图标
+├── features/                     # Feature-based 模块
+│   ├── marketing/components/     # header, footer, hero, pricing...
+│   ├── dashboard/components/     # sidebar, topbar, cards...
+│   ├── admin/components/         # admin-sidebar
+│   ├── ai/components/            # chat-interface
+│   ├── auth/components/          # 认证相关
+│   ├── blog/components/          # 博客相关
+│   ├── settings/components/      # 设置相关
+│   └── support/components/       # 工单支持
+├── db/                           # 数据库 Schema
+├── lib/                          # 工具函数
+│   ├── auth/                     # 认证相关
+│   ├── rate-limit/               # API 限流
+│   ├── logger/                   # 结构化日志
+│   └── monitoring/               # 错误监控 (Sentry)
+├── credits/                      # 积分系统
+├── mail/                         # 邮件系统
+├── storage/                      # 存储系统
+└── config/                       # 配置文件
 ```
 
-## API Compatibility
+## 功能模块
 
-GPT2Image calls the [OpenAI Responses API](https://platform.openai.com/docs/api-reference/responses) with the `image_generation` tool. Any OpenAI-compatible endpoint that supports this tool type will work.
+### 认证系统
 
-**Tested configurations:**
+- 邮箱密码注册/登录
+- GitHub/Google OAuth
+- 会话管理
+- 用户角色（user/admin）
 
-| Model | Size Support |
-|-------|-------------|
-| gpt-4o / gpt-4.1 | Standard sizes (up to 1792 x 1024) |
-| gpt-5.4 | Standard + 2K / 4K (up to 3840 x 2160) |
+### 支付系统
 
-> Note: The **Model** field in settings refers to the chat model (e.g. `gpt-5.4`), not the image model. The underlying image model (`gpt-image-1` / `gpt-image-2`) is selected automatically by the API.
+- Creem 订阅
+- 多种定价方案
+- Webhook 处理
+- 订阅管理
+
+### 积分系统
+
+- FIFO 过期机制
+- 复式记账
+- 批次管理
+- 交易历史
+
+### 邮件系统
+
+- React Email 模板
+- Resend 发送
+- 开发模式预览
+
+### 存储系统
+
+- S3/R2 兼容
+- 预签名上传
+- 文件管理
+
+### 工单系统
+
+- 用户创建工单
+- 消息对话
+- 状态管理
+- 管理员回复
+
+### 管理后台
+
+- 数据统计面板
+- 用户管理（搜索、角色、封禁）
+- 积分充值
+- 工单处理
+
+### API 限流
+
+- Upstash Redis 滑动窗口
+- Middleware 全局自动保护
+- 路由级别差异化限制
+- 未配置时自动跳过
+
+### 日志系统
+
+- Pino 结构化日志
+- Axiom 云日志集成
+- Server Action 错误自动记录
+- 未配置时回退 console
+
+### 错误监控
+
+- Sentry 自动捕获
+- Server Action 错误自动上报
+- 用户上下文关联
+- 未配置时回退 console
+
+## 部署
+
+支持自有服务器部署，提供一键构建 + 推送 + 启动脚本。
+
+### 部署方式
+
+| 方式 | 说明 |
+|------|------|
+| **自有服务器（推荐）** | 通过 `deploy-build.bat` 一键部署到 Linux 服务器 |
+| **Vercel** | `git push` 即可，零配置 |
+| **Docker** | 自行编写 Dockerfile，`pnpm build` + `pnpm start` |
+
+### 一键部署到服务器
+
+项目提供了 `deploy-build.bat`（本地 Windows）+ `start-prod.sh`（服务器端）部署脚本，流程为：
+
+**本地构建 → 打包 → 上传 → 服务器解压 → PM2 启动/重启**
+
+#### 1. 配置部署参数
+
+编辑 `deploy-build.bat` 头部的配置：
+
+```bat
+set "REMOTE_USER=ubuntu"          # 服务器用户名
+set "REMOTE_HOST=<your-server>"   # 服务器 IP 或域名
+set "REMOTE_PORT=22"              # SSH 端口
+set "REMOTE_DIR=/home/ubuntu/NextjsTpl"  # 服务器上的项目目录
+set "SSH_KEY=%USERPROFILE%\.ssh\id_ed25519"  # SSH 私钥路径
+set "PORT=3303"                   # 应用运行端口
+```
+
+#### 2. 准备生产环境变量
+
+```bash
+# 创建生产环境变量文件（不会被提交到 Git）
+cp .env.example .env.prod
+# 编辑 .env.prod，填入生产环境的真实配置
+```
+
+#### 3. 服务器前置准备
+
+```bash
+# 服务器上需要安装：
+# - Node.js 18+（推荐通过 nvm 安装）
+# - pnpm: npm install -g pnpm
+# - PM2: npm install -g pm2
+
+# 创建项目目录
+mkdir -p /home/ubuntu/NextjsTpl
+```
+
+#### 4. 执行部署
+
+```bash
+# Windows 本地执行
+deploy-build.bat
+```
+
+脚本会自动完成：本地 `pnpm build` → 打包 `.next` + 配置文件 → SCP 上传 → SSH 远程解压 → PM2 启动应用。
+
+#### 5. 服务器管理
+
+```bash
+pm2 status              # 查看应用状态
+pm2 logs NextjsTpl      # 查看日志
+pm2 restart NextjsTpl   # 重启应用
+pm2 stop NextjsTpl      # 停止应用
+```
+
+> 服务器端通常还需要配置 Nginx 反向代理（将 80/443 端口转发到应用端口）和 SSL 证书。
+
+## 命令
+
+```bash
+pnpm dev          # 启动开发服务器
+pnpm build        # 生产构建
+pnpm start        # 启动生产服务器
+pnpm lint         # 代码检查
+pnpm format       # 代码格式化
+pnpm check        # 检查并自动修复
+pnpm typecheck    # 类型检查
+pnpm db:generate  # 生成迁移
+pnpm db:push      # 推送 Schema
+pnpm db:studio    # 打开 Drizzle Studio
+```
+
+## 路由说明
+
+| 路由 | 说明 | 权限 |
+|------|------|------|
+| `/` | 首页 | 公开 |
+| `/pricing` | 定价页 | 公开 |
+| `/blog` | 博客 | 公开 |
+| `/docs` | 文档 | 公开 |
+| `/sign-in` | 登录 | 公开 |
+| `/sign-up` | 注册 | 公开 |
+| `/dashboard` | 仪表盘 | 登录用户 |
+| `/dashboard/support` | 我的工单 | 登录用户 |
+| `/settings` | 设置 | 登录用户 |
+| `/admin` | 管理后台 | 管理员 |
+| `/admin/users` | 用户管理 | 管理员 |
+| `/admin/tickets` | 工单管理 | 管理员 |
+
+## 开发规范
+
+- **Server Components 优先** - 只在需要交互时使用 `'use client'`
+- **Server Actions** - 所有数据变更使用 next-safe-action
+- **类型安全** - 所有 Props、API 响应必须有类型定义
+- **Feature-based** - 按功能模块组织代码
 
 ## License
 
