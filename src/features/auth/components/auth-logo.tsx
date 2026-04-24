@@ -11,7 +11,7 @@ export function AuthLogo() {
   return (
     <div className="flex items-center gap-2">
       <Image
-        src="/assets/logo.png"
+        src="/assets/icon.png"
         alt="GPT2IMAGE"
         width={28}
         height={28}

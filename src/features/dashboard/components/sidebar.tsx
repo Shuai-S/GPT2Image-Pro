@@ -134,7 +134,7 @@ export function DashboardSidebar() {
             }}
           >
             <Image
-              src="/assets/logo.png"
+              src="/assets/icon.png"
               alt="GPT2IMAGE"
               width={24}
               height={24}
