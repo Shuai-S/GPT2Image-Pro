@@ -219,21 +219,21 @@ export default function AdminUsersPage() {
   const getSubscriptionBadge = (sub: UserWithDetails["subscription"]) => {
     if (!sub) {
       return (
-        <Badge variant="secondary" className="bg-gray-100 text-gray-800">
+        <Badge variant="secondary" className="bg-muted text-muted-foreground">
           无订阅
         </Badge>
       );
     }
 
     const statusMap: Record<string, { label: string; color: string }> = {
-      active: { label: "订阅中", color: "bg-green-100 text-green-800" },
-      canceled: { label: "已取消", color: "bg-yellow-100 text-yellow-800" },
-      past_due: { label: "逾期", color: "bg-red-100 text-red-800" },
-      incomplete: { label: "未完成", color: "bg-gray-100 text-gray-800" },
+      active: { label: "订阅中", color: "bg-foreground text-background" },
+      canceled: { label: "已取消", color: "bg-foreground/10 text-foreground" },
+      past_due: { label: "逾期", color: "bg-foreground/10 text-foreground" },
+      incomplete: { label: "未完成", color: "bg-muted text-muted-foreground" },
     };
 
     // 获取配置，使用默认值避免 undefined
-    const defaultConfig = { label: "未完成", color: "bg-gray-100 text-gray-800" };
+    const defaultConfig = { label: "未完成", color: "bg-muted text-muted-foreground" };
     const config = statusMap[sub.status] ?? defaultConfig;
     return (
       <Badge variant="secondary" className={config.color}>
@@ -254,7 +254,7 @@ export default function AdminUsersPage() {
     <div className="space-y-6">
       {/* 页面标题 */}
       <div>
-        <h2 className="text-2xl font-bold tracking-tight">用户管理</h2>
+        <h2 className="text-2xl font-bold font-serif tracking-tight">用户管理</h2>
         <p className="text-muted-foreground">
           查看和管理系统中的所有用户
         </p>
@@ -275,7 +275,7 @@ export default function AdminUsersPage() {
             <CardTitle className="text-sm font-medium">管理员</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-blue-600">{adminCount}</div>
+            <div className="text-2xl font-bold">{adminCount}</div>
           </CardContent>
         </Card>
         <Card>
@@ -283,7 +283,7 @@ export default function AdminUsersPage() {
             <CardTitle className="text-sm font-medium">订阅用户</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">
+            <div className="text-2xl font-bold">
               {activeSubscriptions}
             </div>
           </CardContent>
@@ -293,7 +293,7 @@ export default function AdminUsersPage() {
             <CardTitle className="text-sm font-medium">已封禁</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">{bannedCount}</div>
+            <div className="text-2xl font-bold">{bannedCount}</div>
           </CardContent>
         </Card>
       </div>
@@ -311,7 +311,7 @@ export default function AdminUsersPage() {
                 className="pl-10"
               />
             </div>
-            <Button type="submit" disabled={isLoading}>
+            <Button type="submit" disabled={isLoading} className="bg-foreground text-background hover:bg-foreground/90">
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               搜索
             </Button>
@@ -391,18 +391,18 @@ export default function AdminUsersPage() {
                       <td className="px-4 py-3">
                         <div className="flex flex-col gap-1">
                           {u.banned ? (
-                            <Badge variant="destructive">已封禁</Badge>
+                            <Badge variant="secondary" className="bg-destructive/10 text-destructive">已封禁</Badge>
                           ) : u.emailVerified ? (
                             <Badge
                               variant="secondary"
-                              className="bg-green-100 text-green-800"
+                              className="bg-foreground/10 text-foreground"
                             >
                               已验证
                             </Badge>
                           ) : (
                             <Badge
                               variant="secondary"
-                              className="bg-yellow-100 text-yellow-800"
+                              className="bg-muted text-muted-foreground"
                             >
                               未验证
                             </Badge>
@@ -411,7 +411,7 @@ export default function AdminUsersPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <Coins className="h-4 w-4 text-yellow-500" />
+                          <Coins className="h-4 w-4 text-muted-foreground" />
                           <span className="font-medium">
                             {u.credits?.balance ?? 0}
                           </span>
@@ -435,7 +435,7 @@ export default function AdminUsersPage() {
                           </Button>
                           <Button
                             size="sm"
-                            variant={u.banned ? "default" : "destructive"}
+                            variant="outline"
                             onClick={() => openBanDialog(u)}
                             title={u.banned ? "解封" : "封禁"}
                           >
@@ -489,7 +489,8 @@ export default function AdminUsersPage() {
               取消
             </Button>
             <Button
-              variant={selectedUser?.banned ? "default" : "destructive"}
+              className={selectedUser?.banned ? "bg-foreground text-background hover:bg-foreground/90" : ""}
+              variant={selectedUser?.banned ? "default" : "outline"}
               onClick={handleBan}
               disabled={isBanning}
             >
@@ -541,7 +542,7 @@ export default function AdminUsersPage() {
             >
               取消
             </Button>
-            <Button onClick={handleGrant} disabled={isGranting}>
+            <Button onClick={handleGrant} disabled={isGranting} className="bg-foreground text-background hover:bg-foreground/90">
               {isGranting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               确认充值
             </Button>

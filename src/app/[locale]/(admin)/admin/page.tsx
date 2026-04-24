@@ -148,7 +148,7 @@ export default async function AdminDashboardPage() {
     <div className="space-y-6">
       {/* 页面标题 */}
       <div>
-        <h2 className="text-2xl font-bold tracking-tight">控制面板</h2>
+        <h2 className="text-2xl font-bold font-serif tracking-tight">控制面板</h2>
         <p className="text-muted-foreground">
           欢迎来到管理后台，这里是系统概览。
         </p>
@@ -177,7 +177,7 @@ export default async function AdminDashboardPage() {
             <Ticket className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-orange-600">
+            <div className="text-2xl font-bold">
               {stats.tickets.open + stats.tickets.inProgress}
             </div>
             <p className="text-xs text-muted-foreground">
@@ -193,7 +193,7 @@ export default async function AdminDashboardPage() {
             <CreditCard className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">
+            <div className="text-2xl font-bold">
               {stats.subscriptions.active}
             </div>
             <p className="text-xs text-muted-foreground">
@@ -209,7 +209,7 @@ export default async function AdminDashboardPage() {
             <Coins className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-yellow-600">
+            <div className="text-2xl font-bold">
               {stats.credits.totalBalance.toLocaleString()}
             </div>
             <p className="text-xs text-muted-foreground">
@@ -250,7 +250,7 @@ export default async function AdminDashboardPage() {
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">管理员</span>
-              <span className="font-medium text-blue-600">
+              <span className="font-medium">
                 {stats.users.admins}
               </span>
             </div>
@@ -262,13 +262,13 @@ export default async function AdminDashboardPage() {
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">已封禁</span>
-              <span className="font-medium text-red-600">
+              <span className="font-medium">
                 {stats.users.banned}
               </span>
             </div>
             <div className="flex justify-between border-t pt-2">
               <span className="text-muted-foreground">本周新增</span>
-              <span className="font-medium text-green-600">
+              <span className="font-medium">
                 +{stats.users.newThisWeek}
               </span>
             </div>
@@ -286,13 +286,13 @@ export default async function AdminDashboardPage() {
           <CardContent className="space-y-3">
             <div className="flex justify-between">
               <span className="text-muted-foreground">待处理</span>
-              <span className="font-medium text-blue-600">
+              <span className="font-medium">
                 {stats.tickets.open}
               </span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">处理中</span>
-              <span className="font-medium text-yellow-600">
+              <span className="font-medium">
                 {stats.tickets.inProgress}
               </span>
             </div>
@@ -302,7 +302,7 @@ export default async function AdminDashboardPage() {
             </div>
             <div className="flex justify-between border-t pt-2">
               <span className="text-muted-foreground">今日新增</span>
-              <span className="font-medium text-orange-600">
+              <span className="font-medium">
                 +{stats.tickets.newToday}
               </span>
             </div>
@@ -320,19 +320,19 @@ export default async function AdminDashboardPage() {
           <CardContent className="space-y-3">
             <div className="flex justify-between">
               <span className="text-muted-foreground">当前持有</span>
-              <span className="font-medium text-yellow-600">
+              <span className="font-medium">
                 {stats.credits.totalBalance.toLocaleString()}
               </span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">累计发放</span>
-              <span className="font-medium text-green-600">
+              <span className="font-medium">
                 +{stats.credits.totalEarned.toLocaleString()}
               </span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">累计消费</span>
-              <span className="font-medium text-red-600">
+              <span className="font-medium">
                 -{stats.credits.totalSpent.toLocaleString()}
               </span>
             </div>
@@ -394,7 +394,7 @@ export default async function AdminDashboardPage() {
               <Ticket className="h-4 w-4" />
               <span>处理工单</span>
               {stats.tickets.open > 0 && (
-                <span className="ml-auto rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-800">
+                <span className="ml-auto rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground">
                   {stats.tickets.open} 待处理
                 </span>
               )}

@@ -18,12 +18,12 @@ export default async function AdminLayout({
   await checkAdmin();
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
+    <div className="min-h-screen bg-background">
       <AdminSidebar />
       <div className="pl-64">
         {/* Admin 顶栏 */}
-        <header className="sticky top-0 z-30 flex h-14 items-center border-b bg-white/80 px-6 backdrop-blur dark:bg-slate-900/80">
-          <h1 className="text-lg font-semibold">管理后台</h1>
+        <header className="sticky top-0 z-30 flex h-14 items-center border-b bg-background/80 px-6 backdrop-blur">
+          <h1 className="text-lg font-serif font-semibold">管理后台</h1>
         </header>
         {/* 主内容区域 */}
         <main className="p-6">{children}</main>

@@ -81,12 +81,10 @@ export default async function AdminTicketDetailPage({
   const getStatusBadge = (status: string) => {
     const statusConfig = ticketStatuses.find((s) => s.value === status);
     const colorMap: Record<string, string> = {
-      open: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300",
-      in_progress:
-        "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300",
-      resolved:
-        "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
-      closed: "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300",
+      open: "bg-foreground text-background",
+      in_progress: "bg-foreground/80 text-background",
+      resolved: "bg-foreground/10 text-foreground",
+      closed: "bg-muted text-muted-foreground",
     };
     return (
       <Badge className={colorMap[status] || colorMap.closed} variant="secondary">
@@ -101,10 +99,9 @@ export default async function AdminTicketDetailPage({
   const getPriorityBadge = (priority: string) => {
     const priorityConfig = ticketPriorities.find((p) => p.value === priority);
     const colorMap: Record<string, string> = {
-      low: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
-      medium:
-        "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300",
-      high: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300",
+      low: "bg-muted text-muted-foreground",
+      medium: "bg-foreground/10 text-foreground",
+      high: "bg-foreground text-background",
     };
     return (
       <Badge className={colorMap[priority] || colorMap.medium} variant="secondary">
@@ -143,7 +140,7 @@ export default async function AdminTicketDetailPage({
           </Button>
         </Link>
         <div className="flex-1">
-          <h2 className="text-2xl font-bold tracking-tight">
+          <h2 className="text-2xl font-bold font-serif tracking-tight">
             {ticketData.subject}
           </h2>
           <p className="text-muted-foreground">
@@ -208,8 +205,8 @@ export default async function AdminTicketDetailPage({
               key={msg.id}
               className={`flex gap-4 p-4 rounded-lg ${
                 msg.isAdminResponse
-                  ? "bg-blue-50 dark:bg-blue-950/30"
-                  : "bg-muted/50"
+                  ? "bg-foreground text-background"
+                  : "bg-muted"
               }`}
             >
               <Avatar className="h-10 w-10">
@@ -220,7 +217,7 @@ export default async function AdminTicketDetailPage({
                 <AvatarFallback
                   className={
                     msg.isAdminResponse
-                      ? "bg-blue-600 text-white"
+                      ? "bg-background text-foreground"
                       : "bg-foreground text-background"
                   }
                 >
@@ -233,7 +230,7 @@ export default async function AdminTicketDetailPage({
                     {msg.user?.name || "用户"}
                   </span>
                   {msg.isAdminResponse && (
-                    <Badge variant="secondary" className="text-xs">
+                    <Badge variant="secondary" className="text-xs bg-background/20 text-background border-0">
                       客服
                     </Badge>
                   )}

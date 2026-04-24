@@ -45,12 +45,10 @@ export default async function AdminTicketsPage() {
   const getStatusBadge = (status: string) => {
     const statusConfig = ticketStatuses.find((s) => s.value === status);
     const colorMap: Record<string, string> = {
-      open: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300",
-      in_progress:
-        "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300",
-      resolved:
-        "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
-      closed: "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300",
+      open: "bg-foreground text-background",
+      in_progress: "bg-foreground/80 text-background",
+      resolved: "bg-foreground/10 text-foreground",
+      closed: "bg-muted text-muted-foreground",
     };
     return (
       <Badge className={colorMap[status] || colorMap.closed} variant="secondary">
@@ -65,10 +63,9 @@ export default async function AdminTicketsPage() {
   const getPriorityBadge = (priority: string) => {
     const priorityConfig = ticketPriorities.find((p) => p.value === priority);
     const colorMap: Record<string, string> = {
-      low: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
-      medium:
-        "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300",
-      high: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300",
+      low: "bg-muted text-muted-foreground",
+      medium: "bg-foreground/10 text-foreground",
+      high: "bg-foreground text-background",
     };
     return (
       <Badge className={colorMap[priority] || colorMap.medium} variant="secondary">
@@ -108,7 +105,7 @@ export default async function AdminTicketsPage() {
     <div className="space-y-6">
       {/* 页面标题 */}
       <div>
-        <h2 className="text-2xl font-bold tracking-tight">工单管理</h2>
+        <h2 className="text-2xl font-bold font-serif tracking-tight">工单管理</h2>
         <p className="text-muted-foreground">
           查看和处理用户提交的支持工单
         </p>
@@ -121,7 +118,7 @@ export default async function AdminTicketsPage() {
             <CardTitle className="text-sm font-medium">待处理</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-blue-600">{openCount}</div>
+            <div className="text-2xl font-bold">{openCount}</div>
           </CardContent>
         </Card>
         <Card>
@@ -129,7 +126,7 @@ export default async function AdminTicketsPage() {
             <CardTitle className="text-sm font-medium">处理中</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-yellow-600">
+            <div className="text-2xl font-bold">
               {inProgressCount}
             </div>
           </CardContent>
@@ -139,7 +136,7 @@ export default async function AdminTicketsPage() {
             <CardTitle className="text-sm font-medium">已解决</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">
+            <div className="text-2xl font-bold">
               {resolvedCount}
             </div>
           </CardContent>
