@@ -85,7 +85,10 @@ export function AdminSidebar() {
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r bg-background text-foreground">
       {/* Logo - Admin 标识 */}
       <div className="flex h-14 items-center border-b px-4">
-        <Link href="/admin" className="flex items-center gap-2 text-lg font-serif font-bold tracking-tight">
+        <Link
+          href="/admin"
+          className="flex items-center gap-2 text-lg font-serif font-bold tracking-tight"
+        >
           <img src="/assets/icon.png" alt="Logo" className="h-6 w-6 shrink-0" />
           <span className="rounded bg-foreground px-2 py-0.5 text-xs font-medium text-background">
             Admin
@@ -132,7 +135,7 @@ export function AdminSidebar() {
             className="flex items-center gap-3 rounded-md px-2 py-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />
-            返回用户端
+            Back to Dashboard
           </Link>
         </div>
       </nav>
@@ -154,7 +157,9 @@ export function AdminSidebar() {
                 </Avatar>
                 <div className="flex-1 truncate text-left">
                   <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium text-foreground">{user.name}</p>
+                    <p className="text-sm font-medium text-foreground">
+                      {user.name}
+                    </p>
                     <span className="rounded bg-foreground px-1.5 py-0.5 text-xs font-medium text-background">
                       Admin
                     </span>
@@ -202,7 +207,7 @@ export function AdminSidebar() {
                       ? "bg-muted text-foreground"
                       : "text-muted-foreground hover:bg-muted hover:text-foreground"
                   )}
-                  title="浅色模式"
+                  title="Light"
                 >
                   <Sun className="h-4 w-4" />
                 </button>
@@ -215,7 +220,7 @@ export function AdminSidebar() {
                       ? "bg-muted text-foreground"
                       : "text-muted-foreground hover:bg-muted hover:text-foreground"
                   )}
-                  title="深色模式"
+                  title="Dark"
                 >
                   <Moon className="h-4 w-4" />
                 </button>
@@ -228,7 +233,7 @@ export function AdminSidebar() {
                       ? "bg-muted text-foreground"
                       : "text-muted-foreground hover:bg-muted hover:text-foreground"
                   )}
-                  title="跟随系统"
+                  title="System"
                 >
                   <Monitor className="h-4 w-4" />
                 </button>
@@ -245,7 +250,7 @@ export function AdminSidebar() {
                   className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted transition-colors"
                 >
                   <LogOut className="h-4 w-4" />
-                  退出登录
+                  Sign Out
                 </button>
               </div>
             </PopoverContent>

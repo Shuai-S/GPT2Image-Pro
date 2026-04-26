@@ -190,20 +190,20 @@ export const dashboardNav: NavGroup[] = [
  */
 export const adminNav: NavGroup[] = [
   {
-    title: "管理中心",
+    title: "Admin",
     items: [
       {
-        title: "控制面板",
+        title: "Dashboard",
         href: "/admin",
         icon: LayoutDashboard,
       },
       {
-        title: "用户管理",
+        title: "Users",
         href: "/admin/users",
         icon: Users,
       },
       {
-        title: "工单管理",
+        title: "Tickets",
         href: "/admin/tickets",
         icon: Ticket,
       },

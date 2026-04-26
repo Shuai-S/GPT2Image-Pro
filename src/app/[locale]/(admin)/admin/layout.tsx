@@ -23,7 +23,7 @@ export default async function AdminLayout({
       <div className="pl-64">
         {/* Admin 顶栏 */}
         <header className="sticky top-0 z-30 flex h-14 items-center border-b bg-background/80 px-6 backdrop-blur">
-          <h1 className="text-lg font-serif font-semibold">管理后台</h1>
+          <h1 className="text-lg font-serif font-semibold">Admin Panel</h1>
         </header>
         {/* 主内容区域 */}
         <main className="p-6">{children}</main>
