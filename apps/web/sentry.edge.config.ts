@@ -5,6 +5,6 @@
  * 仅在 NEXT_PUBLIC_SENTRY_DSN 配置后生效
  */
 
-import { initSentryServer } from "@repo/shared/monitoring";
+import { initSentryServer } from "@/lib/monitoring";
 
 initSentryServer();
