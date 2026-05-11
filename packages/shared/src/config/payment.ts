@@ -13,20 +13,41 @@ import {
   type PricingConfig,
 } from "../payment/types";
 
+const paymentProvider =
+  process.env.PAYMENT_PROVIDER?.trim().toLowerCase() === "epay" ||
+  process.env.NEXT_PUBLIC_PAYMENT_PROVIDER?.trim().toLowerCase() === "epay"
+    ? "epay"
+    : "creem";
+
 // ============================================
 // 环境变量中的价格 ID
 // ============================================
 
 /**
- * Creem 产品/价格 ID（从环境变量读取）
+ * 产品/价格 ID（从环境变量读取）
+ *
+ * Creem 模式下使用 NEXT_PUBLIC_CREEM_PRICE_*。
+ * 易支付模式不依赖第三方后台产品 ID，使用稳定的本地 priceId。
  */
 export const PRICE_IDS = {
-  STARTER_MONTHLY: process.env.NEXT_PUBLIC_CREEM_PRICE_STARTER_MONTHLY ?? "",
-  STARTER_YEARLY: process.env.NEXT_PUBLIC_CREEM_PRICE_STARTER_YEARLY ?? "",
-  PRO_MONTHLY: process.env.NEXT_PUBLIC_CREEM_PRICE_PRO_MONTHLY ?? "",
-  PRO_YEARLY: process.env.NEXT_PUBLIC_CREEM_PRICE_PRO_YEARLY ?? "",
-  ULTRA_MONTHLY: process.env.NEXT_PUBLIC_CREEM_PRICE_ULTRA_MONTHLY ?? "",
-  ULTRA_YEARLY: process.env.NEXT_PUBLIC_CREEM_PRICE_ULTRA_YEARLY ?? "",
+  STARTER_MONTHLY:
+    process.env.NEXT_PUBLIC_CREEM_PRICE_STARTER_MONTHLY ??
+    (paymentProvider === "epay" ? "starter_monthly" : ""),
+  STARTER_YEARLY:
+    process.env.NEXT_PUBLIC_CREEM_PRICE_STARTER_YEARLY ??
+    (paymentProvider === "epay" ? "starter_yearly" : ""),
+  PRO_MONTHLY:
+    process.env.NEXT_PUBLIC_CREEM_PRICE_PRO_MONTHLY ??
+    (paymentProvider === "epay" ? "pro_monthly" : ""),
+  PRO_YEARLY:
+    process.env.NEXT_PUBLIC_CREEM_PRICE_PRO_YEARLY ??
+    (paymentProvider === "epay" ? "pro_yearly" : ""),
+  ULTRA_MONTHLY:
+    process.env.NEXT_PUBLIC_CREEM_PRICE_ULTRA_MONTHLY ??
+    (paymentProvider === "epay" ? "ultra_monthly" : ""),
+  ULTRA_YEARLY:
+    process.env.NEXT_PUBLIC_CREEM_PRICE_ULTRA_YEARLY ??
+    (paymentProvider === "epay" ? "ultra_yearly" : ""),
 } as const;
 
 // ============================================
@@ -48,7 +69,7 @@ export const SUBSCRIPTION_MONTHLY_CREDITS = {
  */
 export const paymentConfig: PaymentConfig = {
   /** 支付提供商 */
-  provider: "creem",
+  provider: paymentProvider,
 
   /** 货币 */
   currency: "USD",

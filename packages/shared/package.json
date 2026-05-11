@@ -32,6 +32,7 @@
     "./config/payment": "./src/config/payment.ts",
     "./config/subscription-plan": "./src/config/subscription-plan.ts",
     "./payment/creem": "./src/payment/creem.ts",
+    "./payment/epay": "./src/payment/epay.ts",
     "./payment/types": "./src/payment/types.ts",
     "./monitoring": "./src/monitoring/index.ts",
     "./components": "./src/components/index.ts",

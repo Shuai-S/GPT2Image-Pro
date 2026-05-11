@@ -19,6 +19,11 @@ import {
   type SubscriptionPlan,
 } from "../config/subscription-plan";
 import { creem } from "../payment/creem";
+import {
+  createEpayPurchase,
+  encodeEpayMetadata,
+  isEpayPaymentProvider,
+} from "../payment/epay";
 import { logEvent } from "../logger/index";
 import { actionClient, protectedAction } from "../safe-action";
 
@@ -425,9 +430,27 @@ export const createCreditsPurchaseCheckout = withProtectedCreditsAction(
       userId,
       packageId: pkg.id,
       credits: pkg.credits,
-      provider: "creem",
+      provider: isEpayPaymentProvider() ? "epay" : "creem",
       checkoutType: "credits",
     });
+
+    if (isEpayPaymentProvider()) {
+      const outTradeNo = `CR${Date.now()}${crypto.randomUUID().slice(0, 8)}`;
+      const checkout = createEpayPurchase({
+        outTradeNo,
+        name: `GPT2IMAGE Credits ${pkg.credits}`,
+        money: pkg.price,
+        returnUrl: `${baseUrl}/api/payments/epay/return`,
+        param: encodeEpayMetadata({
+          type: "credit_purchase",
+          userId,
+          outTradeNo,
+          packageId: pkg.id,
+        }),
+      });
+
+      return { url: checkout.url };
+    }
 
     // 创建 Creem Checkout Session（一次性支付）
     // 注意：Creem 需要预先在后台创建产品，这里使用 packageId 作为 product_id

@@ -3,12 +3,21 @@
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
-import { findPlanByPriceId, getBaseUrl, paymentConfig } from "@repo/shared/config/payment";
+import {
+  findPlanByPriceId,
+  getBaseUrl,
+  paymentConfig,
+} from "@repo/shared/config/payment";
 import { db } from "@repo/database";
 import { subscription } from "@repo/database/schema";
 import { PaymentType } from "@/features/payment/types";
 import { logEvent } from "@repo/shared/logger";
 import { protectedAction } from "@repo/shared/safe-action";
+import {
+  createEpayPurchase,
+  encodeEpayMetadata,
+  isEpayPaymentProvider,
+} from "@repo/shared/payment/epay";
 
 import { creem } from "./creem";
 
@@ -33,29 +42,51 @@ export const createCheckoutSession = protectedAction
 
     // 检查是否已有活跃订阅
     const [existingSub] = await db
-      .select({ status: subscription.status })
+      .select({
+        currentPeriodEnd: subscription.currentPeriodEnd,
+        status: subscription.status,
+      })
       .from(subscription)
       .where(eq(subscription.userId, userId))
       .limit(1);
 
-    if (
-      existingSub &&
-      ["active", "trialing", "lifetime"].includes(existingSub.status)
-    ) {
+    if (existingSub && isSubscriptionCurrentlyActive(existingSub)) {
       throw new Error("您已有活跃订阅，请先取消当前订阅后再订阅新计划");
     }
 
     // 查找计划和价格信息
-    const { plan } = findPlanByPriceId(priceId);
+    const { plan, price } = findPlanByPriceId(priceId);
+    if (!plan || !price) {
+      throw new Error("无效的价格 ID");
+    }
 
     const baseUrl = getBaseUrl();
 
     logEvent("payment.checkout.started", {
       userId,
       priceId,
-      planId: plan?.id ?? "unknown",
-      provider: "creem",
+      planId: plan.id,
+      provider: isEpayPaymentProvider() ? "epay" : "creem",
     });
+
+    if (isEpayPaymentProvider()) {
+      const outTradeNo = `SUB${Date.now()}${crypto.randomUUID().slice(0, 8)}`;
+      const checkout = createEpayPurchase({
+        outTradeNo,
+        name: `GPT2IMAGE ${plan.name} ${price.interval ?? "subscription"}`,
+        money: price.amount,
+        returnUrl: `${baseUrl}/api/payments/epay/return`,
+        param: encodeEpayMetadata({
+          type: "subscription",
+          userId,
+          outTradeNo,
+          priceId,
+          planId: plan.id,
+        }),
+      });
+
+      return { url: checkout.url };
+    }
 
     // 创建 Creem Checkout
     const checkout = await creem.createCheckout({
@@ -129,6 +160,10 @@ export const cancelSubscription = protectedAction
       throw new Error("您还没有订阅任何计划");
     }
 
+    if (userSubscription.subscriptionId.startsWith("epay_")) {
+      throw new Error("易支付订阅不支持自动取消，请等待当前周期结束");
+    }
+
     // 调用 Creem API 取消订阅
     await creem.cancelSubscription(userSubscription.subscriptionId);
 
@@ -171,7 +206,7 @@ export const getUserSubscription = protectedAction
     }
 
     // 检查订阅是否有效
-    const isActive = ["active", "trialing"].includes(userSubscription.status);
+    const isActive = isSubscriptionCurrentlyActive(userSubscription);
     const isTrialing = userSubscription.status === "trialing";
 
     return {
@@ -197,7 +232,10 @@ export const hasActiveSubscription = protectedAction
     const { userId } = ctx;
 
     const [userSubscription] = await db
-      .select({ status: subscription.status })
+      .select({
+        currentPeriodEnd: subscription.currentPeriodEnd,
+        status: subscription.status,
+      })
       .from(subscription)
       .where(eq(subscription.userId, userId))
       .limit(1);
@@ -206,12 +244,40 @@ export const hasActiveSubscription = protectedAction
       return { hasSubscription: false, status: null };
     }
 
-    const isActive = ["active", "trialing", "lifetime"].includes(
-      userSubscription.status
-    );
+    const isActive = isSubscriptionCurrentlyActive(userSubscription);
 
     return {
       hasSubscription: isActive,
       status: userSubscription.status,
     };
   });
+
+function isSubscriptionCurrentlyActive(sub: {
+  currentPeriodEnd: Date | null;
+  status: string;
+}) {
+  if (sub.status === "lifetime") {
+    return true;
+  }
+
+  return (
+    (["active", "trialing"].includes(sub.status) &&
+      isSubscriptionWithinPeriod(sub)) ||
+    isCanceledSubscriptionWithinPeriod(sub)
+  );
+}
+
+function isSubscriptionWithinPeriod(sub: { currentPeriodEnd: Date | null }) {
+  return !sub.currentPeriodEnd || sub.currentPeriodEnd > new Date();
+}
+
+function isCanceledSubscriptionWithinPeriod(sub: {
+  currentPeriodEnd: Date | null;
+  status: string;
+}) {
+  return (
+    sub.status === "canceled" &&
+    Boolean(sub.currentPeriodEnd) &&
+    isSubscriptionWithinPeriod(sub)
+  );
+}

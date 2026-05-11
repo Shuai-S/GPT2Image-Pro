@@ -78,16 +78,8 @@ export async function getUserPlan(userId: string): Promise<UserPlanInfo> {
     .where(eq(subscription.userId, userId))
     .limit(1);
 
-  // 检查订阅是否有效
-  const isCanceledButStillActive =
-    userSubscription?.status === "canceled" &&
-    userSubscription.currentPeriodEnd &&
-    new Date(userSubscription.currentPeriodEnd) > new Date();
-
   const isActive =
-    userSubscription &&
-    (["active", "trialing", "lifetime"].includes(userSubscription.status) ||
-      isCanceledButStillActive);
+    userSubscription && isSubscriptionCurrentlyActive(userSubscription);
 
   if (!isActive || !userSubscription) {
     return {
@@ -101,9 +93,9 @@ export async function getUserPlan(userId: string): Promise<UserPlanInfo> {
     };
   }
 
-  // 判断是否处于"已取消待到期"状态
   const effectiveCancelAtPeriodEnd =
-    isCanceledButStillActive || userSubscription.cancelAtPeriodEnd;
+    isCanceledSubscriptionWithinPeriod(userSubscription) ||
+    userSubscription.cancelAtPeriodEnd;
 
   // 从 priceId 映射到计划
   const plan = getPlanFromPriceId(userSubscription.priceId);
@@ -134,6 +126,36 @@ export async function getUserPlan(userId: string): Promise<UserPlanInfo> {
     priceId: userSubscription.priceId,
     cancelAtPeriodEnd: effectiveCancelAtPeriodEnd,
   };
+}
+
+function isSubscriptionCurrentlyActive(sub: {
+  currentPeriodEnd: Date | null;
+  status: string;
+}) {
+  if (sub.status === "lifetime") {
+    return true;
+  }
+
+  return (
+    (["active", "trialing"].includes(sub.status) &&
+      isSubscriptionWithinPeriod(sub)) ||
+    isCanceledSubscriptionWithinPeriod(sub)
+  );
+}
+
+function isSubscriptionWithinPeriod(sub: { currentPeriodEnd: Date | null }) {
+  return !sub.currentPeriodEnd || sub.currentPeriodEnd > new Date();
+}
+
+function isCanceledSubscriptionWithinPeriod(sub: {
+  currentPeriodEnd: Date | null;
+  status: string;
+}) {
+  return (
+    sub.status === "canceled" &&
+    Boolean(sub.currentPeriodEnd) &&
+    isSubscriptionWithinPeriod(sub)
+  );
 }
 
 /**
