@@ -33,7 +33,15 @@ export interface ImageLightboxProps {
 
 function formatDate(iso: string): string {
   try {
-    return new Date(iso).toLocaleString();
+    return new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "UTC",
+      timeZoneName: "short",
+    }).format(new Date(iso));
   } catch {
     return iso;
   }

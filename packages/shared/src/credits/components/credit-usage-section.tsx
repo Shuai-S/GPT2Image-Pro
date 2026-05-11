@@ -37,6 +37,7 @@ function formatDate(date: Date | string | null, locale: string): string {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
+    timeZone: "UTC",
   });
 }
 
@@ -100,7 +101,7 @@ export function CreditUsageSection() {
           ) : (
             <>
               <div className="text-4xl font-bold">
-                {balance.toLocaleString()}
+                {balance.toLocaleString("en-US")}
               </div>
               <div className="text-sm text-muted-foreground">
                 {t("creditsAvailable")}

@@ -39,7 +39,7 @@ export default async function DashboardPage() {
         .where(eq(generation.userId, userId)),
     ]);
 
-  const balance = Math.floor(balanceData?.balance ?? 0).toLocaleString();
+  const balance = Math.floor(balanceData?.balance ?? 0).toLocaleString("en-US");
   const creditsPerImage = CREDITS_PER_IMAGE;
   const totalGenerations = totalGenerationsResult[0]?.count ?? 0;
 

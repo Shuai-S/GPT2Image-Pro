@@ -70,6 +70,7 @@ export function BillingSection() {
         year: "numeric",
         month: "short",
         day: "numeric",
+        timeZone: "UTC",
       })
     : null;
 
@@ -218,7 +219,7 @@ export function BillingSection() {
                 {t("currentPlan.monthlyCredits")}
               </p>
               <p className="font-medium">
-                {planConfig.monthlyCredits.toLocaleString()} credits
+                {planConfig.monthlyCredits.toLocaleString("en-US")} credits
               </p>
             </div>
             <div>

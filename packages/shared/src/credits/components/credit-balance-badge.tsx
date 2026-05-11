@@ -48,7 +48,9 @@ export function CreditBalanceBadge() {
       title="Available Credits"
     >
       <Coins className="h-3 w-3" />
-      <span className="text-xs font-medium">{balance.toLocaleString()}</span>
+      <span className="text-xs font-medium">
+        {balance.toLocaleString("en-US")}
+      </span>
     </Badge>
   );
 }

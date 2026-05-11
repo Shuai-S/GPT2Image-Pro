@@ -372,7 +372,7 @@ export function PricingSection({ currentPriceId }: PricingSectionProps) {
                               parseInt(t(`plans.${planId}.booksCount`), 10) *
                               300 *
                               (isYearly ? 12 : 1)
-                            ).toLocaleString(),
+                            ).toLocaleString("en-US"),
                           })}
                         </span>
                       </div>

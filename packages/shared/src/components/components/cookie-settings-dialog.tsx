@@ -53,6 +53,7 @@ interface CookieSettingsDialogProps {
  */
 export function CookieSettingsDialog({ children }: CookieSettingsDialogProps) {
   const t = useTranslations("Cookie");
+  const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
   const [preferences, setPreferences] =
     useState<CookiePreferences>(DEFAULT_PREFERENCES);
@@ -78,6 +79,10 @@ export function CookieSettingsDialog({ children }: CookieSettingsDialogProps) {
       required: false,
     },
   ] as const;
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   /**
    * 加载已保存的偏好设置
@@ -175,6 +180,10 @@ export function CookieSettingsDialog({ children }: CookieSettingsDialogProps) {
     if (id === "analytics") updatePreference("analytics", value);
     if (id === "marketing") updatePreference("marketing", value);
   };
+
+  if (!mounted) {
+    return <>{children}</>;
+  }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
