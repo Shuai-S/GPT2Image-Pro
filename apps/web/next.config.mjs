@@ -14,6 +14,7 @@ const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  assetPrefix: process.env.NEXT_PUBLIC_ASSET_PREFIX || "",
   // Enable standalone output for Docker deployment
   output: "standalone",
   // Transpile monorepo packages
