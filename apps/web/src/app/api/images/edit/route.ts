@@ -97,7 +97,10 @@ async function uploadModerationImages(
   files: File[]
 ) {
   const publicBaseUrl =
-    process.env.NEXT_PUBLIC_APP_URL || process.env.BETTER_AUTH_URL;
+    process.env.ALIYUN_MODERATION_PUBLIC_BASE_URL ||
+    process.env.CONTENT_MODERATION_PUBLIC_BASE_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.BETTER_AUTH_URL;
   if (!process.env.STORAGE_ENDPOINT && !publicBaseUrl) {
     return undefined;
   }
