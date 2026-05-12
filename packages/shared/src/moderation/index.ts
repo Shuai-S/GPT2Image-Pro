@@ -1,4 +1,6 @@
-import Green20220302, { MultiModalAgentRequest } from "@alicloud/green20220302";
+import Green20220302Module, {
+  MultiModalAgentRequest,
+} from "@alicloud/green20220302";
 import { Config as AliyunOpenApiConfig } from "@alicloud/openapi-client";
 import OpenAI from "openai";
 import { logError, logWarn } from "../logger";
@@ -8,6 +10,12 @@ type ModerationDecision = "allow" | "block" | "skipped" | "error";
 type ModerationMode = "text" | "image";
 
 const ALIYUN_MAX_CONTENT_LENGTH = 2000;
+const Green20220302 =
+  (
+    Green20220302Module as typeof Green20220302Module & {
+      default?: typeof Green20220302Module;
+    }
+  ).default || Green20220302Module;
 
 export interface ModerationImageInput {
   data: Buffer;
@@ -56,7 +64,7 @@ function isModerationEnabled() {
 }
 
 function shouldFailClosed() {
-  return envFlag("CONTENT_MODERATION_FAIL_CLOSED", false);
+  return envFlag("CONTENT_MODERATION_FAIL_CLOSED", true);
 }
 
 function getAliyunConfig(): AliyunConfig | null {
