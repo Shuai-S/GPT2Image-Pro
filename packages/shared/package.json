@@ -48,24 +48,26 @@
     "@aws-sdk/s3-request-presigner": "^3.975.0",
     "@axiomhq/pino": "^1.4.0",
     "@react-email/components": "^1.0.6",
+    "@react-email/render": "^2.0.8",
     "@react-email/tailwind": "^2.0.3",
+    "@repo/database": "workspace:*",
+    "@repo/ui": "workspace:*",
+    "@sentry/nextjs": "^10.37.0",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.36.1",
     "better-auth": "^1.4.17",
+    "drizzle-orm": "^0.45.1",
+    "lucide-react": "^0.562.0",
     "nanoid": "^5.1.6",
+    "next-intl": "^4.7.0",
     "next-safe-action": "^8.0.11",
     "next-themes": "^0.4.6",
+    "nodemailer": "^8.0.7",
     "openai": "^6.17.0",
     "pino": "^10.3.0",
     "resend": "^6.8.0",
-    "@sentry/nextjs": "^10.37.0",
-    "drizzle-orm": "^0.45.1",
-    "lucide-react": "^0.562.0",
-    "next-intl": "^4.7.0",
     "sonner": "^2.0.7",
-    "zod": "^4.3.6",
-    "@repo/database": "workspace:*",
-    "@repo/ui": "workspace:*"
+    "zod": "^4.3.6"
   },
   "peerDependencies": {
     "fumadocs-ui": ">=15",
@@ -74,6 +76,7 @@
     "react-dom": "^19"
   },
   "devDependencies": {
+    "@types/nodemailer": "^8.0.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "typescript": "^5"

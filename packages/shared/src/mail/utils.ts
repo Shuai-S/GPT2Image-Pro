@@ -1,6 +1,11 @@
+import { render } from "@react-email/render";
 import type { ReactElement } from "react";
-
-import { DEFAULT_FROM_EMAIL, getResendClient } from "./client";
+import {
+  DEFAULT_FROM_EMAIL,
+  getEmailProvider,
+  getResendClient,
+  getSmtpTransporter,
+} from "./client";
 
 /**
  * 邮件发送工具
@@ -40,12 +45,14 @@ export interface SendEmailParams {
 export interface SendEmailResult {
   /** 是否成功 */
   success: boolean;
-  /** Resend 返回的邮件 ID (生产环境) */
+  /** 邮件服务返回的 ID (生产环境) */
   id?: string;
   /** 错误信息 */
   error?: string;
   /** 是否为模拟发送 (开发环境) */
   simulated?: boolean;
+  /** 实际使用的发送通道 */
+  provider?: "smtp" | "resend";
 }
 
 // ============================================
@@ -67,7 +74,7 @@ function logEmailPreview(params: SendEmailParams): void {
     ? params.to.join(", ")
     : params.to;
 
-  console.log("\n" + "=".repeat(60));
+  console.log(`\n${"=".repeat(60)}`);
   console.log("EMAIL PREVIEW (Development Mode)");
   console.log("=".repeat(60));
   console.log(`To:      ${recipients}`);
@@ -90,7 +97,7 @@ function logEmailPreview(params: SendEmailParams): void {
   }
   console.log("-".repeat(60));
   console.log("Set force: true to send real email in development");
-  console.log("=".repeat(60) + "\n");
+  console.log(`${"=".repeat(60)}\n`);
 }
 
 // ============================================
@@ -140,8 +147,32 @@ export async function sendEmail(
 
   // 真实发送邮件
   try {
-    const resend = getResendClient();
+    const provider = getEmailProvider();
 
+    if (provider === "smtp") {
+      const transporter = getSmtpTransporter();
+      const html = await render(react);
+      const text = await render(react, { plainText: true });
+
+      const info = await transporter.sendMail({
+        from: from ?? DEFAULT_FROM_EMAIL,
+        to,
+        subject,
+        html,
+        text,
+        ...(cc ? { cc } : {}),
+        ...(bcc ? { bcc } : {}),
+        ...(replyTo ? { replyTo } : {}),
+      });
+
+      return {
+        success: true,
+        id: info.messageId,
+        provider,
+      };
+    }
+
+    const resend = getResendClient();
     // 构建邮件选项 (避免传递 undefined 值以满足 exactOptionalPropertyTypes)
     const emailOptions: Parameters<typeof resend.emails.send>[0] = {
       from: from ?? DEFAULT_FROM_EMAIL,
@@ -174,6 +205,7 @@ export async function sendEmail(
     return {
       success: true,
       id: data?.id,
+      provider,
     };
   } catch (error) {
     const errorMessage =

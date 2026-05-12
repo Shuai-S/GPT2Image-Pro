@@ -2,14 +2,13 @@ import { db } from "@repo/database";
 import * as schema from "@repo/database/schema";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { isEmailConfigured } from "../mail/client";
 import {
   ResetPasswordEmail,
   VerifyEmailEmail,
 } from "../mail/templates/primary-action-email";
 import { sendEmail } from "../mail/utils";
 import { registrationVerificationPlugin } from "./registration-verification-plugin";
-
-const isResendConfigured = Boolean(process.env.RESEND_API_KEY);
 
 /**
  * Better Auth 服务端配置
@@ -102,7 +101,7 @@ export const auth = betterAuth({
   /**
    * 邮箱验证配置
    */
-  ...(isResendConfigured
+  ...(isEmailConfigured()
     ? {
         emailVerification: {
           sendOnSignUp: false,

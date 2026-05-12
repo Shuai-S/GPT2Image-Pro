@@ -57,10 +57,19 @@ GITHUB_CLIENT_SECRET="your-github-client-secret"
 GOOGLE_CLIENT_ID="your-google-client-id"
 GOOGLE_CLIENT_SECRET="your-google-client-secret"
 
-# Resend 邮件 — https://resend.com
-# 配置后邮箱验证和密码重置才能发送邮件
-RESEND_API_KEY="re_your-api-key"
+# SMTP 邮件
+# 配置后注册验证码和密码重置才能发送邮件
+EMAIL_PROVIDER="smtp"
 EMAIL_FROM="GPT2IMAGE <noreply@your-domain.com>"
+SMTP_HOST="smtp.qiye.aliyun.com"
+SMTP_PORT="465"
+SMTP_SECURE="true"
+SMTP_USER="admin@your-domain.com"
+SMTP_PASS="your-smtp-password-or-app-password"
+
+# 或使用 Resend — https://resend.com
+# EMAIL_PROVIDER="resend"
+# RESEND_API_KEY="re_your-api-key"
 ```
 
 ### 可选配置（按需启用）
