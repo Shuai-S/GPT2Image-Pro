@@ -13,6 +13,7 @@ SKIP_INSTALL="${SKIP_INSTALL:-0}"
 SKIP_BUILD="${SKIP_BUILD:-1}"
 TAR_FILE="${TAR_FILE:-deploy.tgz}"
 FORCE_EXTRACT="${FORCE_EXTRACT:-1}"
+STANDALONE_APP_DIR="${STANDALONE_APP_DIR:-apps/web/.next/standalone/GPT2Image-Pro/apps/web}"
 
 cd "$APP_DIR"
 export NODE_ENV=production
@@ -55,6 +56,11 @@ else
     echo ".next not found after extracting $TAR_FILE."
     exit 1
   fi
+fi
+
+if [ -d "apps/web/.next/static" ] && [ -d "$STANDALONE_APP_DIR/.next" ]; then
+  mkdir -p "$STANDALONE_APP_DIR/.next/static"
+  cp -a apps/web/.next/static/. "$STANDALONE_APP_DIR/.next/static/"
 fi
 
 if command -v pm2 >/dev/null 2>&1; then
