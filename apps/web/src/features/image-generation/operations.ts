@@ -104,6 +104,28 @@ export async function runImageGenerationForUser(
         : { mode: "generate", quality: input.quality || "auto" },
   });
 
+  let chargedCredits = 0;
+  if (useCredits) {
+    try {
+      await consumeCredits({
+        userId: input.userId,
+        amount: creditsPerImage,
+        serviceName: "image-generation",
+        description: `Image generation: ${input.prompt.substring(0, 50)}`,
+        metadata: { generationId, mode: input.mode, size },
+      });
+      chargedCredits = creditsPerImage;
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : "Insufficient credits";
+      await db
+        .update(generation)
+        .set({ status: "failed", error: message })
+        .where(eq(generation.id, generationId));
+      return { error: "Insufficient credits", generationId };
+    }
+  }
+
   const moderation = await moderateContent({
     prompt: input.prompt,
     images: input.mode === "edit" ? input.images : undefined,
@@ -124,27 +146,7 @@ export async function runImageGenerationForUser(
         error: moderation.reason || message,
       })
       .where(eq(generation.id, generationId));
-    return { error: message, generationId };
-  }
-
-  if (useCredits) {
-    try {
-      await consumeCredits({
-        userId: input.userId,
-        amount: creditsPerImage,
-        serviceName: "image-generation",
-        description: `Image generation: ${input.prompt.substring(0, 50)}`,
-        metadata: { generationId, mode: input.mode, size },
-      });
-    } catch (error: unknown) {
-      const message =
-        error instanceof Error ? error.message : "Insufficient credits";
-      await db
-        .update(generation)
-        .set({ status: "failed", error: message })
-        .where(eq(generation.id, generationId));
-      return { error: "Insufficient credits", generationId };
-    }
+    return { error: message, generationId, creditsConsumed: chargedCredits };
   }
 
   const result =
@@ -241,6 +243,6 @@ export async function runImageGenerationForUser(
     model,
     size,
     revisedPrompt: result.revisedPrompt,
-    creditsConsumed: useCredits ? creditsPerImage : 0,
+    creditsConsumed: chargedCredits,
   };
 }

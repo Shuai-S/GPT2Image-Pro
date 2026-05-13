@@ -287,7 +287,17 @@ export function CreatePageClient({
     ]);
   };
 
-  const showGenerationError = (message: string) => {
+  const syncChargedCredits = (creditsConsumed?: number) => {
+    if (!creditsConsumed || creditsConsumed <= 0) return;
+    setBalance((b) => Math.max(0, b - creditsConsumed));
+  };
+
+  const showGenerationError = (
+    message: string,
+    options?: { creditsConsumed?: number }
+  ) => {
+    syncChargedCredits(options?.creditsConsumed);
+
     if (message.toLowerCase().includes("insufficient credits")) {
       toast.error("Insufficient credits", {
         description: "You don't have enough credits to generate an image.",
@@ -308,7 +318,9 @@ export function CreatePageClient({
     onSuccess: ({ data }) => {
       if (!data) return;
       if (data.error) {
-        showGenerationError(data.error);
+        showGenerationError(data.error, {
+          creditsConsumed: data.creditsConsumed,
+        });
         return;
       }
 
@@ -403,7 +415,9 @@ export function CreatePageClient({
       };
 
       if (!response.ok || data.error) {
-        showGenerationError(data.error || `API error: ${response.status}`);
+        showGenerationError(data.error || `API error: ${response.status}`, {
+          creditsConsumed: data.creditsConsumed,
+        });
         return;
       }
 
@@ -432,11 +446,12 @@ export function CreatePageClient({
     setHeight(dimensions.height);
   };
 
-  const addImages = (files: FileList | null) => {
-    if (!files?.length) return;
+  const addImages = (files: FileList | File[] | null) => {
+    const imageFiles = Array.from(files || []);
+    if (!imageFiles.length) return;
 
     const accepted: EditImageFile[] = [];
-    for (const file of Array.from(files)) {
+    for (const file of imageFiles) {
       if (!isImageFile(file)) {
         toast.error("Unsupported file type", {
           description: "Use PNG, JPEG, or WebP images.",
@@ -471,6 +486,19 @@ export function CreatePageClient({
       }
       return [...prev, ...next];
     });
+  };
+
+  const handleImagePaste = (event: React.ClipboardEvent) => {
+    if (activeMode !== "image" || isEditing) return;
+
+    const files = Array.from(event.clipboardData?.items || [])
+      .filter((item) => item.kind === "file")
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file && isImageFile(file)));
+
+    if (!files.length) return;
+    event.preventDefault();
+    addImages(files);
   };
 
   const removeImage = (index: number) => {
@@ -890,7 +918,11 @@ export function CreatePageClient({
         </TabsContent>
 
         <TabsContent value="image" className="mt-0">
-          <form onSubmit={handleEditSubmit} className="space-y-4">
+          <form
+            onSubmit={handleEditSubmit}
+            onPaste={handleImagePaste}
+            className="space-y-4"
+          >
             <Textarea
               value={editPrompt}
               onChange={(e) => setEditPrompt(e.target.value)}
