@@ -1,5 +1,7 @@
 import Green20220302Module, {
+  ImageModerationRequest,
   MultiModalAgentRequest,
+  TextModerationPlusRequest,
 } from "@alicloud/green20220302";
 import { Config as AliyunOpenApiConfig } from "@alicloud/openapi-client";
 import OpenAI from "openai";
@@ -44,6 +46,12 @@ interface AliyunConfig {
   accessKeySecret: string;
   regionId: string;
   endpoint?: string;
+  textRegionId?: string;
+  textEndpoint?: string;
+  textService?: string;
+  imageRegionId?: string;
+  imageEndpoint?: string;
+  imageService?: string;
   textAppId?: string;
   imageAppId?: string;
 }
@@ -83,6 +91,24 @@ function getAliyunConfig(): AliyunConfig | null {
 
   const endpoint = envValue("ALIYUN_MODERATION_ENDPOINT");
   if (endpoint) config.endpoint = endpoint;
+
+  const textRegionId = envValue("ALIYUN_MODERATION_TEXT_REGION_ID");
+  if (textRegionId) config.textRegionId = textRegionId;
+
+  const textEndpoint = envValue("ALIYUN_MODERATION_TEXT_ENDPOINT");
+  if (textEndpoint) config.textEndpoint = textEndpoint;
+
+  const textService = envValue("ALIYUN_MODERATION_TEXT_SERVICE");
+  if (textService) config.textService = textService;
+
+  const imageRegionId = envValue("ALIYUN_MODERATION_IMAGE_REGION_ID");
+  if (imageRegionId) config.imageRegionId = imageRegionId;
+
+  const imageEndpoint = envValue("ALIYUN_MODERATION_IMAGE_ENDPOINT");
+  if (imageEndpoint) config.imageEndpoint = imageEndpoint;
+
+  const imageService = envValue("ALIYUN_MODERATION_IMAGE_SERVICE");
+  if (imageService) config.imageService = imageService;
 
   const textAppId =
     envValue("ALIYUN_MODERATION_TEXT_APP_ID") ||
@@ -138,8 +164,30 @@ function getAliyunClient(config: AliyunConfig) {
     new AliyunOpenApiConfig({
       accessKeyId: config.accessKeyId,
       accessKeySecret: config.accessKeySecret,
+      regionId: config.textRegionId || config.regionId,
+      endpoint: config.textEndpoint || config.endpoint,
+    })
+  );
+}
+
+function getAliyunAgentClient(config: AliyunConfig) {
+  return new Green20220302(
+    new AliyunOpenApiConfig({
+      accessKeyId: config.accessKeyId,
+      accessKeySecret: config.accessKeySecret,
       regionId: config.regionId,
       endpoint: config.endpoint,
+    })
+  );
+}
+
+function getAliyunImageClient(config: AliyunConfig) {
+  return new Green20220302(
+    new AliyunOpenApiConfig({
+      accessKeyId: config.accessKeyId,
+      accessKeySecret: config.accessKeySecret,
+      regionId: config.imageRegionId || config.regionId,
+      endpoint: config.imageEndpoint || config.endpoint,
     })
   );
 }
@@ -241,6 +289,53 @@ async function moderateWithAliyunTextAgent(
   return { decision: "allow", provider: "aliyun" };
 }
 
+async function moderateWithAliyunTextPlus(
+  client: InstanceType<typeof Green20220302>,
+  service: string,
+  input: ModerateContentInput
+): Promise<ModerationResult> {
+  for (const content of getContentChunks(input.prompt)) {
+    const response = await client.textModerationPlus(
+      new TextModerationPlusRequest({
+        service,
+        serviceParameters: JSON.stringify({
+          dataId: input.generationId,
+          content,
+        }),
+      })
+    );
+
+    assertAliyunResponseOk(response.body);
+
+    const data = response.body?.data;
+    if (
+      data?.riskLevel &&
+      data.riskLevel !== "none" &&
+      data.riskLevel !== "low"
+    ) {
+      const labels = [
+        ...(data.result || []).map((item: { label?: string }) => item.label),
+        ...(data.attackResult || []).map(
+          (item: { label?: string }) => item.label
+        ),
+        ...(data.sensitiveResult || []).map(
+          (item: { label?: string }) => item.label
+        ),
+      ].filter((label): label is string => Boolean(label));
+
+      return toBlockResult(
+        "aliyun",
+        labels.length
+          ? `Content blocked by Aliyun moderation: ${labels.join(", ")}`
+          : `Content blocked by Aliyun moderation: ${data.riskLevel}`,
+        data
+      );
+    }
+  }
+
+  return { decision: "allow", provider: "aliyun" };
+}
+
 async function moderateWithAliyunImageAgent(
   client: InstanceType<typeof Green20220302>,
   appId: string,
@@ -272,6 +367,55 @@ async function moderateWithAliyunImageAgent(
   return { decision: "allow", provider: "aliyun" };
 }
 
+async function moderateWithAliyunImageModeration(
+  client: InstanceType<typeof Green20220302>,
+  service: string,
+  input: ModerateContentInput
+): Promise<ModerationResult> {
+  if (!input.images?.length) {
+    throw new Error("Aliyun image moderation requires an image");
+  }
+
+  for (const image of input.images) {
+    if (!image.url) {
+      throw new Error("Aliyun image moderation requires public image URLs");
+    }
+
+    const response = await client.imageModeration(
+      new ImageModerationRequest({
+        service,
+        serviceParameters: JSON.stringify({
+          dataId: input.generationId,
+          imageUrl: image.url,
+        }),
+      })
+    );
+
+    assertAliyunResponseOk(response.body);
+
+    const data = response.body?.data;
+    if (
+      data?.riskLevel &&
+      data.riskLevel !== "none" &&
+      data.riskLevel !== "low"
+    ) {
+      const labels = (data.result || [])
+        .map((item: { label?: string }) => item.label)
+        .filter((label): label is string => Boolean(label));
+
+      return toBlockResult(
+        "aliyun",
+        labels.length
+          ? `Content blocked by Aliyun moderation: ${labels.join(", ")}`
+          : `Content blocked by Aliyun moderation: ${data.riskLevel}`,
+        data
+      );
+    }
+  }
+
+  return { decision: "allow", provider: "aliyun" };
+}
+
 async function moderateWithAliyun(
   input: ModerateContentInput
 ): Promise<ModerationResult> {
@@ -280,8 +424,25 @@ async function moderateWithAliyun(
     return { decision: "skipped", provider: "aliyun" };
   }
 
-  const client = getAliyunClient(config);
   const isImageMode = input.mode === "image" || Boolean(input.images?.length);
+
+  if (!isImageMode && config.textService) {
+    return moderateWithAliyunTextPlus(
+      getAliyunClient(config),
+      config.textService,
+      input
+    );
+  }
+
+  if (isImageMode && config.imageService) {
+    return moderateWithAliyunImageModeration(
+      getAliyunImageClient(config),
+      config.imageService,
+      input
+    );
+  }
+
+  const client = getAliyunAgentClient(config);
   const appId = isImageMode ? config.imageAppId : config.textAppId;
 
   if (!appId) {
@@ -356,8 +517,8 @@ export async function moderateContent(
     try {
       const result =
         provider === "aliyun"
-          ? await moderateWithAliyun(input)
-          : await moderateWithOpenAI(input);
+            ? await moderateWithAliyun(input)
+            : await moderateWithOpenAI(input);
 
       if (result.decision === "block") {
         return result;
