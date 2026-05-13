@@ -1,6 +1,19 @@
 import type { BetterAuthPlugin } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
+import {
+  getAllowedRegistrationEmailMessage,
+  isAllowedRegistrationEmail,
+} from "./email-domain";
 import { verifyRegistrationCode } from "./registration-verification";
+
+function assertAllowedRegistrationEmail(email: string) {
+  if (!isAllowedRegistrationEmail(email)) {
+    throw new APIError("BAD_REQUEST", {
+      message: getAllowedRegistrationEmailMessage(),
+      code: "EMAIL_DOMAIN_NOT_ALLOWED",
+    });
+  }
+}
 
 export const registrationVerificationPlugin = (): BetterAuthPlugin => ({
   id: "registration-verification",
@@ -15,6 +28,8 @@ export const registrationVerificationPlugin = (): BetterAuthPlugin => ({
             typeof ctx.body.verificationCode === "string"
               ? ctx.body.verificationCode
               : "";
+
+          assertAllowedRegistrationEmail(email);
 
           if (!verificationCode) {
             throw new APIError("BAD_REQUEST", {
@@ -44,14 +59,20 @@ export const registrationVerificationPlugin = (): BetterAuthPlugin => ({
         user: {
           create: {
             before: async (user, context) => {
-              if (context?.path !== "/sign-up/email") {
-                return;
+              assertAllowedRegistrationEmail(user.email);
+
+              if (context?.path === "/sign-up/email") {
+                return {
+                  data: {
+                    ...user,
+                    emailVerified: true,
+                  },
+                };
               }
 
               return {
                 data: {
                   ...user,
-                  emailVerified: true,
                 },
               };
             },

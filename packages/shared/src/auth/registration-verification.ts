@@ -1,16 +1,17 @@
 import { randomInt, randomUUID } from "node:crypto";
 import { db, verification } from "@repo/database";
 import { eq } from "drizzle-orm";
+import {
+  getAllowedRegistrationEmailMessage,
+  isAllowedRegistrationEmail,
+  normalizeEmail,
+} from "./email-domain";
 import { RegistrationVerificationCodeEmail } from "../mail/templates/primary-action-email";
 import { sendEmail } from "../mail/utils";
 
 const PURPOSE = "registration-email-code";
 const CODE_LENGTH = 6;
 const EXPIRES_IN_MINUTES = 10;
-
-function normalizeEmail(email: string) {
-  return email.trim().toLowerCase();
-}
 
 function getIdentifier(email: string) {
   return `${PURPOSE}:${normalizeEmail(email)}`;
@@ -25,6 +26,10 @@ export async function sendRegistrationVerificationCode(email: string) {
 
   if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
     throw new Error("Invalid email address");
+  }
+
+  if (!isAllowedRegistrationEmail(normalizedEmail)) {
+    throw new Error(getAllowedRegistrationEmailMessage());
   }
 
   const identifier = getIdentifier(normalizedEmail);

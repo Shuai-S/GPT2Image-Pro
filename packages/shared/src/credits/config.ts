@@ -11,7 +11,7 @@
 /**
  * 注册奖励积分数量
  */
-export const REGISTRATION_BONUS_CREDITS = 20;
+export const REGISTRATION_BONUS_CREDITS = 100;
 
 /**
  * 积分过期天数（从发放日起）

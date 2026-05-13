@@ -231,6 +231,7 @@
         "missingEmail": "Please enter your email first.",
         "passwordTooShort": "Password must be at least 8 characters.",
         "passwordMismatch": "Passwords do not match.",
+        "emailDomainNotAllowed": "Please use an email ending in 163.com, 126.com, qq.com, or gmail.com.",
         "verificationSendFailed": "Failed to send verification code. Please try again later.",
         "invalidVerificationCode": "The verification code is invalid or expired. Please request a new one.",
         "emailInUse": "Sign-up failed. This email may already be in use."
@@ -399,12 +400,12 @@
         "name": "Free",
         "description": "Try GPT2IMAGE with no commitment",
         "cta": "Get Started",
-        "creditsAmount": "20",
+        "creditsAmount": "100",
         "creditsLabel": "credits",
         "creditsNote": "one-time",
         "features": {
           "creditsNeverExpire": "Credits never expire",
-          "credits": "20 credits (one-time)",
+          "credits": "100 credits (one-time)",
           "input": "Chat-to-image generation",
           "characters": "Standard image resolutions",
           "fileSize": "Up to 5 images per batch",

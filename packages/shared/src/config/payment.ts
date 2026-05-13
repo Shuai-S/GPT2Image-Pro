@@ -167,7 +167,7 @@ export function getPricingPlans(_t?: (key: string) => string): Plan[] {
       name: "Free",
       description: "Try GPT2IMAGE with no commitment",
       features: [
-        "20 credits (one-time)",
+        "100 credits (one-time)",
         "Chat-to-image generation",
         "Standard image resolution",
         "Up to 5 images per batch",

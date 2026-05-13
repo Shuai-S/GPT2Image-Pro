@@ -231,6 +231,7 @@
         "missingEmail": "请先填写邮箱",
         "passwordTooShort": "密码至少需要 8 个字符",
         "passwordMismatch": "两次输入的密码不一致",
+        "emailDomainNotAllowed": "请使用 163.com、126.com、qq.com 或 gmail.com 邮箱注册",
         "verificationSendFailed": "验证码发送失败，请稍后重试",
         "invalidVerificationCode": "验证码错误或已过期，请重新获取",
         "emailInUse": "注册失败，该邮箱可能已被使用"
@@ -364,12 +365,12 @@
         "name": "免费版",
         "description": "无负担体验 GPT2IMAGE",
         "cta": "免费开始",
-        "creditsAmount": "20",
+        "creditsAmount": "100",
         "creditsLabel": "积分",
         "creditsNote": "一次性",
         "features": {
           "creditsNeverExpire": "积分永久有效，不清零",
-          "credits": "20 积分（一次性）",
+          "credits": "100 积分（一次性）",
           "input": "对话生图功能",
           "characters": "标准图像分辨率",
           "fileSize": "每批最多 5 张图",

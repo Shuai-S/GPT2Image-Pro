@@ -46,7 +46,7 @@ export const PLAN_PRIVILEGES: Record<SubscriptionPlan, PlanPrivileges> = {
     name: "Free",
     maxFileSizeBytes: 5 * 1024 * 1024, // 5MB
     queuePriority: "normal",
-    monthlyCredits: 20, // 一次性
+    monthlyCredits: 100, // 一次性
   },
   starter: {
     name: "Starter",

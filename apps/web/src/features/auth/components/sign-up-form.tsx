@@ -6,6 +6,7 @@ import {
   signInWithGoogle,
   signUpWithEmail,
 } from "@repo/shared/auth/client";
+import { isAllowedRegistrationEmail } from "@repo/shared/auth/email-domain";
 import { GoogleIcon } from "@repo/shared/components/icons";
 import { Button } from "@repo/ui/components/button";
 import { Input } from "@repo/ui/components/input";
@@ -45,6 +46,7 @@ export function SignUpForm() {
   const [emailSent, setEmailSent] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [codeCooldown, setCodeCooldown] = useState(0);
+  const isAllowedEmail = (value: string) => isAllowedRegistrationEmail(value);
 
   /**
    * 启动重发冷却倒计时
@@ -103,14 +105,24 @@ export function SignUpForm() {
       return;
     }
 
+    if (!isAllowedEmail(email)) {
+      setError(t("errors.emailDomainNotAllowed"));
+      return;
+    }
+
     try {
       setIsSendingCode(true);
       setError(null);
       await sendRegistrationVerificationCode(email);
       startCodeCooldown();
       toast.success(t("verificationCode.sent"));
-    } catch {
-      setError(t("errors.verificationSendFailed"));
+    } catch (error) {
+      setError(
+        error instanceof Error &&
+          error.message.toLowerCase().includes("email domain")
+          ? t("errors.emailDomainNotAllowed")
+          : t("errors.verificationSendFailed")
+      );
     } finally {
       setIsSendingCode(false);
     }
@@ -142,6 +154,11 @@ export function SignUpForm() {
       return;
     }
 
+    if (!isAllowedEmail(email)) {
+      setError(t("errors.emailDomainNotAllowed"));
+      return;
+    }
+
     if (password.length < 8) {
       setError(t("errors.passwordTooShort"));
       return;
@@ -164,7 +181,9 @@ export function SignUpForm() {
 
       if (result.error) {
         setError(
-          result.error.code === "INVALID_VERIFICATION_CODE" ||
+          result.error.code === "EMAIL_DOMAIN_NOT_ALLOWED"
+            ? t("errors.emailDomainNotAllowed")
+            : result.error.code === "INVALID_VERIFICATION_CODE" ||
             result.error.code === "VERIFICATION_CODE_REQUIRED"
             ? t("errors.invalidVerificationCode")
             : t("errors.emailInUse")

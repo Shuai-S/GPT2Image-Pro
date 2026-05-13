@@ -6,6 +6,7 @@
   "exports": {
     "./auth": "./src/auth/index.ts",
     "./auth/client": "./src/auth/client.ts",
+    "./auth/email-domain": "./src/auth/email-domain.ts",
     "./auth/server": "./src/auth/server.ts",
     "./auth/admin": "./src/auth/admin.ts",
     "./auth/registration-verification": "./src/auth/registration-verification.ts",
