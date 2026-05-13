@@ -7,6 +7,7 @@ import { z } from "zod";
 import { db } from "@repo/database";
 import { userApiConfig } from "@repo/database/schema";
 import { protectedAction } from "@repo/shared/safe-action";
+import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 
 /**
  * 检查 URL 是否指向私有/内部网络地址
@@ -98,6 +99,13 @@ const apiConfigSchema = z.object({
 const withApiConfigAction = (name: string) =>
   protectedAction.metadata({ action: `settings.apiConfig.${name}` });
 
+async function ensureCustomApiAllowed(userId: string) {
+  const plan = await getUserPlan(userId);
+  if (!plan.hasActiveSubscription) {
+    throw new Error("Custom API configuration requires a paid subscription.");
+  }
+}
+
 export const getApiConfig = withApiConfigAction("get").action(
   async ({ ctx }) => {
     const config = await db
@@ -112,6 +120,8 @@ export const getApiConfig = withApiConfigAction("get").action(
 export const saveApiConfig = withApiConfigAction("save")
   .schema(apiConfigSchema)
   .action(async ({ parsedInput, ctx }) => {
+    await ensureCustomApiAllowed(ctx.userId);
+
     const existing = await db
       .select()
       .from(userApiConfig)
@@ -151,6 +161,10 @@ export const deleteApiConfig = withApiConfigAction("delete").action(
 export const toggleApiConfig = withApiConfigAction("toggle")
   .schema(z.object({ isActive: z.boolean() }))
   .action(async ({ parsedInput, ctx }) => {
+    if (parsedInput.isActive) {
+      await ensureCustomApiAllowed(ctx.userId);
+    }
+
     await db
       .update(userApiConfig)
       .set({

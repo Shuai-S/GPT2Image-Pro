@@ -1,5 +1,6 @@
 "use client";
 
+import { getMyPlanAction } from "@repo/shared/subscription/actions/get-user-plan";
 import { Button } from "@repo/ui/components/button";
 import { Input } from "@repo/ui/components/input";
 import { Label } from "@repo/ui/components/label";
@@ -31,6 +32,7 @@ export function ApiConfigForm() {
   const [model, setModel] = useState("");
   const [isActive, setIsActive] = useState(true);
   const [hasConfig, setHasConfig] = useState(false);
+  const [hasPaidPlan, setHasPaidPlan] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const { execute: executeSave, isPending: isSaving } = useAction(
@@ -63,17 +65,24 @@ export function ApiConfigForm() {
     onSuccess: () => {
       setIsActive(!isActive);
     },
+    onError: (err) => {
+      toast.error(err.error?.serverError || "Failed to update");
+    },
   });
 
   useEffect(() => {
     const loadConfig = async () => {
       try {
-        const result = await getApiConfig();
-        if (result?.data) {
-          setBaseUrl(result.data.baseUrl);
-          setApiKey(result.data.apiKey);
-          setModel(result.data.model || "");
-          setIsActive(result.data.isActive);
+        const [configResult, planResult] = await Promise.all([
+          getApiConfig(),
+          getMyPlanAction(),
+        ]);
+        setHasPaidPlan(Boolean(planResult?.data?.hasActiveSubscription));
+        if (configResult?.data) {
+          setBaseUrl(configResult.data.baseUrl);
+          setApiKey(configResult.data.apiKey);
+          setModel(configResult.data.model || "");
+          setIsActive(configResult.data.isActive);
           setHasConfig(true);
         }
       } catch {
@@ -86,6 +95,10 @@ export function ApiConfigForm() {
   }, []);
 
   const handleSave = () => {
+    if (!hasPaidPlan) {
+      toast.error("Custom API requires a paid subscription");
+      return;
+    }
     executeSave({ baseUrl, apiKey, model: model || undefined });
   };
 
@@ -108,8 +121,10 @@ export function ApiConfigForm() {
               {t("apiConfig.warning.title") || "Advanced Configuration"}
             </p>
             <p className="mt-1">
-              {t("apiConfig.warning.description") ||
-                "Configure your own OpenAI-compatible API endpoint. When active, image generation will use your API key instead of platform credits."}
+              {hasPaidPlan
+                ? t("apiConfig.warning.description") ||
+                  "Configure your own OpenAI-compatible API endpoint. When active, image generation will use your API key instead of platform credits."
+                : "Custom API configuration is available for paid subscriptions only."}
             </p>
           </div>
         </div>
@@ -146,6 +161,7 @@ export function ApiConfigForm() {
                 onCheckedChange={(checked) =>
                   executeToggle({ isActive: checked })
                 }
+                disabled={!hasPaidPlan}
               />
             </div>
           )}
@@ -160,6 +176,7 @@ export function ApiConfigForm() {
               placeholder="https://api.openai.com/v1"
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
+              disabled={!hasPaidPlan}
             />
           </div>
 
@@ -174,6 +191,7 @@ export function ApiConfigForm() {
               placeholder="sk-..."
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
+              disabled={!hasPaidPlan}
             />
           </div>
 
@@ -187,6 +205,7 @@ export function ApiConfigForm() {
               placeholder="gpt-image-2"
               value={model}
               onChange={(e) => setModel(e.target.value)}
+              disabled={!hasPaidPlan}
             />
             <p className="text-xs text-muted-foreground">
               {t("apiConfig.modelHint") ||
@@ -198,7 +217,7 @@ export function ApiConfigForm() {
           <div className="flex gap-2 pt-2">
             <Button
               onClick={handleSave}
-              disabled={!baseUrl || !apiKey || isSaving}
+              disabled={!hasPaidPlan || !baseUrl || !apiKey || isSaving}
               size="sm"
             >
               {isSaving && <Loader2 className="mr-2 h-3 w-3 animate-spin" />}

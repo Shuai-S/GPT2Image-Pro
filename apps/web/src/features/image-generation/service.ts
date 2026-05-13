@@ -1,5 +1,6 @@
 import { db } from "@repo/database";
 import { userApiConfig } from "@repo/database/schema";
+import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { eq } from "drizzle-orm";
 import {
   DEFAULT_IMAGE_MODEL,
@@ -143,6 +144,11 @@ function getPlatformConfig(): ApiConfig {
 export async function getUserApiConfig(
   userId: string
 ): Promise<ApiConfig | null> {
+  const plan = await getUserPlan(userId);
+  if (!plan.hasActiveSubscription) {
+    return null;
+  }
+
   const config = await db
     .select()
     .from(userApiConfig)
