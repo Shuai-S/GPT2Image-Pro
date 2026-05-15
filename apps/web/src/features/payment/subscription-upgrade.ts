@@ -1,18 +1,12 @@
 import { findRuntimePlanByPriceId } from "@repo/shared/config/payment-runtime";
 import {
   getPlanFromPriceId,
+  PLAN_RANK,
   type SubscriptionPlan,
 } from "@repo/shared/config/subscription-plan";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MIN_UPGRADE_PAYMENT_CENTS = 1;
-
-const PLAN_RANK: Record<SubscriptionPlan, number> = {
-  free: 0,
-  starter: 1,
-  pro: 2,
-  ultra: 3,
-};
 
 export type ProratedSubscription = {
   priceId: string | null;

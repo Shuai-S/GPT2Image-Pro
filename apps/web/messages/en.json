@@ -397,7 +397,7 @@
     "alreadySubscribed": "Already Subscribed",
     "upgradePlan": "Upgrade",
     "manageSubscription": "Manage Subscription",
-    "booksNote": "≈ {count} images generated",
+    "booksNote": "≈ {count} 4K text-to-image generations, including text moderation",
     "cardsNote": "≈ {count} image generations",
     "billingRules": {
       "title": "Credit billing rules",
@@ -411,7 +411,7 @@
     "plans": {
       "free": {
         "name": "Free",
-        "description": "Try GPT2IMAGE with no commitment",
+        "description": "Try basic image generation",
         "cta": "Get Started",
         "creditsAmount": "100",
         "creditsLabel": "credits",
@@ -419,26 +419,28 @@
         "features": {
           "creditsValidity": "Credits follow their issued batch expiry",
           "credits": "100 credits (one-time)",
-          "input": "Chat-to-image generation",
+          "input": "Text-to-image and image editing",
           "characters": "Standard image resolutions",
-          "fileSize": "Up to 5 images per batch",
+          "fileSize": "Up to 10 images per batch",
           "export": "Download & share",
           "history": "Gallery history saved forever"
         }
       },
       "starter": {
         "name": "Starter",
-        "description": "Perfect for casual creators",
+        "description": "External API and custom API access",
         "cta": "Subscribe",
         "creditsAmount": "5,000",
         "creditsLabel": "credits / month",
-        "booksCount": "1,666",
+        "booksCount": "498",
         "features": {
           "creditsValidity": "Credits valid for the plan period",
           "credits": "5,000 credits / month",
-          "input": "Chat-to-image generation",
+          "input": "Text-to-image and image editing",
           "characters": "Standard image resolutions",
           "fileSize": "Up to 10 images per batch",
+          "externalApi": "External API key calls",
+          "customApi": "Custom OpenAI-compatible API",
           "export": "Download & share",
           "history": "Gallery history saved forever",
           "support": "Email support"
@@ -446,42 +448,45 @@
       },
       "pro": {
         "name": "Pro",
-        "description": "Best value for active creators",
+        "description": "Adds chat-to-image",
         "cta": "Subscribe",
         "creditsAmount": "20,000",
         "creditsLabel": "credits / month",
-        "booksCount": "6,666",
+        "booksCount": "1,994",
         "features": {
           "creditsValidity": "Credits valid for the plan period",
           "credits": "20,000 credits / month",
-          "input": "All generation features",
+          "input": "Text-to-image and image editing",
           "characters": "High-resolution outputs",
-          "fileSize": "Up to 25 images per batch",
+          "fileSize": "Up to 10 images per batch",
+          "chat": "Chat-to-image mode",
           "queue": "Priority generation queue",
           "export": "Download & share",
           "history": "Gallery history saved forever",
-          "customCards": "Advanced model access",
+          "externalApi": "External API key calls",
+          "customApi": "Custom OpenAI-compatible API",
           "support": "Priority support"
         }
       },
       "ultra": {
         "name": "Ultra",
-        "description": "For power users and teams",
+        "description": "Chat-to-image with GPT-5.5",
         "cta": "Subscribe",
         "creditsAmount": "80,000",
         "creditsLabel": "credits / month",
-        "booksCount": "26,666",
+        "booksCount": "7,976",
         "features": {
           "creditsValidity": "Credits valid for the plan period",
           "credits": "80,000 credits / month",
-          "input": "All generation features",
+          "input": "Text-to-image and image editing",
           "characters": "Maximum-resolution outputs",
-          "fileSize": "Up to 50 images per batch",
+          "fileSize": "Up to 10 images per batch",
+          "chatGpt55": "Chat-to-image supports GPT-5.5",
           "queue": "Highest priority queue",
           "export": "Download & share",
           "history": "Gallery history saved forever",
-          "customCards": "Premium model access",
-          "aiAssist": "Higher generation limits",
+          "externalApi": "External API key calls",
+          "customApi": "Custom OpenAI-compatible API",
           "support": "Dedicated support"
         }
       }
@@ -582,7 +587,8 @@
     },
     "externalApi": {
       "title": "External API access",
-      "description": "Create an API key for OpenAI-compatible model listing, image generation, and image editing. External calls use your account credits and appear in your generation history.",
+      "description": "Starter and higher plans can create API keys for OpenAI-compatible model listing, image generation, and image editing. External calls use your account credits and appear in your generation history.",
+      "requiresStarter": "Your current plan cannot create or use external API keys. Upgrade to Starter or higher.",
       "defaultName": "Default API key",
       "newKeyLabel": "New API key. It is shown only once.",
       "namePlaceholder": "API key name",
@@ -623,12 +629,12 @@
       "save": "Save Configuration",
       "remove": "Remove",
       "docsLink": "API Documentation",
-      "paidOnly": "Custom API configuration is available for paid subscriptions only.",
+      "paidOnly": "Custom API configuration is available on Starter and higher plans.",
       "saveFailed": "Failed to save",
       "saved": "API configuration saved",
       "removed": "API configuration removed",
       "updateFailed": "Failed to update",
-      "requiresPaid": "Custom API requires a paid subscription"
+      "requiresPaid": "Custom API requires Starter plan or higher"
     },
     "general": {
       "title": "General",
@@ -702,7 +708,7 @@
         "freePlan": "Free Plan",
         "current": "Current",
         "basicFeatures": "Basic features with limited credits",
-        "premiumFeatures": "Full access to all premium features",
+        "premiumFeatures": "API, chat, and model benefits follow your current plan",
         "upgradePlan": "Upgrade Plan",
         "managePlan": "Manage Plan",
         "monthlyCredits": "Monthly Credits",

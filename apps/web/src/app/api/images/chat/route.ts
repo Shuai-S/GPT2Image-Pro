@@ -2,6 +2,8 @@ import { withApiLogging } from "@repo/shared/api-logger";
 import { auth } from "@repo/shared/auth";
 import { getStorageProvider } from "@repo/shared/storage/providers";
 import { getRuntimeSettingString } from "@repo/shared/system-settings";
+import { canUseChat } from "@repo/shared/config/subscription-plan";
+import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { randomUUID } from "node:crypto";
 import { type NextRequest, NextResponse } from "next/server";
 
@@ -244,6 +246,11 @@ export const POST = withApiLogging(async (request: NextRequest) => {
 
   if (!session?.user) {
     return errorResponse("Unauthorized", 401);
+  }
+
+  const plan = await getUserPlan(session.user.id);
+  if (!canUseChat(plan.plan)) {
+    return errorResponse("Chat mode requires Pro plan or higher.", 403);
   }
 
   let formData: FormData;

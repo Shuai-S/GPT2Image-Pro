@@ -16,6 +16,11 @@ import { PRICE_IDS } from "./payment";
 export type SubscriptionPlan = "free" | "starter" | "pro" | "ultra";
 
 /**
+ * 对话模式旗舰模型
+ */
+export const GPT55_CHAT_MODEL = "gpt-5.5";
+
+/**
  * 队列优先级
  */
 export type QueuePriority = "normal" | "priority" | "highest";
@@ -68,6 +73,16 @@ export const PLAN_PRIVILEGES: Record<SubscriptionPlan, PlanPrivileges> = {
   },
 };
 
+/**
+ * 计划等级，用于功能门槛判断
+ */
+export const PLAN_RANK: Record<SubscriptionPlan, number> = {
+  free: 0,
+  starter: 1,
+  pro: 2,
+  ultra: 3,
+};
+
 // ============================================
 // Price ID 到计划的映射
 // ============================================
@@ -115,6 +130,48 @@ export function getPlanFromPriceId(priceId: string): SubscriptionPlan | null {
  */
 export function getPlanPrivileges(plan: SubscriptionPlan): PlanPrivileges {
   return PLAN_PRIVILEGES[plan];
+}
+
+/**
+ * 检查当前计划是否达到目标计划等级
+ *
+ * @param plan - 当前计划
+ * @param requiredPlan - 需要达到的最低计划
+ * @returns 是否满足等级要求
+ */
+export function isPlanAtLeast(
+  plan: SubscriptionPlan,
+  requiredPlan: SubscriptionPlan
+): boolean {
+  return PLAN_RANK[plan] >= PLAN_RANK[requiredPlan];
+}
+
+/**
+ * 是否允许创建和使用外接 API Key
+ */
+export function canUseExternalApi(plan: SubscriptionPlan): boolean {
+  return isPlanAtLeast(plan, "starter");
+}
+
+/**
+ * 是否允许配置自己的 OpenAI 兼容 API
+ */
+export function canUseCustomApi(plan: SubscriptionPlan): boolean {
+  return isPlanAtLeast(plan, "starter");
+}
+
+/**
+ * 是否允许使用对话生图
+ */
+export function canUseChat(plan: SubscriptionPlan): boolean {
+  return isPlanAtLeast(plan, "pro");
+}
+
+/**
+ * 是否允许对话生图使用 GPT-5.5
+ */
+export function canUseGpt55Chat(plan: SubscriptionPlan): boolean {
+  return isPlanAtLeast(plan, "ultra");
 }
 
 /**

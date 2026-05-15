@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  canUseChat,
+  canUseGpt55Chat,
+  type SubscriptionPlan,
+} from "@repo/shared/config/subscription-plan";
 import { formatCredits } from "@repo/shared/credits/format";
 import { Button } from "@repo/ui/components/button";
 import { Checkbox } from "@repo/ui/components/checkbox";
@@ -256,6 +261,7 @@ const PRESET_LABELS_ZH: Record<string, string> = {
 interface CreatePageClientProps {
   balance: number;
   recentGenerations: RecentGeneration[];
+  plan: SubscriptionPlan;
 }
 
 function isImageFile(file: File) {
@@ -368,6 +374,7 @@ async function urlToEditImageFile(
 export function CreatePageClient({
   balance: initialBalance,
   recentGenerations: initialRecent,
+  plan,
 }: CreatePageClientProps) {
   const locale = useLocale();
   const isZh = locale === "zh";
@@ -427,6 +434,8 @@ export function CreatePageClient({
     }
     return message;
   };
+  const chatAllowed = canUseChat(plan);
+  const gpt55ChatAllowed = canUseGpt55Chat(plan);
   const [activeMode, setActiveMode] = useState<ActiveMode>("text");
   const [prompt, setPrompt] = useState("");
   const [editPrompt, setEditPrompt] = useState("");
@@ -2760,7 +2769,13 @@ export function CreatePageClient({
 
       <Tabs
         value={activeMode}
-        onValueChange={(value) => setActiveMode(value as ActiveMode)}
+        onValueChange={(value) => {
+          if (value === "chat" && !chatAllowed) {
+            toast.error(copy("Chat requires Pro plan or higher.", "对话功能需要专业版或更高套餐。"));
+            return;
+          }
+          setActiveMode(value as ActiveMode);
+        }}
         className="mb-10"
       >
         <TabsList className="mb-4 border border-border bg-muted/40">
@@ -2772,9 +2787,17 @@ export function CreatePageClient({
             <ImagePlus className="h-4 w-4" />
             {copy("Image to image", "图生图")}
           </TabsTrigger>
-          <TabsTrigger value="chat">
+          <TabsTrigger value="chat" disabled={!chatAllowed}>
             <MessageSquare className="h-4 w-4" />
             {copy("Chat", "对话")}
+            {gpt55ChatAllowed && (
+              <span className="text-[10px] text-muted-foreground">
+                GPT-5.5
+              </span>
+            )}
+            {!chatAllowed && (
+              <span className="text-[10px] text-muted-foreground">Pro</span>
+            )}
           </TabsTrigger>
         </TabsList>
 

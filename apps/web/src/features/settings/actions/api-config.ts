@@ -7,6 +7,7 @@ import { z } from "zod";
 import { db } from "@repo/database";
 import { userApiConfig } from "@repo/database/schema";
 import { protectedAction } from "@repo/shared/safe-action";
+import { canUseCustomApi } from "@repo/shared/config/subscription-plan";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 
 /**
@@ -110,8 +111,8 @@ const withApiConfigAction = (name: string) =>
 
 async function ensureCustomApiAllowed(userId: string) {
   const plan = await getUserPlan(userId);
-  if (!plan.hasActiveSubscription) {
-    throw new Error("Custom API configuration requires a paid subscription.");
+  if (!canUseCustomApi(plan.plan)) {
+    throw new Error("Custom API configuration requires Starter plan or higher.");
   }
 }
 

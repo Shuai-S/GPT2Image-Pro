@@ -361,7 +361,7 @@
     "alreadySubscribed": "已订阅",
     "upgradePlan": "补差升级",
     "manageSubscription": "管理订阅",
-    "booksNote": "≈ 可生成 {count} 张图片",
+    "booksNote": "≈ {count} 张 4K 文生图（含文本审核）",
     "cardsNote": "≈ {count} 次图片生成",
     "billingRules": {
       "title": "积分计价规则",
@@ -375,7 +375,7 @@
     "plans": {
       "free": {
         "name": "免费版",
-        "description": "无负担体验 GPT2IMAGE",
+        "description": "体验基础图片生成",
         "cta": "免费开始",
         "creditsAmount": "100",
         "creditsLabel": "积分",
@@ -383,26 +383,28 @@
         "features": {
           "creditsValidity": "积分按发放批次有效期有效",
           "credits": "100 积分（一次性）",
-          "input": "对话生图功能",
+          "input": "文生图与图生图",
           "characters": "标准图像分辨率",
-          "fileSize": "每批最多 5 张图",
+          "fileSize": "每批最多 10 张图",
           "export": "下载与分享",
           "history": "画廊历史永久保存"
         }
       },
       "starter": {
         "name": "入门版",
-        "description": "适合轻度创作者",
+        "description": "开放外接 API 和自接 API",
         "cta": "订阅",
         "creditsAmount": "5,000",
         "creditsLabel": "积分 / 月",
-        "booksCount": "1,666",
+        "booksCount": "498",
         "features": {
           "creditsValidity": "订阅积分按套餐周期有效",
           "credits": "每月 5,000 积分",
-          "input": "对话生图功能",
+          "input": "文生图与图生图",
           "characters": "标准图像分辨率",
           "fileSize": "每批最多 10 张图",
+          "externalApi": "外接 API Key 调用",
+          "customApi": "自接 OpenAI 兼容 API",
           "export": "下载与分享",
           "history": "画廊历史永久保存",
           "support": "邮件支持"
@@ -410,42 +412,45 @@
       },
       "pro": {
         "name": "专业版",
-        "description": "性价比最高，适合活跃创作者",
+        "description": "增加对话生图能力",
         "cta": "订阅",
         "creditsAmount": "20,000",
         "creditsLabel": "积分 / 月",
-        "booksCount": "6,666",
+        "booksCount": "1,994",
         "features": {
           "creditsValidity": "订阅积分按套餐周期有效",
           "credits": "每月 20,000 积分",
-          "input": "全部生成功能",
+          "input": "文生图与图生图",
           "characters": "高分辨率输出",
-          "fileSize": "每批最多 25 张图",
+          "fileSize": "每批最多 10 张图",
+          "chat": "对话生图功能",
           "queue": "优先生成队列",
           "export": "下载与分享",
           "history": "画廊历史永久保存",
-          "customCards": "高级模型访问",
+          "externalApi": "外接 API Key 调用",
+          "customApi": "自接 OpenAI 兼容 API",
           "support": "优先支持"
         }
       },
       "ultra": {
         "name": "旗舰版",
-        "description": "适合高频使用和团队",
+        "description": "对话生图可用 GPT-5.5",
         "cta": "订阅",
         "creditsAmount": "80,000",
         "creditsLabel": "积分 / 月",
-        "booksCount": "26,666",
+        "booksCount": "7,976",
         "features": {
           "creditsValidity": "订阅积分按套餐周期有效",
           "credits": "每月 80,000 积分",
-          "input": "全部生成功能",
+          "input": "文生图与图生图",
           "characters": "最高分辨率输出",
-          "fileSize": "每批最多 50 张图",
+          "fileSize": "每批最多 10 张图",
+          "chatGpt55": "对话生图支持 GPT-5.5",
           "queue": "最高优先队列",
           "export": "下载与分享",
           "history": "画廊历史永久保存",
-          "customCards": "旗舰模型访问",
-          "aiAssist": "更高生成额度",
+          "externalApi": "外接 API Key 调用",
+          "customApi": "自接 OpenAI 兼容 API",
           "support": "专属支持"
         }
       }
@@ -582,7 +587,8 @@
     },
     "externalApi": {
       "title": "外接 API 访问",
-      "description": "创建 OpenAI 兼容的模型查询、图片生成和图片编辑 API Key。外部调用会消耗你的账户积分，并写入生成历史。",
+      "description": "入门版及以上可创建 OpenAI 兼容的模型查询、图片生成和图片编辑 API Key。外部调用会消耗你的账户积分，并写入生成历史。",
+      "requiresStarter": "当前套餐不能创建或使用外接 API Key，请升级到入门版或更高套餐。",
       "defaultName": "默认 API Key",
       "newKeyLabel": "新的 API Key，仅显示一次。",
       "namePlaceholder": "API Key 名称",
@@ -623,12 +629,12 @@
       "save": "保存配置",
       "remove": "删除",
       "docsLink": "API 文档",
-      "paidOnly": "自定义 API 配置仅对付费订阅开放。",
+      "paidOnly": "自定义 API 配置仅对入门版及以上套餐开放。",
       "saveFailed": "保存失败",
       "saved": "API 配置已保存",
       "removed": "API 配置已删除",
       "updateFailed": "更新失败",
-      "requiresPaid": "自定义 API 需要付费订阅"
+      "requiresPaid": "自定义 API 需要入门版或更高套餐"
     },
     "general": {
       "title": "基本信息",
@@ -702,7 +708,7 @@
         "freePlan": "免费版",
         "current": "当前",
         "basicFeatures": "基础功能，积分有限",
-        "premiumFeatures": "完整访问所有高级功能",
+        "premiumFeatures": "按当前套餐开放 API、对话和模型权益",
         "upgradePlan": "升级套餐",
         "managePlan": "管理套餐",
         "monthlyCredits": "每月积分",

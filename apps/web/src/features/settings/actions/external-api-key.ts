@@ -7,7 +7,9 @@ import { z } from "zod";
 
 import { db } from "@repo/database";
 import { externalApiKey } from "@repo/database/schema";
+import { canUseExternalApi } from "@repo/shared/config/subscription-plan";
 import { protectedAction } from "@repo/shared/safe-action";
+import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 
 const API_KEY_PREFIX = "g2i";
 
@@ -21,6 +23,13 @@ function createApiKey() {
 
 const withExternalApiKeyAction = (name: string) =>
   protectedAction.metadata({ action: `settings.externalApiKey.${name}` });
+
+async function ensureExternalApiAllowed(userId: string) {
+  const plan = await getUserPlan(userId);
+  if (!canUseExternalApi(plan.plan)) {
+    throw new Error("External API access requires Starter plan or higher.");
+  }
+}
 
 export const getExternalApiKeys = withExternalApiKeyAction("list").action(
   async ({ ctx }) => {
@@ -49,6 +58,8 @@ export const createExternalApiKey = withExternalApiKeyAction("create")
     })
   )
   .action(async ({ parsedInput, ctx }) => {
+    await ensureExternalApiAllowed(ctx.userId);
+
     const apiKey = createApiKey();
     const keyPrefix = apiKey.slice(0, 7);
 

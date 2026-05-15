@@ -63,6 +63,7 @@ export interface ChatImageParams {
   history?: ChatHistoryMessage[];
   size?: string;
   model?: string;
+  allowGpt55?: boolean;
   quality?: ImageQuality;
   n?: number;
   moderation?: ImageModeration;

@@ -4,6 +4,11 @@ import { consumeCredits, grantCredits } from "@repo/shared/credits/core";
 import { moderateContent } from "@repo/shared/moderation";
 import { getStorageProvider } from "@repo/shared/storage/providers";
 import { getRuntimeSettingString } from "@repo/shared/system-settings";
+import {
+  canUseChat,
+  canUseGpt55Chat,
+} from "@repo/shared/config/subscription-plan";
+import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
@@ -113,15 +118,33 @@ export async function runImageGenerationForUser(
   const bucket =
     (await getRuntimeSettingString("NEXT_PUBLIC_GENERATIONS_BUCKET_NAME")) ||
     "generations";
+  const userPlan = await getUserPlan(input.userId);
+
+  if (input.mode === "chat" && !canUseChat(userPlan.plan)) {
+    return {
+      error: "Chat mode requires Pro plan or higher.",
+      generationId,
+    };
+  }
 
   const userConfig = await getUserApiConfig(input.userId);
   const { config, useCredits } = await getEffectiveConfig(userConfig);
-  const model =
-    input.mode === "chat"
-      ? await getResponsesModel(config, input.model)
-      : normalizeImageModel(input.model) ||
-        normalizeImageModel(config.model) ||
-        DEFAULT_IMAGE_MODEL;
+  let model: string;
+  try {
+    model =
+      input.mode === "chat"
+        ? await getResponsesModel(config, input.model, {
+            allowGpt55: canUseGpt55Chat(userPlan.plan),
+          })
+        : normalizeImageModel(input.model) ||
+          normalizeImageModel(config.model) ||
+          DEFAULT_IMAGE_MODEL;
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "Invalid model.",
+      generationId,
+    };
+  }
 
   await db.insert(generation).values({
     id: generationId,
@@ -272,6 +295,7 @@ export async function runImageGenerationForUser(
               history: input.history,
               size,
               model,
+              allowGpt55: canUseGpt55Chat(userPlan.plan),
               quality: input.quality,
               n: input.n,
               moderation: input.moderation,

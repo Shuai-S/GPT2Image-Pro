@@ -1,5 +1,7 @@
 "use client";
 
+import { canUseExternalApi } from "@repo/shared/config/subscription-plan";
+import { getMyPlanAction } from "@repo/shared/subscription/actions/get-user-plan";
 import { Button } from "@repo/ui/components/button";
 import { Input } from "@repo/ui/components/input";
 import { Label } from "@repo/ui/components/label";
@@ -40,6 +42,7 @@ export function ExternalApiKeySection() {
   const [newKey, setNewKey] = useState("");
   const [keyName, setKeyName] = useState(t("defaultName"));
   const [loading, setLoading] = useState(true);
+  const [externalApiAllowed, setExternalApiAllowed] = useState(false);
 
   const { execute: loadKeys, isPending: isRefreshing } = useAction(
     getExternalApiKeys,
@@ -88,6 +91,11 @@ export function ExternalApiKeySection() {
     if (didLoadRef.current) return;
     didLoadRef.current = true;
     loadKeys();
+    getMyPlanAction().then((result) => {
+      setExternalApiAllowed(
+        result?.data?.plan ? canUseExternalApi(result.data.plan) : false
+      );
+    });
   }, [loadKeys]);
 
   const copyNewKey = async () => {
@@ -107,6 +115,11 @@ export function ExternalApiKeySection() {
           <p className="text-xs text-muted-foreground">
             {t("description")}
           </p>
+          {!externalApiAllowed && (
+            <p className="text-xs text-muted-foreground">
+              {t("requiresStarter")}
+            </p>
+          )}
           <div className="space-y-1 font-mono text-xs text-muted-foreground">
             <p>GET /v1/models</p>
             <p>POST /v1/images/generations</p>
@@ -159,7 +172,7 @@ export function ExternalApiKeySection() {
         <Button
           type="button"
           onClick={() => createKey({ name: keyName || undefined })}
-          disabled={isCreating}
+          disabled={isCreating || !externalApiAllowed}
         >
           {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           {t("create")}

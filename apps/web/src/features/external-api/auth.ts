@@ -1,6 +1,8 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { db } from "@repo/database";
 import { externalApiKey, user } from "@repo/database/schema";
+import { canUseExternalApi } from "@repo/shared/config/subscription-plan";
+import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { and, eq } from "drizzle-orm";
 
 function hashApiKey(apiKey: string) {
@@ -52,6 +54,11 @@ export async function authenticateExternalApiRequest(request: Request) {
     return null;
   }
 
+  const plan = await getUserPlan(apiKey.userId);
+  if (!canUseExternalApi(plan.plan)) {
+    return null;
+  }
+
   await db
     .update(externalApiKey)
     .set({ lastUsedAt: new Date(), updatedAt: new Date() })
@@ -62,4 +69,3 @@ export async function authenticateExternalApiRequest(request: Request) {
     userId: apiKey.userId,
   };
 }
-

@@ -3,6 +3,10 @@ import { userApiConfig } from "@repo/database/schema";
 import { logError } from "@repo/shared/logger";
 import { getRuntimeSettingString } from "@repo/shared/system-settings";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
+import {
+  canUseCustomApi,
+  GPT55_CHAT_MODEL,
+} from "@repo/shared/config/subscription-plan";
 import { eq } from "drizzle-orm";
 import {
   DEFAULT_IMAGE_MODEL,
@@ -99,17 +103,31 @@ function isImageOnlyModel(model: string) {
   return model.toLowerCase().startsWith("gpt-image-");
 }
 
-export async function getResponsesModel(config: ApiConfig, model?: string) {
+export async function getResponsesModel(
+  config: ApiConfig,
+  model?: string,
+  options?: { allowGpt55?: boolean }
+) {
   const requested = (model || config.model || "").trim();
+  if (requested === GPT55_CHAT_MODEL && !options?.allowGpt55) {
+    throw new Error("GPT-5.5 chat model requires Ultra plan.");
+  }
   if (requested && !isImageOnlyModel(requested)) {
     return requested;
   }
 
-  return (
+  if (options?.allowGpt55) {
+    return GPT55_CHAT_MODEL;
+  }
+
+  const fallbackModel =
     (await getRuntimeSettingString("PLATFORM_RESPONSES_MODEL")) ||
     (await getRuntimeSettingString("PLATFORM_CHAT_MODEL")) ||
-    DEFAULT_RESPONSES_MODEL
-  );
+    DEFAULT_RESPONSES_MODEL;
+
+  return fallbackModel === GPT55_CHAT_MODEL
+    ? DEFAULT_RESPONSES_MODEL
+    : fallbackModel;
 }
 
 function getApiError(errorData: unknown, fallback: string) {
@@ -844,7 +862,7 @@ export async function getUserApiConfig(
   userId: string
 ): Promise<ApiConfig | null> {
   const plan = await getUserPlan(userId);
-  if (!plan.hasActiveSubscription) {
+  if (!canUseCustomApi(plan.plan)) {
     return null;
   }
 
@@ -987,7 +1005,9 @@ export async function generateChatImage(
   params: ChatImageParams,
   callbacks?: ImageGenerationCallbacks
 ): Promise<GenerateImageResult> {
-  const model = await getResponsesModel(config, params.model);
+  const model = await getResponsesModel(config, params.model, {
+    allowGpt55: params.allowGpt55,
+  });
   try {
     const prompt = params.apiPrompt || params.prompt;
     const size = params.size || DEFAULT_IMAGE_SIZE;

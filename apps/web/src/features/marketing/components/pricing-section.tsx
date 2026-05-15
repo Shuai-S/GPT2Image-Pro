@@ -4,6 +4,10 @@ import {
   getPlanPrice,
   paymentConfig,
 } from "@repo/shared/config/payment";
+import {
+  PLAN_RANK,
+  type SubscriptionPlan,
+} from "@repo/shared/config/subscription-plan";
 import type { PaymentConfig } from "@repo/shared/payment/types";
 import { Badge } from "@repo/ui/components/badge";
 import { Button } from "@repo/ui/components/button";
@@ -31,13 +35,6 @@ import { AnimatedPrice } from "./animated-price";
  * 计划配置（用于获取价格等非翻译数据）
  */
 const PLAN_IDS = ["free", "starter", "pro", "ultra"] as const;
-const PLAN_RANK: Record<(typeof PLAN_IDS)[number], number> = {
-  free: 0,
-  starter: 1,
-  pro: 2,
-  ultra: 3,
-};
-
 function parsePlanNumber(value: string) {
   return Number.parseInt(value.replace(/,/g, ""), 10);
 }
@@ -59,6 +56,8 @@ const PLAN_FEATURE_KEYS: Record<string, string[]> = {
     "input",
     "characters",
     "fileSize",
+    "externalApi",
+    "customApi",
     "export",
     "history",
     "support",
@@ -68,10 +67,12 @@ const PLAN_FEATURE_KEYS: Record<string, string[]> = {
     "input",
     "characters",
     "fileSize",
+    "chat",
     "queue",
     "export",
     "history",
-    "customCards",
+    "externalApi",
+    "customApi",
     "support",
   ],
   ultra: [
@@ -79,11 +80,12 @@ const PLAN_FEATURE_KEYS: Record<string, string[]> = {
     "input",
     "characters",
     "fileSize",
+    "chatGpt55",
     "queue",
     "export",
     "history",
-    "customCards",
-    "aiAssist",
+    "externalApi",
+    "customApi",
     "support",
   ],
 };
@@ -207,9 +209,7 @@ export function PricingSection({ currentPriceId, payment }: PricingSectionProps)
     if (!activePriceId || planId === "free") return false;
     const currentPlanId = getPlanIdByPriceId(activePriceId);
     if (!currentPlanId || !(planId in PLAN_RANK)) return false;
-    return (
-      PLAN_RANK[planId as keyof typeof PLAN_RANK] > PLAN_RANK[currentPlanId]
-    );
+    return PLAN_RANK[planId as SubscriptionPlan] > PLAN_RANK[currentPlanId];
   };
 
   /**

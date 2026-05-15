@@ -1,6 +1,7 @@
 "use client";
 
 import { getMyPlanAction } from "@repo/shared/subscription/actions/get-user-plan";
+import { canUseCustomApi } from "@repo/shared/config/subscription-plan";
 import { Button } from "@repo/ui/components/button";
 import { Input } from "@repo/ui/components/input";
 import { Label } from "@repo/ui/components/label";
@@ -58,7 +59,7 @@ export function ApiConfigForm() {
   const [useStream, setUseStream] = useState(false);
   const [isActive, setIsActive] = useState(true);
   const [hasConfig, setHasConfig] = useState(false);
-  const [hasPaidPlan, setHasPaidPlan] = useState(false);
+  const [customApiAllowed, setCustomApiAllowed] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const { execute: executeSave, isPending: isSaving } = useAction(
@@ -104,7 +105,9 @@ export function ApiConfigForm() {
           getApiConfig(),
           getMyPlanAction(),
         ]);
-        setHasPaidPlan(Boolean(planResult?.data?.hasActiveSubscription));
+        setCustomApiAllowed(
+          planResult?.data?.plan ? canUseCustomApi(planResult.data.plan) : false
+        );
         if (configResult?.data) {
           setBaseUrl(configResult.data.baseUrl);
           setApiKey(configResult.data.apiKey);
@@ -123,7 +126,7 @@ export function ApiConfigForm() {
   }, []);
 
   const handleSave = () => {
-    if (!hasPaidPlan) {
+    if (!customApiAllowed) {
       toast.error(t("apiConfig.requiresPaid"));
       return;
     }
@@ -154,7 +157,7 @@ export function ApiConfigForm() {
               {t("apiConfig.warning.title")}
             </p>
             <p className="mt-1">
-              {hasPaidPlan
+              {customApiAllowed
                 ? t("apiConfig.warning.description")
                 : t("apiConfig.paidOnly")}
             </p>
@@ -192,7 +195,7 @@ export function ApiConfigForm() {
                 onCheckedChange={(checked) =>
                   executeToggle({ isActive: checked })
                 }
-                disabled={!hasPaidPlan}
+                disabled={!customApiAllowed}
               />
             </div>
           )}
@@ -207,7 +210,7 @@ export function ApiConfigForm() {
               placeholder="https://api.openai.com/v1"
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
-              disabled={!hasPaidPlan}
+              disabled={!customApiAllowed}
             />
           </div>
 
@@ -222,7 +225,7 @@ export function ApiConfigForm() {
               placeholder="sk-..."
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              disabled={!hasPaidPlan}
+              disabled={!customApiAllowed}
             />
           </div>
 
@@ -236,7 +239,7 @@ export function ApiConfigForm() {
               placeholder="gpt-image-2"
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              disabled={!hasPaidPlan}
+              disabled={!customApiAllowed}
             />
             <p className="text-xs text-muted-foreground">
               {t("apiConfig.modelHint")}
@@ -257,7 +260,7 @@ export function ApiConfigForm() {
               id="api-use-stream"
               checked={useStream}
               onCheckedChange={setUseStream}
-              disabled={!hasPaidPlan}
+              disabled={!customApiAllowed}
             />
           </div>
 
@@ -265,7 +268,7 @@ export function ApiConfigForm() {
           <div className="flex gap-2 pt-2">
             <Button
               onClick={handleSave}
-              disabled={!hasPaidPlan || !baseUrl || !apiKey || isSaving}
+              disabled={!customApiAllowed || !baseUrl || !apiKey || isSaving}
               size="sm"
             >
               {isSaving && <Loader2 className="mr-2 h-3 w-3 animate-spin" />}
