@@ -395,7 +395,39 @@ export async function parseEpayRequestParams(
 }
 
 export function encodeEpayMetadata(metadata: EpayMetadata): string {
-  return Buffer.from(JSON.stringify(metadata), "utf8").toString("base64url");
+  const compact: Record<string, unknown> = {
+    t: metadata.type === "subscription" ? "s" : "c",
+    u: metadata.userId,
+    o: metadata.outTradeNo,
+  };
+
+  if (metadata.priceId) compact.p = metadata.priceId;
+  if (metadata.planId) compact.l = metadata.planId;
+  if (metadata.packageId) compact.g = metadata.packageId;
+
+  if (metadata.checkoutMode === "upgrade") {
+    compact.m = "u";
+    if (typeof metadata.expectedAmount === "number") {
+      compact.e = metadata.expectedAmount;
+    }
+    if (typeof metadata.originalAmount === "number") {
+      compact.a = metadata.originalAmount;
+    }
+    if (metadata.prorationCredit) {
+      compact.c = metadata.prorationCredit;
+    }
+    if (metadata.remainingDays) {
+      compact.r = metadata.remainingDays;
+    }
+    if (metadata.periodDays) {
+      compact.d = metadata.periodDays;
+    }
+    if (metadata.upgradeFromPriceId) {
+      compact.f = metadata.upgradeFromPriceId;
+    }
+  }
+
+  return Buffer.from(JSON.stringify(compact), "utf8").toString("base64url");
 }
 
 export function decodeEpayMetadata(param?: string): EpayMetadata | null {
@@ -404,46 +436,79 @@ export function decodeEpayMetadata(param?: string): EpayMetadata | null {
   try {
     const parsed = JSON.parse(
       Buffer.from(param, "base64url").toString("utf8")
-    ) as Partial<EpayMetadata>;
+    ) as Partial<EpayMetadata> & Record<string, unknown>;
+
+    const type =
+      parsed.type ??
+      (parsed.t === "s"
+        ? "subscription"
+        : parsed.t === "c"
+          ? "credit_purchase"
+          : undefined);
+    const userId = parsed.userId ?? parsed.u;
+    const outTradeNo = parsed.outTradeNo ?? parsed.o;
+    const priceId = parsed.priceId ?? parsed.p;
+    const planId = parsed.planId ?? parsed.l;
+    const packageId = parsed.packageId ?? parsed.g;
+    const checkoutMode =
+      parsed.checkoutMode ??
+      (parsed.m === "u"
+        ? "upgrade"
+        : parsed.m === "n"
+          ? "new_subscription"
+          : undefined);
+    const numberValue = (value: unknown) =>
+      typeof value === "number"
+        ? value
+        : typeof value === "string" && value.trim()
+          ? Number(value)
+          : undefined;
+    const expectedAmount = numberValue(parsed.expectedAmount ?? parsed.e);
+    const originalAmount = numberValue(parsed.originalAmount ?? parsed.a);
+    const prorationCredit = numberValue(parsed.prorationCredit ?? parsed.c);
+    const remainingDays = numberValue(parsed.remainingDays ?? parsed.r);
+    const periodDays = numberValue(parsed.periodDays ?? parsed.d);
+    const upgradeFromPriceId = parsed.upgradeFromPriceId ?? parsed.f;
 
     if (
-      (parsed.type !== "subscription" && parsed.type !== "credit_purchase") ||
-      typeof parsed.userId !== "string" ||
-      typeof parsed.outTradeNo !== "string"
+      (type !== "subscription" && type !== "credit_purchase") ||
+      typeof userId !== "string" ||
+      typeof outTradeNo !== "string"
     ) {
       return null;
     }
 
     return {
-      type: parsed.type,
-      userId: parsed.userId,
-      outTradeNo: parsed.outTradeNo,
-      ...(typeof parsed.priceId === "string" && { priceId: parsed.priceId }),
-      ...(typeof parsed.planId === "string" && { planId: parsed.planId }),
-      ...(typeof parsed.packageId === "string" && {
-        packageId: parsed.packageId,
+      type,
+      userId,
+      outTradeNo,
+      ...(typeof priceId === "string" && { priceId }),
+      ...(typeof planId === "string" && { planId }),
+      ...(typeof packageId === "string" && { packageId }),
+      ...((checkoutMode === "new_subscription" ||
+        checkoutMode === "upgrade") && {
+        checkoutMode,
       }),
-      ...((parsed.checkoutMode === "new_subscription" ||
-        parsed.checkoutMode === "upgrade") && {
-        checkoutMode: parsed.checkoutMode,
+      ...(typeof expectedAmount === "number" &&
+        Number.isFinite(expectedAmount) && {
+        expectedAmount,
       }),
-      ...(typeof parsed.expectedAmount === "number" && {
-        expectedAmount: parsed.expectedAmount,
+      ...(typeof originalAmount === "number" &&
+        Number.isFinite(originalAmount) && {
+        originalAmount,
       }),
-      ...(typeof parsed.originalAmount === "number" && {
-        originalAmount: parsed.originalAmount,
+      ...(typeof prorationCredit === "number" &&
+        Number.isFinite(prorationCredit) && {
+        prorationCredit,
       }),
-      ...(typeof parsed.prorationCredit === "number" && {
-        prorationCredit: parsed.prorationCredit,
+      ...(typeof remainingDays === "number" && Number.isFinite(remainingDays) && {
+        remainingDays,
       }),
-      ...(typeof parsed.remainingDays === "number" && {
-        remainingDays: parsed.remainingDays,
+      ...(typeof periodDays === "number" && Number.isFinite(periodDays) && {
+        periodDays,
       }),
-      ...(typeof parsed.periodDays === "number" && {
-        periodDays: parsed.periodDays,
-      }),
-      ...(typeof parsed.upgradeFromPriceId === "string" && {
-        upgradeFromPriceId: parsed.upgradeFromPriceId,
+      ...(typeof upgradeFromPriceId === "string" && {
+        upgradeFromPriceId,
       }),
     };
   } catch {
