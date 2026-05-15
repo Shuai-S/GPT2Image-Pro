@@ -41,12 +41,12 @@ function flattenValidationErrors(value: unknown): string[] {
   return [];
 }
 
-function getActionErrorMessage(error?: ActionError) {
+function getActionErrorMessage(error: ActionError | undefined, fallback: string) {
   const validationMessages = flattenValidationErrors(error?.validationErrors);
   if (validationMessages.length > 0) {
     return validationMessages.join(", ");
   }
-  return error?.serverError || "Failed to save";
+  return error?.serverError || fallback;
 }
 
 export function ApiConfigForm() {
@@ -65,11 +65,11 @@ export function ApiConfigForm() {
     saveApiConfig,
     {
       onSuccess: () => {
-        toast.success("API configuration saved");
+        toast.success(t("apiConfig.saved"));
         setHasConfig(true);
       },
       onError: (err) => {
-        toast.error(getActionErrorMessage(err.error));
+        toast.error(getActionErrorMessage(err.error, t("apiConfig.saveFailed")));
       },
     }
   );
@@ -78,7 +78,7 @@ export function ApiConfigForm() {
     deleteApiConfig,
     {
       onSuccess: () => {
-        toast.success("API configuration removed");
+        toast.success(t("apiConfig.removed"));
         setBaseUrl("");
         setApiKey("");
         setModel("");
@@ -93,7 +93,7 @@ export function ApiConfigForm() {
       setIsActive(!isActive);
     },
     onError: (err) => {
-      toast.error(err.error?.serverError || "Failed to update");
+      toast.error(err.error?.serverError || t("apiConfig.updateFailed"));
     },
   });
 
@@ -124,7 +124,7 @@ export function ApiConfigForm() {
 
   const handleSave = () => {
     if (!hasPaidPlan) {
-      toast.error("Custom API requires a paid subscription");
+      toast.error(t("apiConfig.requiresPaid"));
       return;
     }
     executeSave({
@@ -151,13 +151,12 @@ export function ApiConfigForm() {
           <AlertTriangle className="h-5 w-5 shrink-0 text-muted-foreground" />
           <div className="text-sm text-muted-foreground">
             <p className="font-medium text-foreground/80">
-              {t("apiConfig.warning.title") || "Advanced Configuration"}
+              {t("apiConfig.warning.title")}
             </p>
             <p className="mt-1">
               {hasPaidPlan
-                ? t("apiConfig.warning.description") ||
-                  "Configure your own OpenAI-compatible API endpoint. When active, image generation will use your API key instead of platform credits."
-                : "Custom API configuration is available for paid subscriptions only."}
+                ? t("apiConfig.warning.description")
+                : t("apiConfig.paidOnly")}
             </p>
           </div>
         </div>
@@ -169,7 +168,7 @@ export function ApiConfigForm() {
         onClick={() => setExpanded(!expanded)}
         className="flex w-full items-center justify-between rounded-lg border border-border px-4 py-3 text-sm text-muted-foreground transition-colors hover:bg-muted/50"
       >
-        <span>{t("apiConfig.customEndpoint") || "Custom API Endpoint"}</span>
+        <span>{t("apiConfig.customEndpoint")}</span>
         <ChevronDown
           className={`h-4 w-4 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
         />
@@ -182,11 +181,10 @@ export function ApiConfigForm() {
             <div className="flex items-center justify-between">
               <div>
                 <Label className="text-sm">
-                  {t("apiConfig.enabled") || "Use Custom API"}
+                  {t("apiConfig.enabled")}
                 </Label>
                 <p className="text-xs text-muted-foreground">
-                  {t("apiConfig.enabledDescription") ||
-                    "When enabled, bypasses platform credits"}
+                  {t("apiConfig.enabledDescription")}
                 </p>
               </div>
               <Switch
@@ -202,7 +200,7 @@ export function ApiConfigForm() {
           {/* Base URL */}
           <div className="space-y-2">
             <Label htmlFor="api-base-url" className="text-sm">
-              {t("apiConfig.baseUrl") || "API Base URL"}
+              {t("apiConfig.baseUrl")}
             </Label>
             <Input
               id="api-base-url"
@@ -216,7 +214,7 @@ export function ApiConfigForm() {
           {/* API Key */}
           <div className="space-y-2">
             <Label htmlFor="api-key" className="text-sm">
-              {t("apiConfig.apiKey") || "API Key"}
+              {t("apiConfig.apiKey")}
             </Label>
             <Input
               id="api-key"
@@ -231,7 +229,7 @@ export function ApiConfigForm() {
           {/* Model (optional) */}
           <div className="space-y-2">
             <Label htmlFor="api-model" className="text-sm">
-              {t("apiConfig.model") || "Model (optional)"}
+              {t("apiConfig.model")}
             </Label>
             <Input
               id="api-model"
@@ -241,8 +239,7 @@ export function ApiConfigForm() {
               disabled={!hasPaidPlan}
             />
             <p className="text-xs text-muted-foreground">
-              {t("apiConfig.modelHint") ||
-                "Leave blank to use the default model"}
+              {t("apiConfig.modelHint")}
             </p>
           </div>
 
@@ -250,11 +247,10 @@ export function ApiConfigForm() {
           <div className="flex items-center justify-between gap-4 rounded-md border border-border px-3 py-3">
             <div>
               <Label htmlFor="api-use-stream" className="text-sm">
-                {t("apiConfig.useStream") || "Stream responses"}
+                {t("apiConfig.useStream")}
               </Label>
               <p className="text-xs text-muted-foreground">
-                {t("apiConfig.useStreamDescription") ||
-                  "Send stream=true and accept New API image event streams."}
+                {t("apiConfig.useStreamDescription")}
               </p>
             </div>
             <Switch
@@ -273,7 +269,7 @@ export function ApiConfigForm() {
               size="sm"
             >
               {isSaving && <Loader2 className="mr-2 h-3 w-3 animate-spin" />}
-              {t("apiConfig.save") || "Save Configuration"}
+              {t("apiConfig.save")}
             </Button>
             {hasConfig && (
               <Button
@@ -284,7 +280,7 @@ export function ApiConfigForm() {
                 className="text-destructive"
               >
                 <Trash2 className="mr-2 h-3 w-3" />
-                {t("apiConfig.remove") || "Remove"}
+                {t("apiConfig.remove")}
               </Button>
             )}
           </div>
@@ -295,7 +291,7 @@ export function ApiConfigForm() {
             className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
           >
             <ExternalLink className="h-3 w-3" />
-            {t("apiConfig.docsLink") || "API Documentation"}
+            {t("apiConfig.docsLink")}
           </a>
         </div>
       )}

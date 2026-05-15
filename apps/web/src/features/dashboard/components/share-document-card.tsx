@@ -38,9 +38,9 @@ export function ShareDocumentCard() {
   return (
     <Card className="rounded-xl">
       <CardHeader>
-        <CardTitle className="text-base">Share this document</CardTitle>
+        <CardTitle className="text-base">共享文档</CardTitle>
         <p className="text-sm text-muted-foreground">
-          Anyone with the link can view this document.
+          拥有链接的人可以查看此文档。
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -56,7 +56,7 @@ export function ShareDocumentCard() {
         </div>
 
         <div className="space-y-4">
-          <p className="text-sm font-medium">People with access</p>
+          <p className="text-sm font-medium">有权限的成员</p>
           {users.map((user) => (
             <div
               key={user.email}
@@ -77,8 +77,8 @@ export function ShareDocumentCard() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="edit">Can edit</SelectItem>
-                  <SelectItem value="view">Can view</SelectItem>
+                  <SelectItem value="edit">可编辑</SelectItem>
+                  <SelectItem value="view">可查看</SelectItem>
                 </SelectContent>
               </Select>
             </div>

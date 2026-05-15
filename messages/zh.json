@@ -506,18 +506,26 @@
   "Dashboard": {
     "nav": {
       "dashboard": "控制台",
+      "create": "创作",
+      "gallery": "图库",
+      "history": "历史记录",
+      "settings": "设置",
       "support": "支持",
       "newTicket": "新建工单"
     },
     "pages": {
       "dashboard": "控制台",
+      "create": "创作",
       "generate": "生成",
+      "gallery": "图库",
+      "history": "历史记录",
       "tasks": "任务",
       "myDecks": "我的合集",
       "deckDetails": "合集详情",
       "support": "支持",
       "newTicket": "新建工单",
       "settings": "设置",
+      "creditsBuy": "购买积分",
       "profile": "个人资料",
       "security": "安全",
       "billing": "账单",

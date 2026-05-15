@@ -506,18 +506,26 @@
   "Dashboard": {
     "nav": {
       "dashboard": "Dashboard",
+      "create": "Create",
+      "gallery": "Gallery",
+      "history": "History",
+      "settings": "Settings",
       "support": "Support",
       "newTicket": "New Ticket"
     },
     "pages": {
       "dashboard": "Dashboard",
+      "create": "Create",
       "generate": "Generate",
+      "gallery": "Gallery",
+      "history": "History",
       "tasks": "Tasks",
       "myDecks": "My Decks",
       "deckDetails": "Deck Details",
       "support": "Support",
       "newTicket": "New Ticket",
       "settings": "Settings",
+      "creditsBuy": "Buy Credits",
       "profile": "Profile",
       "security": "Security",
       "billing": "Billing",

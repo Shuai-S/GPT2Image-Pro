@@ -143,7 +143,7 @@ export function ExternalApiKeySection() {
             />
             <Button type="button" variant="outline" onClick={copyNewKey}>
               <Copy className="mr-2 h-3 w-3" />
-              Copy
+              复制
             </Button>
           </div>
         </div>

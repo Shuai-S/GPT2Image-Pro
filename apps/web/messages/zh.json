@@ -530,18 +530,26 @@
   "Dashboard": {
     "nav": {
       "dashboard": "控制台",
+      "create": "创作",
+      "gallery": "图库",
+      "history": "历史记录",
+      "settings": "设置",
       "support": "支持",
       "newTicket": "新建工单"
     },
     "pages": {
       "dashboard": "控制台",
+      "create": "创作",
       "generate": "生成",
+      "gallery": "图库",
+      "history": "历史记录",
       "tasks": "任务",
       "myDecks": "我的合集",
       "deckDetails": "合集详情",
       "support": "支持",
       "newTicket": "新建工单",
       "settings": "设置",
+      "creditsBuy": "购买积分",
       "profile": "个人资料",
       "security": "安全",
       "billing": "账单",
@@ -609,7 +617,13 @@
       "useStreamDescription": "发送 stream=true，并兼容 New API 的图像事件流。",
       "save": "保存配置",
       "remove": "删除",
-      "docsLink": "API 文档"
+      "docsLink": "API 文档",
+      "paidOnly": "自定义 API 配置仅对付费订阅开放。",
+      "saveFailed": "保存失败",
+      "saved": "API 配置已保存",
+      "removed": "API 配置已删除",
+      "updateFailed": "更新失败",
+      "requiresPaid": "自定义 API 需要付费订阅"
     },
     "general": {
       "title": "基本信息",

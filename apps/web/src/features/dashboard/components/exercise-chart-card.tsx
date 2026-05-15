@@ -17,9 +17,9 @@ export function ExerciseChartCard() {
   return (
     <Card className="rounded-xl">
       <CardHeader>
-        <CardTitle className="text-base">Exercise Minutes</CardTitle>
+        <CardTitle className="text-base">运动分钟数</CardTitle>
         <p className="text-sm text-muted-foreground">
-          Your exercise minutes are ahead of where you normally are.
+          你的运动时长高于平时水平。
         </p>
       </CardHeader>
       <CardContent>
@@ -46,7 +46,7 @@ export function ExerciseChartCard() {
                 stroke="hsl(var(--primary))"
                 strokeWidth={2}
                 dot={false}
-                name="This Week"
+                name="本周"
               />
               <Line
                 type="monotone"
@@ -55,7 +55,7 @@ export function ExerciseChartCard() {
                 strokeWidth={2}
                 strokeDasharray="5 5"
                 dot={false}
-                name="Last Week"
+                name="上周"
               />
             </LineChart>
           </ResponsiveContainer>
@@ -63,11 +63,11 @@ export function ExerciseChartCard() {
         <div className="mt-4 flex items-center justify-center gap-6 text-sm">
           <div className="flex items-center gap-2">
             <span className="h-3 w-3 rounded-full bg-primary" />
-            This Week
+            本周
           </div>
           <div className="flex items-center gap-2">
             <span className="h-3 w-3 rounded-full bg-muted-foreground" />
-            Last Week
+            上周
           </div>
         </div>
       </CardContent>

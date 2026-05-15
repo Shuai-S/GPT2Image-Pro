@@ -530,18 +530,26 @@
   "Dashboard": {
     "nav": {
       "dashboard": "Dashboard",
+      "create": "Create",
+      "gallery": "Gallery",
+      "history": "History",
+      "settings": "Settings",
       "support": "Support",
       "newTicket": "New Ticket"
     },
     "pages": {
       "dashboard": "Dashboard",
+      "create": "Create",
       "generate": "Generate",
+      "gallery": "Gallery",
+      "history": "History",
       "tasks": "Tasks",
       "myDecks": "My Decks",
       "deckDetails": "Deck Details",
       "support": "Support",
       "newTicket": "New Ticket",
       "settings": "Settings",
+      "creditsBuy": "Buy Credits",
       "profile": "Profile",
       "security": "Security",
       "billing": "Billing",
@@ -609,7 +617,13 @@
       "useStreamDescription": "Send stream=true and accept New API image event streams.",
       "save": "Save Configuration",
       "remove": "Remove",
-      "docsLink": "API Documentation"
+      "docsLink": "API Documentation",
+      "paidOnly": "Custom API configuration is available for paid subscriptions only.",
+      "saveFailed": "Failed to save",
+      "saved": "API configuration saved",
+      "removed": "API configuration removed",
+      "updateFailed": "Failed to update",
+      "requiresPaid": "Custom API requires a paid subscription"
     },
     "general": {
       "title": "General",

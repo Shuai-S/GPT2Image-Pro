@@ -107,7 +107,7 @@ export function ProfileForm({ initialData }: ProfileFormProps) {
     <Card className="max-w-2xl">
       {/* 卡片头部 */}
       <CardHeader>
-        <CardTitle>General Settings</CardTitle>
+        <CardTitle>基本设置</CardTitle>
         <CardDescription>
           更新您的个人资料信息。这些信息将在您的公开资料中显示。
         </CardDescription>
@@ -123,7 +123,7 @@ export function ProfileForm({ initialData }: ProfileFormProps) {
               name="name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Display Name</FormLabel>
+                  <FormLabel>显示名称</FormLabel>
                   <FormControl>
                     <Input
                       placeholder="请输入您的名称"
@@ -144,7 +144,7 @@ export function ProfileForm({ initialData }: ProfileFormProps) {
           <CardFooter className="border-t pt-6">
             <Button type="submit" disabled={isPending}>
               {isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {isPending ? "Saving..." : "Save Changes"}
+              {isPending ? "保存中..." : "保存更改"}
             </Button>
           </CardFooter>
         </form>

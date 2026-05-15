@@ -11,9 +11,9 @@ export function AuthCard() {
   return (
     <Card className="rounded-xl">
       <CardHeader className="text-center">
-        <CardTitle className="text-xl">Create an account</CardTitle>
+        <CardTitle className="text-xl">创建账号</CardTitle>
         <p className="text-sm text-muted-foreground">
-          Enter your email below to create your account
+          输入邮箱后创建你的账号
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -51,22 +51,22 @@ export function AuthCard() {
           </div>
           <div className="relative flex justify-center text-xs uppercase">
             <span className="bg-card px-2 text-muted-foreground">
-              Or continue with
+              或继续使用
             </span>
           </div>
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="auth-email">Email</Label>
+          <Label htmlFor="auth-email">邮箱</Label>
           <Input id="auth-email" type="email" placeholder="m@example.com" />
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="auth-password">Password</Label>
+          <Label htmlFor="auth-password">密码</Label>
           <Input id="auth-password" type="password" />
         </div>
 
-        <Button className="w-full">Create account</Button>
+        <Button className="w-full">创建账号</Button>
       </CardContent>
     </Card>
   );

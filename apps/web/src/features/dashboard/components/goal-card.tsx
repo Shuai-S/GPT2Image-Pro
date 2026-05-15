@@ -25,9 +25,9 @@ export function GoalCard() {
   return (
     <Card className="rounded-xl">
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium">Move Goal</CardTitle>
+        <CardTitle className="text-sm font-medium">活动目标</CardTitle>
         <p className="text-xs text-muted-foreground">
-          Set your daily activity goal.
+          设置每日活动目标。
         </p>
       </CardHeader>
       <CardContent>
@@ -43,7 +43,7 @@ export function GoalCard() {
           <div className="text-center">
             <div className="text-5xl font-bold tracking-tighter">{goal}</div>
             <div className="text-xs uppercase text-muted-foreground">
-              Calories/day
+              卡路里 / 天
             </div>
           </div>
           <Button

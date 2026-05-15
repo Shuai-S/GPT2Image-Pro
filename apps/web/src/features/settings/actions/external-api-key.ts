@@ -55,7 +55,7 @@ export const createExternalApiKey = withExternalApiKeyAction("create")
     await db.insert(externalApiKey).values({
       id: nanoid(),
       userId: ctx.userId,
-      name: parsedInput.name || "Default API key",
+      name: parsedInput.name || "默认 API Key",
       keyPrefix,
       keyHash: hashApiKey(apiKey),
       lastFour: apiKey.slice(-4),
