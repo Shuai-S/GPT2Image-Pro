@@ -217,6 +217,7 @@ export async function ensureCreditsBalance(userId: string) {
  * 获取用户积分余额
  */
 export async function getCreditsBalance(userId: string) {
+  await processExpiredBatches({ userId });
   return await ensureCreditsBalance(userId);
 }
 
@@ -437,6 +438,8 @@ export async function consumeCredits(
   if (amount <= 0) {
     throw new Error("消费数量必须大于 0");
   }
+
+  await processExpiredBatches({ userId });
 
   return await db.transaction(async (tx) => {
     const [balanceRecord] = await tx
@@ -722,7 +725,7 @@ export async function voidActiveSubscriptionCreditsForUpgrade(
  * 扫描并标记所有过期的批次，同时更新用户余额。
  * 使用条件更新保证同一批次在并发运行时只会被处理一次。
  */
-export async function processExpiredBatches() {
+export async function processExpiredBatches(options?: { userId?: string }) {
   const now = new Date();
 
   const expiredBatches = await db
@@ -733,6 +736,7 @@ export async function processExpiredBatches() {
     .where(
       and(
         eq(creditsBatch.status, "active"),
+        options?.userId ? eq(creditsBatch.userId, options.userId) : sql`true`,
         lt(creditsBatch.expiresAt, now),
         gt(creditsBatch.remaining, 0)
       )
