@@ -556,6 +556,32 @@
       "title": "Advanced Settings",
       "description": "Configuration options for power users."
     },
+    "externalApi": {
+      "title": "External API access",
+      "description": "Create an API key for OpenAI-compatible model listing and image generation. External calls use your account credits and appear in your generation history.",
+      "defaultName": "Default API key",
+      "newKeyLabel": "New API key. It is shown only once.",
+      "namePlaceholder": "API key name",
+      "create": "Create API Key",
+      "refresh": "Refresh API keys",
+      "loading": "Loading API keys",
+      "empty": "No external API keys yet.",
+      "active": "Active",
+      "revoked": "Revoked",
+      "lastUsed": "Last used",
+      "never": "Never",
+      "revoke": "Revoke",
+      "success": {
+        "created": "API key created",
+        "copied": "API key copied",
+        "revoked": "API key revoked"
+      },
+      "errors": {
+        "load": "Failed to load API keys",
+        "create": "Failed to create API key",
+        "revoke": "Failed to revoke API key"
+      }
+    },
     "apiConfig": {
       "warning": {
         "title": "Advanced Configuration",

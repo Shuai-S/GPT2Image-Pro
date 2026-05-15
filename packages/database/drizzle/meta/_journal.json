@@ -36,6 +36,13 @@
       "when": 1778716800000,
       "tag": "0004_registration_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1778788800000,
+      "tag": "0005_external_api_key",
+      "breakpoints": true
     }
   ]
 }

@@ -556,6 +556,32 @@
       "title": "高级设置",
       "description": "面向高级用户的配置选项。"
     },
+    "externalApi": {
+      "title": "外接 API 访问",
+      "description": "创建 OpenAI 兼容的模型查询和图片生成 API Key。外部调用会消耗你的账户积分，并写入生成历史。",
+      "defaultName": "默认 API Key",
+      "newKeyLabel": "新的 API Key，仅显示一次。",
+      "namePlaceholder": "API Key 名称",
+      "create": "创建 API Key",
+      "refresh": "刷新 API Key",
+      "loading": "正在加载 API Key",
+      "empty": "还没有外接 API Key。",
+      "active": "启用",
+      "revoked": "已撤销",
+      "lastUsed": "最后使用",
+      "never": "从未使用",
+      "revoke": "撤销",
+      "success": {
+        "created": "API Key 已创建",
+        "copied": "API Key 已复制",
+        "revoked": "API Key 已撤销"
+      },
+      "errors": {
+        "load": "加载 API Key 失败",
+        "create": "创建 API Key 失败",
+        "revoke": "撤销 API Key 失败"
+      }
+    },
     "apiConfig": {
       "warning": {
         "title": "高级配置",

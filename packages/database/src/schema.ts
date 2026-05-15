@@ -547,6 +547,27 @@ export type UserApiConfig = typeof userApiConfig.$inferSelect;
 export type NewUserApiConfig = typeof userApiConfig.$inferInsert;
 
 // ============================================
+// External API Keys
+// ============================================
+export const externalApiKey = pgTable("external_api_key", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  name: text("name").notNull().default("Default API key"),
+  keyPrefix: text("key_prefix").notNull(),
+  keyHash: text("key_hash").notNull().unique(),
+  lastFour: text("last_four").notNull(),
+  lastUsedAt: timestamp("last_used_at"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type ExternalApiKey = typeof externalApiKey.$inferSelect;
+export type NewExternalApiKey = typeof externalApiKey.$inferInsert;
+
+// ============================================
 // Image Generation
 // ============================================
 

@@ -58,6 +58,7 @@ import { signOut } from "@repo/shared/auth/client";
 
 import { ApiConfigForm } from "./api-config-form";
 import { BillingSection } from "./billing-section";
+import { ExternalApiKeySection } from "./external-api-key-section";
 import { SecuritySection } from "./security-section";
 
 interface SettingsProfileViewProps {
@@ -522,6 +523,7 @@ export function SettingsProfileView({ user }: SettingsProfileViewProps) {
                 "Configuration options for power users."}
             </p>
           </div>
+          <ExternalApiKeySection />
           <ApiConfigForm />
         </TabsContent>
       </Tabs>
