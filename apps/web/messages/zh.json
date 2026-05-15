@@ -755,8 +755,15 @@
       "creditsAvailable": "积分可用",
       "getMoreCredits": {
         "title": "获取更多积分",
-        "description": "订阅套餐以获取每月积分并解锁高级功能",
+        "description": "按量付费可一次性购买积分；订阅套餐可获得每月积分并解锁高级功能",
+        "buyCredits": "按量付费",
         "viewPlans": "查看订阅套餐"
+      },
+      "sources": {
+        "bonus": "免费积分",
+        "purchase": "按量付费",
+        "subscription": "套餐积分",
+        "refund": "退款积分"
       },
       "expiringSoon": {
         "title": "积分即将过期",
@@ -788,6 +795,7 @@
           "registration_bonus": "新用户注册奖励",
           "monthly_grant": "{plan} 月度订阅积分",
           "yearly_grant": "{plan} 年度订阅积分 ({monthly} x 12)",
+          "purchase": "按量付费积分购买",
           "consumption": "图像生成",
           "expiration": "积分已过期",
           "admin_grant": "管理员发放积分",

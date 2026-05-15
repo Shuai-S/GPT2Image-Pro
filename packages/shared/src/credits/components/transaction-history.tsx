@@ -153,6 +153,8 @@ export function TransactionHistory() {
         return t("descriptions.expiration");
       case "admin_grant":
         return t("descriptions.admin_grant");
+      case "purchase":
+        return t("descriptions.purchase");
       case "refund":
         return t("descriptions.refund");
       default:

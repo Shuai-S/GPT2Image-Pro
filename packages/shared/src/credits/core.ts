@@ -176,8 +176,8 @@ export async function getCreditsBalance(userId: string) {
  * 确保用户获得注册奖励
  *
  * 懒加载机制：
- * 1. 检查用户是否已有交易记录
- * 2. 如果没有任何交易记录，说明是新用户，发放注册奖励
+ * 1. 检查用户是否已经领过注册奖励
+ * 2. 如果没有注册奖励交易，补发注册奖励
  * 3. 这种方式比在注册时发放更安全，避免 Auth Hook 失败导致的问题
  *
  * @param userId 用户 ID
@@ -192,11 +192,16 @@ export async function ensureRegistrationBonus(
   const [existingTransaction] = await db
     .select({ id: creditsTransaction.id })
     .from(creditsTransaction)
-    .where(eq(creditsTransaction.userId, userId))
+    .where(
+      and(
+        eq(creditsTransaction.userId, userId),
+        eq(creditsTransaction.type, "registration_bonus")
+      )
+    )
     .limit(1);
 
   if (existingTransaction) {
-    return { granted: false, reason: "User already has transactions" };
+    return { granted: false, reason: "Registration bonus already granted" };
   }
 
   const expiresAt = expiryDays
@@ -210,6 +215,7 @@ export async function ensureRegistrationBonus(
     debitAccount: "SYSTEM:registration_bonus",
     transactionType: "registration_bonus",
     expiresAt,
+    sourceRef: `registration_bonus:${userId}`,
     description: "新用户注册奖励",
     metadata: {
       bonusType: "registration",

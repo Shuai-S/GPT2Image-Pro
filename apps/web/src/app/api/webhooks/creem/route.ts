@@ -5,11 +5,9 @@ import { getSubscriptionMonthlyCredits } from "@repo/shared/config/payment-runti
 import { getPlanFromPriceId } from "@repo/shared/config/subscription-plan";
 import { db } from "@repo/database";
 import { creditsBatch, subscription, user } from "@repo/database/schema";
-import {
-  CREDIT_CONFIG_DEFAULTS,
-  CREDIT_PACKAGES,
-} from "@repo/shared/credits/config";
+import { CREDIT_CONFIG_DEFAULTS } from "@repo/shared/credits/config";
 import { grantCredits } from "@repo/shared/credits/core";
+import { getRuntimeCreditPackageById } from "@repo/shared/credits/packages";
 import { getRuntimeSettingNumber } from "@repo/shared/system-settings";
 import {
   type CreemCheckoutCompletedData,
@@ -176,7 +174,7 @@ async function handleCheckoutCompleted(data: CreemCheckoutCompletedData) {
  * 处理积分包购买
  *
  * 在一次性支付完成后，根据服务端积分包配置发放积分
- * 安全: 不信任 metadata.credits，从 CREDIT_PACKAGES 配置查找真实积分数量
+ * 安全: 不信任 metadata.credits，从服务端积分包配置查找真实积分数量
  */
 async function handleCreditPurchase(
   userId: string,
@@ -194,7 +192,9 @@ async function handleCreditPurchase(
   }
 
   // 从服务端配置查找积分数量（不信任客户端 metadata.credits）
-  const pkg = CREDIT_PACKAGES.find((p) => p.id === packageId);
+  const pkg = await getRuntimeCreditPackageById(packageId, {
+    includeHidden: true,
+  });
   if (!pkg) {
     logger.error(
       { source: "creem-webhook", packageId, userId },
@@ -244,6 +244,7 @@ async function handleCreditPurchase(
         packageId,
         checkoutId: data.id,
         paymentType: "one-time",
+        paidMoney: pkg.price,
       },
     });
 

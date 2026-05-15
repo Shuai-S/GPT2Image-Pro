@@ -7,8 +7,14 @@
  * 设计风格：GPT2IMAGE 黑白简约
  */
 
-import { createCreditsPurchaseCheckout } from "@repo/shared/credits/actions";
-import { CREDIT_PACKAGES } from "@repo/shared/credits/config";
+import {
+  createCreditsPurchaseCheckout,
+  getCreditPackages,
+} from "@repo/shared/credits/actions";
+import {
+  CREDIT_PACKAGES,
+  isCreditPackageVisible,
+} from "@repo/shared/credits/config";
 import { Badge } from "@repo/ui/components/badge";
 import { Button } from "@repo/ui/components/button";
 import {
@@ -26,7 +32,32 @@ import { useAction } from "next-safe-action/hooks";
 import { useCallback, useEffect } from "react";
 import { toast } from "sonner";
 
+type CreditPackageCard = {
+  id: string;
+  name: string;
+  credits: number;
+  price: number;
+  description: string;
+  popular: boolean;
+};
+
+const FALLBACK_PACKAGES: CreditPackageCard[] = CREDIT_PACKAGES.filter(
+  isCreditPackageVisible
+).map((pkg) => ({
+  id: pkg.id,
+  name: pkg.name,
+  credits: pkg.credits,
+  price: pkg.price,
+  description: pkg.description,
+  popular: "popular" in pkg ? pkg.popular : false,
+}));
+
+const PACKAGE_NAMES_ZH: Record<string, string> = {
+  payg_starter: "按量付费",
+};
+
 const PACKAGE_DESCRIPTIONS_ZH: Record<string, string> = {
+  payg_starter: "与入门版同价同积分的一次性积分包",
   lite: "少量补充，适合临时生成几张图片",
   standard: "适合日常使用的高性价比选择",
   pro: "更多积分，更适合高频创作",
@@ -42,6 +73,11 @@ export function BuyCreditPackagesView() {
   const searchParams = useSearchParams();
   const canceled = searchParams.get("canceled");
   const copy = useCallback((en: string, zh: string) => (isZh ? zh : en), [isZh]);
+  const {
+    execute: fetchPackages,
+    result: packagesResult,
+    isPending: isPackagesLoading,
+  } = useAction(getCreditPackages);
 
   // 创建 Checkout Session
   const { execute, isPending } = useAction(createCreditsPurchaseCheckout, {
@@ -51,9 +87,16 @@ export function BuyCreditPackagesView() {
       }
     },
     onError: ({ error }) => {
-      toast.error(error.serverError ?? copy("Failed to create checkout session", "创建支付订单失败"));
+      toast.error(
+        error.serverError ??
+          copy("Failed to create checkout session", "创建支付订单失败")
+      );
     },
   });
+
+  useEffect(() => {
+    fetchPackages();
+  }, [fetchPackages]);
 
   // 显示取消提示
   useEffect(() => {
@@ -66,9 +109,11 @@ export function BuyCreditPackagesView() {
   /**
    * 处理购买按钮点击
    */
-  const handlePurchase = (packageId: "lite" | "standard" | "pro") => {
+  const handlePurchase = (packageId: string) => {
     execute({ packageId });
   };
+
+  const packages = (packagesResult.data ?? FALLBACK_PACKAGES) as CreditPackageCard[];
 
   return (
     <div className="mx-auto max-w-3xl space-y-10 px-4 py-8">
@@ -88,10 +133,17 @@ export function BuyCreditPackagesView() {
       <Separator />
 
       {/* 套餐列表 */}
-      <div className="grid gap-6 sm:grid-cols-3">
-        {CREDIT_PACKAGES.map((pkg) => {
-          const isPopular = "popular" in pkg && pkg.popular;
-          const perCredit = (pkg.price / pkg.credits).toFixed(2);
+      <div
+        className={cn(
+          "grid gap-6",
+          packages.length === 1
+            ? "mx-auto max-w-md"
+            : "sm:grid-cols-2 lg:grid-cols-3"
+        )}
+      >
+        {packages.map((pkg) => {
+          const isPopular = pkg.popular;
+          const perCredit = (pkg.price / pkg.credits).toFixed(4);
 
           return (
             <Card
@@ -112,7 +164,7 @@ export function BuyCreditPackagesView() {
 
               <CardHeader className="pb-3 pt-6 text-center">
                 <p className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
-                  {pkg.name}
+                  {isZh ? (PACKAGE_NAMES_ZH[pkg.id] ?? pkg.name) : pkg.name}
                 </p>
               </CardHeader>
 
@@ -139,7 +191,9 @@ export function BuyCreditPackagesView() {
 
                 {/* 描述 + 每积分价格 */}
                 <p className="text-center text-xs text-muted-foreground">
-                  {isZh ? PACKAGE_DESCRIPTIONS_ZH[pkg.id] : pkg.description}
+                  {isZh
+                    ? (PACKAGE_DESCRIPTIONS_ZH[pkg.id] ?? pkg.description)
+                    : pkg.description}
                 </p>
 
                 {/* 特性列表 */}
@@ -163,10 +217,8 @@ export function BuyCreditPackagesView() {
                 <Button
                   className="w-full"
                   variant={isPopular ? "default" : "outline"}
-                  disabled={isPending}
-                  onClick={() =>
-                    handlePurchase(pkg.id as "lite" | "standard" | "pro")
-                  }
+                  disabled={isPending || isPackagesLoading}
+                  onClick={() => handlePurchase(pkg.id)}
                 >
                   {isPending ? (
                     <>

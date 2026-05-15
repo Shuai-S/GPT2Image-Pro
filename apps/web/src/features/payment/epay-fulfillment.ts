@@ -8,11 +8,9 @@ import {
   type PaidPlanId,
 } from "@repo/shared/config/payment-runtime";
 import { getPlanFromPriceId } from "@repo/shared/config/subscription-plan";
-import {
-  CREDIT_PACKAGES,
-  CREDIT_CONFIG_DEFAULTS,
-} from "@repo/shared/credits/config";
+import { CREDIT_CONFIG_DEFAULTS } from "@repo/shared/credits/config";
 import { grantCredits } from "@repo/shared/credits/core";
+import { getRuntimeCreditPackageById } from "@repo/shared/credits/packages";
 import { getRuntimeSettingNumber } from "@repo/shared/system-settings";
 import {
   decodeEpayMetadata,
@@ -102,7 +100,9 @@ async function handleCreditPurchase(
     throw new Error("Missing credit package ID");
   }
 
-  const pkg = CREDIT_PACKAGES.find((item) => item.id === packageId);
+  const pkg = await getRuntimeCreditPackageById(packageId, {
+    includeHidden: true,
+  });
   if (!pkg) {
     throw new Error(`Unknown credit package: ${packageId}`);
   }

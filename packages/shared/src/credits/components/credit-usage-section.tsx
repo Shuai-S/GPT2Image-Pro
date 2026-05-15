@@ -60,14 +60,35 @@ export function CreditUsageSection() {
   const { execute: fetchBatches, result: batchesResult } =
     useAction(getMyActiveBatches);
 
-  // 组件挂载时获取数据
+  // 组件挂载时获取余额；余额 Action 会先懒发注册送积分。
   useEffect(() => {
     fetchBalance();
+  }, [fetchBalance]);
+
+  // 确认余额后再拉批次，避免注册送积分刚补发时分类明细滞后。
+  useEffect(() => {
+    if (!balanceResult.data) return;
     fetchBatches();
-  }, [fetchBalance, fetchBatches]);
+  }, [balanceResult.data, fetchBatches]);
 
   const balance = balanceResult.data?.balance ?? 0;
   const batches = batchesResult.data ?? [];
+  const creditsBySource = batches.reduce<Record<string, number>>(
+    (totals, batch) => {
+      totals[batch.sourceType] =
+        (totals[batch.sourceType] ?? 0) + batch.remaining;
+      return totals;
+    },
+    {}
+  );
+  const breakdownItems = (
+    ["bonus", "purchase", "subscription", "refund"] as const
+  )
+    .map((source) => ({
+      source,
+      amount: creditsBySource[source] ?? 0,
+    }))
+    .filter((item) => item.amount > 0);
 
   // 找到最近即将过期的批次
   const expiringBatch = batches
@@ -112,6 +133,22 @@ export function CreditUsageSection() {
         </div>
       </div>
 
+      {breakdownItems.length > 0 && (
+        <div className="grid gap-2 sm:grid-cols-4">
+          {breakdownItems.map((item) => (
+            <div
+              key={item.source}
+              className="rounded-md border px-3 py-2 text-sm"
+            >
+              <div className="text-muted-foreground">
+                {t(`sources.${item.source}`)}
+              </div>
+              <div className="font-medium">{formatCredits(item.amount)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
       <Separator />
 
       {/* 购买更多积分 */}
@@ -125,6 +162,11 @@ export function CreditUsageSection() {
 
         <div className="flex gap-3">
           <Button asChild>
+            <Link href="/dashboard/credits/buy">
+              {t("getMoreCredits.buyCredits")}
+            </Link>
+          </Button>
+          <Button asChild variant="outline">
             <Link href="/#pricing">{t("getMoreCredits.viewPlans")}</Link>
           </Button>
         </div>

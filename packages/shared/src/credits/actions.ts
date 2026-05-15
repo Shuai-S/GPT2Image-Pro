@@ -28,10 +28,11 @@ import { logEvent } from "../logger/index";
 import { actionClient, protectedAction } from "../safe-action";
 import { getRuntimeSettingNumber } from "../system-settings";
 
+import { CREDIT_CONFIG_DEFAULTS } from "./config";
 import {
-  CREDIT_CONFIG_DEFAULTS,
-  CREDIT_PACKAGES,
-} from "./config";
+  getRuntimeCreditPackageById,
+  getRuntimeCreditPackages,
+} from "./packages";
 import {
   AccountFrozenError,
   consumeCredits,
@@ -94,7 +95,7 @@ export const grantRegistrationBonus = withProtectedCreditsAction(
       .where(
         and(
           eq(creditsTransaction.userId, userId),
-          eq(creditsTransaction.description, "新用户注册奖励")
+          eq(creditsTransaction.type, "registration_bonus")
         )
       )
       .limit(1);
@@ -114,6 +115,7 @@ export const grantRegistrationBonus = withProtectedCreditsAction(
       debitAccount: "SYSTEM:registration_bonus",
       transactionType: "registration_bonus",
       expiresAt,
+      sourceRef: `registration_bonus:${userId}`,
       description: "新用户注册奖励",
       metadata: {
         bonusType: "registration",
@@ -130,7 +132,7 @@ export const grantRegistrationBonus = withProtectedCreditsAction(
  * 获取当前用户积分余额
  *
  * 包含懒加载注册奖励机制:
- * 首次调用时，如果用户没有任何交易记录，会自动发放注册奖励
+ * 首次调用时，如果用户没有领过注册奖励，会自动发放注册奖励
  */
 export const getMyCreditsBalance = withProtectedCreditsAction(
   "getMyCreditsBalance"
@@ -430,7 +432,7 @@ export const createCreditsPurchaseCheckout = withProtectedCreditsAction(
 )
   .schema(
     z.object({
-      packageId: z.enum(["lite", "standard", "pro"]),
+      packageId: z.string().min(1),
       successUrl: z.string().optional(),
       cancelUrl: z.string().optional(),
     })
@@ -440,7 +442,7 @@ export const createCreditsPurchaseCheckout = withProtectedCreditsAction(
     const { userId } = ctx;
 
     // 查找套餐配置
-    const pkg = CREDIT_PACKAGES.find((p) => p.id === packageId);
+    const pkg = await getRuntimeCreditPackageById(packageId);
     if (!pkg) {
       throw new Error("无效的积分套餐");
     }
@@ -500,7 +502,8 @@ export const createCreditsPurchaseCheckout = withProtectedCreditsAction(
 export const getCreditPackages = withProtectedCreditsAction(
   "getCreditPackages"
 ).action(async () => {
-  return CREDIT_PACKAGES.map((pkg) => ({
+  const packages = await getRuntimeCreditPackages();
+  return packages.map((pkg) => ({
     id: pkg.id,
     name: pkg.name,
     credits: pkg.credits,

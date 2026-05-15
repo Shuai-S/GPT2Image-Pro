@@ -19,7 +19,6 @@ import {
   type SubscriptionPlan,
 } from "@repo/shared/config/subscription-plan";
 import { getMyTransactions } from "@repo/shared/credits/actions";
-import { CREDIT_PACKAGES } from "@repo/shared/credits/config";
 import { formatCredits } from "@repo/shared/credits/format";
 import { getMyPlanAction } from "@repo/shared/subscription/actions/get-user-plan";
 import {
@@ -92,12 +91,6 @@ function getBillingAmount(tx: BillingTransaction) {
     if (price) return formatCurrency(price.amount);
   }
 
-  const packageId = typeof meta?.packageId === "string" ? meta.packageId : "";
-  if (packageId) {
-    const pkg = CREDIT_PACKAGES.find((item) => item.id === packageId);
-    if (pkg) return formatCurrency(pkg.price);
-  }
-
   return `${formatCredits(tx.amount)} credits`;
 }
 
@@ -107,11 +100,17 @@ function getBillingDescription(tx: BillingTransaction, locale: string) {
   const paymentProvider = provider ? provider.toUpperCase() : "Payment";
 
   if (tx.type === "purchase") {
-    const packageId =
-      typeof meta?.packageId === "string" ? ` (${meta.packageId})` : "";
+    const packageId = typeof meta?.packageId === "string" ? meta.packageId : "";
+    if (packageId === "payg_starter") {
+      return locale === "zh"
+        ? `${paymentProvider} 按量付费积分购买`
+        : `${paymentProvider} pay-as-you-go credit purchase`;
+    }
+
+    const packageSuffix = packageId ? ` (${packageId})` : "";
     return locale === "zh"
-      ? `${paymentProvider} 积分包购买${packageId}`
-      : `${paymentProvider} credit pack purchase${packageId}`;
+      ? `${paymentProvider} 积分包购买${packageSuffix}`
+      : `${paymentProvider} credit pack purchase${packageSuffix}`;
   }
 
   if (tx.type === "monthly_grant") {

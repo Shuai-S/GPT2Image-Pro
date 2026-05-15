@@ -755,8 +755,15 @@
       "creditsAvailable": "credits available",
       "getMoreCredits": {
         "title": "Get More Credits",
-        "description": "Subscribe to a plan to get monthly credits and unlock advanced features",
+        "description": "Buy one-time pay-as-you-go credits, or subscribe for monthly credits and advanced features",
+        "buyCredits": "Pay as you go",
         "viewPlans": "View Subscription Plans"
+      },
+      "sources": {
+        "bonus": "Free Credits",
+        "purchase": "Pay as you go",
+        "subscription": "Plan Credits",
+        "refund": "Refund Credits"
       },
       "expiringSoon": {
         "title": "Credits Expiring Soon",
@@ -788,6 +795,7 @@
           "registration_bonus": "New user registration bonus",
           "monthly_grant": "{plan} monthly subscription credits",
           "yearly_grant": "{plan} yearly subscription credits ({monthly} x 12)",
+          "purchase": "Pay-as-you-go credit purchase",
           "consumption": "Image generation",
           "expiration": "Credits expired",
           "admin_grant": "Admin granted credits",
