@@ -53,6 +53,7 @@ export type ImageGenerationOperationResult = {
   size?: string;
   revisedPrompt?: string;
   responseText?: string;
+  responseThinking?: string;
   creditsConsumed?: number;
 };
 
@@ -211,11 +212,14 @@ export async function runImageGenerationForUser(
               prompt: input.prompt,
               apiPrompt,
               images: input.images,
+              history: input.history,
               size,
               model,
               quality: input.quality,
               n: input.n,
               moderation: input.moderation,
+              stream: input.stream,
+              thinking: input.thinking,
             },
             callbacks
           )
@@ -254,6 +258,27 @@ export async function runImageGenerationForUser(
       .set({ status: "failed", error: result.error })
       .where(eq(generation.id, generationId));
     return { error: result.error, generationId };
+  }
+
+  if (!result.imageBase64 && !result.imageUrl) {
+    await db
+      .update(generation)
+      .set({
+        status: "completed",
+        revisedPrompt: result.revisedPrompt,
+        completedAt: new Date(),
+      })
+      .where(eq(generation.id, generationId));
+
+    return {
+      generationId,
+      model,
+      size,
+      revisedPrompt: result.revisedPrompt,
+      responseText: result.responseText,
+      responseThinking: result.responseThinking,
+      creditsConsumed: chargedCredits,
+    };
   }
 
   let storageKey = "";
@@ -309,6 +334,7 @@ export async function runImageGenerationForUser(
     size,
     revisedPrompt: result.revisedPrompt,
     responseText: result.responseText,
+    responseThinking: result.responseThinking,
     creditsConsumed: chargedCredits,
   };
 }

@@ -9,12 +9,13 @@ import {
   DEFAULT_IMAGE_SIZE,
   validateImageSize,
 } from "@/features/image-generation/resolution";
-import { getUserApiConfig } from "@/features/image-generation/service";
 import { createImageStreamResponse } from "@/features/image-generation/streaming";
 import type {
   ImageInputFile,
   ImageModeration,
   ImageQuality,
+  ChatHistoryMessage,
+  ThinkingLevel,
 } from "@/features/image-generation/types";
 
 const MAX_CHAT_IMAGES = 16;
@@ -29,6 +30,13 @@ const VALID_QUALITIES = new Set<ImageQuality>([
   "high",
 ]);
 const VALID_MODERATION = new Set<ImageModeration>(["auto", "low"]);
+const VALID_THINKING = new Set<ThinkingLevel>([
+  "none",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+]);
 const MAX_BATCH_COUNT = 10;
 
 function errorResponse(message: string, status = 400) {
@@ -71,6 +79,70 @@ function getImageFiles(formData: FormData) {
   }
 
   return images;
+}
+
+function getHistory(formData: FormData): ChatHistoryMessage[] {
+  const value = getText(formData, "history");
+  if (!value) return [];
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("history must be valid JSON.");
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error("history must be an array.");
+  }
+
+  return parsed.slice(-24).flatMap((item): ChatHistoryMessage[] => {
+    if (!item || typeof item !== "object") return [];
+    const source = item as Record<string, unknown>;
+    const role = source.role === "assistant" ? "assistant" : "user";
+    const text =
+      typeof source.text === "string" ? source.text.slice(0, 4000) : "";
+    const imageUrls = Array.isArray(source.imageUrls)
+      ? source.imageUrls
+          .filter((url): url is string => typeof url === "string")
+          .slice(0, MAX_CHAT_IMAGES)
+      : [];
+    const variants = Array.isArray(source.variants)
+      ? source.variants
+          .filter((variant) => variant && typeof variant === "object")
+          .slice(0, 10)
+          .map((variant) => {
+            const item = variant as Record<string, unknown>;
+            return {
+              text:
+                typeof item.text === "string"
+                  ? item.text.slice(0, 4000)
+                  : undefined,
+              imageUrl:
+                typeof item.imageUrl === "string"
+                  ? item.imageUrl.slice(0, 4000)
+                  : undefined,
+              size: typeof item.size === "string" ? item.size : undefined,
+              timestamp:
+                typeof item.timestamp === "string" ? item.timestamp : undefined,
+            };
+          })
+      : undefined;
+
+    return [
+      {
+        role,
+        text,
+        imageUrls,
+        variants,
+        activeVariant:
+          typeof source.activeVariant === "number"
+            ? source.activeVariant
+            : undefined,
+        error: typeof source.error === "string" ? source.error : undefined,
+      },
+    ];
+  });
 }
 
 function validateImageFile(file: File) {
@@ -194,6 +266,14 @@ export const POST = withApiLogging(async (request: NextRequest) => {
   if (apiPrompt && apiPrompt.length > 8000) {
     return errorResponse("Context prompt exceeds the 8000 character limit.");
   }
+  let history: ChatHistoryMessage[] = [];
+  try {
+    history = getHistory(formData);
+  } catch (error) {
+    return errorResponse(
+      error instanceof Error ? error.message : "Invalid history."
+    );
+  }
 
   const size = getText(formData, "size") || DEFAULT_IMAGE_SIZE;
   const sizeCheck = validateImageSize(size);
@@ -212,6 +292,12 @@ export const POST = withApiLogging(async (request: NextRequest) => {
     return errorResponse("Invalid moderation.");
   }
   const moderation = moderationValue as ImageModeration;
+
+  const thinkingValue = getText(formData, "thinking") || "low";
+  if (!VALID_THINKING.has(thinkingValue as ThinkingLevel)) {
+    return errorResponse("Invalid thinking level.");
+  }
+  const thinking = thinkingValue as ThinkingLevel;
 
   let count = 1;
   try {
@@ -250,9 +336,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
       batchId,
       sourceFiles
     );
-    const useStreamResponse =
-      wantsStreamResponse(request, formData) &&
-      Boolean((await getUserApiConfig(session.user.id))?.useStream);
+    const useStreamResponse = wantsStreamResponse(request, formData);
 
     const buildImages = async () =>
       await Promise.all(
@@ -273,11 +357,14 @@ export const POST = withApiLogging(async (request: NextRequest) => {
           prompt,
           apiPrompt,
           images: await buildImages(),
+          history,
           size,
           model,
           quality,
           n: 1,
           moderation,
+          stream: useStreamResponse,
+          thinking,
         },
         onPartialImage
       );
@@ -296,6 +383,12 @@ export const POST = withApiLogging(async (request: NextRequest) => {
                     b64_json: image.imageBase64,
                     url: image.imageUrl,
                   });
+                },
+                onTextDelta: async (delta) => {
+                  await emit({ type: "text_delta", index, delta });
+                },
+                onThinkingDelta: async (delta) => {
+                  await emit({ type: "thinking_delta", index, delta });
                 },
               });
 

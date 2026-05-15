@@ -15,6 +15,7 @@ export interface GenerateImageResult {
   imageUrl?: string;
   revisedPrompt?: string;
   responseText?: string;
+  responseThinking?: string;
   error?: string;
 }
 
@@ -27,6 +28,8 @@ export interface PartialImageResult {
 
 export interface ImageGenerationCallbacks {
   onPartialImage?: (image: PartialImageResult) => Promise<void> | void;
+  onTextDelta?: (delta: string) => Promise<void> | void;
+  onThinkingDelta?: (delta: string) => Promise<void> | void;
 }
 
 export type ImageQuality = "auto" | "low" | "medium" | "high";
@@ -38,6 +41,8 @@ export interface ImageInputFile {
   type: string;
   url?: string;
 }
+
+export type ThinkingLevel = "none" | "low" | "medium" | "high" | "xhigh";
 
 export interface EditImageParams {
   prompt: string;
@@ -55,11 +60,30 @@ export interface ChatImageParams {
   prompt: string;
   apiPrompt?: string;
   images?: ImageInputFile[];
+  history?: ChatHistoryMessage[];
   size?: string;
   model?: string;
   quality?: ImageQuality;
   n?: number;
   moderation?: ImageModeration;
+  stream?: boolean;
+  thinking?: ThinkingLevel;
+}
+
+export interface ChatHistoryVariant {
+  text?: string;
+  imageUrl?: string;
+  size?: string;
+  timestamp?: string;
+}
+
+export interface ChatHistoryMessage {
+  role: "user" | "assistant";
+  text?: string;
+  imageUrls?: string[];
+  variants?: ChatHistoryVariant[];
+  activeVariant?: number;
+  error?: string;
 }
 
 export interface ApiConfig {

@@ -21,11 +21,15 @@ import {
   Brush,
   Check,
   Coins,
+  ChevronDown,
   Download,
   Eraser,
   Eye,
+  ChevronLeft,
+  ChevronRight,
   ImagePlus,
   Loader2,
+  Maximize2,
   MessageSquare,
   RefreshCcw,
   Save,
@@ -80,6 +84,7 @@ type ImageApiResult = {
   size?: string;
   revisedPrompt?: string;
   responseText?: string;
+  responseThinking?: string;
   creditsConsumed?: number;
   results?: ImageApiResult[];
 };
@@ -91,6 +96,16 @@ type ImageStreamEvent =
       partial_image_index?: number;
       b64_json?: string;
       url?: string;
+    }
+  | {
+      type: "text_delta";
+      index?: number;
+      delta: string;
+    }
+  | {
+      type: "thinking_delta";
+      index?: number;
+      delta: string;
     }
   | ({ type: "completed" } & ImageApiResult)
   | ({ type: "error"; error: string } & ImageApiResult)
@@ -111,14 +126,16 @@ type ChatAttachmentPreview = {
 };
 
 type ChatVariant = {
-  generationId: string;
-  imageUrl: string;
+  generationId?: string;
+  imageUrl?: string;
   prompt: string;
   model: string;
   size: string;
   revisedPrompt?: string;
   responseText?: string;
+  responseThinking?: string;
   creditsConsumed?: number;
+  createdAt?: string;
 };
 
 type ChatMessage = {
@@ -127,8 +144,36 @@ type ChatMessage = {
   text: string;
   attachments?: ChatAttachmentPreview[];
   variants?: ChatVariant[];
+  activeVariant?: number;
   error?: string;
   createdAt: string;
+};
+
+type ChatStreamState = {
+  messageId?: string;
+  cardId?: string;
+  text: string;
+  thinking: string;
+  imageUrl?: string;
+};
+
+type ChatViewMode = "chat" | "batch";
+type ChatThinkingLevel = "none" | "low" | "medium" | "high" | "xhigh";
+
+type BatchCard = {
+  id: string;
+  state: "loading" | "image" | "text" | "error";
+  aspectRatio: string;
+  prompt: string;
+  size: string;
+  streamText?: string;
+  streamThinking?: string;
+  imageUrl?: string;
+  generationId?: string;
+  text?: string;
+  error?: string;
+  model?: string;
+  saved?: boolean;
 };
 
 type MaskPoint = {
@@ -169,6 +214,24 @@ const MODERATION_OPTIONS: Array<{ value: ImageModeration; label: string }> = [
   { value: "low", label: "Low" },
 ];
 const BATCH_OPTIONS = [1, 2, 4, 6, 8, 10] as const;
+const CHAT_TIER_OPTIONS = [1, 5, 10, 20] as const;
+const CHAT_THINKING_OPTIONS: Array<{
+  value: ChatThinkingLevel;
+  label: string;
+}> = [
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "xhigh", label: "xHigh" },
+  { value: "none", label: "None" },
+];
+const WATERFALL_ASPECT_RATIOS = ["1 / 1", "3 / 4", "4 / 3", "2 / 3"] as const;
+const CHAT_SUGGESTIONS = [
+  "A serene mountain lake at sunset, oil painting",
+  "Minimalist logo for a tech startup",
+  "Cyberpunk city street in the rain, neon lights",
+  "Watercolor portrait of a cat wearing glasses",
+] as const;
 const CHAT_STORAGE_KEY = "gpt2image_chat_messages_v1";
 const CHAT_CONTEXT_MESSAGE_LIMIT = 8;
 
@@ -205,45 +268,61 @@ function cloneFile(file: File) {
   return new File([file], file.name, { type: file.type });
 }
 
-function getVariantSummary(variants?: ChatVariant[]) {
-  if (!variants?.length) return "No image output.";
-  return variants
-    .map((variant, index) => {
-      const revised =
-        variant.revisedPrompt && variant.revisedPrompt !== variant.prompt
-          ? ` Revised prompt: ${variant.revisedPrompt}`
-          : "";
-      return `Image ${index + 1}: ${variant.size}, model ${variant.model}.${revised}`;
-    })
-    .join("\n");
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Failed to read image"));
+    reader.readAsDataURL(file);
+  });
 }
 
-function buildChatContextPrompt(messages: ChatMessage[], prompt: string) {
-  const contextMessages = messages
-    .filter((message) => message.role === "user" || message.variants?.length)
-    .slice(-CHAT_CONTEXT_MESSAGE_LIMIT);
+function getChatVariants(message: ChatMessage) {
+  return message.variants || [];
+}
 
-  if (contextMessages.length === 0) return prompt;
+function getActiveChatVariant(message: ChatMessage) {
+  const variants = getChatVariants(message);
+  return variants[message.activeVariant || 0] || variants[0] || null;
+}
 
-  const context = contextMessages
-    .map((message) => {
-      if (message.role === "user") {
-        const imageNote = message.attachments?.length
-          ? ` (${message.attachments.length} reference image(s) attached)`
-          : "";
-        return `User${imageNote}: ${message.text}`;
-      }
-      return `Assistant: ${message.text}\n${getVariantSummary(message.variants)}`;
-    })
-    .join("\n\n");
+function getMessageImageUrls(message: ChatMessage) {
+  return (message.attachments || [])
+    .map((attachment) => attachment.previewUrl)
+    .filter(
+      (url) =>
+        url.startsWith("data:image/") ||
+        url.startsWith("http://") ||
+        url.startsWith("https://")
+    );
+}
 
-  return [
-    "Use the conversation context below to preserve intent, style, subjects, and requested changes.",
-    "Conversation context:",
-    context,
-    "Current user request:",
-    prompt,
-  ].join("\n\n");
+function toChatHistory(messages: ChatMessage[]) {
+  return messages
+    .filter(
+      (message) =>
+        message.role === "user" ||
+        (message.role === "assistant" && message.variants?.length)
+    )
+    .slice(-CHAT_CONTEXT_MESSAGE_LIMIT)
+    .map((message) => ({
+      role: message.role,
+      text: message.text,
+      imageUrls: message.role === "user" ? getMessageImageUrls(message) : [],
+      variants: message.variants?.map((variant) => ({
+        text:
+          variant.responseText ||
+          variant.revisedPrompt ||
+          (variant.imageUrl
+            ? `Generated an image at ${variant.size}: ${variant.imageUrl}`
+            : undefined),
+        imageUrl: variant.imageUrl,
+        size: variant.size,
+        timestamp: variant.createdAt,
+      })),
+      activeVariant: message.activeVariant || 0,
+      error: message.error,
+    }));
 }
 
 async function urlToEditImageFile(
@@ -278,6 +357,17 @@ export function CreatePageClient({
   const [chatPrompt, setChatPrompt] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
+  const [chatViewMode, setChatViewMode] = useState<ChatViewMode>("chat");
+  const [chatStream, setChatStream] = useState<ChatStreamState | null>(null);
+  const [retryingChatMessageId, setRetryingChatMessageId] = useState<
+    string | null
+  >(null);
+  const [batchCards, setBatchCards] = useState<BatchCard[]>([]);
+  const [batchPrompt, setBatchPrompt] = useState("");
+  const [batchTier, setBatchTier] = useState(5);
+  const [isBatchActive, setIsBatchActive] = useState(false);
+  const [isBatchLoadingMore, setIsBatchLoadingMore] = useState(false);
+  const [chatThinking, setChatThinking] = useState<ChatThinkingLevel>("low");
   const [chatFirstImageSize, setChatFirstImageSize] = useState<{
     width: number;
     height: number;
@@ -313,8 +403,15 @@ export function CreatePageClient({
   const [selectedRecentId, setSelectedRecentId] = useState<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const chatImageInputRef = useRef<HTMLInputElement | null>(null);
+  const batchImageInputRef = useRef<HTMLInputElement | null>(null);
   const chatMessagesRef = useRef<HTMLDivElement | null>(null);
   const didLoadChatRef = useRef(false);
+  const batchLoadTriggerRef = useRef<HTMLDivElement | null>(null);
+  const batchScrollRef = useRef<HTMLDivElement | null>(null);
+  const batchActiveRequestsRef = useRef(0);
+  const batchPromptRef = useRef("");
+  const batchSizeRef = useRef(DEFAULT_IMAGE_SIZE);
+  const batchLoadingMoreRef = useRef(false);
   const maskInputRef = useRef<HTMLInputElement | null>(null);
   const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const isDrawingRef = useRef(false);
@@ -356,7 +453,13 @@ export function CreatePageClient({
   const chatEditImageCreditCost = chatEffectiveEditSize
     ? getImageCreditCost(chatEffectiveEditSize)
     : getImageCreditCost();
-  const chatEditBatchCreditCost = chatEditImageCreditCost * editBatchCount;
+  const chatSingleCreditCost =
+    chatAttachments.length > 0 ? chatEditImageCreditCost : textImageCreditCost;
+  const batchFallbackSize =
+    chatAttachments.length > 0 && chatEffectiveEditSize
+      ? chatEffectiveEditSize
+      : size;
+  const batchCreditCost = getImageCreditCost(batchFallbackSize) * batchTier;
   const sizeCheck = useMemo(() => validateImageSize(size), [size]);
   const customEditSizeCheck = useMemo(
     () => validateImageSize(customEditSize),
@@ -431,6 +534,10 @@ export function CreatePageClient({
         return;
       }
 
+      if (event.type === "text_delta" || event.type === "thinking_delta") {
+        return;
+      }
+
       if (event.type === "completed") {
         completed.push(event);
         return;
@@ -465,6 +572,188 @@ export function CreatePageClient({
     }
 
     return failed || { error: "API returned no image data" };
+  };
+
+  const runChatRequest = async ({
+    prompt,
+    attachments = [],
+    fallbackSize,
+    historyMessages,
+    streamMessageId,
+    streamCardId,
+  }: {
+    prompt: string;
+    attachments?: ChatAttachment[];
+    fallbackSize: string;
+    historyMessages: ChatMessage[];
+    streamMessageId?: string;
+    streamCardId?: string;
+  }) => {
+    const formData = new FormData();
+    formData.append("prompt", prompt);
+    formData.append("history", JSON.stringify(toChatHistory(historyMessages)));
+    formData.append("quality", quality);
+    formData.append("moderation", moderation);
+    formData.append("thinking", chatThinking);
+    formData.append("size", fallbackSize);
+    formData.append("count", "1");
+    formData.append("stream", "true");
+    attachments.forEach(({ file }) => {
+      formData.append(attachments.length === 1 ? "image" : "image[]", file);
+    });
+
+    const response = await fetch("/api/images/chat", {
+      method: "POST",
+      headers: {
+        Accept: "text/event-stream",
+      },
+      body: formData,
+    });
+
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("text/event-stream")) {
+      const data = (await response.json()) as ImageApiResult;
+      if (!response.ok || data.error) {
+        throw new Error(data.error || `API error: ${response.status}`);
+      }
+      return data;
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error("API returned an empty stream");
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let failed: string | null = null;
+    let completed: ImageApiResult | undefined;
+    let text = "";
+    let thinking = "";
+    let previewUrl: string | undefined;
+
+    const processBlock = (block: string) => {
+      const data = block
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).trimStart())
+        .join("\n")
+        .trim();
+
+      if (!data || data === "[DONE]") return;
+
+      let event: ImageStreamEvent;
+      try {
+        event = JSON.parse(data) as ImageStreamEvent;
+      } catch {
+        return;
+      }
+
+      if (event.type === "text_delta") {
+        text += event.delta;
+        setChatStream({
+          messageId: streamMessageId,
+          cardId: streamCardId,
+          text,
+          thinking,
+          imageUrl: previewUrl,
+        });
+        if (streamCardId) {
+          setBatchCards((prev) =>
+            prev.map((card) =>
+              card.id === streamCardId &&
+              (card.state === "loading" || card.state === "text")
+                ? { ...card, state: "text", streamText: text }
+                : card
+            )
+          );
+        }
+        return;
+      }
+
+      if (event.type === "thinking_delta") {
+        thinking += event.delta;
+        setChatStream({
+          messageId: streamMessageId,
+          cardId: streamCardId,
+          text,
+          thinking,
+          imageUrl: previewUrl,
+        });
+        if (streamCardId) {
+          setBatchCards((prev) =>
+            prev.map((card) =>
+              card.id === streamCardId &&
+              (card.state === "loading" || card.state === "text")
+                ? { ...card, streamThinking: thinking }
+                : card
+            )
+          );
+        }
+        return;
+      }
+
+      if (event.type === "partial_image") {
+        const nextPreviewUrl = imageStreamEventToPreviewUrl(event);
+        if (nextPreviewUrl) {
+          previewUrl = nextPreviewUrl;
+          setStreamingPreviewUrl(nextPreviewUrl);
+          setChatStream({
+            messageId: streamMessageId,
+            cardId: streamCardId,
+            text,
+            thinking,
+            imageUrl: nextPreviewUrl,
+          });
+          if (streamCardId) {
+            setBatchCards((prev) =>
+              prev.map((card) =>
+                card.id === streamCardId && card.state === "loading"
+                  ? { ...card, imageUrl: nextPreviewUrl }
+                  : card
+              )
+            );
+          }
+        }
+        return;
+      }
+
+      if (event.type === "completed") {
+        completed = event;
+        return;
+      }
+
+      if (event.type === "error") {
+        failed = event.error;
+      }
+    };
+
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      const blocks = buffer.split(/\r?\n\r?\n/);
+      buffer = blocks.pop() || "";
+      for (const block of blocks) {
+        processBlock(block);
+      }
+      if (done) break;
+    }
+
+    if (buffer.trim()) processBlock(buffer);
+
+    if (!response.ok || failed) {
+      throw new Error(failed || `API error: ${response.status}`);
+    }
+
+    if (!completed) {
+      throw new Error("API returned no image data");
+    }
+
+    return {
+      ...completed,
+      responseText: completed.responseText || text || undefined,
+      responseThinking: completed.responseThinking || thinking || undefined,
+    };
   };
 
   useEffect(() => {
@@ -590,52 +879,57 @@ export function CreatePageClient({
       size?: string;
       revisedPrompt?: string;
       responseText?: string;
+      responseThinking?: string;
       creditsConsumed?: number;
     },
     resultPrompt: string,
     fallbackSize = size
   ): ChatVariant | null => {
-    if (!data.imageUrl || !data.generationId) return null;
-
-    const generationId = data.generationId;
-    const imageUrl = data.imageUrl;
     const model = data.model || DEFAULT_IMAGE_MODEL;
     const resultSize = data.size || fallbackSize;
-    const nextResult: ResultState = {
-      generationId,
-      imageUrl,
-      prompt: resultPrompt,
-      model,
-      size: resultSize,
-    };
-    if (data.revisedPrompt) nextResult.revisedPrompt = data.revisedPrompt;
+    if (!data.imageUrl && !data.responseText) return null;
 
-    setResult(nextResult);
-    setBalance((b) => Math.max(0, b - (data.creditsConsumed || 0)));
-    setRecent((prev) => [
-      {
-        id: generationId,
+    if (data.imageUrl && data.generationId) {
+      const nextResult: ResultState = {
+        generationId: data.generationId,
+        imageUrl: data.imageUrl,
         prompt: resultPrompt,
-        revisedPrompt: data.revisedPrompt || null,
         model,
         size: resultSize,
-        creditsConsumed: data.creditsConsumed || 0,
-        status: "completed",
-        imageUrl,
-        createdAt: new Date().toISOString(),
-      },
-      ...prev.slice(0, 5),
-    ]);
+      };
+      if (data.revisedPrompt) nextResult.revisedPrompt = data.revisedPrompt;
+      setResult(nextResult);
+    }
+    setBalance((b) => Math.max(0, b - (data.creditsConsumed || 0)));
+    if (data.imageUrl && data.generationId) {
+      const generationId = data.generationId;
+      setRecent((prev) => [
+        {
+          id: generationId,
+          prompt: resultPrompt,
+          revisedPrompt: data.revisedPrompt || null,
+          model,
+          size: resultSize,
+          creditsConsumed: data.creditsConsumed || 0,
+          status: "completed",
+          imageUrl: data.imageUrl || null,
+          createdAt: new Date().toISOString(),
+        },
+        ...prev.slice(0, 5),
+      ]);
+    }
 
     return {
-      generationId,
-      imageUrl,
+      generationId: data.generationId,
+      imageUrl: data.imageUrl,
       prompt: resultPrompt,
       model,
       size: resultSize,
       revisedPrompt: data.revisedPrompt,
       responseText: data.responseText,
+      responseThinking: data.responseThinking,
       creditsConsumed: data.creditsConsumed,
+      createdAt: new Date().toISOString(),
     };
   };
 
@@ -688,7 +982,7 @@ export function CreatePageClient({
     toast.error("Generation failed", { description: message });
   };
 
-  const addChatAttachments = (files: FileList | File[] | null) => {
+  const addChatAttachments = async (files: FileList | File[] | null) => {
     const imageFiles = Array.from(files || []);
     if (!imageFiles.length) return;
 
@@ -706,7 +1000,13 @@ export function CreatePageClient({
         });
         continue;
       }
-      accepted.push({ file, previewUrl: URL.createObjectURL(file) });
+      try {
+        accepted.push({ file, previewUrl: await readFileAsDataUrl(file) });
+      } catch {
+        toast.error("Failed to load image", {
+          description: file.name || "Could not read the selected file.",
+        });
+      }
     }
 
     if (!accepted.length) return;
@@ -783,6 +1083,498 @@ export function CreatePageClient({
     await attachImageUrlToChat(imageUrl, `gpt2image-${id}`, id);
   };
 
+  const findPrecedingUserMessage = (assistantIndex: number) => {
+    for (let index = assistantIndex - 1; index >= 0; index--) {
+      const message = chatMessages[index];
+      if (message?.role === "user") return message;
+    }
+    return null;
+  };
+
+  const handleChatVariantChange = (messageId: string, direction: -1 | 1) => {
+    setChatMessages((prev) =>
+      prev.map((message) => {
+        if (message.id !== messageId) return message;
+        const variants = getChatVariants(message);
+        const current = message.activeVariant || 0;
+        return {
+          ...message,
+          activeVariant: Math.max(
+            0,
+            Math.min(variants.length - 1, current + direction)
+          ),
+        };
+      })
+    );
+  };
+
+  const handleChatRetry = async (assistantId: string) => {
+    if (isChatGenerating) return;
+
+    const assistantIndex = chatMessages.findIndex(
+      (message) => message.id === assistantId
+    );
+    if (assistantIndex < 0) return;
+    const userMessage = findPrecedingUserMessage(assistantIndex);
+    if (!userMessage?.text) return;
+
+    const assistantMessage = chatMessages[assistantIndex];
+    if (!assistantMessage) return;
+    const activeVariant = getActiveChatVariant(assistantMessage);
+    const retrySize = activeVariant?.size || size;
+    const historyMessages = chatMessages.slice(0, assistantIndex);
+
+    setRetryingChatMessageId(assistantId);
+    setIsChatGenerating(true);
+    setChatStream({
+      messageId: assistantId,
+      text: "",
+      thinking: "",
+    });
+
+    try {
+      const data = await runChatRequest({
+        prompt: userMessage.text,
+        fallbackSize: retrySize,
+        historyMessages,
+        streamMessageId: assistantId,
+      });
+      const variant = addSuccessfulResult(data, userMessage.text, retrySize);
+      if (!variant) throw new Error("API returned no image data");
+
+      setChatMessages((prev) =>
+        prev.map((message) => {
+          if (message.id !== assistantId) return message;
+          const variants = [...getChatVariants(message), variant];
+          return {
+            ...message,
+            error: undefined,
+            text:
+              variant.responseText ||
+              (variant.imageUrl ? "Image generated" : "Response generated"),
+            variants,
+            activeVariant: variants.length - 1,
+          };
+        })
+      );
+      toast.success("Variant generated");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Retry failed.";
+      toast.error("Retry failed", { description: message });
+    } finally {
+      setRetryingChatMessageId(null);
+      setIsChatGenerating(false);
+      setChatStream(null);
+      clearStreamingPreview();
+      scrollChatToBottom();
+    }
+  };
+
+  const saveBatchCardToRecent = (card: BatchCard) => {
+    if (!card.imageUrl || !card.generationId) return;
+
+    setRecent((prev) => {
+      if (prev.some((item) => item.id === card.generationId)) return prev;
+      return [
+        {
+          id: card.generationId || createLocalId(),
+          prompt: card.prompt,
+          revisedPrompt: null,
+          model: card.model || DEFAULT_IMAGE_MODEL,
+          size: card.size,
+          creditsConsumed: 0,
+          status: "completed",
+          imageUrl: card.imageUrl || null,
+          createdAt: new Date().toISOString(),
+        },
+        ...prev.slice(0, 5),
+      ];
+    });
+    setBatchCards((prev) =>
+      prev.map((item) =>
+        item.id === card.id ? { ...item, saved: true } : item
+      )
+    );
+    toast.success("Saved to recent");
+  };
+
+  const handleBatchSuggestion = (suggestion: string) => {
+    setBatchPrompt(suggestion);
+  };
+
+  const renderThinkingBlock = (thinking?: string, open = false) => {
+    if (!thinking) return null;
+    return (
+      <details
+        className="mb-3 rounded-md border border-border bg-background/70 p-2"
+        open={open}
+      >
+        <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+          Thinking
+        </summary>
+        <p className="mt-2 whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
+          {thinking}
+        </p>
+      </details>
+    );
+  };
+
+  const renderChatStreamBubble = (messageId?: string) => {
+    if (!chatStream || chatStream.messageId !== messageId) return null;
+    return (
+      <div className="rounded-lg border border-border bg-muted/35 px-3 py-3 text-sm text-foreground">
+        {renderThinkingBlock(chatStream.thinking, true)}
+        {chatStream.text && (
+          <p className="whitespace-pre-wrap break-words leading-relaxed">
+            {chatStream.text}
+          </p>
+        )}
+        {chatStream.imageUrl && (
+          <div className="relative mt-3 max-w-sm overflow-hidden rounded-md border bg-muted">
+            <Image
+              src={chatStream.imageUrl}
+              alt="Streaming preview"
+              width={320}
+              height={320}
+              className="h-auto w-full object-contain"
+              unoptimized
+            />
+          </div>
+        )}
+        {!chatStream.text && !chatStream.imageUrl && (
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Generating...
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderChatInput = () => (
+    <form
+      onSubmit={handleChatSubmit}
+      onPaste={handleChatPaste}
+      className="border-t border-border p-3"
+    >
+      {chatAttachments.length > 0 && (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {chatAttachments.map((item, index) => (
+            <button
+              type="button"
+              key={`${item.file.name}-${item.previewUrl}`}
+              className="group relative h-12 w-12 overflow-hidden rounded-md border bg-muted"
+              onClick={() => removeChatAttachment(index)}
+              disabled={isChatGenerating}
+              title="Remove reference image"
+            >
+              <Image
+                src={item.previewUrl}
+                alt={item.file.name || `Reference ${index + 1}`}
+                fill
+                sizes="48px"
+                className="object-cover"
+                unoptimized
+              />
+              <span className="absolute inset-0 hidden items-center justify-center bg-background/70 group-hover:flex">
+                <X className="h-3.5 w-3.5 text-foreground" />
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <Select
+          value={chatThinking}
+          onValueChange={(value) => setChatThinking(value as ChatThinkingLevel)}
+          disabled={isChatGenerating}
+        >
+          <SelectTrigger className="h-8 w-[138px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {CHAT_THINKING_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                Thinking {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={
+            IMAGE_RESOLUTION_PRESETS.some((preset) => preset.value === size)
+              ? size
+              : "custom"
+          }
+          onValueChange={(value) => {
+            if (value !== "custom") applyPreset(value);
+          }}
+          disabled={isChatGenerating}
+        >
+          <SelectTrigger className="h-8 w-[168px]">
+            <SelectValue placeholder={size} />
+          </SelectTrigger>
+          <SelectContent>
+            {IMAGE_RESOLUTION_PRESETS.map((preset) => (
+              <SelectItem key={preset.value} value={preset.value}>
+                {preset.label} · {preset.detail}
+              </SelectItem>
+            ))}
+            <SelectItem value="custom">Custom · {size}</SelectItem>
+          </SelectContent>
+        </Select>
+        <span className="ml-auto text-xs text-muted-foreground">
+          Cost{" "}
+          <span className="font-medium text-foreground">
+            {chatSingleCreditCost}
+          </span>
+        </span>
+      </div>
+
+      <div className="flex items-end gap-2 rounded-lg border border-border bg-background p-2">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => chatImageInputRef.current?.click()}
+          disabled={
+            isChatGenerating || chatAttachments.length >= MAX_EDIT_IMAGES
+          }
+          title="Attach reference image"
+        >
+          <ImagePlus className="h-4 w-4" />
+        </Button>
+        <Textarea
+          value={chatPrompt}
+          onChange={(event) => setChatPrompt(event.target.value)}
+          placeholder="Continue creating..."
+          rows={1}
+          disabled={isChatGenerating}
+          className="max-h-40 min-h-9 resize-none border-0 bg-transparent px-0 py-2 text-base shadow-none focus-visible:ring-0"
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              event.currentTarget.form?.requestSubmit();
+            }
+          }}
+        />
+        <Button
+          type="submit"
+          size="icon-sm"
+          disabled={isChatGenerating || !chatPrompt.trim()}
+          title="Send"
+        >
+          {isChatGenerating ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Send className="h-4 w-4" />
+          )}
+        </Button>
+        <input
+          ref={chatImageInputRef}
+          type="file"
+          multiple
+          accept={IMAGE_ACCEPT}
+          className="sr-only"
+          onChange={(event) => {
+            void addChatAttachments(event.target.files);
+            event.target.value = "";
+          }}
+        />
+      </div>
+    </form>
+  );
+
+  const addBatchAttachments = async (files: FileList | File[] | null) => {
+    await addChatAttachments(files);
+  };
+
+  const getBatchFallbackSize = () => {
+    if (chatAttachments.length > 0 && chatEffectiveEditSize) {
+      return chatEffectiveEditSize;
+    }
+    return size;
+  };
+
+  const validateChatAttachments = (attachments: ChatAttachment[]) => {
+    if (attachments.length === 0) return true;
+    const totalUploadSize = attachments.reduce(
+      (total, item) => total + item.file.size,
+      0
+    );
+    if (totalUploadSize > MAX_EDIT_REQUEST_BYTES) {
+      toast.error("Upload is too large", {
+        description: `Reference images total ${formatMegabytes(totalUploadSize)}. Keep the total under ${formatMegabytes(MAX_EDIT_REQUEST_BYTES)}.`,
+      });
+      return false;
+    }
+    if (!chatEffectiveEditSize) {
+      toast.error("Waiting for reference image size", {
+        description: "The first reference image is still loading.",
+      });
+      return false;
+    }
+    return true;
+  };
+
+  const triggerBatchGeneration = async (options?: { retryCardId?: string }) => {
+    const currentPrompt = (batchPromptRef.current || batchPrompt).trim();
+    if (!currentPrompt) return;
+
+    const fallbackSize = batchSizeRef.current || getBatchFallbackSize();
+    if (!validateImageSize(fallbackSize).valid) {
+      toast.error("Invalid resolution");
+      return;
+    }
+
+    const attachments = chatAttachments.map((item) => ({
+      ...item,
+      file: cloneFile(item.file),
+    }));
+    if (!validateChatAttachments(attachments)) return;
+
+    const requestCount = options?.retryCardId ? 1 : batchTier;
+    const maxConcurrent = batchTier * 3;
+    const available = maxConcurrent - batchActiveRequestsRef.current;
+    const batchSize = Math.min(requestCount, Math.max(available, 0));
+    if (batchSize <= 0) return;
+
+    if (balance < getImageCreditCost(fallbackSize) * batchSize) {
+      showGenerationError("Insufficient credits");
+      return;
+    }
+
+    const cards: BatchCard[] = options?.retryCardId
+      ? []
+      : Array.from({ length: batchSize }, () => ({
+          id: createLocalId(),
+          state: "loading" as const,
+          aspectRatio:
+            WATERFALL_ASPECT_RATIOS[
+              Math.floor(Math.random() * WATERFALL_ASPECT_RATIOS.length)
+            ] || WATERFALL_ASPECT_RATIOS[0],
+          prompt: currentPrompt,
+          size: fallbackSize,
+        }));
+
+    if (cards.length > 0) {
+      setBatchCards((prev) => [...prev, ...cards]);
+    } else if (options?.retryCardId) {
+      setBatchCards((prev) =>
+        prev.map((card) =>
+          card.id === options.retryCardId
+            ? {
+                ...card,
+                state: "loading",
+                error: undefined,
+                streamText: undefined,
+                streamThinking: undefined,
+              }
+            : card
+        )
+      );
+    }
+
+    const runCard = async (cardId: string) => {
+      batchActiveRequestsRef.current += 1;
+      try {
+        const data = await runChatRequest({
+          prompt: currentPrompt,
+          attachments,
+          fallbackSize,
+          historyMessages: [],
+          streamCardId: cardId,
+        });
+        const variant = addSuccessfulResult(data, currentPrompt, fallbackSize);
+        setBatchCards((prev) =>
+          prev.map((card) =>
+            card.id === cardId
+              ? {
+                  ...card,
+                  state: data.imageUrl ? "image" : "text",
+                  imageUrl: data.imageUrl,
+                  generationId: data.generationId,
+                  text: data.responseText || variant?.responseText,
+                  streamText: undefined,
+                  streamThinking: data.responseThinking,
+                  model: data.model,
+                  size: data.size || fallbackSize,
+                }
+              : card
+          )
+        );
+      } catch (error) {
+        setBatchCards((prev) =>
+          prev.map((card) =>
+            card.id === cardId
+              ? {
+                  ...card,
+                  state: "error",
+                  error:
+                    error instanceof Error
+                      ? error.message
+                      : "Generation failed",
+                }
+              : card
+          )
+        );
+      } finally {
+        batchActiveRequestsRef.current -= 1;
+      }
+    };
+
+    if (options?.retryCardId) {
+      void runCard(options.retryCardId);
+      return;
+    }
+
+    cards.forEach((card) => {
+      void runCard(card.id);
+    });
+  };
+
+  const handleBatchSubmit = async (event?: React.FormEvent) => {
+    event?.preventDefault();
+    const currentPrompt = batchPrompt.trim();
+    if (!currentPrompt) {
+      toast.error("Please enter a prompt");
+      return;
+    }
+    batchPromptRef.current = currentPrompt;
+    batchSizeRef.current = getBatchFallbackSize();
+    setIsBatchActive(true);
+    await triggerBatchGeneration();
+  };
+
+  useEffect(() => {
+    if (
+      !isBatchActive ||
+      !batchLoadTriggerRef.current ||
+      !batchScrollRef.current
+    ) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) return;
+        if (!batchPromptRef.current || batchLoadingMoreRef.current) return;
+        if (batchActiveRequestsRef.current >= batchTier * 3) return;
+        batchLoadingMoreRef.current = true;
+        setIsBatchLoadingMore(true);
+        void triggerBatchGeneration().finally(() => {
+          batchLoadingMoreRef.current = false;
+          setIsBatchLoadingMore(false);
+        });
+      },
+      { root: batchScrollRef.current, threshold: 0.1 }
+    );
+
+    observer.observe(batchLoadTriggerRef.current);
+    return () => observer.disconnect();
+  }, [batchTier, isBatchActive, triggerBatchGeneration]);
+
   const handleChatPaste = (event: React.ClipboardEvent) => {
     if (activeMode !== "chat" || isChatGenerating) return;
 
@@ -793,7 +1585,7 @@ export function CreatePageClient({
 
     if (!files.length) return;
     event.preventDefault();
-    addChatAttachments(files);
+    void addChatAttachments(files);
   };
 
   const handleChatSubmit = async (event: React.FormEvent) => {
@@ -810,8 +1602,7 @@ export function CreatePageClient({
     }));
     const isEditRequest = attachments.length > 0;
     const fallbackSize = isEditRequest ? chatEffectiveEditSize : size;
-    const count = isEditRequest ? editBatchCount : batchCount;
-    const cost = isEditRequest ? chatEditBatchCreditCost : textBatchCreditCost;
+    const cost = isEditRequest ? chatEditImageCreditCost : textImageCreditCost;
 
     if (balance < cost) {
       showGenerationError("Insufficient credits");
@@ -854,11 +1645,6 @@ export function CreatePageClient({
     const userMessageId = createLocalId();
     const assistantMessageId = createLocalId();
     const conversationBeforeSend = chatMessages;
-    const apiPrompt = buildChatContextPrompt(
-      conversationBeforeSend,
-      currentPrompt
-    );
-
     setChatMessages((prev) => [
       ...prev,
       {
@@ -882,51 +1668,19 @@ export function CreatePageClient({
     scrollChatToBottom();
 
     try {
-      const formData = new FormData();
-      formData.append("prompt", currentPrompt);
-      formData.append("apiPrompt", apiPrompt);
-      formData.append("quality", quality);
-      formData.append("moderation", moderation);
-      formData.append("size", fallbackSize || size);
-      formData.append("count", String(count));
-      formData.append("stream", "true");
-      attachments.forEach(({ file }) => {
-        formData.append(attachments.length === 1 ? "image" : "image[]", file);
+      const data = await runChatRequest({
+        prompt: currentPrompt,
+        attachments,
+        fallbackSize: fallbackSize || size,
+        historyMessages: conversationBeforeSend,
+        streamMessageId: assistantMessageId,
       });
-
-      const response = await fetch("/api/images/chat", {
-        method: "POST",
-        headers: {
-          Accept: "text/event-stream",
-        },
-        body: formData,
-      });
-
-      const data = await readImageStreamResponse(response);
-      if (!response.ok || data.error) {
-        showGenerationError(data.error || `API error: ${response.status}`, {
-          creditsConsumed: data.creditsConsumed,
-        });
-        setChatMessages((prev) =>
-          prev.map((message) =>
-            message.id === assistantMessageId
-              ? {
-                  ...message,
-                  text: "Generation failed",
-                  error: data.error || `API error: ${response.status}`,
-                }
-              : message
-          )
-        );
-        return;
-      }
-
-      const variants = addSuccessfulResults(
+      const variant = addSuccessfulResult(
         data,
         currentPrompt,
         fallbackSize || size
       );
-      if (variants.length === 0) {
+      if (!variant) {
         const message = "API returned no image data";
         showGenerationError(message);
         setChatMessages((prev) =>
@@ -945,21 +1699,16 @@ export function CreatePageClient({
             ? {
                 ...message,
                 text:
-                  data.responseText ||
-                  (variants.length > 1
-                    ? `${variants.length} images generated`
-                    : "Image generated"),
-                variants,
+                  variant.responseText ||
+                  (variant.imageUrl ? "Image generated" : "Response generated"),
+                variants: [variant],
+                activeVariant: 0,
               }
             : message
         )
       );
       clearChatAttachments();
-      toast.success(
-        variants.length > 1
-          ? `${variants.length} images generated`
-          : "Image generated"
-      );
+      toast.success(data.imageUrl ? "Image generated" : "Response generated");
     } catch (error) {
       const message =
         error instanceof Error
@@ -975,6 +1724,7 @@ export function CreatePageClient({
       );
     } finally {
       setIsChatGenerating(false);
+      setChatStream(null);
       clearStreamingPreview();
       scrollChatToBottom();
     }
@@ -1642,122 +2392,6 @@ export function CreatePageClient({
     </div>
   );
 
-  const chatGenerationControls = (
-    <div className="space-y-3 rounded-lg border border-border bg-background p-4">
-      <div>
-        <span className="text-sm font-medium text-foreground">
-          Generate controls
-        </span>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Used when no reference image is attached.
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        <label
-          htmlFor="chat-size-preset"
-          className="text-xs font-medium text-muted-foreground"
-        >
-          Resolution
-        </label>
-        <Select
-          value={
-            IMAGE_RESOLUTION_PRESETS.some((preset) => preset.value === size)
-              ? size
-              : "custom"
-          }
-          onValueChange={(value) => {
-            if (value !== "custom") {
-              applyPreset(value);
-            }
-          }}
-          disabled={busy}
-        >
-          <SelectTrigger id="chat-size-preset" className="w-full">
-            <SelectValue placeholder={size} />
-          </SelectTrigger>
-          <SelectContent>
-            {IMAGE_RESOLUTION_PRESETS.map((preset) => (
-              <SelectItem key={preset.value} value={preset.value}>
-                {preset.label} · {preset.detail}
-              </SelectItem>
-            ))}
-            <SelectItem value="custom">Custom · {size}</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
-        <div className="space-y-1.5">
-          <label
-            htmlFor="chat-image-width"
-            className="text-xs font-medium text-muted-foreground"
-          >
-            Width
-          </label>
-          <Input
-            id="chat-image-width"
-            type="number"
-            min={256}
-            max={MAX_IMAGE_DIMENSION}
-            step={IMAGE_DIMENSION_STEP}
-            value={width}
-            onChange={(event) => setWidth(Number(event.target.value) || 0)}
-            disabled={busy}
-          />
-        </div>
-        <div className="pb-2 text-muted-foreground">x</div>
-        <div className="space-y-1.5">
-          <label
-            htmlFor="chat-image-height"
-            className="text-xs font-medium text-muted-foreground"
-          >
-            Height
-          </label>
-          <Input
-            id="chat-image-height"
-            type="number"
-            min={256}
-            max={MAX_IMAGE_DIMENSION}
-            step={IMAGE_DIMENSION_STEP}
-            value={height}
-            onChange={(event) => setHeight(Number(event.target.value) || 0)}
-            disabled={busy}
-          />
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <label
-          htmlFor="chat-generate-batch"
-          className="text-xs font-medium text-muted-foreground"
-        >
-          Batch
-        </label>
-        <Select
-          value={String(batchCount)}
-          onValueChange={(value) => setBatchCount(Number(value))}
-          disabled={busy}
-        >
-          <SelectTrigger id="chat-generate-batch" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {BATCH_OPTIONS.map((count) => (
-              <SelectItem key={count} value={String(count)}>
-                {count} image{count > 1 ? "s" : ""}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {!sizeCheck.valid && (
-        <p className="text-xs text-destructive">{sizeCheck.message}</p>
-      )}
-    </div>
-  );
-
   const loading = busy;
 
   return (
@@ -2276,353 +2910,593 @@ export function CreatePageClient({
         </TabsContent>
 
         <TabsContent value="chat" className="mt-0">
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
-            <div className="flex min-h-[620px] flex-col overflow-hidden rounded-lg border border-border bg-background">
-              <div
-                ref={chatMessagesRef}
-                className="flex-1 space-y-5 overflow-y-auto px-4 py-4"
-              >
-                {chatMessages.length === 0 ? (
-                  <div className="flex min-h-[320px] flex-col items-center justify-center text-center text-muted-foreground">
-                    <MessageSquare className="mb-3 h-8 w-8" />
-                    <p className="text-sm font-medium text-foreground">
-                      Start a visual conversation
-                    </p>
-                    <p className="mt-1 max-w-md text-xs">
-                      Send a prompt to generate images. Attach a reference image
-                      or click a recent image to edit in auto mode.
-                    </p>
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="inline-flex rounded-lg border border-border bg-muted/40 p-1">
+                <Button
+                  type="button"
+                  variant={chatViewMode === "chat" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setChatViewMode("chat")}
+                >
+                  <MessageSquare className="h-4 w-4" />
+                  Chat
+                </Button>
+                <Button
+                  type="button"
+                  variant={chatViewMode === "batch" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setChatViewMode("batch")}
+                >
+                  <ImagePlus className="h-4 w-4" />
+                  Batch
+                </Button>
+              </div>
+              {chatAttachments.length > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={clearChatAttachments}
+                  disabled={isChatGenerating}
+                >
+                  <X className="h-4 w-4" />
+                  Clear references
+                </Button>
+              )}
+            </div>
+
+            {chatViewMode === "chat" ? (
+              <div className="flex min-h-[680px] flex-col overflow-hidden rounded-lg border border-border bg-background">
+                <div
+                  ref={chatMessagesRef}
+                  className="flex-1 space-y-5 overflow-y-auto px-4 py-4"
+                >
+                  {chatMessages.length === 0 ? (
+                    <div className="flex min-h-[420px] flex-col items-center justify-center text-center text-muted-foreground">
+                      <MessageSquare className="mb-3 h-8 w-8" />
+                      <p className="text-sm font-medium text-foreground">
+                        Start a visual conversation
+                      </p>
+                      <p className="mt-1 max-w-md text-xs">
+                        Auto mode generates from text, edits attached images,
+                        and keeps the conversation as context.
+                      </p>
+                    </div>
+                  ) : (
+                    chatMessages.map((message) => {
+                      const variants = getChatVariants(message);
+                      const activeVariant = getActiveChatVariant(message);
+                      const activeIndex = message.activeVariant || 0;
+                      const isRetrying =
+                        retryingChatMessageId === message.id && chatStream;
+
+                      return (
+                        <div
+                          key={message.id}
+                          className={`flex ${
+                            message.role === "user"
+                              ? "justify-end"
+                              : "justify-start"
+                          }`}
+                        >
+                          <div
+                            className={`max-w-[88%] ${
+                              message.role === "user"
+                                ? "text-right"
+                                : "text-left"
+                            }`}
+                          >
+                            <div
+                              className={`rounded-lg border px-3 py-3 text-sm ${
+                                message.role === "user"
+                                  ? "border-primary/20 bg-primary text-primary-foreground"
+                                  : "border-border bg-muted/35 text-foreground"
+                              }`}
+                            >
+                              {message.role === "user" ? (
+                                <div className="flex flex-col gap-3">
+                                  {message.attachments?.length ? (
+                                    <div className="flex flex-wrap justify-end gap-2">
+                                      {message.attachments.map((attachment) => (
+                                        <div
+                                          key={attachment.id}
+                                          className="relative h-12 w-12 overflow-hidden rounded-md border border-primary-foreground/25 bg-muted"
+                                        >
+                                          <Image
+                                            src={attachment.previewUrl}
+                                            alt={attachment.name}
+                                            fill
+                                            sizes="48px"
+                                            className="object-cover"
+                                            unoptimized
+                                          />
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                  <p className="whitespace-pre-wrap break-words">
+                                    {message.text}
+                                  </p>
+                                </div>
+                              ) : isRetrying ? (
+                                renderChatStreamBubble(message.id)
+                              ) : message.error ? (
+                                <p className="text-destructive">
+                                  {message.error}
+                                </p>
+                              ) : activeVariant ? (
+                                <div>
+                                  {renderThinkingBlock(
+                                    activeVariant.responseThinking
+                                  )}
+                                  {activeVariant.responseText && (
+                                    <p
+                                      className={`whitespace-pre-wrap break-words leading-relaxed ${
+                                        activeVariant.imageUrl ? "mb-3" : ""
+                                      }`}
+                                    >
+                                      {activeVariant.responseText}
+                                    </p>
+                                  )}
+                                  {activeVariant.imageUrl && (
+                                    <div className="overflow-hidden rounded-md border bg-background">
+                                      <button
+                                        type="button"
+                                        className="group relative block w-full bg-muted"
+                                        style={{
+                                          aspectRatio: `${
+                                            parseImageSize(activeVariant.size)
+                                              ?.width || defaultDimensions.width
+                                          } / ${
+                                            parseImageSize(activeVariant.size)
+                                              ?.height ||
+                                            defaultDimensions.height
+                                          }`,
+                                        }}
+                                        onClick={() => {
+                                          if (activeVariant.generationId) {
+                                            setSelectedRecentId(
+                                              activeVariant.generationId
+                                            );
+                                          }
+                                        }}
+                                        title="Open image preview"
+                                      >
+                                        <Image
+                                          src={activeVariant.imageUrl}
+                                          alt={activeVariant.prompt}
+                                          fill
+                                          sizes="(max-width: 768px) 80vw, 420px"
+                                          className="object-contain"
+                                          unoptimized
+                                        />
+                                        <span className="absolute right-2 top-2 rounded bg-background/90 px-2 py-1 text-[11px] font-medium text-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100">
+                                          <Eye className="mr-1 inline h-3 w-3" />
+                                          Preview
+                                        </span>
+                                      </button>
+                                      <div className="flex flex-wrap gap-2 p-2">
+                                        <Button
+                                          asChild
+                                          variant="outline"
+                                          size="xs"
+                                        >
+                                          <a
+                                            href={activeVariant.imageUrl}
+                                            download
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                          >
+                                            <Download className="h-3 w-3" />
+                                            Download
+                                          </a>
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="xs"
+                                          onClick={() =>
+                                            attachResultToChat(activeVariant)
+                                          }
+                                        >
+                                          <RefreshCcw className="h-3 w-3" />
+                                          Edit next
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  )}
+                                  {!activeVariant.responseText &&
+                                    !activeVariant.imageUrl && (
+                                      <p className="text-muted-foreground">
+                                        Response generated
+                                      </p>
+                                    )}
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2 text-muted-foreground">
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  Generating...
+                                </div>
+                              )}
+                            </div>
+
+                            {message.role === "assistant" && (
+                              <div className="mt-2 flex items-center gap-2">
+                                {variants.length > 1 && (
+                                  <div className="inline-flex items-center rounded-md border border-border bg-background text-xs text-muted-foreground">
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon-xs"
+                                      disabled={
+                                        isChatGenerating || activeIndex === 0
+                                      }
+                                      onClick={() =>
+                                        handleChatVariantChange(message.id, -1)
+                                      }
+                                      title="Previous variant"
+                                    >
+                                      <ChevronLeft className="h-3 w-3" />
+                                    </Button>
+                                    <span className="px-2">
+                                      {activeIndex + 1} / {variants.length}
+                                    </span>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon-xs"
+                                      disabled={
+                                        isChatGenerating ||
+                                        activeIndex >= variants.length - 1
+                                      }
+                                      onClick={() =>
+                                        handleChatVariantChange(message.id, 1)
+                                      }
+                                      title="Next variant"
+                                    >
+                                      <ChevronRight className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                )}
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  disabled={isChatGenerating}
+                                  onClick={() => handleChatRetry(message.id)}
+                                  title={
+                                    message.error
+                                      ? "Retry generation"
+                                      : "Generate another variant"
+                                  }
+                                >
+                                  <RefreshCcw className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+
+                  {chatStream && !retryingChatMessageId && (
+                    <div className="flex justify-start">
+                      <div className="max-w-[88%]">
+                        {renderChatStreamBubble(undefined)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {renderChatInput()}
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-lg border border-border bg-background">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Select
+                      value={String(batchTier)}
+                      onValueChange={(value) => setBatchTier(Number(value))}
+                    >
+                      <SelectTrigger className="h-8 w-[110px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CHAT_TIER_OPTIONS.map((tier) => (
+                          <SelectItem key={tier} value={String(tier)}>
+                            Batch {tier}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={chatThinking}
+                      onValueChange={(value) =>
+                        setChatThinking(value as ChatThinkingLevel)
+                      }
+                    >
+                      <SelectTrigger className="h-8 w-[138px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CHAT_THINKING_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            Thinking {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Cost{" "}
+                    <span className="font-medium text-foreground">
+                      {batchCreditCost}
+                    </span>{" "}
+                    for {batchTier}
+                  </div>
+                </div>
+
+                {!isBatchActive ? (
+                  <div className="mx-auto flex min-h-[560px] max-w-3xl flex-col justify-center px-4 py-10">
+                    <div className="mb-5 text-center">
+                      <h2 className="font-serif text-2xl font-semibold tracking-tight">
+                        What world will you flood with art?
+                      </h2>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        One prompt, endless creations
+                      </p>
+                    </div>
+                    <form
+                      onSubmit={handleBatchSubmit}
+                      onPaste={handleChatPaste}
+                      className="space-y-3"
+                    >
+                      {chatAttachments.length > 0 && (
+                        <div className="flex flex-wrap justify-center gap-2">
+                          {chatAttachments.map((item, index) => (
+                            <button
+                              type="button"
+                              key={`${item.file.name}-${item.previewUrl}`}
+                              className="relative h-12 w-12 overflow-hidden rounded-md border bg-muted"
+                              onClick={() => removeChatAttachment(index)}
+                              title="Remove reference image"
+                            >
+                              <Image
+                                src={item.previewUrl}
+                                alt={item.file.name}
+                                fill
+                                sizes="48px"
+                                className="object-cover"
+                                unoptimized
+                              />
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex items-end gap-2 rounded-lg border border-border bg-background p-2">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => batchImageInputRef.current?.click()}
+                          disabled={chatAttachments.length >= MAX_EDIT_IMAGES}
+                          title="Attach reference image"
+                        >
+                          <ImagePlus className="h-4 w-4" />
+                        </Button>
+                        <Textarea
+                          value={batchPrompt}
+                          onChange={(event) =>
+                            setBatchPrompt(event.target.value)
+                          }
+                          placeholder="Describe the images you want to generate..."
+                          rows={1}
+                          className="max-h-40 min-h-9 resize-none border-0 bg-transparent px-0 py-2 text-base shadow-none focus-visible:ring-0"
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" && !event.shiftKey) {
+                              event.preventDefault();
+                              event.currentTarget.form?.requestSubmit();
+                            }
+                          }}
+                        />
+                        <Button
+                          type="submit"
+                          size="icon-sm"
+                          disabled={!batchPrompt.trim()}
+                          title="Generate batch"
+                        >
+                          <Send className="h-4 w-4" />
+                        </Button>
+                        <input
+                          ref={batchImageInputRef}
+                          type="file"
+                          multiple
+                          accept={IMAGE_ACCEPT}
+                          className="sr-only"
+                          onChange={(event) => {
+                            void addBatchAttachments(event.target.files);
+                            event.target.value = "";
+                          }}
+                        />
+                      </div>
+                    </form>
+                    <div className="mt-4 flex flex-wrap justify-center gap-2">
+                      {CHAT_SUGGESTIONS.map((suggestion) => (
+                        <Button
+                          key={suggestion}
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="max-w-full"
+                          onClick={() => handleBatchSuggestion(suggestion)}
+                          title={suggestion}
+                        >
+                          <span className="truncate">
+                            {suggestion.length > 40
+                              ? `${suggestion.slice(0, 40)}...`
+                              : suggestion}
+                          </span>
+                        </Button>
+                      ))}
+                    </div>
                   </div>
                 ) : (
-                  chatMessages.map((message) => (
-                    <div
-                      key={message.id}
-                      className={`flex ${
-                        message.role === "user"
-                          ? "justify-end"
-                          : "justify-start"
-                      }`}
-                    >
-                      <div
-                        className={`max-w-[88%] rounded-lg border px-3 py-3 text-sm ${
-                          message.role === "user"
-                            ? "border-primary/20 bg-primary text-primary-foreground"
-                            : "border-border bg-muted/35 text-foreground"
-                        }`}
-                      >
-                        <p className="whitespace-pre-wrap break-words">
-                          {message.text}
-                        </p>
-
-                        {message.attachments &&
-                          message.attachments.length > 0 && (
-                            <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
-                              {message.attachments.map((attachment) => (
-                                <div
-                                  key={attachment.id}
-                                  className="relative aspect-square overflow-hidden rounded-md border bg-muted"
-                                >
-                                  <Image
-                                    src={attachment.previewUrl}
-                                    alt={attachment.name}
-                                    fill
-                                    sizes="96px"
-                                    className="object-cover"
-                                    unoptimized
-                                  />
-                                </div>
-                              ))}
+                  <div
+                    ref={batchScrollRef}
+                    className="max-h-[760px] overflow-y-auto p-3"
+                  >
+                    <div className="columns-1 gap-3 sm:columns-2 lg:columns-3">
+                      {batchCards.map((card) => (
+                        <div
+                          key={card.id}
+                          className={`mb-3 break-inside-avoid overflow-hidden rounded-lg border bg-muted/30 ${
+                            card.state === "error"
+                              ? "border-destructive/30"
+                              : "border-border"
+                          }`}
+                          style={
+                            card.aspectRatio &&
+                            (card.state === "loading" ||
+                              (card.state === "image" && !card.imageUrl))
+                              ? { aspectRatio: card.aspectRatio }
+                              : undefined
+                          }
+                        >
+                          {card.state === "loading" && !card.imageUrl && (
+                            <div className="flex h-full min-h-40 items-center justify-center text-muted-foreground">
+                              <Loader2 className="h-5 w-5 animate-spin" />
                             </div>
                           )}
 
-                        {message.error && (
-                          <p className="mt-2 text-xs text-destructive">
-                            {message.error}
-                          </p>
-                        )}
-
-                        {message.variants && message.variants.length > 0 && (
-                          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                            {message.variants.map((variant) => (
-                              <div
-                                key={variant.generationId}
-                                className="overflow-hidden rounded-md border bg-background"
-                              >
-                                <button
-                                  type="button"
-                                  className="group relative block w-full bg-muted"
-                                  style={{
-                                    aspectRatio: `${
-                                      parseImageSize(variant.size)?.width ||
-                                      defaultDimensions.width
-                                    } / ${
-                                      parseImageSize(variant.size)?.height ||
-                                      defaultDimensions.height
-                                    }`,
-                                  }}
-                                  onClick={() =>
-                                    setSelectedRecentId(variant.generationId)
-                                  }
-                                  title="Open image preview"
-                                >
-                                  <Image
-                                    src={variant.imageUrl}
-                                    alt={variant.prompt}
-                                    fill
-                                    sizes="(max-width: 768px) 80vw, 320px"
-                                    className="object-contain"
-                                    unoptimized
-                                  />
-                                  <span className="absolute right-2 top-2 rounded bg-background/90 px-2 py-1 text-[11px] font-medium text-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100">
-                                    <Eye className="mr-1 inline h-3 w-3" />
-                                    Preview
-                                  </span>
-                                </button>
-                                <div className="flex flex-wrap gap-2 p-2">
-                                  <Button asChild variant="outline" size="xs">
+                          {card.imageUrl && (
+                            <button
+                              type="button"
+                              className="group relative block w-full bg-muted"
+                              onClick={() => {
+                                if (card.generationId) {
+                                  setSelectedRecentId(card.generationId);
+                                }
+                              }}
+                              title="Open image preview"
+                            >
+                              <Image
+                                src={card.imageUrl}
+                                alt={card.prompt}
+                                width={640}
+                                height={640}
+                                className="h-auto w-full object-cover"
+                                unoptimized
+                              />
+                              {card.state === "loading" && (
+                                <span className="absolute left-2 top-2 rounded-full bg-background/90 px-2 py-1 text-[11px] font-medium text-foreground shadow-sm">
+                                  <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
+                                  Streaming
+                                </span>
+                              )}
+                              {card.state === "image" && (
+                                <div className="absolute inset-x-2 bottom-2 hidden items-center justify-end gap-1 group-hover:flex">
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="icon-xs"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      saveBatchCardToRecent(card);
+                                    }}
+                                    disabled={card.saved}
+                                    title="Save to recent"
+                                  >
+                                    <Save className="h-3 w-3" />
+                                  </Button>
+                                  <Button
+                                    asChild
+                                    variant="secondary"
+                                    size="icon-xs"
+                                    title="Download"
+                                    onClick={(event) => event.stopPropagation()}
+                                  >
                                     <a
-                                      href={variant.imageUrl}
+                                      href={card.imageUrl}
                                       download
                                       target="_blank"
                                       rel="noopener noreferrer"
                                     >
                                       <Download className="h-3 w-3" />
-                                      Download
                                     </a>
                                   </Button>
                                   <Button
                                     type="button"
-                                    variant="outline"
-                                    size="xs"
-                                    onClick={() => attachResultToChat(variant)}
+                                    variant="secondary"
+                                    size="icon-xs"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      if (card.generationId) {
+                                        setSelectedRecentId(card.generationId);
+                                      }
+                                    }}
+                                    title="Fullscreen"
                                   >
-                                    <RefreshCcw className="h-3 w-3" />
-                                    Edit next
+                                    <Maximize2 className="h-3 w-3" />
                                   </Button>
                                 </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))
-                )}
+                              )}
+                            </button>
+                          )}
 
-                {isChatGenerating && (
-                  <div className="flex justify-start">
-                    <div className="rounded-lg border border-border bg-muted/35 px-3 py-2 text-sm text-muted-foreground">
-                      <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
-                      Working...
-                    </div>
-                  </div>
-                )}
-              </div>
+                          {card.state === "text" && (
+                            <div className="p-3 text-sm leading-relaxed">
+                              {renderThinkingBlock(card.streamThinking)}
+                              <p className="whitespace-pre-wrap break-words">
+                                {card.text || card.streamText || ""}
+                              </p>
+                            </div>
+                          )}
 
-              <form
-                onSubmit={handleChatSubmit}
-                onPaste={handleChatPaste}
-                className="border-t border-border p-3"
-              >
-                {chatAttachments.length > 0 && (
-                  <div className="mb-3 flex flex-wrap gap-2">
-                    {chatAttachments.map((item, index) => (
-                      <div
-                        key={`${item.file.name}-${item.previewUrl}`}
-                        className="group relative h-16 w-16 overflow-hidden rounded-md border bg-muted"
-                      >
-                        <Image
-                          src={item.previewUrl}
-                          alt={item.file.name || `Reference ${index + 1}`}
-                          fill
-                          sizes="64px"
-                          className="object-cover"
-                          unoptimized
-                        />
-                        <Button
-                          type="button"
-                          variant="destructive"
-                          size="icon-xs"
-                          className="absolute right-1 top-1"
-                          onClick={() => removeChatAttachment(index)}
-                          disabled={isChatGenerating}
-                        >
-                          <X className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="flex gap-2">
-                  <Textarea
-                    value={chatPrompt}
-                    onChange={(event) => setChatPrompt(event.target.value)}
-                    placeholder={
-                      chatAttachments.length > 0
-                        ? "Describe the edit for the attached reference..."
-                        : "Describe the image you want..."
-                    }
-                    rows={3}
-                    disabled={isChatGenerating}
-                    className="min-h-20 resize-none border-input bg-background text-base"
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && !event.shiftKey) {
-                        event.preventDefault();
-                        event.currentTarget.form?.requestSubmit();
-                      }
-                    }}
-                  />
-                  <div className="flex flex-col gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      onClick={() => chatImageInputRef.current?.click()}
-                      disabled={
-                        isChatGenerating ||
-                        chatAttachments.length >= MAX_EDIT_IMAGES
-                      }
-                      title="Attach reference images"
-                    >
-                      <ImagePlus className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      type="submit"
-                      size="icon"
-                      disabled={isChatGenerating || !chatPrompt.trim()}
-                      title="Send"
-                    >
-                      {isChatGenerating ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Send className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </div>
-                  <input
-                    ref={chatImageInputRef}
-                    type="file"
-                    multiple
-                    accept={IMAGE_ACCEPT}
-                    className="sr-only"
-                    onChange={(event) => {
-                      addChatAttachments(event.target.files);
-                      event.target.value = "";
-                    }}
-                  />
-                </div>
-              </form>
-            </div>
-
-            <aside className="space-y-4">
-              <div className="space-y-3 rounded-lg border border-border bg-background p-4">
-                <div>
-                  <span className="text-sm font-medium text-foreground">
-                    Auto mode
-                  </span>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    No reference generates a new image. Attached references use
-                    edit automatically.
-                  </p>
-                </div>
-
-                <div className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
-                  <p>
-                    Current action:{" "}
-                    <span className="font-medium text-foreground">
-                      {chatAttachments.length > 0 ? "Edit" : "Generate"}
-                    </span>
-                  </p>
-                  <p className="mt-1">
-                    Batch:{" "}
-                    <span className="font-medium text-foreground">
-                      {chatAttachments.length > 0 ? editBatchCount : batchCount}
-                    </span>
-                  </p>
-                  <p className="mt-1">
-                    Cost:{" "}
-                    <span className="font-medium text-foreground">
-                      {chatAttachments.length > 0
-                        ? chatEditBatchCreditCost
-                        : textBatchCreditCost}
-                    </span>
-                  </p>
-                </div>
-
-                {chatAttachments.length > 0 && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full"
-                    onClick={clearChatAttachments}
-                    disabled={isChatGenerating}
-                  >
-                    <X className="mr-2 h-4 w-4" />
-                    Clear references
-                  </Button>
-                )}
-              </div>
-
-              {chatGenerationControls}
-
-              <div className="space-y-3 rounded-lg border border-border bg-background p-4">
-                <div>
-                  <span className="text-sm font-medium text-foreground">
-                    Edit controls
-                  </span>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Used when references are attached.
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <label
-                    htmlFor="chat-edit-batch"
-                    className="text-xs font-medium text-muted-foreground"
-                  >
-                    Edit batch
-                  </label>
-                  <Select
-                    value={String(editBatchCount)}
-                    onValueChange={(value) => setEditBatchCount(Number(value))}
-                    disabled={isChatGenerating}
-                  >
-                    <SelectTrigger id="chat-edit-batch" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {BATCH_OPTIONS.map((count) => (
-                        <SelectItem key={count} value={String(count)}>
-                          {count} image{count > 1 ? "s" : ""}
-                        </SelectItem>
+                          {card.state === "error" && (
+                            <div className="space-y-3 p-3 text-sm text-destructive">
+                              <p className="break-words">
+                                {card.error || "Generation failed"}
+                              </p>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() =>
+                                  triggerBatchGeneration({
+                                    retryCardId: card.id,
+                                  })
+                                }
+                              >
+                                <RefreshCcw className="h-4 w-4" />
+                                Retry
+                              </Button>
+                            </div>
+                          )}
+                        </div>
                       ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <label
-                  htmlFor="chat-use-source-size"
-                  className="flex cursor-pointer items-start gap-2 text-sm font-medium text-foreground"
-                >
-                  <Checkbox
-                    id="chat-use-source-size"
-                    checked={useFirstImageSize}
-                    onCheckedChange={(checked) =>
-                      setUseFirstImageSize(checked === true)
-                    }
-                    disabled={isChatGenerating}
-                    className="mt-0.5"
-                  />
-                  <span>
-                    Use reference resolution
-                    <span className="mt-1 block text-xs font-normal text-muted-foreground">
-                      {chatEffectiveEditSize || "Attach a reference image"}
-                    </span>
-                  </span>
-                </label>
+                    </div>
+                    <div
+                      ref={batchLoadTriggerRef}
+                      className="flex h-20 flex-col items-center justify-center gap-1 text-xs text-muted-foreground"
+                    >
+                      {isBatchLoadingMore ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Generating...
+                        </>
+                      ) : (
+                        <>
+                          <ChevronDown className="h-4 w-4" />
+                          Scroll to generate more
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
-            </aside>
+            )}
           </div>
         </TabsContent>
       </Tabs>

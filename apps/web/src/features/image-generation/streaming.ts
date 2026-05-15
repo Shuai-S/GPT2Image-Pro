@@ -7,6 +7,16 @@ export type ImageStreamEvent =
       url?: string;
     }
   | {
+      type: "text_delta";
+      index?: number;
+      delta: string;
+    }
+  | {
+      type: "thinking_delta";
+      index?: number;
+      delta: string;
+    }
+  | {
       type: "completed";
       generationId?: string;
       imageUrl?: string;
@@ -14,6 +24,7 @@ export type ImageStreamEvent =
       size?: string;
       revisedPrompt?: string;
       responseText?: string;
+      responseThinking?: string;
       creditsConsumed?: number;
     }
   | {

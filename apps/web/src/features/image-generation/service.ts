@@ -11,6 +11,7 @@ import {
 } from "./resolution";
 import type {
   ApiConfig,
+  ChatHistoryMessage,
   ChatImageParams,
   EditImageParams,
   GenerateImageParams,
@@ -20,6 +21,7 @@ import type {
   ImageModeration,
   ImageQuality,
   PartialImageResult,
+  ThinkingLevel,
 } from "./types";
 
 const VALID_QUALITIES = new Set<ImageQuality>([
@@ -71,11 +73,17 @@ type ResponsesPayload = {
 
 type ResponsesRequestContent =
   | { type: "input_text"; text: string }
-  | { type: "input_image"; image_url: string };
+  | { type: "input_image"; image_url: string }
+  | { type: "output_text"; text: string };
 
 type ResponsesRequestMessage = {
-  role: "user";
+  role: "user" | "assistant";
   content: ResponsesRequestContent[];
+};
+
+type ReasoningConfig = {
+  effort: ThinkingLevel;
+  generate_summary?: "concise";
 };
 
 function getModel(config: ApiConfig, model?: string) {
@@ -142,6 +150,19 @@ function normalizeModeration(moderation?: string): ImageModeration | undefined {
     : undefined;
 }
 
+function normalizeThinking(thinking?: string): ThinkingLevel | undefined {
+  if (
+    thinking === "low" ||
+    thinking === "medium" ||
+    thinking === "high" ||
+    thinking === "xhigh"
+  ) {
+    return thinking;
+  }
+
+  return undefined;
+}
+
 function describeEndpoint(baseUrl: string, path: string) {
   try {
     const url = new URL(path, baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`);
@@ -185,6 +206,67 @@ function getDataUrl(image: ImageInputFile) {
     return image.url;
   }
   return `data:${image.type || "image/png"};base64,${image.data.toString("base64")}`;
+}
+
+function isUsableInputImageUrl(url: string) {
+  return (
+    url.startsWith("data:image/") ||
+    url.startsWith("http://") ||
+    url.startsWith("https://")
+  );
+}
+
+function historyVariantText(message: ChatHistoryMessage) {
+  const variants = message.variants || [];
+  const variant = variants[message.activeVariant || 0] || variants[0];
+  const imageNote = variant?.imageUrl
+    ? `\nGenerated image: ${variant.imageUrl}`
+    : "";
+  return `${variant?.text || message.text || ""}${imageNote}`;
+}
+
+function buildResponsesInput(
+  prompt: string,
+  images: ImageInputFile[] | undefined,
+  history: ChatHistoryMessage[] | undefined
+): ResponsesRequestMessage[] {
+  const input: ResponsesRequestMessage[] = [];
+
+  for (const message of history || []) {
+    if (message.error) continue;
+
+    if (message.role === "user") {
+      const content: ResponsesRequestContent[] = [
+        { type: "input_text", text: message.text || "" },
+      ];
+      for (const imageUrl of message.imageUrls || []) {
+        if (isUsableInputImageUrl(imageUrl)) {
+          content.push({ type: "input_image", image_url: imageUrl });
+        }
+      }
+      input.push({ role: "user", content });
+      continue;
+    }
+
+    const text = historyVariantText(message).trim();
+    if (text) {
+      input.push({
+        role: "assistant",
+        content: [{ type: "output_text", text }],
+      });
+    }
+  }
+
+  const currentContent: ResponsesRequestContent[] = [
+    { type: "input_text", text: prompt },
+    ...(images || []).map((image) => ({
+      type: "input_image" as const,
+      image_url: getDataUrl(image),
+    })),
+  ];
+  input.push({ role: "user", content: currentContent });
+
+  return input;
 }
 
 function appendImageParams(
@@ -291,8 +373,22 @@ function parseResponsesOutput(
   let imageBase64: string | undefined;
   let revisedPrompt: string | undefined;
   let responseText: string | undefined;
+  let responseThinking: string | undefined;
 
   for (const item of output || []) {
+    if (item.type === "reasoning" && item.summary) {
+      const text = item.summary
+        .filter((part) => part.type === "summary_text" && part.text)
+        .map((part) => part.text)
+        .join("\n")
+        .trim();
+      if (text) {
+        responseThinking = responseThinking
+          ? `${responseThinking}\n${text}`
+          : text;
+      }
+    }
+
     if (item.type === "image_generation_call" && item.result) {
       imageBase64 = item.result;
       if (item.revised_prompt) revisedPrompt = item.revised_prompt;
@@ -309,12 +405,13 @@ function parseResponsesOutput(
     }
   }
 
-  if (!imageBase64) return null;
+  if (!imageBase64 && !responseText && !responseThinking) return null;
 
   return {
     imageBase64,
     revisedPrompt,
     responseText,
+    responseThinking,
   };
 }
 
@@ -361,6 +458,30 @@ async function processResponsesEventPayload(
       state.fallbackResult = {
         imageBase64: item.result,
         revisedPrompt: item.revised_prompt,
+      };
+    }
+    return null;
+  }
+
+  if (eventName === "response.output_text.delta") {
+    const delta = payload.delta;
+    if (typeof delta === "string" && delta) {
+      await callbacks?.onTextDelta?.(delta);
+      state.fallbackResult = {
+        ...(state.fallbackResult || {}),
+        responseText: `${state.fallbackResult?.responseText || ""}${delta}`,
+      };
+    }
+    return null;
+  }
+
+  if (eventName === "response.reasoning_summary_text.delta") {
+    const delta = payload.delta;
+    if (typeof delta === "string" && delta) {
+      await callbacks?.onThinkingDelta?.(delta);
+      state.fallbackResult = {
+        ...(state.fallbackResult || {}),
+        responseThinking: `${state.fallbackResult?.responseThinking || ""}${delta}`,
       };
     }
     return null;
@@ -503,13 +624,9 @@ async function parseResponsesResponse(
   const data = (await response.json()) as ResponsesPayload;
   const result = parseResponsesOutput(data.output);
 
-  if (!result) {
-    return {
-      error: getPayloadError(data) || "API returned no image data",
-    };
-  }
-
-  return result;
+  return (
+    result || { error: getPayloadError(data) || "API returned no image data" }
+  );
 }
 
 type EventStreamParseState = {
@@ -873,14 +990,7 @@ export async function generateChatImage(
   try {
     const prompt = params.apiPrompt || params.prompt;
     const size = params.size || DEFAULT_IMAGE_SIZE;
-    const content: ResponsesRequestContent[] = [
-      { type: "input_text", text: prompt },
-      ...(params.images || []).map((image) => ({
-        type: "input_image" as const,
-        image_url: getDataUrl(image),
-      })),
-    ];
-    const input: ResponsesRequestMessage[] = [{ role: "user", content }];
+    const input = buildResponsesInput(prompt, params.images, params.history);
     const tool: {
       type: "image_generation";
       action: "auto";
@@ -894,6 +1004,11 @@ export async function generateChatImage(
       tool.size = size;
     }
 
+    const thinking = normalizeThinking(params.thinking);
+    const reasoning: ReasoningConfig | undefined = thinking
+      ? { effort: thinking, generate_summary: "concise" }
+      : undefined;
+
     const response = await fetch(
       `${stripTrailingSlash(config.baseUrl)}/responses`,
       {
@@ -906,7 +1021,8 @@ export async function generateChatImage(
           model,
           input,
           tools: [tool],
-          ...(config.useStream ? { stream: true } : {}),
+          ...(reasoning ? { reasoning } : {}),
+          ...(params.stream || config.useStream ? { stream: true } : {}),
         }),
       }
     );
