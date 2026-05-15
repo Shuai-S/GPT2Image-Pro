@@ -4,9 +4,12 @@ import { z } from "zod";
 
 import { authenticateExternalApiRequest } from "@/features/external-api/auth";
 import {
+  createExternalImageStreamResponse,
   getImageBase64,
   getPublicImageUrl,
+  openAIImageError,
   toOpenAIImageData,
+  wantsImageStreamResponse,
 } from "@/features/external-api/images";
 import { runImageGenerationForUser } from "@/features/image-generation/operations";
 import {
@@ -30,102 +33,6 @@ const externalImageGenerationSchema = z.object({
   response_format: z.enum(["url", "b64_json"]).optional(),
   stream: z.boolean().optional(),
 });
-
-function openAIError(message: string, status = 400, code?: string) {
-  return NextResponse.json(
-    {
-      error: {
-        message,
-        type: "invalid_request_error",
-        code: code || null,
-      },
-    },
-    { status }
-  );
-}
-
-function wantsStreamResponse(request: NextRequest, stream?: boolean) {
-  if (stream) return true;
-  return request.headers.get("accept")?.includes("text/event-stream") ?? false;
-}
-
-type ExternalImageStreamEvent = {
-  event?: string;
-  data: unknown;
-};
-
-function createExternalImageStreamResponse(
-  run: (emit: (event: ExternalImageStreamEvent) => Promise<void>) => Promise<void>
-) {
-  const encoder = new TextEncoder();
-  const keepAliveMs = 15_000;
-  let keepAlive: ReturnType<typeof setInterval> | undefined;
-  let cancelled = false;
-
-  return new Response(
-    new ReadableStream({
-      async start(controller) {
-        let closed = false;
-
-        const write = (chunk: string) => {
-          if (closed || cancelled) return;
-          try {
-            controller.enqueue(encoder.encode(chunk));
-          } catch {
-            closed = true;
-          }
-        };
-
-        keepAlive = setInterval(() => {
-          write(": ping\n\n");
-        }, keepAliveMs);
-
-        const emit = async ({ event, data }: ExternalImageStreamEvent) => {
-          if (event) write(`event: ${event}\n`);
-          write(`data: ${typeof data === "string" ? data : JSON.stringify(data)}\n\n`);
-        };
-
-        try {
-          write(": open\n\n");
-          await run(emit);
-          await emit({ data: "[DONE]" });
-        } catch (error) {
-          await emit({
-            event: "error",
-            data: {
-              type: "upstream_error",
-              message:
-                error instanceof Error ? error.message : "Image stream failed",
-            },
-          });
-        } finally {
-          if (keepAlive) {
-            clearInterval(keepAlive);
-            keepAlive = undefined;
-          }
-          if (!(closed || cancelled)) {
-            closed = true;
-            controller.close();
-          }
-        }
-      },
-      cancel() {
-        cancelled = true;
-        if (keepAlive) {
-          clearInterval(keepAlive);
-          keepAlive = undefined;
-        }
-      },
-    }),
-    {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive",
-      },
-    }
-  );
-}
 
 async function toStreamCompletedPayload(
   request: Request,
@@ -173,19 +80,21 @@ function toPartialPayload(
 export const POST = withApiLogging(async (request: NextRequest) => {
   const auth = await authenticateExternalApiRequest(request);
   if (!auth) {
-    return openAIError("Invalid or missing API key", 401, "invalid_api_key");
+    return openAIImageError("Invalid or missing API key", 401, "invalid_api_key");
   }
 
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return openAIError("Invalid JSON body");
+    return openAIImageError("Invalid JSON body");
   }
 
   const parsed = externalImageGenerationSchema.safeParse(body);
   if (!parsed.success) {
-    return openAIError(parsed.error.issues[0]?.message || "Invalid request");
+    return openAIImageError(
+      parsed.error.issues[0]?.message || "Invalid request"
+    );
   }
 
   const input = {
@@ -200,7 +109,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
   const count = parsed.data.n || 1;
   const responseFormat = parsed.data.response_format || "url";
 
-  if (wantsStreamResponse(request, parsed.data.stream)) {
+  if (wantsImageStreamResponse(request, parsed.data.stream)) {
     return createExternalImageStreamResponse(async (emit) => {
       for (let index = 0; index < count; index++) {
         const result = await runImageGenerationForUser(input, {
@@ -246,7 +155,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
   for (let index = 0; index < count; index++) {
     const result = await runImageGenerationForUser(input);
     if (result.error) {
-      return openAIError(result.error, 400);
+      return openAIImageError(result.error, 400);
     }
     data.push(await toOpenAIImageData(request, result, responseFormat));
   }

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
 
 type CurrentSession = {
   user?: {
@@ -12,19 +13,30 @@ type CurrentSession = {
 } | null;
 
 export function useCurrentSession() {
+  const pathname = usePathname();
   const [data, setData] = useState<CurrentSession>(null);
   const [isPending, setIsPending] = useState(true);
+  const [reloadToken, setReloadToken] = useState(0);
+
+  const reload = useCallback(() => {
+    setReloadToken((value) => value + 1);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
 
     async function loadSession() {
+      setIsPending(true);
+      setData(null);
+
       try {
+        const requestTag = `${Date.now().toString(36)}-${reloadToken}-${encodeURIComponent(pathname)}`;
         const response = await fetch(
-          `/api/session/current?t=${Date.now().toString(36)}`,
+          `/api/session/current?t=${requestTag}`,
           {
             cache: "no-store",
             credentials: "include",
+            method: "POST",
             headers: {
               "Cache-Control": "no-store",
             },
@@ -38,7 +50,7 @@ export function useCurrentSession() {
         }
 
         setData((await response.json()) as CurrentSession);
-      } catch (error) {
+      } catch {
         if (!controller.signal.aborted) {
           setData(null);
         }
@@ -52,7 +64,23 @@ export function useCurrentSession() {
     loadSession();
 
     return () => controller.abort();
-  }, []);
+  }, [pathname, reloadToken]);
 
-  return { data, isPending };
+  useEffect(() => {
+    const refreshOnVisible = () => {
+      if (document.visibilityState === "visible") reload();
+    };
+
+    window.addEventListener("focus", reload);
+    window.addEventListener("pageshow", reload);
+    document.addEventListener("visibilitychange", refreshOnVisible);
+
+    return () => {
+      window.removeEventListener("focus", reload);
+      window.removeEventListener("pageshow", reload);
+      document.removeEventListener("visibilitychange", refreshOnVisible);
+    };
+  }, [reload]);
+
+  return { data, isPending, reload };
 }

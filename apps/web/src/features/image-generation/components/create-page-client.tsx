@@ -382,6 +382,8 @@ export function CreatePageClient({
   const [editBatchCount, setEditBatchCount] = useState(1);
   const [editModel, setEditModel] = useState("default");
   const [useFirstImageSize, setUseFirstImageSize] = useState(true);
+  const [chatCustomResolutionOpen, setChatCustomResolutionOpen] =
+    useState(false);
   const [editWidth, setEditWidth] = useState(defaultDimensions.width);
   const [editHeight, setEditHeight] = useState(defaultDimensions.height);
   const [editImages, setEditImages] = useState<EditImageFile[]>([]);
@@ -477,6 +479,13 @@ export function CreatePageClient({
   const customEditSizeCheck = useMemo(
     () => validateImageSize(customEditSize),
     [customEditSize]
+  );
+  const chatSizeCheck = useMemo(
+    () =>
+      chatAttachments.length > 0 && !useFirstImageSize
+        ? customEditSizeCheck
+        : sizeCheck,
+    [chatAttachments.length, customEditSizeCheck, sizeCheck, useFirstImageSize]
   );
   const busy = isGenerating || isEditing || isChatGenerating;
   const firstPreviewUrl = editImages[0]?.previewUrl || null;
@@ -868,6 +877,12 @@ export function CreatePageClient({
     setEditWidth(firstImageSize.width);
     setEditHeight(firstImageSize.height);
   }, [firstImageSize, useFirstImageSize]);
+
+  useEffect(() => {
+    if (!useFirstImageSize || !chatFirstImageSize) return;
+    setEditWidth(chatFirstImageSize.width);
+    setEditHeight(chatFirstImageSize.height);
+  }, [chatFirstImageSize, useFirstImageSize]);
 
   useEffect(() => {
     const canvas = maskCanvasRef.current;
@@ -1269,140 +1284,262 @@ export function CreatePageClient({
     );
   };
 
-  const renderChatInput = () => (
-    <form
-      onSubmit={handleChatSubmit}
-      onPaste={handleChatPaste}
-      className="border-t border-border p-3"
-    >
-      {chatAttachments.length > 0 && (
-        <div className="mb-3 flex flex-wrap gap-2">
-          {chatAttachments.map((item, index) => (
-            <button
-              type="button"
-              key={`${item.file.name}-${item.previewUrl}`}
-              className="group relative h-12 w-12 overflow-hidden rounded-md border bg-muted"
-              onClick={() => removeChatAttachment(index)}
-              disabled={isChatGenerating}
-              title="Remove reference image"
-            >
-              <Image
-                src={item.previewUrl}
-                alt={item.file.name || `Reference ${index + 1}`}
-                fill
-                sizes="48px"
-                className="object-cover"
-                unoptimized
-              />
-              <span className="absolute inset-0 hidden items-center justify-center bg-background/70 group-hover:flex">
-                <X className="h-3.5 w-3.5 text-foreground" />
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
+  const renderChatInput = () => {
+    const isEditChat = chatAttachments.length > 0;
+    const activeChatSize =
+      isEditChat && useFirstImageSize
+        ? chatEffectiveEditSize || "Reference image"
+        : isEditChat
+          ? customEditSize
+          : size;
+    const selectedChatPreset =
+      isEditChat && useFirstImageSize && chatEffectiveEditSize
+        ? "reference"
+        : typeof activeChatSize === "string" &&
+            IMAGE_RESOLUTION_PRESETS.some(
+              (preset) => preset.value === activeChatSize
+            )
+          ? activeChatSize
+          : "custom";
 
-      <div className="mb-2 flex flex-wrap items-center gap-2">
-        <Select
-          value={chatThinking}
-          onValueChange={(value) => setChatThinking(value as ChatThinkingLevel)}
-          disabled={isChatGenerating}
-        >
-          <SelectTrigger className="h-8 w-[138px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {CHAT_THINKING_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                Thinking {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select
-          value={
-            IMAGE_RESOLUTION_PRESETS.some((preset) => preset.value === size)
-              ? size
-              : "custom"
-          }
-          onValueChange={(value) => {
-            if (value !== "custom") applyPreset(value);
-          }}
-          disabled={isChatGenerating}
-        >
-          <SelectTrigger className="h-8 w-[168px]">
-            <SelectValue placeholder={size} />
-          </SelectTrigger>
-          <SelectContent>
-            {IMAGE_RESOLUTION_PRESETS.map((preset) => (
-              <SelectItem key={preset.value} value={preset.value}>
-                {preset.label} · {preset.detail}
-              </SelectItem>
-            ))}
-            <SelectItem value="custom">Custom · {size}</SelectItem>
-          </SelectContent>
-        </Select>
-        <span className="ml-auto text-xs text-muted-foreground">
-          Cost{" "}
-          <span className="font-medium text-foreground">
-            {formattedChatSingleCreditCost}
-          </span>
-        </span>
-      </div>
+    const applyChatPreset = (value: string) => {
+      if (value === "reference") {
+        setUseFirstImageSize(true);
+        setChatCustomResolutionOpen(false);
+        return;
+      }
 
-      <div className="flex items-end gap-2 rounded-lg border border-border bg-background p-2">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          onClick={() => chatImageInputRef.current?.click()}
-          disabled={
-            isChatGenerating || chatAttachments.length >= MAX_EDIT_IMAGES
-          }
-          title="Attach reference image"
-        >
-          <ImagePlus className="h-4 w-4" />
-        </Button>
-        <Textarea
-          value={chatPrompt}
-          onChange={(event) => setChatPrompt(event.target.value)}
-          placeholder="Continue creating..."
-          rows={1}
-          disabled={isChatGenerating}
-          className="max-h-40 min-h-9 resize-none border-0 bg-transparent px-0 py-2 text-base shadow-none focus-visible:ring-0"
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              event.currentTarget.form?.requestSubmit();
+      if (value === "custom") {
+        setChatCustomResolutionOpen(true);
+        if (isEditChat) setUseFirstImageSize(false);
+        return;
+      }
+
+      if (isEditChat) {
+        applyEditPreset(value);
+      } else {
+        applyPreset(value);
+      }
+      setChatCustomResolutionOpen(false);
+    };
+
+    return (
+      <form
+        onSubmit={handleChatSubmit}
+        onPaste={handleChatPaste}
+        className="border-t border-border p-3"
+      >
+        {chatAttachments.length > 0 && (
+          <div className="mb-3 flex flex-wrap gap-2">
+            {chatAttachments.map((item, index) => (
+              <button
+                type="button"
+                key={`${item.file.name}-${item.previewUrl}`}
+                className="group relative h-12 w-12 overflow-hidden rounded-md border bg-muted"
+                onClick={() => removeChatAttachment(index)}
+                disabled={isChatGenerating}
+                title="Remove reference image"
+              >
+                <Image
+                  src={item.previewUrl}
+                  alt={item.file.name || `Reference ${index + 1}`}
+                  fill
+                  sizes="48px"
+                  className="object-cover"
+                  unoptimized
+                />
+                <span className="absolute inset-0 hidden items-center justify-center bg-background/70 group-hover:flex">
+                  <X className="h-3.5 w-3.5 text-foreground" />
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <Select
+            value={chatThinking}
+            onValueChange={(value) =>
+              setChatThinking(value as ChatThinkingLevel)
             }
-          }}
-        />
-        <Button
-          type="submit"
-          size="icon-sm"
-          disabled={isChatGenerating || !chatPrompt.trim()}
-          title="Send"
-        >
-          {isChatGenerating ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Send className="h-4 w-4" />
+            disabled={isChatGenerating}
+          >
+            <SelectTrigger className="h-8 w-[138px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {CHAT_THINKING_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  Thinking {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={selectedChatPreset}
+            onValueChange={applyChatPreset}
+            disabled={isChatGenerating}
+          >
+            <SelectTrigger className="h-8 w-[168px]">
+              <SelectValue placeholder={activeChatSize} />
+            </SelectTrigger>
+            <SelectContent>
+              {isEditChat && chatEffectiveEditSize && (
+                <SelectItem value="reference">
+                  Reference · {chatEffectiveEditSize}
+                </SelectItem>
+              )}
+              {IMAGE_RESOLUTION_PRESETS.map((preset) => (
+                <SelectItem key={preset.value} value={preset.value}>
+                  {preset.label} · {preset.detail}
+                </SelectItem>
+              ))}
+              <SelectItem value="custom">Custom · {activeChatSize}</SelectItem>
+            </SelectContent>
+          </Select>
+          {isEditChat && (
+            <Button
+              type="button"
+              variant={useFirstImageSize ? "secondary" : "outline"}
+              size="sm"
+              onClick={() => setUseFirstImageSize((value) => !value)}
+              disabled={isChatGenerating || !chatFirstImageSize}
+            >
+              Reference size
+            </Button>
           )}
-        </Button>
-        <input
-          ref={chatImageInputRef}
-          type="file"
-          multiple
-          accept={IMAGE_ACCEPT}
-          className="sr-only"
-          onChange={(event) => {
-            void addChatAttachments(event.target.files);
-            event.target.value = "";
-          }}
-        />
-      </div>
-    </form>
-  );
+          <span className="ml-auto text-xs text-muted-foreground">
+            Cost{" "}
+            <span className="font-medium text-foreground">
+              {formattedChatSingleCreditCost}
+            </span>
+          </span>
+        </div>
+
+        {chatCustomResolutionOpen && (
+          <div className="mb-2 rounded-md border border-border bg-muted/30 p-2">
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="space-y-1">
+                <label
+                  htmlFor="chat-width"
+                  className="text-xs font-medium text-muted-foreground"
+                >
+                  Width
+                </label>
+                <Input
+                  id="chat-width"
+                  type="number"
+                  min={256}
+                  max={MAX_IMAGE_DIMENSION}
+                  step={IMAGE_DIMENSION_STEP}
+                  value={isEditChat ? editWidth : width}
+                  onChange={(event) => {
+                    const next = Number(event.target.value) || 0;
+                    if (isEditChat) {
+                      setUseFirstImageSize(false);
+                      setEditWidth(next);
+                    } else {
+                      setWidth(next);
+                    }
+                  }}
+                  disabled={isChatGenerating}
+                  className="h-8 w-28"
+                />
+              </div>
+              <div className="pb-2 text-muted-foreground">x</div>
+              <div className="space-y-1">
+                <label
+                  htmlFor="chat-height"
+                  className="text-xs font-medium text-muted-foreground"
+                >
+                  Height
+                </label>
+                <Input
+                  id="chat-height"
+                  type="number"
+                  min={256}
+                  max={MAX_IMAGE_DIMENSION}
+                  step={IMAGE_DIMENSION_STEP}
+                  value={isEditChat ? editHeight : height}
+                  onChange={(event) => {
+                    const next = Number(event.target.value) || 0;
+                    if (isEditChat) {
+                      setUseFirstImageSize(false);
+                      setEditHeight(next);
+                    } else {
+                      setHeight(next);
+                    }
+                  }}
+                  disabled={isChatGenerating}
+                  className="h-8 w-28"
+                />
+              </div>
+              <div className="pb-2 text-xs text-muted-foreground">
+                {activeChatSize}
+              </div>
+            </div>
+            {!chatSizeCheck.valid && (
+              <p className="mt-2 text-xs text-destructive">
+                {chatSizeCheck.message}
+              </p>
+            )}
+          </div>
+        )}
+
+        <div className="flex items-end gap-2 rounded-lg border border-border bg-background p-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => chatImageInputRef.current?.click()}
+            disabled={
+              isChatGenerating || chatAttachments.length >= MAX_EDIT_IMAGES
+            }
+            title="Attach reference image"
+          >
+            <ImagePlus className="h-4 w-4" />
+          </Button>
+          <Textarea
+            value={chatPrompt}
+            onChange={(event) => setChatPrompt(event.target.value)}
+            placeholder="Continue creating..."
+            rows={1}
+            disabled={isChatGenerating}
+            className="max-h-40 min-h-9 resize-none border-0 bg-transparent px-0 py-2 text-base shadow-none focus-visible:ring-0"
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
+          />
+          <Button
+            type="submit"
+            size="icon-sm"
+            disabled={isChatGenerating || !chatPrompt.trim()}
+            title="Send"
+          >
+            {isChatGenerating ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
+          </Button>
+          <input
+            ref={chatImageInputRef}
+            type="file"
+            multiple
+            accept={IMAGE_ACCEPT}
+            className="sr-only"
+            onChange={(event) => {
+              void addChatAttachments(event.target.files);
+              event.target.value = "";
+            }}
+          />
+        </div>
+      </form>
+    );
+  };
 
   const addBatchAttachments = async (files: FileList | File[] | null) => {
     await addChatAttachments(files);

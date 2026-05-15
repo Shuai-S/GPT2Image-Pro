@@ -8,10 +8,7 @@
  */
 
 import { createCreditsPurchaseCheckout } from "@repo/shared/credits/actions";
-import {
-  CREDIT_PACKAGES,
-  CREDITS_EXPIRY_DAYS,
-} from "@repo/shared/credits/config";
+import { CREDIT_PACKAGES } from "@repo/shared/credits/config";
 import { Badge } from "@repo/ui/components/badge";
 import { Button } from "@repo/ui/components/button";
 import {
@@ -71,8 +68,8 @@ export function BuyCreditPackagesView() {
           Buy Credits
         </h1>
         <p className="text-muted-foreground">
-          One-time credit packages. No subscription required. Credits are valid
-          for {CREDITS_EXPIRY_DAYS} days after purchase.
+          One-time credit packages. No subscription required. Credits follow the
+          issued batch expiry shown on your usage page.
         </p>
       </div>
 
@@ -139,7 +136,7 @@ export function BuyCreditPackagesView() {
                   </li>
                   <li className="flex items-center gap-2 text-muted-foreground">
                     <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />
-                    Valid for {CREDITS_EXPIRY_DAYS} days
+                    Batch expiry shown in Usage
                   </li>
                   <li className="flex items-center gap-2 text-muted-foreground">
                     <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />¥

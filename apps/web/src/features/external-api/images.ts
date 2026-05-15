@@ -6,6 +6,11 @@ type OpenAIImageData = {
   revised_prompt?: string;
 };
 
+export type ExternalImageStreamEvent = {
+  event?: string;
+  data: unknown;
+};
+
 export function getPublicImageUrl(request: Request, imageUrl?: string) {
   if (!imageUrl) return undefined;
   if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
@@ -60,4 +65,97 @@ export async function toOpenAIImageData(
   }
 
   return data;
+}
+
+export function openAIImageError(message: string, status = 400, code?: string) {
+  return Response.json(
+    {
+      error: {
+        message,
+        type: "invalid_request_error",
+        code: code || null,
+      },
+    },
+    { status }
+  );
+}
+
+export function wantsImageStreamResponse(request: Request, stream?: boolean) {
+  if (stream) return true;
+  return request.headers.get("accept")?.includes("text/event-stream") ?? false;
+}
+
+export function createExternalImageStreamResponse(
+  run: (emit: (event: ExternalImageStreamEvent) => Promise<void>) => Promise<void>
+) {
+  const encoder = new TextEncoder();
+  const keepAliveMs = 15_000;
+  let keepAlive: ReturnType<typeof setInterval> | undefined;
+  let cancelled = false;
+
+  return new Response(
+    new ReadableStream({
+      async start(controller) {
+        let closed = false;
+
+        const write = (chunk: string) => {
+          if (closed || cancelled) return;
+          try {
+            controller.enqueue(encoder.encode(chunk));
+          } catch {
+            closed = true;
+          }
+        };
+
+        keepAlive = setInterval(() => {
+          write(": ping\n\n");
+        }, keepAliveMs);
+
+        const emit = async ({ event, data }: ExternalImageStreamEvent) => {
+          if (event) write(`event: ${event}\n`);
+          write(
+            `data: ${typeof data === "string" ? data : JSON.stringify(data)}\n\n`
+          );
+        };
+
+        try {
+          write(": open\n\n");
+          await run(emit);
+          await emit({ data: "[DONE]" });
+        } catch (error) {
+          await emit({
+            event: "error",
+            data: {
+              type: "upstream_error",
+              message:
+                error instanceof Error ? error.message : "Image stream failed",
+            },
+          });
+        } finally {
+          if (keepAlive) {
+            clearInterval(keepAlive);
+            keepAlive = undefined;
+          }
+          if (!(closed || cancelled)) {
+            closed = true;
+            controller.close();
+          }
+        }
+      },
+      cancel() {
+        cancelled = true;
+        if (keepAlive) {
+          clearInterval(keepAlive);
+          keepAlive = undefined;
+        }
+      },
+    }),
+    {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+      },
+    }
+  );
 }

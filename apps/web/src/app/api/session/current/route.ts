@@ -1,6 +1,12 @@
+import { db, user } from "@repo/database";
 import { auth } from "@repo/shared/auth";
+import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 function withNoStore(response: NextResponse) {
   response.headers.set(
@@ -16,9 +22,41 @@ function withNoStore(response: NextResponse) {
 }
 
 export async function GET() {
+  return getCurrentSessionResponse();
+}
+
+export async function POST() {
+  return getCurrentSessionResponse();
+}
+
+async function getCurrentSessionResponse() {
   const session = await auth.api.getSession({
     headers: await headers(),
   });
 
-  return withNoStore(NextResponse.json(session ?? null));
+  if (!session?.user?.id) {
+    return withNoStore(NextResponse.json(null));
+  }
+
+  const [currentUser] = await db
+    .select({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      image: user.image,
+    })
+    .from(user)
+    .where(eq(user.id, session.user.id))
+    .limit(1);
+
+  if (!currentUser) {
+    return withNoStore(NextResponse.json(null));
+  }
+
+  return withNoStore(
+    NextResponse.json({
+      ...session,
+      user: currentUser,
+    })
+  );
 }

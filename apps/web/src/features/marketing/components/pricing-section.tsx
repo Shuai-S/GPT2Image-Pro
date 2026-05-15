@@ -416,6 +416,18 @@ export function PricingSection({ currentPriceId }: PricingSectionProps) {
             );
           })}
         </div>
+
+        <div className="mt-8 rounded-lg border bg-muted/30 px-4 py-4">
+          <h3 className="text-sm font-semibold">{t("billingRules.title")}</h3>
+          <ul className="mt-3 grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
+            {(t.raw("billingRules.items") as string[]).map((item) => (
+              <li key={item} className="flex gap-2">
+                <Check className="mt-0.5 h-4 w-4 shrink-0 text-foreground" />
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
       </div>
     </section>
   );

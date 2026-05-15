@@ -41,7 +41,7 @@
       },
       "batch": {
         "title": "Credits System",
-        "description": "Subscription credits are valid for the plan period, and one-time credit packs are valid for 365 days after issuance. Track usage, monitor consumption, and top up whenever you need."
+        "description": "Subscription credits are valid for the plan period, and other credits follow their issued batch expiry. Track usage, monitor consumption, and top up whenever you need."
       },
       "multilingual": {
         "title": "Dark Mode",
@@ -155,7 +155,7 @@
       },
       {
         "question": "How does the credits system work?",
-        "answer": "Every image generation consumes a small number of credits based on the model and parameters you choose. Subscription credits are valid for the matching plan period, while one-time credit packs are valid for 365 days after issuance. You can review expiring batches on the usage page, subscribe for recurring credits, or top up whenever you need more."
+        "answer": "Every image generation consumes credits based on output pixels and moderation checks. Subscription credits are valid for the matching plan period, while other credits follow the batch expiry shown on the usage page."
       },
       {
         "question": "How do I get started?",
@@ -317,7 +317,7 @@
         "multiModel": "Multi-model Support",
         "multiModelDesc": "Leading image generation models in one place",
         "credits": "Credits System",
-        "creditsDesc": "Plan-period subscription credits; 365-day credit packs"
+        "creditsDesc": "Plan-period subscription credits with clear batch expiries"
       }
     }
   },
@@ -385,7 +385,7 @@
   },
   "Pricing": {
     "title": "Simple, transparent pricing",
-    "subtitle": "Pay by credits. Subscription credits are valid for the plan period, and one-time credit packs are <strong>valid for 365 days</strong> after issuance. Image base cost scales by exact pixels from 4K=10 credits, with fixed moderation cost per check added.",
+    "subtitle": "Pay by credits. Subscription credits are valid for the plan period, and other credits follow the batch expiry shown on the usage page. Image base cost scales by exact pixels from 4K=10 credits, with fixed moderation cost per check added.",
     "creditsUpfront": "all at once",
     "creditsPerYear": "credits / year",
     "monthly": "Monthly",
@@ -398,6 +398,15 @@
     "manageSubscription": "Manage Subscription",
     "booksNote": "≈ {count} images generated",
     "cardsNote": "≈ {count} image generations",
+    "billingRules": {
+      "title": "Credit billing rules",
+      "items": [
+        "Base image generation: 3840×2160 (4K) = 10 credits. Other sizes scale by exact output pixels.",
+        "Text moderation: fixed 0.03 credits per request, calculated only from the latest input text.",
+        "Image moderation: fixed 0.06 credits for each image in the current input; text-to-image has no image moderation fee.",
+        "Final price = base image credits + text moderation credits + input image moderation credits, shown and charged with two decimals."
+      ]
+    },
     "plans": {
       "free": {
         "name": "Free",
@@ -407,7 +416,7 @@
         "creditsLabel": "credits",
         "creditsNote": "one-time",
         "features": {
-          "creditsValidity": "Credits valid for 365 days",
+          "creditsValidity": "Credits follow their issued batch expiry",
           "credits": "100 credits (one-time)",
           "input": "Chat-to-image generation",
           "characters": "Standard image resolutions",
@@ -560,7 +569,7 @@
     },
     "externalApi": {
       "title": "External API access",
-      "description": "Create an API key for OpenAI-compatible model listing and image generation. External calls use your account credits and appear in your generation history.",
+      "description": "Create an API key for OpenAI-compatible model listing, image generation, and image editing. External calls use your account credits and appear in your generation history.",
       "defaultName": "Default API key",
       "newKeyLabel": "New API key. It is shown only once.",
       "namePlaceholder": "API key name",

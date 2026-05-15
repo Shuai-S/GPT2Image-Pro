@@ -199,9 +199,12 @@ export function DashboardSidebar() {
         </nav>
 
         {/* 用户信息区域 */}
-        <div className="border-t border-sidebar-border p-3">
+        <div
+          className="border-t border-sidebar-border p-3"
+          key={user?.id || "session-loading"}
+        >
           {user ? (
-            <Popover open={open} onOpenChange={setOpen}>
+            <Popover key={user.id} open={open} onOpenChange={setOpen}>
               <PopoverTrigger asChild>
                 <button
                   type="button"
@@ -212,6 +215,7 @@ export function DashboardSidebar() {
                 >
                   <Avatar className="h-8 w-8 shrink-0">
                     <AvatarImage
+                      key={user.image || user.id}
                       src={user.image || undefined}
                       alt={user.name}
                     />
@@ -224,7 +228,7 @@ export function DashboardSidebar() {
                       <div className="flex-1 truncate text-left">
                         <div className="flex items-center gap-2">
                           <p className="text-sm font-medium">{user.name}</p>
-                          <CreditBalanceBadge />
+                          <CreditBalanceBadge key={user.id} />
                         </div>
                         <p className="truncate text-xs text-muted-foreground">
                           {user.email}
@@ -246,6 +250,7 @@ export function DashboardSidebar() {
                 <div className="flex items-center gap-3 p-4">
                   <Avatar className="h-10 w-10">
                     <AvatarImage
+                      key={user.image || user.id}
                       src={user.image || undefined}
                       alt={user.name}
                     />
