@@ -9,6 +9,7 @@ import type { PseoPage } from "../lib/pseo-data";
 
 export function PseoHero({ page }: { page: PseoPage }) {
   const { hero, stats } = page.data;
+  const isZh = page.locale === "zh";
 
   return (
     <section className="container relative overflow-hidden py-20 md:py-28">
@@ -80,19 +81,25 @@ export function PseoHero({ page }: { page: PseoPage }) {
 
               <div className="mt-6 space-y-3 rounded-xl bg-muted/60 p-4 text-sm">
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Category</span>
+                  <span className="text-muted-foreground">
+                    {isZh ? "分类" : "Category"}
+                  </span>
                   <span className="font-medium text-foreground">
                     {page.category}
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Locale</span>
+                  <span className="text-muted-foreground">
+                    {isZh ? "语言" : "Locale"}
+                  </span>
                   <span className="font-medium text-foreground">
                     {page.locale.toUpperCase()}
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Slug</span>
+                  <span className="text-muted-foreground">
+                    {isZh ? "路径" : "Slug"}
+                  </span>
                   <span className="font-medium text-foreground">
                     {page.slug}
                   </span>

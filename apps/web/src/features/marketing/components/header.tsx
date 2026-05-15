@@ -154,7 +154,7 @@ export function Header() {
       {/* 移动端导航 Sheet */}
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetContent side="right" className="w-72 p-0">
-          <SheetTitle className="sr-only">Navigation</SheetTitle>
+          <SheetTitle className="sr-only">{tNav("menu")}</SheetTitle>
           <div className="flex h-full flex-col">
             {/* 导航链接 */}
             <nav className="flex-1 overflow-y-auto px-4 pt-12">

@@ -1,7 +1,32 @@
 import { Github, Twitter } from "lucide-react";
 import Link from "next/link";
+import { getLocale } from "next-intl/server";
 
 import { footerNav, siteConfig } from "@repo/shared/config";
+
+const footerTitleMap = {
+  product: {
+    Pricing: "定价",
+    Docs: "文档",
+    "Contact Us": "联系我们",
+  },
+  legal: {
+    "Terms of Service": "服务条款",
+    "Privacy Policy": "隐私政策",
+    "Cookie Policy": "Cookie 政策",
+  },
+} as const;
+
+function getFooterLinkTitle(
+  title: string,
+  group: keyof typeof footerTitleMap,
+  isZh: boolean
+) {
+  if (!isZh) return title;
+  return footerTitleMap[group][
+    title as keyof (typeof footerTitleMap)[typeof group]
+  ] || title;
+}
 
 /**
  * Marketing 页面底部
@@ -12,7 +37,9 @@ import { footerNav, siteConfig } from "@repo/shared/config";
  * - 社交媒体链接
  * - 版权信息
  */
-export function Footer() {
+export async function Footer() {
+  const isZh = (await getLocale()) === "zh";
+
   return (
     <footer className="border-t bg-background">
       <div className="container py-16">
@@ -23,7 +50,9 @@ export function Footer() {
               <span className="font-serif text-xl font-medium">GPT2IMAGE</span>
             </Link>
             <p className="text-sm text-muted-foreground">
-              AI-powered chat-to-image generation platform.
+              {isZh
+                ? "AI 驱动的对话生图平台。"
+                : "AI-powered chat-to-image generation platform."}
             </p>
           </div>
 
@@ -31,7 +60,9 @@ export function Footer() {
           <div className="grid grid-cols-2 gap-8">
             {/* 产品 */}
             <div>
-              <h3 className="mb-4 text-sm font-semibold">Product</h3>
+              <h3 className="mb-4 text-sm font-semibold">
+                {isZh ? "产品" : "Product"}
+              </h3>
               <ul className="space-y-3">
                 {footerNav.product.map((link) => (
                   <li key={link.href}>
@@ -42,7 +73,7 @@ export function Footer() {
                         : {})}
                       className="text-sm text-muted-foreground transition-colors hover:text-foreground"
                     >
-                      {link.title}
+                      {getFooterLinkTitle(link.title, "product", isZh)}
                     </Link>
                   </li>
                 ))}
@@ -51,7 +82,9 @@ export function Footer() {
 
             {/* 法律 */}
             <div>
-              <h3 className="mb-4 text-sm font-semibold">Legal</h3>
+              <h3 className="mb-4 text-sm font-semibold">
+                {isZh ? "法律" : "Legal"}
+              </h3>
               <ul className="space-y-3">
                 {footerNav.legal.map((link) => (
                   <li key={link.href}>
@@ -59,7 +92,7 @@ export function Footer() {
                       href={link.href}
                       className="text-sm text-muted-foreground transition-colors hover:text-foreground"
                     >
-                      {link.title}
+                      {getFooterLinkTitle(link.title, "legal", isZh)}
                     </Link>
                   </li>
                 ))}
@@ -71,8 +104,9 @@ export function Footer() {
         {/* 底部栏 */}
         <div className="mt-12 flex flex-col items-center justify-between gap-4 border-t pt-8 sm:flex-row">
           <p className="text-sm text-muted-foreground">
-            &copy; {new Date().getFullYear()} {siteConfig.name}. All rights
-            reserved.
+            {isZh
+              ? `© ${new Date().getFullYear()} ${siteConfig.name}。保留所有权利。`
+              : `© ${new Date().getFullYear()} ${siteConfig.name}. All rights reserved.`}
           </p>
 
           {/* 社交链接 */}

@@ -11,12 +11,12 @@ export function RepoCard() {
         <div>
           <CardTitle className="text-base font-semibold">tweakcn</CardTitle>
           <p className="text-sm text-muted-foreground">
-            An AI-powered theme editor for shadcn/ui components.
+            面向 shadcn/ui 组件的 AI 主题编辑器。
           </p>
         </div>
         <Button variant="outline" size="sm" className="gap-1">
           <Star className="h-3 w-3" />
-          Star
+          收藏
         </Button>
       </CardHeader>
       <CardContent>
@@ -29,7 +29,7 @@ export function RepoCard() {
             <Star className="h-3 w-3" />
             1.2k
           </div>
-          <div>Updated Apr 2024</div>
+          <div>更新于 2024 年 4 月</div>
         </div>
       </CardContent>
     </Card>
