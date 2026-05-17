@@ -212,6 +212,12 @@ function toBlockResult(
   return { decision: "block", provider, reason, details };
 }
 
+function formatModerationErrors(
+  errors: Array<{ provider: ModerationProvider; error: string }>
+) {
+  return errors.map(({ provider, error }) => `${provider}: ${error}`).join("; ");
+}
+
 function getAliyunClient(config: AliyunConfig) {
   return new Green20220302(
     new AliyunOpenApiConfig({
@@ -709,10 +715,12 @@ export async function moderateContent(
   }
 
   if (errors.length > 0) {
+    const reason = formatModerationErrors(errors);
+
     if (await shouldFailClosed()) {
       return {
         decision: "error",
-        reason: "Content moderation failed",
+        reason,
         details: errors,
       };
     }

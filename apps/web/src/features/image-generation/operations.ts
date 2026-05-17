@@ -387,15 +387,20 @@ export async function runImageGenerationForUser(
       moderation.decision === "block"
         ? "Content failed moderation"
         : "Content moderation is temporarily unavailable";
+    const responseMessage = moderation.reason || message;
     await db
       .update(generation)
       .set({
         status: "failed",
-        error: moderation.reason || message,
+        error: responseMessage,
         creditsConsumed: chargedCredits,
       })
       .where(eq(generation.id, generationId));
-    return { error: message, generationId, creditsConsumed: chargedCredits };
+    return {
+      error: responseMessage,
+      generationId,
+      creditsConsumed: chargedCredits,
+    };
   }
 
   const result =
