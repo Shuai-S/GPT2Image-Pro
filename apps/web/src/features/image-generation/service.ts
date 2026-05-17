@@ -5,6 +5,7 @@ import { getRuntimeSettingString } from "@repo/shared/system-settings";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import {
   canUseCustomApi,
+  GPT52_CHAT_MODEL,
   GPT54_CHAT_MODEL,
   GPT54_MINI_CHAT_MODEL,
   GPT55_CHAT_MODEL,
@@ -121,6 +122,7 @@ function normalizeResponsesModel(
   if (
     requested === GPT54_CHAT_MODEL ||
     requested === GPT54_MINI_CHAT_MODEL ||
+    requested === GPT52_CHAT_MODEL ||
     requested === GPT55_CHAT_MODEL
   ) {
     return requested;
