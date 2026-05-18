@@ -40,6 +40,8 @@ const VALID_THINKING = new Set<ThinkingLevel>([
   "high",
   "xhigh",
 ]);
+const MAX_IMAGE_MB = MAX_IMAGE_BYTES / 1024 / 1024;
+const MAX_CHAT_REQUEST_MB = MAX_CHAT_REQUEST_BYTES / 1024 / 1024;
 const MAX_BATCH_COUNT = 10;
 const MAX_CHAT_CONTEXT_CHARS = 30_000;
 
@@ -342,7 +344,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
     formData = await request.formData();
   } catch {
     return errorResponse(
-      "Upload is too large or incomplete. Use smaller reference images and try again.",
+      `Upload is too large or incomplete. Each reference image must be ${MAX_IMAGE_MB}MB or smaller, and the total upload must be ${MAX_CHAT_REQUEST_MB}MB or smaller.`,
       413
     );
   }

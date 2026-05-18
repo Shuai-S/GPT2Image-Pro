@@ -28,6 +28,8 @@ const VALID_QUALITIES = new Set<ImageQuality>([
   "medium",
   "high",
 ]);
+const MAX_IMAGE_MB = MAX_IMAGE_BYTES / 1024 / 1024;
+const MAX_EDIT_REQUEST_MB = MAX_EDIT_REQUEST_BYTES / 1024 / 1024;
 const MAX_BATCH_COUNT = 10;
 
 function errorResponse(message: string, status = 400) {
@@ -200,7 +202,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
     formData = await request.formData();
   } catch {
     return errorResponse(
-      "Upload is too large or incomplete. Use smaller source images and try again.",
+      `Upload is too large or incomplete. Each source image must be ${MAX_IMAGE_MB}MB or smaller, and the total upload must be ${MAX_EDIT_REQUEST_MB}MB or smaller.`,
       413
     );
   }
