@@ -219,8 +219,8 @@ const defaultDimensions = parseImageSize(DEFAULT_IMAGE_SIZE) || {
 };
 
 const MAX_EDIT_IMAGES = 16;
-const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
-const MAX_EDIT_REQUEST_BYTES = 75 * 1024 * 1024;
+const DEFAULT_MAX_IMAGE_BYTES = 25 * 1024 * 1024;
+const DEFAULT_MAX_EDIT_REQUEST_BYTES = 75 * 1024 * 1024;
 const CHAT_TEXT_ONLY_CREDITS = 1;
 const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp";
 const EDIT_MODEL_OPTIONS = [
@@ -293,6 +293,10 @@ interface CreatePageClientProps {
   balance: number;
   recentGenerations: RecentGeneration[];
   plan: SubscriptionPlan;
+  uploadLimits: {
+    maxFileSizeBytes: number;
+    maxUploadBytes: number;
+  };
 }
 
 function isImageFile(file: File) {
@@ -485,6 +489,7 @@ export function CreatePageClient({
   balance: initialBalance,
   recentGenerations: initialRecent,
   plan,
+  uploadLimits,
 }: CreatePageClientProps) {
   const locale = useLocale();
   const isZh = locale === "zh";
@@ -547,6 +552,10 @@ export function CreatePageClient({
   const chatAllowed = canUseChat(plan);
   const gpt55ChatAllowed = canUseGpt55Chat(plan);
   const promptOptimizationAllowed = canUsePromptOptimization(plan);
+  const maxImageBytes =
+    uploadLimits.maxFileSizeBytes || DEFAULT_MAX_IMAGE_BYTES;
+  const maxEditRequestBytes =
+    uploadLimits.maxUploadBytes || DEFAULT_MAX_EDIT_REQUEST_BYTES;
   const [activeMode, setActiveMode] = useState<ActiveMode>("text");
   const [prompt, setPrompt] = useState("");
   const [editPrompt, setEditPrompt] = useState("");
@@ -1410,11 +1419,11 @@ export function CreatePageClient({
         });
         continue;
       }
-      if (file.size > MAX_IMAGE_BYTES) {
+      if (file.size > maxImageBytes) {
         toast.error(copy("File too large", "文件过大"), {
           description: copy(
-            `${file.name} exceeds 25MB.`,
-            `${file.name} 超过 25MB。`
+            `${file.name} exceeds ${formatMegabytes(maxImageBytes)}.`,
+            `${file.name} 超过 ${formatMegabytes(maxImageBytes)}。`
           ),
         });
         continue;
@@ -2006,11 +2015,11 @@ export function CreatePageClient({
       (total, item) => total + item.file.size,
       0
     );
-    if (totalUploadSize > MAX_EDIT_REQUEST_BYTES) {
+    if (totalUploadSize > maxEditRequestBytes) {
       toast.error(copy("Upload is too large", "上传内容过大"), {
         description: copy(
-          `Reference images total ${formatMegabytes(totalUploadSize)}. Keep the total under ${formatMegabytes(MAX_EDIT_REQUEST_BYTES)}.`,
-          `参考图片总大小为 ${formatMegabytes(totalUploadSize)}，请控制在 ${formatMegabytes(MAX_EDIT_REQUEST_BYTES)} 以内。`
+          `Reference images total ${formatMegabytes(totalUploadSize)}. Keep the total under ${formatMegabytes(maxEditRequestBytes)}.`,
+          `参考图片总大小为 ${formatMegabytes(totalUploadSize)}，请控制在 ${formatMegabytes(maxEditRequestBytes)} 以内。`
         ),
       });
       return false;
@@ -2265,11 +2274,11 @@ export function CreatePageClient({
         (total, item) => total + item.file.size,
         0
       );
-      if (totalUploadSize > MAX_EDIT_REQUEST_BYTES) {
+      if (totalUploadSize > maxEditRequestBytes) {
         toast.error(copy("Upload is too large", "上传内容过大"), {
           description: copy(
-            `Reference images total ${formatMegabytes(totalUploadSize)}. Keep the total under ${formatMegabytes(MAX_EDIT_REQUEST_BYTES)}.`,
-            `参考图片总大小为 ${formatMegabytes(totalUploadSize)}，请控制在 ${formatMegabytes(MAX_EDIT_REQUEST_BYTES)} 以内。`
+            `Reference images total ${formatMegabytes(totalUploadSize)}. Keep the total under ${formatMegabytes(maxEditRequestBytes)}.`,
+            `参考图片总大小为 ${formatMegabytes(totalUploadSize)}，请控制在 ${formatMegabytes(maxEditRequestBytes)} 以内。`
           ),
         });
         return;
@@ -2487,11 +2496,11 @@ export function CreatePageClient({
     const totalUploadSize =
       editImages.reduce((total, item) => total + item.file.size, 0) +
       (maskFile?.file.size || 0);
-    if (totalUploadSize > MAX_EDIT_REQUEST_BYTES) {
+    if (totalUploadSize > maxEditRequestBytes) {
       toast.error(copy("Upload is too large", "上传内容过大"), {
         description: copy(
-          `Source images and mask total ${formatMegabytes(totalUploadSize)}. Keep the total under ${formatMegabytes(MAX_EDIT_REQUEST_BYTES)}.`,
-          `源图片和蒙版总大小为 ${formatMegabytes(totalUploadSize)}，请控制在 ${formatMegabytes(MAX_EDIT_REQUEST_BYTES)} 以内。`
+          `Source images and mask total ${formatMegabytes(totalUploadSize)}. Keep the total under ${formatMegabytes(maxEditRequestBytes)}.`,
+          `源图片和蒙版总大小为 ${formatMegabytes(totalUploadSize)}，请控制在 ${formatMegabytes(maxEditRequestBytes)} 以内。`
         ),
       });
       return;
@@ -2599,11 +2608,11 @@ export function CreatePageClient({
         });
         continue;
       }
-      if (file.size > MAX_IMAGE_BYTES) {
+      if (file.size > maxImageBytes) {
         toast.error(copy("File too large", "文件过大"), {
           description: copy(
-            `${file.name} exceeds 25MB.`,
-            `${file.name} 超过 25MB。`
+            `${file.name} exceeds ${formatMegabytes(maxImageBytes)}.`,
+            `${file.name} 超过 ${formatMegabytes(maxImageBytes)}。`
           ),
         });
         continue;
@@ -2682,9 +2691,12 @@ export function CreatePageClient({
       toast.error(copy("Mask must be a PNG file", "蒙版必须是 PNG 文件"));
       return;
     }
-    if (file.size > MAX_IMAGE_BYTES) {
+    if (file.size > maxImageBytes) {
       toast.error(copy("Mask is too large", "蒙版文件过大"), {
-        description: copy("Maximum size is 25MB.", "最大支持 25MB。"),
+        description: copy(
+          `Maximum size is ${formatMegabytes(maxImageBytes)}.`,
+          `最大支持 ${formatMegabytes(maxImageBytes)}。`
+        ),
       });
       return;
     }
@@ -3214,8 +3226,8 @@ export function CreatePageClient({
                   </span>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {copy(
-                      `Upload PNG, JPEG, or WebP. Up to ${MAX_EDIT_IMAGES} images, ${formatMegabytes(MAX_EDIT_REQUEST_BYTES)} total.`,
-                      `上传 PNG、JPEG 或 WebP，最多 ${MAX_EDIT_IMAGES} 张，总大小不超过 ${formatMegabytes(MAX_EDIT_REQUEST_BYTES)}。`
+                      `Upload PNG, JPEG, or WebP. Up to ${MAX_EDIT_IMAGES} images, ${formatMegabytes(maxEditRequestBytes)} total.`,
+                      `上传 PNG、JPEG 或 WebP，最多 ${MAX_EDIT_IMAGES} 张，总大小不超过 ${formatMegabytes(maxEditRequestBytes)}。`
                     )}
                   </p>
                 </div>

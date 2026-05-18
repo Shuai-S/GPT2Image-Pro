@@ -10,5 +10,6 @@ export { Header } from "./header";
 export { HeroSection } from "./hero-section";
 export { HowItWorks } from "./how-it-works";
 export { PricingSection } from "./pricing-section";
+export { SlaStatusSection } from "./sla-status-section";
 export { Testimonials } from "./testimonials";
 export { UseCasesSection } from "./use-cases-section";

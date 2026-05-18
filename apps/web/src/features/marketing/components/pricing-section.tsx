@@ -40,10 +40,19 @@ function parsePlanNumber(value: string) {
  * 计划功能 keys（按顺序显示，credits 单独突出显示）
  */
 const PLAN_FEATURE_KEYS: Record<string, string[]> = {
-  free: ["creditsValidity", "input", "fileSize", "queue", "export", "history"],
+  free: [
+    "creditsValidity",
+    "input",
+    "batch",
+    "fileSize",
+    "queue",
+    "export",
+    "history",
+  ],
   starter: [
     "creditsValidity",
     "input",
+    "batch",
     "fileSize",
     "queue",
     "externalApi",
@@ -55,6 +64,7 @@ const PLAN_FEATURE_KEYS: Record<string, string[]> = {
   pro: [
     "creditsValidity",
     "input",
+    "batch",
     "fileSize",
     "chat",
     "promptOptimization",
@@ -68,6 +78,7 @@ const PLAN_FEATURE_KEYS: Record<string, string[]> = {
   ultra: [
     "creditsValidity",
     "input",
+    "batch",
     "fileSize",
     "chatGpt55",
     "moderationSettlement",
@@ -82,6 +93,7 @@ const PLAN_FEATURE_KEYS: Record<string, string[]> = {
   enterprise: [
     "creditsValidity",
     "input",
+    "batch",
     "fileSize",
     "chatGpt55",
     "moderationSettlement",
@@ -104,6 +116,15 @@ interface PricingSectionProps {
   /** 用户当前订阅的价格 ID */
   currentPriceId?: string | null;
   payment?: PaymentConfig & { yearlyEnabled?: boolean };
+  uploadLimits?: Partial<
+    Record<
+      SubscriptionPlan,
+      {
+        maxFileSizeBytes: number;
+        maxUploadBytes: number;
+      }
+    >
+  >;
 }
 
 /**
@@ -112,6 +133,7 @@ interface PricingSectionProps {
 export function PricingSection({
   currentPriceId,
   payment,
+  uploadLimits,
 }: PricingSectionProps) {
   const t = useTranslations("Pricing");
   const [isPending, startTransition] = useTransition();
@@ -233,6 +255,23 @@ export function PricingSection({
   const isPopular = (planId: string) => {
     const config = getPlanConfig(planId);
     return config && "popular" in config && config.popular;
+  };
+
+  const formatMegabytes = (bytes: number) =>
+    `${Math.round(bytes / 1024 / 1024)}MB`;
+
+  const getFeatureText = (planId: string, featureKey: string) => {
+    if (featureKey !== "fileSize") {
+      return t(`plans.${planId}.features.${featureKey}`);
+    }
+
+    const limits = uploadLimits?.[planId as SubscriptionPlan];
+    if (!limits) return t(`plans.${planId}.features.${featureKey}`);
+
+    return t("uploadLimitFeature", {
+      file: formatMegabytes(limits.maxFileSizeBytes),
+      total: formatMegabytes(limits.maxUploadBytes),
+    });
   };
 
   /**
@@ -395,7 +434,7 @@ export function PricingSection({
                       <li key={featureKey} className="flex items-center gap-2">
                         <Check className="h-4 w-4 shrink-0 text-foreground" />
                         <span className="text-sm text-muted-foreground">
-                          {t(`plans.${planId}.features.${featureKey}`)}
+                          {getFeatureText(planId, featureKey)}
                         </span>
                       </li>
                     ))}

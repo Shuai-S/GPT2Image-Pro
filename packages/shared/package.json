@@ -38,6 +38,7 @@
     "./subscription/actions/get-user-plan": "./src/subscription/actions/get-user-plan.ts",
     "./subscription/components/plan-badge": "./src/subscription/components/plan-badge.tsx",
     "./subscription/services/user-plan": "./src/subscription/services/user-plan.ts",
+    "./subscription/services/upload-limits": "./src/subscription/services/upload-limits.ts",
     "./mail/*": "./src/mail/*",
     "./moderation": "./src/moderation/index.ts",
     "./config": "./src/config/index.ts",

@@ -18,7 +18,7 @@ const nextConfig = {
   // Enable standalone output for Docker deployment
   output: "standalone",
   experimental: {
-    proxyClientMaxBodySize: "80mb",
+    proxyClientMaxBodySize: "200mb",
   },
   // Transpile monorepo packages
   transpilePackages: ["@repo/ui", "@repo/database", "@repo/shared"],

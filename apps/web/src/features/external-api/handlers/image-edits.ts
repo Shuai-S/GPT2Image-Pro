@@ -1,6 +1,8 @@
 import { withApiLogging } from "@repo/shared/api-logger";
 import { getStorageProvider } from "@repo/shared/storage/providers";
 import { getRuntimeSettingString } from "@repo/shared/system-settings";
+import { getPlanUploadLimits } from "@repo/shared/subscription/services/upload-limits";
+import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
 
@@ -28,8 +30,7 @@ import type {
 } from "@/features/image-generation/types";
 
 const MAX_EDIT_IMAGES = 16;
-const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
-const MAX_EDIT_REQUEST_BYTES = 75 * 1024 * 1024;
+const DEFAULT_MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 const MODERATION_UPLOAD_URL_EXPIRES = 600;
 const MAX_BATCH_COUNT = 10;
 const VALID_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
@@ -39,8 +40,9 @@ const VALID_QUALITIES = new Set<ImageQuality>([
   "medium",
   "high",
 ]);
-const MAX_IMAGE_MB = MAX_IMAGE_BYTES / 1024 / 1024;
-const MAX_EDIT_REQUEST_MB = MAX_EDIT_REQUEST_BYTES / 1024 / 1024;
+function formatMegabytes(bytes: number) {
+  return `${bytes / 1024 / 1024}MB`;
+}
 
 function getText(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -90,14 +92,18 @@ function getImageFiles(formData: FormData) {
   return images;
 }
 
-function validateImageFile(file: File, options?: { mask?: boolean }) {
+function validateImageFile(
+  file: File,
+  options?: { mask?: boolean; maxImageBytes?: number }
+) {
   if (file.size <= 0) {
     throw new Error(`${file.name || "Image"} is empty.`);
   }
 
-  if (file.size > MAX_IMAGE_BYTES) {
+  const maxImageBytes = options?.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES;
+  if (file.size > maxImageBytes) {
     throw new Error(
-      `${file.name || "Image"} exceeds the ${MAX_IMAGE_BYTES / 1024 / 1024}MB limit.`
+      `${file.name || "Image"} exceeds the ${formatMegabytes(maxImageBytes)} limit.`
     );
   }
 
@@ -249,12 +255,17 @@ export const postExternalImageEdits = withApiLogging(
       );
     }
 
+    const plan = await getUserPlan(auth.userId);
+    const uploadLimits = await getPlanUploadLimits(plan.plan);
+    const maxImageBytes = uploadLimits.maxFileSizeBytes;
+    const maxRequestBytes = uploadLimits.maxUploadBytes;
+
     let formData: FormData;
     try {
       formData = await request.formData();
     } catch {
       return openAIImageError(
-        `Upload is too large or incomplete. Each source image must be ${MAX_IMAGE_MB}MB or smaller, and the total upload must be ${MAX_EDIT_REQUEST_MB}MB or smaller.`,
+        `Upload is too large or incomplete. Each source image must be ${formatMegabytes(maxImageBytes)} or smaller, and the total upload must be ${formatMegabytes(maxRequestBytes)} or smaller.`,
         413
       );
     }
@@ -328,7 +339,7 @@ export const postExternalImageEdits = withApiLogging(
 
     try {
       for (const file of sourceFiles) {
-        validateImageFile(file);
+        validateImageFile(file, { maxImageBytes });
       }
 
       const maskFile = formData.get("mask");
@@ -336,17 +347,17 @@ export const postExternalImageEdits = withApiLogging(
         return openAIImageError("Mask must be a PNG file.");
       }
       if (maskFile instanceof File) {
-        validateImageFile(maskFile, { mask: true });
+        validateImageFile(maskFile, { mask: true, maxImageBytes });
       }
 
       if (
         getTotalUploadSize(
           sourceFiles,
           maskFile instanceof File ? maskFile : undefined
-        ) > MAX_EDIT_REQUEST_BYTES
+        ) > maxRequestBytes
       ) {
         return openAIImageError(
-          `Total upload size must be no more than ${MAX_EDIT_REQUEST_BYTES / 1024 / 1024}MB.`,
+          `Total upload size must be no more than ${formatMegabytes(maxRequestBytes)}.`,
           413
         );
       }

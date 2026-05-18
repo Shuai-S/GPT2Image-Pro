@@ -46,6 +46,16 @@ export type SettingKey =
   | "PLAN_PRO_MONTHLY_CREDITS"
   | "PLAN_ULTRA_MONTHLY_CREDITS"
   | "PLAN_ENTERPRISE_MONTHLY_CREDITS"
+  | "PLAN_FREE_MAX_FILE_MB"
+  | "PLAN_FREE_MAX_UPLOAD_MB"
+  | "PLAN_STARTER_MAX_FILE_MB"
+  | "PLAN_STARTER_MAX_UPLOAD_MB"
+  | "PLAN_PRO_MAX_FILE_MB"
+  | "PLAN_PRO_MAX_UPLOAD_MB"
+  | "PLAN_ULTRA_MAX_FILE_MB"
+  | "PLAN_ULTRA_MAX_UPLOAD_MB"
+  | "PLAN_ENTERPRISE_MAX_FILE_MB"
+  | "PLAN_ENTERPRISE_MAX_UPLOAD_MB"
   | "PLAN_STARTER_MONTHLY_AMOUNT"
   | "PLAN_STARTER_YEARLY_AMOUNT"
   | "PLAN_PRO_MONTHLY_AMOUNT"
@@ -352,6 +362,86 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     category: "plans",
     valueType: "number",
     defaultValue: 320000,
+  },
+  {
+    key: "PLAN_FREE_MAX_FILE_MB",
+    label: "Free 单图上传 MB",
+    description: "Free 套餐单张输入图片或蒙版的大小上限。",
+    category: "plans",
+    valueType: "number",
+    defaultValue: 5,
+  },
+  {
+    key: "PLAN_FREE_MAX_UPLOAD_MB",
+    label: "Free 总上传 MB",
+    description: "Free 套餐单次图生图/对话上传的总大小上限。",
+    category: "plans",
+    valueType: "number",
+    defaultValue: 75,
+  },
+  {
+    key: "PLAN_STARTER_MAX_FILE_MB",
+    label: "Starter 单图上传 MB",
+    description: "Starter 套餐单张输入图片或蒙版的大小上限。",
+    category: "plans",
+    valueType: "number",
+    defaultValue: 20,
+  },
+  {
+    key: "PLAN_STARTER_MAX_UPLOAD_MB",
+    label: "Starter 总上传 MB",
+    description: "Starter 套餐单次图生图/对话上传的总大小上限。",
+    category: "plans",
+    valueType: "number",
+    defaultValue: 75,
+  },
+  {
+    key: "PLAN_PRO_MAX_FILE_MB",
+    label: "Pro 单图上传 MB",
+    description: "Pro 套餐单张输入图片或蒙版的大小上限。",
+    category: "plans",
+    valueType: "number",
+    defaultValue: 50,
+  },
+  {
+    key: "PLAN_PRO_MAX_UPLOAD_MB",
+    label: "Pro 总上传 MB",
+    description: "Pro 套餐单次图生图/对话上传的总大小上限。",
+    category: "plans",
+    valueType: "number",
+    defaultValue: 75,
+  },
+  {
+    key: "PLAN_ULTRA_MAX_FILE_MB",
+    label: "Ultra 单图上传 MB",
+    description: "Ultra 套餐单张输入图片或蒙版的大小上限。",
+    category: "plans",
+    valueType: "number",
+    defaultValue: 100,
+  },
+  {
+    key: "PLAN_ULTRA_MAX_UPLOAD_MB",
+    label: "Ultra 总上传 MB",
+    description: "Ultra 套餐单次图生图/对话上传的总大小上限。",
+    category: "plans",
+    valueType: "number",
+    defaultValue: 100,
+  },
+  {
+    key: "PLAN_ENTERPRISE_MAX_FILE_MB",
+    label: "Enterprise 单图上传 MB",
+    description: "Enterprise 套餐单张输入图片或蒙版的大小上限。",
+    category: "plans",
+    valueType: "number",
+    defaultValue: 200,
+  },
+  {
+    key: "PLAN_ENTERPRISE_MAX_UPLOAD_MB",
+    label: "Enterprise 总上传 MB",
+    description: "Enterprise 套餐单次图生图/对话上传的总大小上限。",
+    category: "plans",
+    valueType: "number",
+    defaultValue: 200,
   },
   {
     key: "PLAN_STARTER_MONTHLY_AMOUNT",

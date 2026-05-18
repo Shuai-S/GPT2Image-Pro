@@ -37,6 +37,18 @@ export const RESPONSES_IMAGE_MODELS = [
 
 export type ResponsesImageModel = (typeof RESPONSES_IMAGE_MODELS)[number];
 
+export type UploadLimitSettingKey =
+  | "PLAN_FREE_MAX_FILE_MB"
+  | "PLAN_FREE_MAX_UPLOAD_MB"
+  | "PLAN_STARTER_MAX_FILE_MB"
+  | "PLAN_STARTER_MAX_UPLOAD_MB"
+  | "PLAN_PRO_MAX_FILE_MB"
+  | "PLAN_PRO_MAX_UPLOAD_MB"
+  | "PLAN_ULTRA_MAX_FILE_MB"
+  | "PLAN_ULTRA_MAX_UPLOAD_MB"
+  | "PLAN_ENTERPRISE_MAX_FILE_MB"
+  | "PLAN_ENTERPRISE_MAX_UPLOAD_MB";
+
 /**
  * 队列优先级
  */
@@ -50,6 +62,8 @@ export interface PlanPrivileges {
   name: string;
   /** 单文件大小上限 (bytes) */
   maxFileSizeBytes: number;
+  /** 单次图片编辑/对话上传总大小上限 (bytes) */
+  maxUploadBytes: number;
   /** 队列优先级 */
   queuePriority: QueuePriority;
   /** 单用户图片生成并发上限 */
@@ -69,6 +83,7 @@ export const PLAN_PRIVILEGES: Record<SubscriptionPlan, PlanPrivileges> = {
   free: {
     name: "Free",
     maxFileSizeBytes: 5 * 1024 * 1024, // 5MB
+    maxUploadBytes: 75 * 1024 * 1024, // 75MB
     queuePriority: "normal",
     imageGenerationConcurrency: 2,
     monthlyCredits: 100, // 一次性
@@ -76,6 +91,7 @@ export const PLAN_PRIVILEGES: Record<SubscriptionPlan, PlanPrivileges> = {
   starter: {
     name: "Starter",
     maxFileSizeBytes: 20 * 1024 * 1024, // 20MB
+    maxUploadBytes: 75 * 1024 * 1024, // 75MB
     queuePriority: "normal",
     imageGenerationConcurrency: 5,
     monthlyCredits: 5_000,
@@ -83,6 +99,7 @@ export const PLAN_PRIVILEGES: Record<SubscriptionPlan, PlanPrivileges> = {
   pro: {
     name: "Pro",
     maxFileSizeBytes: 50 * 1024 * 1024, // 50MB
+    maxUploadBytes: 75 * 1024 * 1024, // 75MB
     queuePriority: "priority",
     imageGenerationConcurrency: 15,
     monthlyCredits: 20_000,
@@ -90,13 +107,15 @@ export const PLAN_PRIVILEGES: Record<SubscriptionPlan, PlanPrivileges> = {
   ultra: {
     name: "Ultra",
     maxFileSizeBytes: 100 * 1024 * 1024, // 100MB
+    maxUploadBytes: 100 * 1024 * 1024, // 100MB
     queuePriority: "highest",
     imageGenerationConcurrency: 50,
     monthlyCredits: 80_000,
   },
   enterprise: {
     name: "Enterprise",
-    maxFileSizeBytes: 100 * 1024 * 1024, // 100MB
+    maxFileSizeBytes: 200 * 1024 * 1024, // 200MB
+    maxUploadBytes: 200 * 1024 * 1024, // 200MB
     queuePriority: "highest",
     imageGenerationConcurrency: 100,
     monthlyCredits: 320_000,
@@ -170,6 +189,35 @@ export function getPlanFromPriceId(priceId: string): SubscriptionPlan | null {
 export function getPlanPrivileges(plan: SubscriptionPlan): PlanPrivileges {
   return PLAN_PRIVILEGES[plan];
 }
+
+export const PLAN_UPLOAD_LIMIT_SETTING_KEYS: Record<
+  SubscriptionPlan,
+  {
+    maxFileMb: UploadLimitSettingKey;
+    maxUploadMb: UploadLimitSettingKey;
+  }
+> = {
+  free: {
+    maxFileMb: "PLAN_FREE_MAX_FILE_MB",
+    maxUploadMb: "PLAN_FREE_MAX_UPLOAD_MB",
+  },
+  starter: {
+    maxFileMb: "PLAN_STARTER_MAX_FILE_MB",
+    maxUploadMb: "PLAN_STARTER_MAX_UPLOAD_MB",
+  },
+  pro: {
+    maxFileMb: "PLAN_PRO_MAX_FILE_MB",
+    maxUploadMb: "PLAN_PRO_MAX_UPLOAD_MB",
+  },
+  ultra: {
+    maxFileMb: "PLAN_ULTRA_MAX_FILE_MB",
+    maxUploadMb: "PLAN_ULTRA_MAX_UPLOAD_MB",
+  },
+  enterprise: {
+    maxFileMb: "PLAN_ENTERPRISE_MAX_FILE_MB",
+    maxUploadMb: "PLAN_ENTERPRISE_MAX_UPLOAD_MB",
+  },
+};
 
 /**
  * 检查当前计划是否达到目标计划等级

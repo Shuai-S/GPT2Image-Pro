@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { SiteJsonLd, SoftwareAppJsonLd } from "@/components/seo/json-ld";
 import { siteConfig } from "@repo/shared/config";
 import { getRuntimePaymentConfig } from "@repo/shared/config/payment-runtime";
+import { getAllPlanUploadLimits } from "@repo/shared/subscription/services/upload-limits";
 import {
   CTASection,
   FAQSection,
@@ -9,9 +10,14 @@ import {
   HeroSection,
   HowItWorks,
   PricingSection,
+  SlaStatusSection,
   Testimonials,
   UseCasesSection,
 } from "@/features/marketing/components";
+import { getRecentGenerationSlaStats } from "@/features/image-generation/sla";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 /**
  * 生成首页 Metadata
@@ -75,7 +81,11 @@ export default async function HomePage({
   params: Promise<{ locale: string }>;
 }) {
   const { locale } = await params;
-  const runtimePaymentConfig = await getRuntimePaymentConfig();
+  const [runtimePaymentConfig, uploadLimits, slaStats] = await Promise.all([
+    getRuntimePaymentConfig(),
+    getAllPlanUploadLimits(),
+    getRecentGenerationSlaStats(1000),
+  ]);
 
   return (
     <>
@@ -89,7 +99,8 @@ export default async function HomePage({
       <HowItWorks />
       <UseCasesSection />
       <Testimonials />
-      <PricingSection payment={runtimePaymentConfig} />
+      <SlaStatusSection locale={locale} stats={slaStats} />
+      <PricingSection payment={runtimePaymentConfig} uploadLimits={uploadLimits} />
       <FAQSection />
       <CTASection />
     </>

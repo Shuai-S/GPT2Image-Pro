@@ -1,6 +1,7 @@
 import { getCurrentUser } from "@repo/shared/auth/server";
 
 import { getCreditsBalance } from "@repo/shared/credits/core";
+import { getPlanUploadLimits } from "@repo/shared/subscription/services/upload-limits";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { getLocale } from "next-intl/server";
 import { redirect } from "next/navigation";
@@ -17,6 +18,7 @@ export default async function CreatePage() {
     getUserRecentGenerations(user.id, 6),
     getUserPlan(user.id),
   ]);
+  const uploadLimits = await getPlanUploadLimits(plan.plan);
 
   const balance = creditsData?.balance || 0;
 
@@ -39,6 +41,7 @@ export default async function CreatePage() {
       balance={balance}
       recentGenerations={recents}
       plan={plan.plan}
+      uploadLimits={uploadLimits}
     />
   );
 }

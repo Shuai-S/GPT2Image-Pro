@@ -1,8 +1,9 @@
 import { withApiLogging } from "@repo/shared/api-logger";
 import { auth } from "@repo/shared/auth";
+import { canUseChat } from "@repo/shared/config/subscription-plan";
 import { getStorageProvider } from "@repo/shared/storage/providers";
 import { getRuntimeSettingString } from "@repo/shared/system-settings";
-import { canUseChat } from "@repo/shared/config/subscription-plan";
+import { getPlanUploadLimits } from "@repo/shared/subscription/services/upload-limits";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { randomUUID } from "node:crypto";
 import { type NextRequest, NextResponse } from "next/server";
@@ -22,8 +23,7 @@ import type {
 } from "@/features/image-generation/types";
 
 const MAX_CHAT_IMAGES = 16;
-const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
-const MAX_CHAT_REQUEST_BYTES = 75 * 1024 * 1024;
+const DEFAULT_MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 const MODERATION_UPLOAD_URL_EXPIRES = 600;
 const VALID_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const VALID_QUALITIES = new Set<ImageQuality>([
@@ -40,10 +40,12 @@ const VALID_THINKING = new Set<ThinkingLevel>([
   "high",
   "xhigh",
 ]);
-const MAX_IMAGE_MB = MAX_IMAGE_BYTES / 1024 / 1024;
-const MAX_CHAT_REQUEST_MB = MAX_CHAT_REQUEST_BYTES / 1024 / 1024;
 const MAX_BATCH_COUNT = 10;
 const MAX_CHAT_CONTEXT_CHARS = 30_000;
+
+function formatMegabytes(bytes: number) {
+  return `${bytes / 1024 / 1024}MB`;
+}
 
 function errorResponse(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
@@ -234,14 +236,14 @@ function limitChatContext(params: {
   return { history: limited };
 }
 
-function validateImageFile(file: File) {
+function validateImageFile(file: File, maxImageBytes = DEFAULT_MAX_IMAGE_BYTES) {
   if (file.size <= 0) {
     throw new Error(`${file.name || "Image"} is empty.`);
   }
 
-  if (file.size > MAX_IMAGE_BYTES) {
+  if (file.size > maxImageBytes) {
     throw new Error(
-      `${file.name || "Image"} exceeds the ${MAX_IMAGE_BYTES / 1024 / 1024}MB limit.`
+      `${file.name || "Image"} exceeds the ${formatMegabytes(maxImageBytes)} limit.`
     );
   }
 
@@ -338,13 +340,16 @@ export const POST = withApiLogging(async (request: NextRequest) => {
   if (!canUseChat(plan.plan)) {
     return errorResponse("Chat mode requires Pro plan or higher.", 403);
   }
+  const uploadLimits = await getPlanUploadLimits(plan.plan);
+  const maxImageBytes = uploadLimits.maxFileSizeBytes;
+  const maxRequestBytes = uploadLimits.maxUploadBytes;
 
   let formData: FormData;
   try {
     formData = await request.formData();
   } catch {
     return errorResponse(
-      `Upload is too large or incomplete. Each reference image must be ${MAX_IMAGE_MB}MB or smaller, and the total upload must be ${MAX_CHAT_REQUEST_MB}MB or smaller.`,
+      `Upload is too large or incomplete. Each reference image must be ${formatMegabytes(maxImageBytes)} or smaller, and the total upload must be ${formatMegabytes(maxRequestBytes)} or smaller.`,
       413
     );
   }
@@ -426,16 +431,16 @@ export const POST = withApiLogging(async (request: NextRequest) => {
 
   try {
     for (const file of sourceFiles) {
-      validateImageFile(file);
+      validateImageFile(file, maxImageBytes);
     }
 
     const totalUploadSize = sourceFiles.reduce(
       (total, file) => total + file.size,
       0
     );
-    if (totalUploadSize > MAX_CHAT_REQUEST_BYTES) {
+    if (totalUploadSize > maxRequestBytes) {
       return errorResponse(
-        `Total upload size must be no more than ${MAX_CHAT_REQUEST_BYTES / 1024 / 1024}MB.`,
+        `Total upload size must be no more than ${formatMegabytes(maxRequestBytes)}.`,
         413
       );
     }
