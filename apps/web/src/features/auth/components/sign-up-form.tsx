@@ -92,7 +92,11 @@ function isVerificationCodeError(error: unknown) {
  * - GitHub OAuth 注册
  * - 邮箱密码注册
  */
-export function SignUpForm() {
+interface SignUpFormProps {
+  googleAuthEnabled?: boolean;
+}
+
+export function SignUpForm({ googleAuthEnabled = false }: SignUpFormProps) {
   const locale = useLocale();
   const t = useTranslations("Auth.signUp");
   const tCommon = useTranslations("Auth.common");
@@ -337,30 +341,34 @@ export function SignUpForm() {
       {/* 错误提示 */}
       <AuthErrorAlert message={error} />
 
-      {/* OAuth 登录按钮 */}
-      <div className="space-y-3">
-        <Button
-          variant="outline"
-          className="w-full"
-          onClick={handleGoogleSignUp}
-          disabled={isLoading}
-        >
-          <GoogleIcon className="mr-2 h-4 w-4" />
-          {tCommon("google")}
-        </Button>
-      </div>
+      {googleAuthEnabled ? (
+        <>
+          {/* OAuth 登录按钮 */}
+          <div className="space-y-3">
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={handleGoogleSignUp}
+              disabled={isLoading}
+            >
+              <GoogleIcon className="mr-2 h-4 w-4" />
+              {tCommon("google")}
+            </Button>
+          </div>
 
-      {/* 分隔线 */}
-      <div className="relative">
-        <div className="absolute inset-0 flex items-center">
-          <Separator className="w-full" />
-        </div>
-        <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-muted/30 px-2 text-muted-foreground">
-            {tCommon("or")}
-          </span>
-        </div>
-      </div>
+          {/* 分隔线 */}
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <Separator className="w-full" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-muted/30 px-2 text-muted-foreground">
+                {tCommon("or")}
+              </span>
+            </div>
+          </div>
+        </>
+      ) : null}
 
       {/* 邮箱密码表单 */}
       <form onSubmit={handleEmailSignUp} className="space-y-4">

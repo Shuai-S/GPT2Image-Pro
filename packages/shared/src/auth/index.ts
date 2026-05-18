@@ -14,6 +14,32 @@ function settingValue(name: string, fallback = "") {
   return process.env[name] || fallback;
 }
 
+function configuredSocialProviders() {
+  const githubClientId = settingValue("GITHUB_CLIENT_ID");
+  const githubClientSecret = settingValue("GITHUB_CLIENT_SECRET");
+  const googleClientId = settingValue("GOOGLE_CLIENT_ID");
+  const googleClientSecret = settingValue("GOOGLE_CLIENT_SECRET");
+
+  return {
+    ...(githubClientId && githubClientSecret
+      ? {
+          github: {
+            clientId: githubClientId,
+            clientSecret: githubClientSecret,
+          },
+        }
+      : {}),
+    ...(googleClientId && googleClientSecret
+      ? {
+          google: {
+            clientId: googleClientId,
+            clientSecret: googleClientSecret,
+          },
+        }
+      : {}),
+  };
+}
+
 /**
  * Better Auth 服务端配置
  *
@@ -127,25 +153,7 @@ export const auth = betterAuth({
    * OAuth 社交登录提供商配置
    * 需要在 .env 中配置相应的 Client ID 和 Secret
    */
-  socialProviders: {
-    /**
-     * GitHub OAuth 配置
-     * 获取凭证: https://github.com/settings/developers
-     */
-    github: {
-      clientId: settingValue("GITHUB_CLIENT_ID"),
-      clientSecret: settingValue("GITHUB_CLIENT_SECRET"),
-    },
-
-    /**
-     * Google OAuth 配置
-     * 获取凭证: https://console.cloud.google.com/apis/credentials
-     */
-    google: {
-      clientId: settingValue("GOOGLE_CLIENT_ID"),
-      clientSecret: settingValue("GOOGLE_CLIENT_SECRET"),
-    },
-  },
+  socialProviders: configuredSocialProviders(),
 
   /**
    * 会话配置
