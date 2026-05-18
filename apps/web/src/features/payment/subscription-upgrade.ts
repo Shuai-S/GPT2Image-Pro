@@ -1,4 +1,12 @@
-import { findRuntimePlanByPriceId } from "@repo/shared/config/payment-runtime";
+import { and, eq, gte, gt, isNull, lt, or, sql } from "drizzle-orm";
+
+import { db } from "@repo/database";
+import { creditsBatch } from "@repo/database/schema";
+import {
+  findRuntimePlanByPriceId,
+  getSubscriptionMonthlyCredits,
+  type PaidPlanId,
+} from "@repo/shared/config/payment-runtime";
 import {
   getPlanFromPriceId,
   PLAN_RANK,
@@ -9,6 +17,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const MIN_UPGRADE_PAYMENT_CENTS = 1;
 
 export type ProratedSubscription = {
+  userId: string;
   priceId: string | null;
   currentPeriodStart: Date | null;
   currentPeriodEnd: Date | null;
@@ -19,6 +28,10 @@ export type SubscriptionCheckoutQuote = {
   amountDue: number;
   originalAmount: number;
   prorationCredit: number;
+  dayProrationCredit: number;
+  creditUsageProrationCredit: number;
+  remainingSubscriptionCredits: number;
+  subscriptionCredits: number;
   remainingDays: number;
   periodDays: number;
   targetPlan: SubscriptionPlan;
@@ -40,6 +53,22 @@ function toValidDate(value: Date | null) {
 
 function fallbackPeriodDays(interval?: string) {
   return interval === "yearly" ? 365 : 30;
+}
+
+function isPaidPlan(plan: SubscriptionPlan | null): plan is PaidPlanId {
+  return (
+    plan === "starter" ||
+    plan === "pro" ||
+    plan === "ultra" ||
+    plan === "enterprise"
+  );
+}
+
+function getCycleSubscriptionCredits(
+  monthlyCredits: number,
+  interval?: string
+) {
+  return interval === "yearly" ? monthlyCredits * 12 : monthlyCredits;
 }
 
 function getPeriodDayCounts(
@@ -64,6 +93,34 @@ function getPeriodDayCounts(
   return { periodDays, remainingDays };
 }
 
+async function getRemainingSubscriptionCredits(
+  current: ProratedSubscription,
+  now: Date
+) {
+  const start = toValidDate(current.currentPeriodStart);
+  const end = toValidDate(current.currentPeriodEnd);
+  const filters = [
+    eq(creditsBatch.userId, current.userId),
+    eq(creditsBatch.sourceType, "subscription"),
+    eq(creditsBatch.status, "active"),
+    gt(creditsBatch.remaining, 0),
+    or(isNull(creditsBatch.expiresAt), gt(creditsBatch.expiresAt, now)),
+    start ? gte(creditsBatch.issuedAt, start) : sql`true`,
+    end ? lt(creditsBatch.issuedAt, end) : sql`true`,
+  ];
+
+  const [result] = await db
+    .select({
+      remaining: sql<number>`coalesce(sum(${creditsBatch.remaining}), 0)`.mapWith(
+        Number
+      ),
+    })
+    .from(creditsBatch)
+    .where(and(...filters));
+
+  return Math.max(0, result?.remaining ?? 0);
+}
+
 export async function createSubscriptionCheckoutQuote(
   current: ProratedSubscription,
   targetPriceId: string,
@@ -71,7 +128,7 @@ export async function createSubscriptionCheckoutQuote(
 ): Promise<SubscriptionCheckoutQuote> {
   const targetPlan = getPlanFromPriceId(targetPriceId);
   const { price: targetPrice } = await findRuntimePlanByPriceId(targetPriceId);
-  if (!targetPlan || targetPlan === "free" || !targetPrice) {
+  if (!isPaidPlan(targetPlan) || !targetPrice) {
     throw new Error("无效的目标套餐");
   }
 
@@ -83,7 +140,7 @@ export async function createSubscriptionCheckoutQuote(
   const { price: currentPrice } = await findRuntimePlanByPriceId(
     current.priceId
   );
-  if (!currentPlan || currentPlan === "free" || !currentPrice) {
+  if (!isPaidPlan(currentPlan) || !currentPrice) {
     throw new Error("找不到当前订阅套餐");
   }
 
@@ -102,9 +159,36 @@ export async function createSubscriptionCheckoutQuote(
   );
   const currentAmountCents = toCents(currentPrice.amount);
   const targetAmountCents = toCents(targetPrice.amount);
-  const prorationCreditCents = Math.min(
+  const dayProrationCreditCents = Math.min(
     currentAmountCents,
     Math.floor((currentAmountCents * remainingDays) / periodDays)
+  );
+  const monthlyCreditsByPlan = await getSubscriptionMonthlyCredits();
+  const subscriptionCredits = getCycleSubscriptionCredits(
+    monthlyCreditsByPlan[currentPlan],
+    currentPrice.interval
+  );
+  const remainingSubscriptionCredits = await getRemainingSubscriptionCredits(
+    current,
+    now
+  );
+  const cappedRemainingSubscriptionCredits = Math.min(
+    remainingSubscriptionCredits,
+    subscriptionCredits
+  );
+  const creditUsageProrationCreditCents =
+    subscriptionCredits > 0
+      ? Math.min(
+          currentAmountCents,
+          Math.floor(
+            (currentAmountCents * cappedRemainingSubscriptionCredits) /
+              subscriptionCredits
+          )
+        )
+      : 0;
+  const prorationCreditCents = Math.min(
+    dayProrationCreditCents,
+    creditUsageProrationCreditCents
   );
   const amountDueCents = Math.max(
     MIN_UPGRADE_PAYMENT_CENTS,
@@ -116,6 +200,10 @@ export async function createSubscriptionCheckoutQuote(
     amountDue: fromCents(amountDueCents),
     originalAmount: fromCents(targetAmountCents),
     prorationCredit: fromCents(prorationCreditCents),
+    dayProrationCredit: fromCents(dayProrationCreditCents),
+    creditUsageProrationCredit: fromCents(creditUsageProrationCreditCents),
+    remainingSubscriptionCredits,
+    subscriptionCredits,
     remainingDays,
     periodDays,
     targetPlan,

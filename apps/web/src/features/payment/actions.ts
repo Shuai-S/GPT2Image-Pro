@@ -44,6 +44,7 @@ export const createCheckoutSession = protectedAction
     // 检查是否已有活跃订阅
     const [existingSub] = await db
       .select({
+        userId: subscription.userId,
         priceId: subscription.priceId,
         currentPeriodStart: subscription.currentPeriodStart,
         currentPeriodEnd: subscription.currentPeriodEnd,
