@@ -16,8 +16,15 @@ import {
 type ModerationProvider = "aliyun" | "openai";
 type ModerationDecision = "allow" | "block" | "skipped" | "error";
 type ModerationMode = "text" | "image";
+type AliyunRiskLevel = "none" | "low" | "medium" | "high";
 
 const ALIYUN_MAX_CONTENT_LENGTH = 2000;
+const ALIYUN_RISK_ORDER: Record<AliyunRiskLevel, number> = {
+  none: 0,
+  low: 1,
+  medium: 2,
+  high: 3,
+};
 const Green20220302 =
   (
     Green20220302Module as typeof Green20220302Module & {
@@ -157,6 +164,27 @@ async function getProviderTimeoutMs() {
     "CONTENT_MODERATION_PROVIDER_TIMEOUT_MS",
     10_000,
     { positive: true }
+  );
+}
+
+async function getAliyunBlockRiskLevel(): Promise<AliyunRiskLevel> {
+  const value = await runtimeValue("ALIYUN_MODERATION_BLOCK_RISK_LEVEL");
+  return value === "low" || value === "medium" || value === "high"
+    ? value
+    : "medium";
+}
+
+function shouldBlockAliyunRisk(
+  riskLevel: unknown,
+  blockRiskLevel: AliyunRiskLevel
+) {
+  if (typeof riskLevel !== "string") return false;
+  const normalized = riskLevel.toLowerCase();
+  if (!(normalized in ALIYUN_RISK_ORDER)) return normalized !== "pass";
+
+  return (
+    ALIYUN_RISK_ORDER[normalized as AliyunRiskLevel] >=
+    ALIYUN_RISK_ORDER[blockRiskLevel]
   );
 }
 
@@ -313,7 +341,8 @@ async function moderateWithAliyunAgent(
   appId: string,
   input: ModerateContentInput,
   content: string,
-  imageUrl?: string
+  imageUrl: string | undefined,
+  blockRiskLevel: AliyunRiskLevel
 ): Promise<ModerationResult> {
   const response = await client.multiModalAgentWithOptions(
     new MultiModalAgentRequest({
@@ -328,11 +357,7 @@ async function moderateWithAliyunAgent(
   assertAliyunResponseOk(response.body);
 
   const data = response.body?.data;
-  if (
-    data?.riskLevel &&
-    data.riskLevel !== "none" &&
-    data.riskLevel !== "low"
-  ) {
+  if (data && shouldBlockAliyunRisk(data.riskLevel, blockRiskLevel)) {
     const labels = (data.result || [])
       .map((item: { label?: string }) => item.label)
       .filter((label): label is string => Boolean(label));
@@ -352,7 +377,8 @@ async function moderateWithAliyunTextAgent(
   client: InstanceType<typeof Green20220302>,
   config: AliyunConfig,
   appId: string,
-  input: ModerateContentInput
+  input: ModerateContentInput,
+  blockRiskLevel: AliyunRiskLevel
 ): Promise<ModerationResult> {
   for (const content of getContentChunks(input.prompt)) {
     const result = await moderateWithAliyunAgent(
@@ -360,7 +386,9 @@ async function moderateWithAliyunTextAgent(
       config,
       appId,
       input,
-      content
+      content,
+      undefined,
+      blockRiskLevel
     );
     if (result.decision === "block") {
       return result;
@@ -374,7 +402,8 @@ async function moderateWithAliyunTextPlus(
   client: InstanceType<typeof Green20220302>,
   config: AliyunConfig,
   service: string,
-  input: ModerateContentInput
+  input: ModerateContentInput,
+  blockRiskLevel: AliyunRiskLevel
 ): Promise<ModerationResult> {
   for (const content of getContentChunks(input.prompt)) {
     const response = await client.textModerationPlusWithOptions(
@@ -391,11 +420,7 @@ async function moderateWithAliyunTextPlus(
     assertAliyunResponseOk(response.body);
 
     const data = response.body?.data;
-    if (
-      data?.riskLevel &&
-      data.riskLevel !== "none" &&
-      data.riskLevel !== "low"
-    ) {
+    if (data && shouldBlockAliyunRisk(data.riskLevel, blockRiskLevel)) {
       const labels = [
         ...(data.result || []).map((item: { label?: string }) => item.label),
         ...(data.attackResult || []).map(
@@ -423,7 +448,8 @@ async function moderateWithAliyunImageAgent(
   client: InstanceType<typeof Green20220302>,
   config: AliyunConfig,
   appId: string,
-  input: ModerateContentInput
+  input: ModerateContentInput,
+  blockRiskLevel: AliyunRiskLevel
 ): Promise<ModerationResult> {
   if (!input.images?.length) {
     throw new Error("Aliyun image moderation requires an image");
@@ -441,7 +467,8 @@ async function moderateWithAliyunImageAgent(
         appId,
         input,
         content,
-        image.url
+        image.url,
+        blockRiskLevel
       );
       if (result.decision === "block") {
         return result;
@@ -456,7 +483,8 @@ async function moderateWithAliyunImageModeration(
   client: InstanceType<typeof Green20220302>,
   config: AliyunConfig,
   service: string,
-  input: ModerateContentInput
+  input: ModerateContentInput,
+  blockRiskLevel: AliyunRiskLevel
 ): Promise<ModerationResult> {
   if (!input.images?.length) {
     throw new Error("Aliyun image moderation requires an image");
@@ -481,11 +509,7 @@ async function moderateWithAliyunImageModeration(
     assertAliyunResponseOk(response.body);
 
     const data = response.body?.data;
-    if (
-      data?.riskLevel &&
-      data.riskLevel !== "none" &&
-      data.riskLevel !== "low"
-    ) {
+    if (data && shouldBlockAliyunRisk(data.riskLevel, blockRiskLevel)) {
       const labels = (data.result || [])
         .map((item: { label?: string }) => item.label)
         .filter((label): label is string => Boolean(label));
@@ -512,13 +536,15 @@ async function moderateWithAliyun(
   }
 
   const isImageMode = input.mode === "image" || Boolean(input.images?.length);
+  const blockRiskLevel = await getAliyunBlockRiskLevel();
 
   if (!isImageMode && config.textService) {
     return moderateWithAliyunTextPlus(
       getAliyunClient(config),
       config,
       config.textService,
-      input
+      input,
+      blockRiskLevel
     );
   }
 
@@ -527,7 +553,8 @@ async function moderateWithAliyun(
       getAliyunImageClient(config),
       config,
       config.imageService,
-      input
+      input,
+      blockRiskLevel
     );
   }
 
@@ -543,8 +570,8 @@ async function moderateWithAliyun(
   }
 
   return isImageMode
-    ? moderateWithAliyunImageAgent(client, config, appId, input)
-    : moderateWithAliyunTextAgent(client, config, appId, input);
+    ? moderateWithAliyunImageAgent(client, config, appId, input, blockRiskLevel)
+    : moderateWithAliyunTextAgent(client, config, appId, input, blockRiskLevel);
 }
 
 async function moderateWithOpenAI(

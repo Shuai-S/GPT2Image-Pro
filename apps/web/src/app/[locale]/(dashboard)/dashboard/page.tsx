@@ -14,6 +14,7 @@ import { Coins, Image as ImageIcon, ImagePlus } from "lucide-react";
 import { headers } from "next/headers";
 import { getLocale } from "next-intl/server";
 import { redirect } from "next/navigation";
+import { RecentCreationsClient } from "@/features/image-generation/components/recent-creations-client";
 import { Link } from "@/i18n/routing";
 
 export default async function DashboardPage() {
@@ -51,10 +52,19 @@ export default async function DashboardPage() {
   const totalGenerations = totalGenerationsResult[0]?.count ?? 0;
 
   const generationsWithUrls = recentGenerations.map((gen) => ({
-    ...gen,
+    id: gen.id,
+    prompt: gen.prompt,
+    revisedPrompt: gen.revisedPrompt,
+    model: gen.model,
+    size: gen.size,
+    status: gen.status,
+    creditsConsumed: gen.creditsConsumed,
+    storageKey: gen.storageKey,
+    storageBucket: gen.storageBucket,
     imageUrl: gen.storageKey
       ? `/api/storage/${gen.storageBucket}/${gen.storageKey}`
       : null,
+    createdAt: gen.createdAt.toISOString(),
   }));
 
   return (
@@ -133,37 +143,7 @@ export default async function DashboardPage() {
                 </Link>
               </Button>
             </div>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {generationsWithUrls.map((gen) => (
-                <Link
-                  key={gen.id}
-                  href={`/${locale}/dashboard/gallery`}
-                  className="group"
-                >
-                  <Card className="overflow-hidden transition-shadow hover:shadow-md">
-                    <div className="relative aspect-square">
-                      {gen.imageUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={gen.imageUrl}
-                          alt={gen.prompt}
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center bg-muted">
-                          <ImageIcon className="h-8 w-8 text-muted-foreground" />
-                        </div>
-                      )}
-                    </div>
-                    <CardContent className="p-3">
-                      <p className="truncate text-sm text-muted-foreground">
-                        {gen.prompt}
-                      </p>
-                    </CardContent>
-                  </Card>
-                </Link>
-              ))}
-            </div>
+            <RecentCreationsClient initialGenerations={generationsWithUrls} />
           </div>
         )}
       </div>

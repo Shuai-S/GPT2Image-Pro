@@ -85,6 +85,7 @@ export type SettingKey =
   | "ALIYUN_MODERATION_IMAGE_REGION_ID"
   | "ALIYUN_MODERATION_IMAGE_ENDPOINT"
   | "ALIYUN_MODERATION_IMAGE_SERVICE"
+  | "ALIYUN_MODERATION_BLOCK_RISK_LEVEL"
   | "ALIYUN_MODERATION_TEXT_APP_ID"
   | "ALIYUN_MODERATION_IMAGE_APP_ID"
   | "ALIYUN_MODERATION_PUBLIC_BASE_URL"
@@ -719,6 +720,20 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     description: "图片审核服务 code。",
     category: "moderation",
     valueType: "string",
+  },
+  {
+    key: "ALIYUN_MODERATION_BLOCK_RISK_LEVEL",
+    label: "阿里云拦截风险等级",
+    description:
+      "达到该风险等级即拦截。low 表示更严格，只允许 none；medium 表示兼容旧逻辑，允许 none/low。",
+    category: "moderation",
+    valueType: "select",
+    options: [
+      { label: "严格：拦截 low 及以上", value: "low" },
+      { label: "默认：拦截 medium 及以上", value: "medium" },
+      { label: "宽松：仅拦截 high", value: "high" },
+    ],
+    defaultValue: "medium",
   },
   {
     key: "ALIYUN_MODERATION_TEXT_APP_ID",
