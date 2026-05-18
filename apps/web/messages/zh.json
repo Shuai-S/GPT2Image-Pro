@@ -455,6 +455,7 @@
           "fileSize": "上传上限：单图 100MB，总上传 100MB",
           "chatGpt55": "对话生图支持 GPT-5.5",
           "moderationSettlement": "审核失败只扣审核积分",
+          "moderationLowControl": "可选择放开 low 级审核拦截",
           "promptOptimization": "可关闭提示词优化",
           "queue": "最高优先队列，单用户最多 50 并发",
           "export": "下载与分享",
@@ -479,6 +480,7 @@
           "fileSize": "上传上限：单图 200MB，总上传 200MB",
           "chatGpt55": "对话生图支持 GPT-5.5",
           "moderationSettlement": "审核失败只扣审核积分",
+          "moderationMediumControl": "可选择放开 low 和 medium 级审核拦截",
           "promptOptimization": "可关闭提示词优化",
           "queue": "最高优先队列，单用户最多 100 并发",
           "enterpriseResourcePack": "企业资源包：每份 5,000 积分，约 3 分 / 张 4K",
@@ -624,6 +626,25 @@
       "title": "高级设置",
       "description": "面向高级用户的配置选项。"
     },
+    "moderation": {
+      "title": "审核拦截级别",
+      "description": "该设置会应用到网页端生成；外接 API Key 可单独设置。",
+      "upgradeHint": "旗舰版可放开 low 级拦截，企业版可继续放开 medium 级拦截。",
+      "options": {
+        "low": {
+          "label": "拦截 low 及以上",
+          "description": "最严格：low、medium、high 均会拦截。"
+        },
+        "medium": {
+          "label": "放开 low",
+          "description": "仅拦截 medium、high，旗舰版可选。"
+        },
+        "high": {
+          "label": "仅拦截 high",
+          "description": "放开 low、medium，仅企业版可选。"
+        }
+      }
+    },
     "externalApi": {
       "title": "外接 API 访问",
       "description": "入门版及以上可创建 OpenAI 兼容的模型查询、图片生成和图片编辑 API Key。外部调用会消耗你的账户积分，并写入生成历史。",
@@ -640,15 +661,25 @@
       "lastUsed": "最后使用",
       "never": "从未使用",
       "revoke": "撤销",
+      "moderation": {
+        "label": "审核级别",
+        "options": {
+          "low": "拦截 low 及以上",
+          "medium": "放开 low",
+          "high": "仅拦截 high"
+        }
+      },
       "success": {
         "created": "API Key 已创建",
         "copied": "API Key 已复制",
-        "revoked": "API Key 已撤销"
+        "revoked": "API Key 已撤销",
+        "updated": "审核级别已更新"
       },
       "errors": {
         "load": "加载 API Key 失败",
         "create": "创建 API Key 失败",
-        "revoke": "撤销 API Key 失败"
+        "revoke": "撤销 API Key 失败",
+        "update": "更新审核级别失败"
       }
     },
     "apiConfig": {

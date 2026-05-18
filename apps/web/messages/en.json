@@ -491,6 +491,7 @@
           "fileSize": "Uploads: 100MB per image, 100MB total",
           "chatGpt55": "Chat-to-image supports GPT-5.5",
           "moderationSettlement": "Moderation failures only charge review credits",
+          "moderationLowControl": "Option to allow low-risk moderation results",
           "promptOptimization": "Prompt optimization can be turned off",
           "queue": "Highest priority queue, up to 50 concurrent generations",
           "export": "Download & share",
@@ -515,6 +516,7 @@
           "fileSize": "Uploads: 200MB per image, 200MB total",
           "chatGpt55": "Chat-to-image supports GPT-5.5",
           "moderationSettlement": "Moderation failures only charge review credits",
+          "moderationMediumControl": "Option to allow low and medium-risk moderation results",
           "promptOptimization": "Prompt optimization can be turned off",
           "queue": "Highest priority queue, up to 100 concurrent generations",
           "enterpriseResourcePack": "Enterprise resource packs: 5,000 credits per pack, about ¥0.03 per 4K image",
@@ -624,6 +626,25 @@
       "title": "Advanced Settings",
       "description": "Configuration options for power users."
     },
+    "moderation": {
+      "title": "Moderation block level",
+      "description": "This setting applies to web generation. External API keys can use their own level.",
+      "upgradeHint": "Ultra can allow low-risk results. Enterprise can also allow medium-risk results.",
+      "options": {
+        "low": {
+          "label": "Block low and above",
+          "description": "Strictest: low, medium, and high are blocked."
+        },
+        "medium": {
+          "label": "Allow low",
+          "description": "Blocks medium and high only. Available on Ultra."
+        },
+        "high": {
+          "label": "Block high only",
+          "description": "Allows low and medium. Available on Enterprise."
+        }
+      }
+    },
     "externalApi": {
       "title": "External API access",
       "description": "Starter and higher plans can create API keys for OpenAI-compatible model listing, image generation, and image editing. External calls use your account credits and appear in your generation history.",
@@ -640,15 +661,25 @@
       "lastUsed": "Last used",
       "never": "Never",
       "revoke": "Revoke",
+      "moderation": {
+        "label": "Moderation level",
+        "options": {
+          "low": "Block low and above",
+          "medium": "Allow low",
+          "high": "Block high only"
+        }
+      },
       "success": {
         "created": "API key created",
         "copied": "API key copied",
-        "revoked": "API key revoked"
+        "revoked": "API key revoked",
+        "updated": "Moderation level updated"
       },
       "errors": {
         "load": "Failed to load API keys",
         "create": "Failed to create API key",
-        "revoke": "Failed to revoke API key"
+        "revoke": "Failed to revoke API key",
+        "update": "Failed to update moderation level"
       }
     },
     "apiConfig": {
