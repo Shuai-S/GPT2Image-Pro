@@ -11,10 +11,10 @@ import { findRuntimePlanByPriceId } from "@repo/shared/config/payment-runtime";
 import { db } from "@repo/database";
 import { subscription } from "@repo/database/schema";
 import { PaymentType } from "@/features/payment/types";
-import { logEvent } from "@repo/shared/logger";
+import { logEvent, logger } from "@repo/shared/logger";
 import { protectedAction } from "@repo/shared/safe-action";
 import {
-  createRuntimeEpayPurchase,
+  createSubmittedRuntimeEpayPurchase,
   encodeEpayMetadata,
   isRuntimeEpayPaymentProvider,
 } from "@repo/shared/payment/epay";
@@ -80,7 +80,7 @@ export const createCheckoutSession = protectedAction
 
     if (useEpay) {
       const outTradeNo = `SUB${Date.now()}${crypto.randomUUID().slice(0, 8)}`;
-      const checkout = await createRuntimeEpayPurchase({
+      const checkout = await createSubmittedRuntimeEpayPurchase({
         outTradeNo,
         name: upgradeQuote
           ? `GPT2IMAGE upgrade to ${plan.name} ${price.interval ?? "subscription"}`
@@ -101,6 +101,20 @@ export const createCheckoutSession = protectedAction
           upgradeFromPriceId: upgradeQuote?.upgradeFromPriceId,
         }),
       });
+
+      logger.info(
+        {
+          event: "payment.checkout.gateway_order",
+          userId,
+          priceId,
+          planId: plan.id,
+          outTradeNo,
+          gatewayOrderId: checkout.gatewayOrderId,
+          gatewayExpiresAt: checkout.gatewayExpiresAt,
+          checkoutMode: upgradeQuote ? "upgrade" : "new_subscription",
+        },
+        "Epay gateway checkout created"
+      );
 
       return { url: checkout.url };
     }

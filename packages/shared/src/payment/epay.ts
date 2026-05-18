@@ -50,6 +50,12 @@ export interface EpayPurchaseResult {
   params: Record<string, string>;
 }
 
+export interface EpaySubmittedPurchaseResult extends EpayPurchaseResult {
+  gatewayOrderId: string;
+  gatewayExpiresAt: number | null;
+  submitUrl: string;
+}
+
 export interface EpayVerifyResult {
   verifyStatus: boolean;
   type: string;
@@ -118,6 +124,12 @@ function getEpayConfig() {
   }
 
   return { pid, key, apiUrl };
+}
+
+function getEpaySubmitUrl(apiUrl: string): URL {
+  const submitUrl = new URL(apiUrl.endsWith("/") ? apiUrl : `${apiUrl}/`);
+  submitUrl.pathname = `${submitUrl.pathname.replace(/\/+$/, "")}/submit.php`;
+  return submitUrl;
 }
 
 async function getRuntimeEpayConfig() {
@@ -231,8 +243,7 @@ export function createEpayPurchase(
   }
 
   const signedParams = withEpaySignature(params);
-  const submitUrl = new URL(apiUrl.endsWith("/") ? apiUrl : `${apiUrl}/`);
-  submitUrl.pathname = `${submitUrl.pathname.replace(/\/+$/, "")}/submit.php`;
+  const submitUrl = getEpaySubmitUrl(apiUrl);
   submitUrl.search = new URLSearchParams(signedParams).toString();
 
   return {
@@ -275,14 +286,120 @@ export async function createRuntimeEpayPurchase(
     sign: await signRuntimeEpayParams(params),
     sign_type: "MD5",
   };
-  const submitUrl = new URL(apiUrl.endsWith("/") ? apiUrl : `${apiUrl}/`);
-  submitUrl.pathname = `${submitUrl.pathname.replace(/\/+$/, "")}/submit.php`;
+  const submitUrl = getEpaySubmitUrl(apiUrl);
   submitUrl.search = new URLSearchParams(signedParams).toString();
 
   return {
     url: submitUrl.toString(),
     params: signedParams,
   };
+}
+
+interface EpayGatewayOrderInfoResponse {
+  code?: number;
+  message?: string;
+  data?: {
+    out_order_id?: string;
+    order_id?: string;
+    status?: number;
+    expire_time?: number;
+  };
+}
+
+async function fetchEpayGatewayOrderInfo(
+  submitUrl: URL,
+  gatewayOrderId: string
+): Promise<EpayGatewayOrderInfoResponse> {
+  const orderInfoUrl = new URL("/api/order/info", submitUrl);
+  const response = await fetch(orderInfoUrl, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "x-requested-with": "XMLHttpRequest",
+      "cache-control": "no-store",
+    },
+    body: JSON.stringify({ order_id: gatewayOrderId }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Epay order info failed with HTTP ${response.status}`);
+  }
+
+  return (await response.json()) as EpayGatewayOrderInfoResponse;
+}
+
+async function submitEpayPurchase(
+  checkout: EpayPurchaseResult
+): Promise<EpaySubmittedPurchaseResult> {
+  const submitUrl = new URL(checkout.url);
+  submitUrl.search = "";
+
+  const response = await fetch(submitUrl, {
+    method: "POST",
+    redirect: "manual",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded; charset=utf-8",
+      "cache-control": "no-store",
+    },
+    body: new URLSearchParams(checkout.params).toString(),
+    cache: "no-store",
+  });
+
+  if (response.status < 300 || response.status >= 400) {
+    const body = await response.text();
+    throw new Error(
+      `Epay submit failed with HTTP ${response.status}: ${body.slice(0, 200)}`
+    );
+  }
+
+  const location = response.headers.get("location");
+  if (!location) {
+    throw new Error("Epay submit did not return a payment location");
+  }
+
+  const gatewayUrl = new URL(location, submitUrl);
+  const gatewayOrderId = gatewayUrl.pathname.match(/\/pay\/([^/?#]+)/)?.[1];
+  if (!gatewayOrderId) {
+    throw new Error(`Epay submit returned unsupported location: ${location}`);
+  }
+
+  const orderInfo = await fetchEpayGatewayOrderInfo(submitUrl, gatewayOrderId);
+  const data = orderInfo.data;
+  if (orderInfo.code !== 200 || !data) {
+    throw new Error(
+      `Epay order info failed: ${orderInfo.message ?? "unknown error"}`
+    );
+  }
+
+  const outTradeNo = checkout.params.out_trade_no;
+  if (data.out_order_id !== outTradeNo) {
+    throw new Error(
+      `Epay order mismatch: gateway=${data.out_order_id ?? ""}, expected=${outTradeNo}`
+    );
+  }
+
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (typeof data.expire_time === "number" && data.expire_time <= nowSeconds) {
+    throw new Error(
+      `Epay order already expired: ${gatewayOrderId}, expire_time=${data.expire_time}`
+    );
+  }
+
+  return {
+    ...checkout,
+    url: gatewayUrl.toString(),
+    gatewayOrderId,
+    gatewayExpiresAt:
+      typeof data.expire_time === "number" ? data.expire_time : null,
+    submitUrl: checkout.url,
+  };
+}
+
+export async function createSubmittedRuntimeEpayPurchase(
+  input: EpayPurchaseInput
+): Promise<EpaySubmittedPurchaseResult> {
+  return submitEpayPurchase(await createRuntimeEpayPurchase(input));
 }
 
 export function verifyEpayParams(

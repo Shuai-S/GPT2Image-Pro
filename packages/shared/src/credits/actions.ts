@@ -21,11 +21,11 @@ import {
 } from "../config/subscription-plan";
 import { creem } from "../payment/creem";
 import {
-  createRuntimeEpayPurchase,
+  createSubmittedRuntimeEpayPurchase,
   encodeEpayMetadata,
   isRuntimeEpayPaymentProvider,
 } from "../payment/epay";
-import { logEvent } from "../logger/index";
+import { logEvent, logger } from "../logger/index";
 import { actionClient, protectedAction } from "../safe-action";
 import { getUserPlanType } from "../subscription/services/user-plan";
 import { getRuntimeSettingNumber } from "../system-settings";
@@ -511,7 +511,7 @@ export const createCreditsPurchaseCheckout = withProtectedCreditsAction(
 
     if (useEpay) {
       const outTradeNo = `CR${Date.now()}${crypto.randomUUID().slice(0, 8)}`;
-      const checkout = await createRuntimeEpayPurchase({
+      const checkout = await createSubmittedRuntimeEpayPurchase({
         outTradeNo,
         name:
           quantity > 1
@@ -526,6 +526,20 @@ export const createCreditsPurchaseCheckout = withProtectedCreditsAction(
           quantity,
         }),
       });
+
+      logger.info(
+        {
+          event: "payment.checkout.gateway_order",
+          userId,
+          packageId: pkg.id,
+          outTradeNo,
+          gatewayOrderId: checkout.gatewayOrderId,
+          gatewayExpiresAt: checkout.gatewayExpiresAt,
+          credits: creditsAmount,
+          quantity,
+        },
+        "Epay gateway checkout created"
+      );
 
       return { url: checkout.url };
     }
