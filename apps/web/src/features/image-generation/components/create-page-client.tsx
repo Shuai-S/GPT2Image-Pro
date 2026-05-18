@@ -184,6 +184,7 @@ type ChatStreamState = {
 type ChatViewMode = "chat" | "batch";
 type ChatModel = typeof GPT54_CHAT_MODEL | typeof GPT55_CHAT_MODEL;
 type ChatThinkingLevel = "none" | "low" | "medium" | "high" | "xhigh";
+type TextGenerationMode = "single" | "lines";
 
 type BatchCard = {
   id: string;
@@ -223,6 +224,12 @@ const DEFAULT_MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 const DEFAULT_MAX_EDIT_REQUEST_BYTES = 75 * 1024 * 1024;
 const CHAT_TEXT_ONLY_CREDITS = 1;
 const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp";
+const TEXT_MODEL_OPTIONS = [
+  { value: "default", label: "Default" },
+  { value: "gpt-image-2", label: "GPT Image 2" },
+  { value: "gpt-image-1.5", label: "GPT Image 1.5" },
+  { value: "gpt-image-1-mini", label: "GPT Image 1 Mini" },
+] as const;
 const EDIT_MODEL_OPTIONS = [
   { value: "default", label: "Default" },
   { value: "gpt-image-2", label: "GPT Image 2" },
@@ -504,6 +511,8 @@ export function CreatePageClient({
     isZh ? PRESET_LABELS_ZH[label] || label : label;
   const editModelLabel = (label: string) =>
     label === "Default" ? copy("Default", "默认") : label;
+  const textModelLabel = (label: string) =>
+    label === "Default" ? copy("Default", "默认") : label;
   const qualityLabel = (qualityValue: ImageQuality) =>
     copy(
       QUALITY_OPTIONS.find((option) => option.value === qualityValue)?.label ||
@@ -558,6 +567,8 @@ export function CreatePageClient({
     uploadLimits.maxUploadBytes || DEFAULT_MAX_EDIT_REQUEST_BYTES;
   const [activeMode, setActiveMode] = useState<ActiveMode>("text");
   const [prompt, setPrompt] = useState("");
+  const [textMode, setTextMode] = useState<TextGenerationMode>("single");
+  const [linePrompts, setLinePrompts] = useState("");
   const [editPrompt, setEditPrompt] = useState("");
   const [promptOptimization, setPromptOptimization] = useState(true);
   const [chatPrompt, setChatPrompt] = useState("");
@@ -591,7 +602,9 @@ export function CreatePageClient({
   const [quality, setQuality] = useState<ImageQuality>("auto");
   const [moderation, setModeration] = useState<ImageModeration>("auto");
   const [batchCount, setBatchCount] = useState(1);
+  const [lineBatchRepeatCount, setLineBatchRepeatCount] = useState(1);
   const [editBatchCount, setEditBatchCount] = useState(1);
+  const [textModel, setTextModel] = useState("default");
   const [editModel, setEditModel] = useState("default");
   const [useFirstImageSize, setUseFirstImageSize] = useState(true);
   const [chatCustomResolutionOpen, setChatCustomResolutionOpen] =
@@ -642,6 +655,16 @@ export function CreatePageClient({
   );
   const textImageCreditCost = useMemo(() => getImageCreditCost(size), [size]);
   const textBatchCreditCost = textImageCreditCost * batchCount;
+  const linePromptItems = useMemo(
+    () =>
+      linePrompts
+        .split(/\r?\n/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    [linePrompts]
+  );
+  const lineBatchTotalCount = linePromptItems.length * lineBatchRepeatCount;
+  const lineBatchCreditCost = textImageCreditCost * lineBatchTotalCount;
   const customEditSize = useMemo(
     () => normalizeImageSize(editWidth, editHeight),
     [editWidth, editHeight]
@@ -687,6 +710,7 @@ export function CreatePageClient({
   });
   const formattedBalance = formatCredits(balance);
   const formattedTextBatchCreditCost = formatCredits(textBatchCreditCost);
+  const formattedLineBatchCreditCost = formatCredits(lineBatchCreditCost);
   const formattedEditBatchCreditCost = formatCredits(editBatchCreditCost);
   const formattedChatSingleCreditCost = formatCredits(chatSingleCreditCost);
   const formattedBatchSingleCreditCost = formatCredits(batchSingleCreditCost);
@@ -2412,31 +2436,11 @@ export function CreatePageClient({
     clearStreamingPreview();
     setIsGenerating(true);
     try {
-      const response = await fetch("/api/images/generate", {
-        method: "POST",
-        headers: {
-          Accept: "text/event-stream",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          prompt: currentPrompt,
-          size,
-          stream: true,
-          count: batchCount,
-          moderation,
-          ...(promptOptimizationAllowed
-            ? { promptOptimization }
-            : {}),
-        }),
+      const data = await runTextGenerationRequest({
+        prompt: currentPrompt,
+        count: batchCount,
+        stream: true,
       });
-      const data = await readImageStreamResponse(response);
-
-      if (!response.ok || data.error) {
-        showGenerationError(data.error || `API error: ${response.status}`, {
-          creditsConsumed: data.creditsConsumed,
-        });
-        return;
-      }
 
       const generatedCount = addSuccessfulResults(data, currentPrompt).length;
       toast.success(
@@ -2448,6 +2452,105 @@ export function CreatePageClient({
           : copy("Image generated", "图片已生成")
       );
     } catch (error) {
+      const creditsConsumed =
+        error instanceof Error
+          ? (error as GenerationRequestError).creditsConsumed
+          : undefined;
+      syncChargedCredits(creditsConsumed);
+      toast.error(copy("Generation failed", "生成失败"), {
+        description:
+          error instanceof Error
+            ? error.message
+            : copy("An unexpected error occurred.", "发生未知错误。"),
+      });
+    } finally {
+      setIsGenerating(false);
+      clearStreamingPreview();
+    }
+  };
+
+  const runTextGenerationRequest = async (params: {
+    prompt: string;
+    count?: number;
+    stream?: boolean;
+  }) => {
+    const response = await fetch("/api/images/generate", {
+      method: "POST",
+      headers: {
+        Accept: params.stream ? "text/event-stream" : "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        prompt: params.prompt,
+        size,
+        stream: Boolean(params.stream),
+        count: params.count || 1,
+        moderation,
+        ...(textModel !== "default" ? { model: textModel } : {}),
+        ...(promptOptimizationAllowed ? { promptOptimization } : {}),
+      }),
+    });
+
+    const data = params.stream
+      ? await readImageStreamResponse(response)
+      : ((await response.json()) as ImageApiResult);
+
+    if (!response.ok || data.error) {
+      const error = new Error(data.error || `API error: ${response.status}`);
+      (error as GenerationRequestError).creditsConsumed = data.creditsConsumed;
+      throw error;
+    }
+
+    return data;
+  };
+
+  const handleTextLineBatchSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (linePromptItems.length === 0) {
+      toast.error(copy("Enter at least one prompt line", "请至少输入一行提示词"));
+      return;
+    }
+    if (balance < lineBatchCreditCost) {
+      showGenerationError("Insufficient credits");
+      return;
+    }
+    if (!sizeCheck.valid) {
+      toast.error(copy("Invalid resolution", "分辨率无效"), {
+        description: validationMessage(sizeCheck.message),
+      });
+      return;
+    }
+
+    setResult(null);
+    clearStreamingPreview();
+    setIsGenerating(true);
+    let generatedCount = 0;
+    try {
+      for (const itemPrompt of linePromptItems) {
+        for (let repeatIndex = 0; repeatIndex < lineBatchRepeatCount; repeatIndex++) {
+          const data = await runTextGenerationRequest({
+            prompt: itemPrompt,
+            count: 1,
+            stream: false,
+          });
+          generatedCount += addSuccessfulResults(data, itemPrompt).length;
+        }
+      }
+
+      toast.success(
+        generatedCount > 1
+          ? copy(
+              `${generatedCount} images generated`,
+              `已生成 ${generatedCount} 张图片`
+            )
+          : copy("Image generated", "图片已生成")
+      );
+    } catch (error) {
+      const creditsConsumed =
+        error instanceof Error
+          ? (error as GenerationRequestError).creditsConsumed
+          : undefined;
+      syncChargedCredits(creditsConsumed);
       toast.error(copy("Generation failed", "生成失败"), {
         description:
           error instanceof Error
@@ -2956,10 +3059,77 @@ export function CreatePageClient({
   const selectedRecent =
     recent.find((item) => item.id === selectedRecentId) ?? null;
 
-  const resolutionControls = (
+  const textSettingsPanel = (mode: TextGenerationMode) => {
+    const isLineMode = mode === "lines";
+    const countValue = isLineMode ? lineBatchRepeatCount : batchCount;
+    const setCountValue = isLineMode ? setLineBatchRepeatCount : setBatchCount;
+    const formattedCost = isLineMode
+      ? formattedLineBatchCreditCost
+      : formattedTextBatchCreditCost;
+    const costSuffix = isLineMode
+      ? copy(
+          ` for ${lineBatchTotalCount} total`,
+          `，共 ${lineBatchTotalCount} 张`
+        )
+      : batchCostSuffix(batchCount);
+
+    return (
     <div className="space-y-4 rounded-lg border border-border bg-background p-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <label
+                htmlFor={`text-model-${mode}`}
+                className="text-xs font-medium text-muted-foreground"
+              >
+                {copy("Model", "模型")}
+              </label>
+              <Select value={textModel} onValueChange={setTextModel} disabled={busy}>
+                <SelectTrigger id={`text-model-${mode}`} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TEXT_MODEL_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {textModelLabel(option.label)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label
+                htmlFor={isLineMode ? "line-repeat-count" : "batch-count"}
+                className="text-xs font-medium text-muted-foreground"
+              >
+                {isLineMode
+                  ? copy("Repeat each line", "每行重复")
+                  : copy("Repeat prompt", "重复生成")}
+              </label>
+              <Select
+                value={String(countValue)}
+                onValueChange={(value) => setCountValue(Number(value))}
+                disabled={busy}
+              >
+                <SelectTrigger
+                  id={isLineMode ? "line-repeat-count" : "batch-count"}
+                  className="w-full"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {BATCH_OPTIONS.map((count) => (
+                    <SelectItem key={count} value={String(count)}>
+                      {imageCountLabel(count)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
           <div>
             <span className="text-sm font-medium text-foreground">
               {copy("Resolution", "分辨率")}
@@ -3041,31 +3211,6 @@ export function CreatePageClient({
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <label
-                htmlFor="batch-count"
-                className="text-xs font-medium text-muted-foreground"
-              >
-                {copy("Batch", "批量")}
-              </label>
-              <Select
-                value={String(batchCount)}
-                onValueChange={(value) => setBatchCount(Number(value))}
-                disabled={busy}
-              >
-                <SelectTrigger id="batch-count" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {BATCH_OPTIONS.map((count) => (
-                    <SelectItem key={count} value={String(count)}>
-                      {imageCountLabel(count)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1.5">
-              <label
                 htmlFor="image-moderation"
                 className="text-xs font-medium text-muted-foreground"
               >
@@ -3102,9 +3247,9 @@ export function CreatePageClient({
             </span>{" "}
             · {copy("Cost", "费用")}:{" "}
             <span className="font-medium text-foreground">
-              {formattedTextBatchCreditCost}
+              {formattedCost}
             </span>
-            {batchCostSuffix(batchCount)}
+            {costSuffix}
           </span>
         </div>
       </div>
@@ -3114,7 +3259,8 @@ export function CreatePageClient({
         </p>
       )}
     </div>
-  );
+    );
+  };
 
   const loading = busy;
 
@@ -3167,36 +3313,106 @@ export function CreatePageClient({
         </TabsList>
 
         <TabsContent value="text" className="mt-0">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <Textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder={copy(
-                "Describe the image you want to create...",
-                "描述你想创作的图片..."
-              )}
-              rows={5}
-              disabled={isGenerating}
-              className="resize-none border-input bg-background text-base"
-            />
-            {promptOptimizationField("text-prompt-optimization", isGenerating)}
-            {resolutionControls}
-            <div className="flex justify-end">
-              <Button type="submit" disabled={isGenerating || !prompt.trim()}>
-                {isGenerating ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    {copy("Generating", "生成中")}
-                  </>
-                ) : (
-                  <>
-                    <ImagePlus className="mr-2 h-4 w-4" />
-                    {copy("Generate", "生成")}
-                  </>
+          <Tabs
+            value={textMode}
+            onValueChange={(value) => setTextMode(value as TextGenerationMode)}
+            className="space-y-4"
+          >
+            <TabsList className="border border-border bg-muted/40">
+              <TabsTrigger value="single">
+                {copy("Single prompt", "单提示词")}
+              </TabsTrigger>
+              <TabsTrigger value="lines">
+                {copy("Line batch", "逐行批量")}
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="single" className="mt-0">
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <Textarea
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder={copy(
+                    "Describe the image you want to create...",
+                    "描述你想创作的图片..."
+                  )}
+                  rows={5}
+                  disabled={isGenerating}
+                  className="resize-none border-input bg-background text-base"
+                />
+                {promptOptimizationField("text-prompt-optimization", isGenerating)}
+                {textSettingsPanel("single")}
+                <div className="flex justify-end">
+                  <Button type="submit" disabled={isGenerating || !prompt.trim()}>
+                    {isGenerating ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        {copy("Generating", "生成中")}
+                      </>
+                    ) : (
+                      <>
+                        <ImagePlus className="mr-2 h-4 w-4" />
+                        {copy("Generate", "生成")}
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </form>
+            </TabsContent>
+
+            <TabsContent value="lines" className="mt-0">
+              <form onSubmit={handleTextLineBatchSubmit} className="space-y-4">
+                <Textarea
+                  value={linePrompts}
+                  onChange={(e) => setLinePrompts(e.target.value)}
+                  placeholder={copy(
+                    "One prompt per line. Each line generates one image.",
+                    "每行一个提示词，每行生成一张图片。"
+                  )}
+                  rows={8}
+                  disabled={isGenerating}
+                  className="resize-none border-input bg-background text-base"
+                />
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>
+                    {copy("Prompt lines", "提示词行数")}:{" "}
+                    <span className="font-medium text-foreground">
+                      {linePromptItems.length}
+                    </span>
+                  </span>
+                  <span>
+                    {copy("Total images", "总图片数")}:{" "}
+                    <span className="font-medium text-foreground">
+                      {lineBatchTotalCount}
+                    </span>
+                  </span>
+                </div>
+                {promptOptimizationField(
+                  "text-line-prompt-optimization",
+                  isGenerating
                 )}
-              </Button>
-            </div>
-          </form>
+                {textSettingsPanel("lines")}
+                <div className="flex justify-end">
+                  <Button
+                    type="submit"
+                    disabled={isGenerating || linePromptItems.length === 0}
+                  >
+                    {isGenerating ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        {copy("Generating", "生成中")}
+                      </>
+                    ) : (
+                      <>
+                        <ImagePlus className="mr-2 h-4 w-4" />
+                        {copy("Generate line batch", "生成逐行批量")}
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </form>
+            </TabsContent>
+          </Tabs>
         </TabsContent>
 
         <TabsContent value="image" className="mt-0">
