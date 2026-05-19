@@ -278,6 +278,10 @@ function getNonJsonErrorMessage(
   return `API returned a non-JSON ${apiName} response: ${trimmedBody}`;
 }
 
+function looksLikeEventStreamText(text: string) {
+  return /(?:^|\n)(?:event|data):/.test(text.replace(/\r\n/g, "\n"));
+}
+
 function normalizeQuality(quality?: string): ImageQuality | undefined {
   if (!quality || quality === "auto") return undefined;
   return VALID_QUALITIES.has(quality as ImageQuality)
@@ -769,17 +773,7 @@ async function parseResponsesEventStreamResponse(
   callbacks?: ImageGenerationCallbacks
 ): Promise<GenerateImageResult> {
   if (!response.body) {
-    const text = await response.text();
-    const state: EventStreamParseState = {
-      completedResult: null,
-      fallbackResult: null,
-    };
-    for (const block of text.replace(/\r\n/g, "\n").split("\n\n")) {
-      if (!block.trim()) continue;
-      const error = await processResponsesEventBlock(block, state, callbacks);
-      if (error) return { error };
-    }
-    return finishEventStream(state);
+    return parseResponsesEventStreamText(await response.text(), callbacks);
   }
 
   const state: EventStreamParseState = {
@@ -816,6 +810,24 @@ async function parseResponsesEventStreamResponse(
   return finishEventStream(state);
 }
 
+async function parseResponsesEventStreamText(
+  text: string,
+  callbacks?: ImageGenerationCallbacks
+): Promise<GenerateImageResult> {
+  const state: EventStreamParseState = {
+    completedResult: null,
+    fallbackResult: null,
+  };
+
+  for (const block of text.replace(/\r\n/g, "\n").split("\n\n")) {
+    if (!block.trim()) continue;
+    const error = await processResponsesEventBlock(block, state, callbacks);
+    if (error) return { error };
+  }
+
+  return finishEventStream(state);
+}
+
 async function parseResponsesResponse(
   response: Response,
   callbacks?: ImageGenerationCallbacks
@@ -834,6 +846,9 @@ async function parseResponsesResponse(
 
   if (!contentType.includes("application/json")) {
     const text = await response.text().catch(() => "");
+    if (looksLikeEventStreamText(text)) {
+      return parseResponsesEventStreamText(text, callbacks);
+    }
     return {
       error: getNonJsonErrorMessage(text, "Responses API"),
     };
