@@ -12,6 +12,12 @@ import { logError } from "@repo/shared/logger";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { getRuntimeSettingString } from "@repo/shared/system-settings";
 import { eq } from "drizzle-orm";
+import { resolveImageBackendPoolConfig } from "@/features/image-backend-pool/service";
+import type { ImageBackendRequestKind } from "@/features/image-backend-pool/types";
+import {
+  editImageWithChatGptWeb,
+  generateImageWithChatGptWeb,
+} from "./chatgpt-web";
 import {
   DEFAULT_IMAGE_MODEL,
   DEFAULT_IMAGE_SIZE,
@@ -20,6 +26,10 @@ import {
   normalizeImageModel,
   parseImageSize,
 } from "./resolution";
+import {
+  buildResponsesImageEditRequest,
+  buildResponsesImageGenerationRequest,
+} from "./responses-image";
 import type {
   ApiConfig,
   ChatHistoryMessage,
@@ -112,6 +122,17 @@ function getModel(config: ApiConfig, model?: string) {
     );
   }
   return imageModel;
+}
+
+function getHeaders(
+  config: ApiConfig,
+  defaults: Record<string, string>
+): Record<string, string> {
+  return {
+    ...defaults,
+    ...(config.headers || {}),
+    Authorization: `Bearer ${config.apiKey}`,
+  };
 }
 
 function normalizeResponsesModel(
@@ -300,6 +321,20 @@ function toBlobPart(buffer: Buffer): BlobPart {
 
 function stripTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
+}
+
+function isPoolAccountBackend(
+  config: ApiConfig,
+  accountBackend: "web" | "responses"
+) {
+  return (
+    config.backend?.type === "pool-account" &&
+    config.backend.accountBackend === accountBackend
+  );
+}
+
+function isResponsesBackend(config: ApiConfig) {
+  return isPoolAccountBackend(config, "responses");
 }
 
 function getDataUrl(image: ImageInputFile) {
@@ -951,17 +986,34 @@ export async function getUserApiConfig(
   const normalizedModel = normalizeImageModel(row.model);
   if (normalizedModel) result.model = normalizedModel;
   if (row.useStream) result.useStream = true;
+  result.contentSafetyEnabled = true;
+  result.backend = { type: "user-api" };
   return result;
 }
 
 export async function getEffectiveConfig(
-  userConfig: ApiConfig | null
+  userConfig: ApiConfig | null,
+  options?: {
+    userId?: string;
+    apiKeyId?: string;
+    requestKind?: ImageBackendRequestKind;
+  }
 ): Promise<{
   config: ApiConfig;
   useCredits: boolean;
 }> {
   if (userConfig) {
     return { config: userConfig, useCredits: false };
+  }
+  if (options?.userId && options.requestKind) {
+    const poolConfig = await resolveImageBackendPoolConfig({
+      userId: options.userId,
+      apiKeyId: options.apiKeyId,
+      requestKind: options.requestKind,
+    });
+    if (poolConfig) {
+      return { config: poolConfig.config, useCredits: true };
+    }
   }
   return { config: await getPlatformConfig(), useCredits: true };
 }
@@ -972,6 +1024,35 @@ export async function generateImage(
   callbacks?: ImageGenerationCallbacks
 ): Promise<GenerateImageResult> {
   const model = getModel(config, params.model);
+  if (isPoolAccountBackend(config, "web")) {
+    return generateImageWithChatGptWeb(config, { ...params, model });
+  }
+  if (isResponsesBackend(config)) {
+    try {
+      const response = await fetch(`${stripTrailingSlash(config.baseUrl)}/responses`, {
+        method: "POST",
+        headers: getHeaders(config, {
+          "Content-Type": "application/json",
+        }),
+        body: JSON.stringify(
+          buildResponsesImageGenerationRequest(config, { ...params, model })
+        ),
+      });
+      return await parseResponsesResponse(response, callbacks);
+    } catch (error) {
+      logImageRequestError(error, {
+        operation: "generate",
+        baseUrl: config.baseUrl,
+        path: "/responses",
+        model,
+        useStream: config.useStream,
+      });
+      return {
+        error: error instanceof Error ? error.message : "Unknown error occurred",
+      };
+    }
+  }
+
   try {
     const prompt =
       params.promptOptimization === false
@@ -981,10 +1062,9 @@ export async function generateImage(
     const dimensions = parseImageSize(size);
     const response = await fetch(`${config.baseUrl}/images/generations`, {
       method: "POST",
-      headers: {
+      headers: getHeaders(config, {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${config.apiKey}`,
-      },
+      }),
       body: JSON.stringify({
         model,
         prompt,
@@ -1029,6 +1109,35 @@ export async function editImage(
   callbacks?: ImageGenerationCallbacks
 ): Promise<GenerateImageResult> {
   const model = getModel(config, params.model);
+  if (isPoolAccountBackend(config, "web")) {
+    return editImageWithChatGptWeb(config, { ...params, model });
+  }
+  if (isResponsesBackend(config)) {
+    try {
+      const response = await fetch(`${stripTrailingSlash(config.baseUrl)}/responses`, {
+        method: "POST",
+        headers: getHeaders(config, {
+          "Content-Type": "application/json",
+        }),
+        body: JSON.stringify(
+          buildResponsesImageEditRequest(config, { ...params, model })
+        ),
+      });
+      return await parseResponsesResponse(response, callbacks);
+    } catch (error) {
+      logImageRequestError(error, {
+        operation: "edit",
+        baseUrl: config.baseUrl,
+        path: "/responses",
+        model,
+        useStream: config.useStream,
+      });
+      return {
+        error: error instanceof Error ? error.message : "Unknown error occurred",
+      };
+    }
+  }
+
   try {
     const prompt =
       params.promptOptimization === false
@@ -1063,9 +1172,7 @@ export async function editImage(
 
     const response = await fetch(`${config.baseUrl}/images/edits`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${config.apiKey}`,
-      },
+      headers: getHeaders(config, {}),
       body: formData,
     });
 
@@ -1092,6 +1199,9 @@ export async function generateChatImage(
   const model = await getResponsesModel(config, params.model, {
     allowGpt55: params.allowGpt55,
   });
+  if (isPoolAccountBackend(config, "web")) {
+    return { error: "Web backend accounts do not support /v1/responses." };
+  }
   try {
     const prompt =
       params.promptOptimization === false
@@ -1121,22 +1231,29 @@ export async function generateChatImage(
       ? { effort: thinking, summary: "concise" }
       : undefined;
 
+    const requestBody =
+      params.rawResponsesBody && typeof params.rawResponsesBody === "object"
+        ? {
+            ...(params.rawResponsesBody as Record<string, unknown>),
+            ...(params.stream || config.useStream ? { stream: true } : {}),
+          }
+        : {
+            model,
+            input,
+            tools: [tool],
+            ...(instructions ? { instructions } : {}),
+            ...(reasoning ? { reasoning } : {}),
+            ...(params.stream || config.useStream ? { stream: true } : {}),
+          };
+
     const response = await fetch(
       `${stripTrailingSlash(config.baseUrl)}/responses`,
       {
         method: "POST",
-        headers: {
+        headers: getHeaders(config, {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${config.apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          input,
-          tools: [tool],
-          ...(instructions ? { instructions } : {}),
-          ...(reasoning ? { reasoning } : {}),
-          ...(params.stream || config.useStream ? { stream: true } : {}),
         }),
+        body: JSON.stringify(requestBody),
       }
     );
 

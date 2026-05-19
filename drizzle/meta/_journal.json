@@ -50,6 +50,13 @@
       "when": 1779177600000,
       "tag": "0006_moderation_risk_levels",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1779179000000,
+      "tag": "0007_image_backend_pool",
+      "breakpoints": true
     }
   ]
 }

@@ -314,6 +314,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
           mode: "edit",
           userId: session.user.id,
           generationId,
+          backendRequestKind: "image_edit" as const,
           prompt,
           apiPrompt,
           promptOptimization,

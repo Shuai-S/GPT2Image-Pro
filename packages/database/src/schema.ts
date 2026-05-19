@@ -674,6 +674,94 @@ export type UserApiConfig = typeof userApiConfig.$inferSelect;
 export type NewUserApiConfig = typeof userApiConfig.$inferInsert;
 
 // ============================================
+// Image Backend Pool
+// ============================================
+export const imageBackendGroup = pgTable("image_backend_group", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  isEnabled: boolean("is_enabled").notNull().default(true),
+  isDefault: boolean("is_default").notNull().default(false),
+  isUserSelectable: boolean("is_user_selectable").notNull().default(true),
+  contentSafetyEnabled: boolean("content_safety_enabled"),
+  priority: integer("priority").notNull().default(50),
+  metadata: json("metadata").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const imageBackendAccount = pgTable("image_backend_account", {
+  id: text("id").primaryKey(),
+  groupId: text("group_id").references(() => imageBackendGroup.id, {
+    onDelete: "set null",
+  }),
+  name: text("name").notNull(),
+  email: text("email"),
+  credentialHash: text("credential_hash").notNull().unique(),
+  accessToken: text("access_token").notNull(),
+  refreshToken: text("refresh_token"),
+  implementationMode: text("interface_mode").notNull().default("web"),
+  model: text("model"),
+  contentSafetyEnabled: boolean("content_safety_enabled").notNull().default(true),
+  isEnabled: boolean("is_enabled").notNull().default(true),
+  priority: integer("priority").notNull().default(50),
+  concurrency: integer("concurrency").notNull().default(1),
+  status: text("status").notNull().default("active"),
+  lastUsedAt: timestamp("last_used_at"),
+  metadata: json("metadata").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const imageBackendApi = pgTable("image_backend_api", {
+  id: text("id").primaryKey(),
+  groupId: text("group_id").references(() => imageBackendGroup.id, {
+    onDelete: "set null",
+  }),
+  name: text("name").notNull(),
+  baseUrl: text("base_url").notNull(),
+  apiKey: text("api_key").notNull(),
+  model: text("model"),
+  interfaceMode: text("interface_mode").notNull().default("images"),
+  useStream: boolean("use_stream").notNull().default(false),
+  contentSafetyEnabled: boolean("content_safety_enabled").notNull().default(true),
+  isEnabled: boolean("is_enabled").notNull().default(true),
+  priority: integer("priority").notNull().default(50),
+  status: text("status").notNull().default("active"),
+  lastUsedAt: timestamp("last_used_at"),
+  metadata: json("metadata").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const userImageBackendPreference = pgTable(
+  "user_image_backend_preference",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .unique()
+      .references(() => user.id, { onDelete: "cascade" }),
+    groupId: text("group_id").references(() => imageBackendGroup.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  }
+);
+
+export type ImageBackendGroup = typeof imageBackendGroup.$inferSelect;
+export type NewImageBackendGroup = typeof imageBackendGroup.$inferInsert;
+export type ImageBackendAccount = typeof imageBackendAccount.$inferSelect;
+export type NewImageBackendAccount = typeof imageBackendAccount.$inferInsert;
+export type ImageBackendApi = typeof imageBackendApi.$inferSelect;
+export type NewImageBackendApi = typeof imageBackendApi.$inferInsert;
+export type UserImageBackendPreference =
+  typeof userImageBackendPreference.$inferSelect;
+export type NewUserImageBackendPreference =
+  typeof userImageBackendPreference.$inferInsert;
+
+// ============================================
 // External API Keys
 // ============================================
 export const externalApiKey = pgTable("external_api_key", {
@@ -688,6 +776,10 @@ export const externalApiKey = pgTable("external_api_key", {
   moderationBlockRiskLevel: text("moderation_block_risk_level")
     .notNull()
     .default("low"),
+  generationGroupId: text("generation_group_id").references(
+    () => imageBackendGroup.id,
+    { onDelete: "set null" }
+  ),
   lastUsedAt: timestamp("last_used_at"),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),

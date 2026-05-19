@@ -669,6 +669,10 @@
           "high": "Block high only"
         }
       },
+      "backendGroup": {
+        "label": "Backend group",
+        "default": "Default group"
+      },
       "success": {
         "created": "API key created",
         "copied": "API key copied",

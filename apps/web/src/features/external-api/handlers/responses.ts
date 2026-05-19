@@ -245,6 +245,8 @@ export const postExternalResponses = withApiLogging(
     const input = {
       mode: "chat" as const,
       userId: auth.userId,
+      apiKeyId: auth.apiKeyId,
+      backendRequestKind: "responses" as const,
       prompt,
       history,
       moderationBlockRiskLevel: auth.moderationBlockRiskLevel,
@@ -254,6 +256,7 @@ export const postExternalResponses = withApiLogging(
       moderation: (parsed.data.moderation || "auto") as ImageModeration,
       thinking: normalizeThinking(parsed.data.reasoning?.effort),
       stream: wantsImageStreamResponse(request, parsed.data.stream),
+      rawResponsesBody: parsed.data,
     };
 
     const requestId = responseId("resp");

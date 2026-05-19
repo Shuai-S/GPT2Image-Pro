@@ -15,6 +15,7 @@ import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { getRuntimeSettingString } from "@repo/shared/system-settings";
 import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import type { ImageBackendRequestKind } from "@/features/image-backend-pool/types";
 import { withImageGenerationQueue } from "./queue";
 import {
   DEFAULT_IMAGE_SIZE,
@@ -45,16 +46,22 @@ type RunImageGenerationInput =
       mode: "generate";
       userId: string;
       generationId?: string;
+      apiKeyId?: string;
+      backendRequestKind?: ImageBackendRequestKind;
     } & GenerateImageParams)
   | ({
       mode: "edit";
       userId: string;
       generationId?: string;
+      apiKeyId?: string;
+      backendRequestKind?: ImageBackendRequestKind;
     } & EditImageParams)
   | ({
       mode: "chat";
       userId: string;
       generationId?: string;
+      apiKeyId?: string;
+      backendRequestKind?: ImageBackendRequestKind;
     } & ChatImageParams);
 
 const CHAT_TEXT_ONLY_CREDITS = 1;
@@ -226,7 +233,18 @@ export async function runImageGenerationForUser(
   }
 
   const userConfig = await getUserApiConfig(input.userId);
-  const { config, useCredits } = await getEffectiveConfig(userConfig);
+  const backendRequestKind =
+    input.backendRequestKind ??
+    (input.mode === "generate"
+      ? "image_generation"
+      : input.mode === "edit"
+        ? "image_edit"
+        : undefined);
+  const { config, useCredits } = await getEffectiveConfig(userConfig, {
+    userId: input.userId,
+    apiKeyId: input.apiKeyId,
+    requestKind: backendRequestKind,
+  });
   let model: string;
   try {
     if (input.mode === "chat") {
@@ -469,15 +487,18 @@ async function runQueuedImageGenerationForUser({
     }
   }
 
-  const moderation = await moderateContent({
-    prompt: moderationPrompt,
-    images: inputImages,
-    mode: inputImages.length > 0 ? "image" : "text",
-    userId: input.userId,
-    userPlan: userPlan.plan,
-    userModerationBlockRiskLevel: moderationBlockRiskLevel,
-    generationId,
-  });
+  const moderation =
+    config.contentSafetyEnabled === false
+      ? ({ decision: "skipped" } as const)
+      : await moderateContent({
+          prompt: moderationPrompt,
+          images: inputImages,
+          mode: inputImages.length > 0 ? "image" : "text",
+          userId: input.userId,
+          userPlan: userPlan.plan,
+          userModerationBlockRiskLevel: moderationBlockRiskLevel,
+          generationId,
+        });
 
   if (moderation.decision === "block" || moderation.decision === "error") {
     const targetCredits =
@@ -552,6 +573,7 @@ async function runQueuedImageGenerationForUser({
               moderation: input.moderation,
               stream: input.stream,
               thinking: input.thinking,
+              rawResponsesBody: input.rawResponsesBody,
             },
             callbacks
           )

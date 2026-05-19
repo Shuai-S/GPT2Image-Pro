@@ -64,6 +64,7 @@ import {
 } from "@repo/shared/storage";
 import { usePathname, useRouter } from "@/i18n/routing";
 import { signOut } from "@repo/shared/auth/client";
+import { ImageBackendPreferenceSection } from "@/features/image-backend-pool";
 
 import { ApiConfigForm } from "./api-config-form";
 import { BillingSection } from "./billing-section";
@@ -614,6 +615,7 @@ export function SettingsProfileView({ user }: SettingsProfileViewProps) {
               {t("advanced.description")}
             </p>
           </div>
+          <ImageBackendPreferenceSection />
           <ExternalApiKeySection />
           <ApiConfigForm />
         </TabsContent>

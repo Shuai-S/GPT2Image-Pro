@@ -669,6 +669,10 @@
           "high": "仅拦截 high"
         }
       },
+      "backendGroup": {
+        "label": "后端分组",
+        "default": "默认分组"
+      },
       "success": {
         "created": "API Key 已创建",
         "copied": "API Key 已复制",

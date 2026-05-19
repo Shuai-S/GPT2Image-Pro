@@ -27,8 +27,18 @@ import {
   createExternalApiKey,
   getExternalApiKeys,
   revokeExternalApiKey,
+  updateExternalApiKeyGroup,
   updateExternalApiKeyModeration,
 } from "../actions";
+
+type ImageBackendGroupOption = {
+  id: string;
+  name: string;
+  description: string | null;
+  isDefault: boolean;
+  isUserSelectable: boolean;
+  isEnabled: boolean;
+};
 
 type ExternalApiKeySummary = {
   id: string;
@@ -36,6 +46,7 @@ type ExternalApiKeySummary = {
   keyPrefix: string;
   lastFour: string;
   moderationBlockRiskLevel: ModerationBlockRiskLevel;
+  generationGroupId: string | null;
   lastUsedAt: Date | string | null;
   isActive: boolean;
   createdAt: Date | string;
@@ -57,6 +68,8 @@ export function ExternalApiKeySection() {
   const [keyName, setKeyName] = useState(t("defaultName"));
   const [newKeyModerationLevel, setNewKeyModerationLevel] =
     useState<ModerationBlockRiskLevel>("low");
+  const [newKeyGroupId, setNewKeyGroupId] = useState("default");
+  const [groups, setGroups] = useState<ImageBackendGroupOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [externalApiAllowed, setExternalApiAllowed] = useState(false);
   const [userPlan, setUserPlan] = useState<SubscriptionPlan>("free");
@@ -68,7 +81,7 @@ export function ExternalApiKeySection() {
     {
       onSuccess: ({ data }) => {
         setKeys(
-          (data || []).map((key) => ({
+          (data?.keys || []).map((key) => ({
             ...key,
             moderationBlockRiskLevel:
               key.moderationBlockRiskLevel === "medium" ||
@@ -77,6 +90,7 @@ export function ExternalApiKeySection() {
                 : "low",
           }))
         );
+        setGroups((data?.groups || []) as ImageBackendGroupOption[]);
         setLoading(false);
       },
       onError: ({ error }) => {
@@ -127,6 +141,19 @@ export function ExternalApiKeySection() {
       toast.error(error.serverError || t("errors.update"));
     },
   });
+
+  const { execute: updateKeyGroup, isPending: isUpdatingGroup } = useAction(
+    updateExternalApiKeyGroup,
+    {
+      onSuccess: () => {
+        toast.success(t("success.updated"));
+        loadKeys();
+      },
+      onError: ({ error }) => {
+        toast.error(error.serverError || t("errors.update"));
+      },
+    }
+  );
 
   useEffect(() => {
     if (didLoadRef.current) return;
@@ -233,12 +260,30 @@ export function ExternalApiKeySection() {
             ))}
           </SelectContent>
         </Select>
+        <Select
+          value={newKeyGroupId}
+          onValueChange={setNewKeyGroupId}
+          disabled={!externalApiAllowed}
+        >
+          <SelectTrigger className="sm:w-48">
+            <SelectValue placeholder={t("backendGroup.label")} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="default">{t("backendGroup.default")}</SelectItem>
+            {groups.map((group) => (
+              <SelectItem key={group.id} value={group.id}>
+                {group.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Button
           type="button"
           onClick={() =>
             createKey({
               name: keyName || undefined,
               moderationBlockRiskLevel: newKeyModerationLevel,
+              generationGroupId: newKeyGroupId,
             })
           }
           disabled={isCreating || !externalApiAllowed}
@@ -306,6 +351,38 @@ export function ExternalApiKeySection() {
                       {moderationOptions.map((level) => (
                         <SelectItem key={level} value={level}>
                           {t(`moderation.options.${level}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="mt-3 max-w-xs">
+                  <Label htmlFor={`external-key-group-${key.id}`}>
+                    {t("backendGroup.label")}
+                  </Label>
+                  <Select
+                    value={key.generationGroupId || "default"}
+                    onValueChange={(value) =>
+                      updateKeyGroup({
+                        id: key.id,
+                        generationGroupId: value,
+                      })
+                    }
+                    disabled={!externalApiAllowed || isUpdatingGroup}
+                  >
+                    <SelectTrigger
+                      id={`external-key-group-${key.id}`}
+                      className="mt-1"
+                    >
+                      <SelectValue placeholder={t("backendGroup.label")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">
+                        {t("backendGroup.default")}
+                      </SelectItem>
+                      {groups.map((group) => (
+                        <SelectItem key={group.id} value={group.id}>
+                          {group.name}
                         </SelectItem>
                       ))}
                     </SelectContent>

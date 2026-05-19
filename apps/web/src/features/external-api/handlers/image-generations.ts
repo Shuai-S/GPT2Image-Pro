@@ -120,6 +120,8 @@ export const postExternalImageGenerations = withApiLogging(
     const input = {
       mode: "generate" as const,
       userId: auth.userId,
+      apiKeyId: auth.apiKeyId,
+      backendRequestKind: "image_generation" as const,
       prompt: parsed.data.prompt,
       apiPrompt: parsed.data.apiPrompt || parsed.data.api_prompt,
       promptOptimization:

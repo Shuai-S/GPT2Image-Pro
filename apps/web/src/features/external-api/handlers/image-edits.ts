@@ -388,6 +388,8 @@ export const postExternalImageEdits = withApiLogging(
             mode: "edit",
             userId: auth.userId,
             generationId,
+            apiKeyId: auth.apiKeyId,
+            backendRequestKind: "image_edit" as const,
             prompt,
             apiPrompt,
             promptOptimization,

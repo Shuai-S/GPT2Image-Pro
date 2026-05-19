@@ -76,6 +76,7 @@ export interface ChatImageParams {
   moderation?: ImageModeration;
   stream?: boolean;
   thinking?: ThinkingLevel;
+  rawResponsesBody?: unknown;
 }
 
 export interface ChatHistoryVariant {
@@ -100,6 +101,15 @@ export interface ApiConfig {
   model?: string;
   useStream?: boolean;
   supportsPromptOptimizationControl?: boolean;
+  contentSafetyEnabled?: boolean;
+  headers?: Record<string, string>;
+  backend?: {
+    type: "platform" | "pool-api" | "pool-account" | "user-api";
+    id?: string;
+    groupId?: string | null;
+    requestKind?: "image_generation" | "image_edit" | "responses";
+    accountBackend?: "web" | "responses";
+  };
 }
 
 export interface GenerationRecord {

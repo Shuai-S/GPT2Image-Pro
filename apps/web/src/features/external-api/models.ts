@@ -8,6 +8,7 @@ import {
   type SubscriptionPlan,
 } from "@repo/shared/config/subscription-plan";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
+import { DEFAULT_IMAGE_MODEL } from "@/features/image-generation/resolution";
 
 const DEFAULT_MODEL_OWNER = "gpt2image";
 
@@ -61,8 +62,12 @@ export async function getExternalModelsForUser(
   userId: string
 ): Promise<OpenAIModelList> {
   const plan = await getUserPlan(userId);
+  const imageModels = [DEFAULT_IMAGE_MODEL];
   return {
     object: "list",
-    data: getExternalResponsesImageModels(plan.plan).map(toOpenAIModel),
+    data: [
+      ...imageModels.map(toOpenAIModel),
+      ...getExternalResponsesImageModels(plan.plan).map(toOpenAIModel),
+    ],
   };
 }

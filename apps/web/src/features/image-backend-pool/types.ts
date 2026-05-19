@@ -1,0 +1,20 @@
+export type ImageBackendRequestKind =
+  | "image_generation"
+  | "image_edit"
+  | "responses";
+export type ImageBackendAccountBackend = "web" | "responses";
+export type ImageBackendMemberType = "api" | "account";
+export type ContentSafetyOverride = "inherit" | "enabled" | "disabled";
+
+export type ImageBackendGroupSummary = {
+  id: string;
+  name: string;
+  description: string | null;
+  isEnabled: boolean;
+  isDefault: boolean;
+  isUserSelectable: boolean;
+  contentSafetyEnabled: boolean | null;
+  priority: number;
+  apiCount: number;
+  accountCount: number;
+};

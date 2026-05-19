@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { db } from "@repo/database";
 import { externalApiKey } from "@repo/database/schema";
+import { listImageBackendGroupOptions } from "@/features/image-backend-pool/service";
 import {
   canUseExternalApi,
   normalizeModerationBlockRiskLevelForPlan,
@@ -35,6 +36,15 @@ async function ensureExternalApiAllowed(userId: string) {
   return plan.plan;
 }
 
+async function normalizeSelectableGenerationGroupId(groupId?: string | null) {
+  if (!groupId || groupId === "default") return null;
+  const groups = await listImageBackendGroupOptions({ userSelectableOnly: true });
+  if (!groups.some((group) => group.id === groupId)) {
+    throw new Error("Image backend group is not selectable");
+  }
+  return groupId;
+}
+
 export const getExternalApiKeys = withExternalApiKeyAction("list").action(
   async ({ ctx }) => {
     const keys = await db
@@ -44,6 +54,7 @@ export const getExternalApiKeys = withExternalApiKeyAction("list").action(
         keyPrefix: externalApiKey.keyPrefix,
         lastFour: externalApiKey.lastFour,
         moderationBlockRiskLevel: externalApiKey.moderationBlockRiskLevel,
+        generationGroupId: externalApiKey.generationGroupId,
         lastUsedAt: externalApiKey.lastUsedAt,
         isActive: externalApiKey.isActive,
         createdAt: externalApiKey.createdAt,
@@ -52,7 +63,10 @@ export const getExternalApiKeys = withExternalApiKeyAction("list").action(
       .where(eq(externalApiKey.userId, ctx.userId))
       .orderBy(desc(externalApiKey.createdAt));
 
-    return keys;
+    const groups = await listImageBackendGroupOptions({
+      userSelectableOnly: true,
+    });
+    return { keys, groups };
   }
 );
 
@@ -61,6 +75,7 @@ export const createExternalApiKey = withExternalApiKeyAction("create")
     z.object({
       name: z.string().trim().min(1).max(80).optional(),
       moderationBlockRiskLevel: z.enum(["low", "medium", "high"]).optional(),
+      generationGroupId: z.string().trim().optional().nullable(),
     })
   )
   .action(async ({ parsedInput, ctx }) => {
@@ -68,6 +83,9 @@ export const createExternalApiKey = withExternalApiKeyAction("create")
 
     const apiKey = createApiKey();
     const keyPrefix = apiKey.slice(0, 7);
+    const generationGroupId = await normalizeSelectableGenerationGroupId(
+      parsedInput.generationGroupId
+    );
 
     await db.insert(externalApiKey).values({
       id: nanoid(),
@@ -80,6 +98,7 @@ export const createExternalApiKey = withExternalApiKeyAction("create")
         plan,
         parsedInput.moderationBlockRiskLevel
       ),
+      generationGroupId,
     });
 
     return { apiKey };
@@ -150,4 +169,32 @@ export const updateExternalApiKeyModeration = withExternalApiKeyAction(
       );
 
     return { success: true, moderationBlockRiskLevel: normalized };
+  });
+
+export const updateExternalApiKeyGroup = withExternalApiKeyAction("updateGroup")
+  .schema(
+    z.object({
+      id: z.string().min(1),
+      generationGroupId: z.string().trim().optional().nullable(),
+    })
+  )
+  .action(async ({ parsedInput, ctx }) => {
+    await ensureExternalApiAllowed(ctx.userId);
+    const generationGroupId = await normalizeSelectableGenerationGroupId(
+      parsedInput.generationGroupId
+    );
+    await db
+      .update(externalApiKey)
+      .set({
+        generationGroupId,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(externalApiKey.id, parsedInput.id),
+          eq(externalApiKey.userId, ctx.userId)
+        )
+      );
+
+    return { success: true };
   });
