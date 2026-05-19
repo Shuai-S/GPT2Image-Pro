@@ -174,7 +174,7 @@ export function ImageLightbox({
                 fill
                 sizes="(max-width: 768px) 100vw, 60vw"
                 className="object-contain"
-                unoptimized
+                unoptimized={!imageUrl.startsWith("/api/storage/")}
               />
             ) : (
               <div className="flex h-full min-h-[320px] w-full items-center justify-center text-muted-foreground">

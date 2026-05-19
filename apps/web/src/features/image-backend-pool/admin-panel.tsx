@@ -33,10 +33,11 @@ import {
   deleteImageBackendGroupAction,
   deleteImageBackendMemberAction,
   getAdminImageBackendPoolAction,
-  importImageBackendAccountsAction,
+  refreshImageBackendAccountInfoAction,
   saveImageBackendAccountAction,
   saveImageBackendApiAction,
   saveImageBackendGroupAction,
+  syncImageBackendAccountsFromSub2ApiAction,
 } from "./actions";
 
 type Group = {
@@ -64,7 +65,25 @@ type Account = {
   priority: number;
   concurrency: number;
   status: string;
+  successCount: number;
+  failCount: number;
   lastUsedAt: Date | string | null;
+  cooldownUntil: Date | string | null;
+  lastError: string | null;
+  lastErrorAt: Date | string | null;
+  metadata: {
+    webAccount?: {
+      email?: string | null;
+      userId?: string | null;
+      type?: string;
+      quota?: number;
+      imageQuotaUnknown?: boolean;
+      defaultModelSlug?: string | null;
+      restoreAt?: string | null;
+      status?: "active" | "limited";
+      refreshedAt?: string;
+    };
+  } | null;
 };
 
 type Api = {
@@ -78,11 +97,17 @@ type Api = {
   isEnabled: boolean;
   priority: number;
   status: string;
+  successCount: number;
+  failCount: number;
   lastUsedAt: Date | string | null;
+  cooldownUntil: Date | string | null;
+  lastError: string | null;
+  lastErrorAt: Date | string | null;
 };
 
 type ContentSafetyFormValue = "inherit" | "enabled" | "disabled";
 type AccountBackendFormValue = "web" | "responses";
+type TokenSyncMode = "web" | "responses" | "both";
 
 function groupName(groups: Group[], groupId: string | null) {
   return groups.find((group) => group.id === groupId)?.name || "未分组";
@@ -94,6 +119,35 @@ function formatDate(value: Date | string | null) {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function formatOptionalDate(value: Date | string | null) {
+  if (!value) return "无";
+  return formatDate(value);
+}
+
+function isCoolingDown(value: Date | string | null) {
+  return value ? new Date(value).getTime() > Date.now() : false;
+}
+
+function getWebAccountInfo(account: Account) {
+  return account.implementationMode === "web"
+    ? account.metadata?.webAccount
+    : undefined;
+}
+
+function formatWebQuota(account: Account) {
+  const info = getWebAccountInfo(account);
+  if (!info) return "未刷新";
+  if (info.type === "pro" || info.type === "prolite") return "∞";
+  if (info.imageQuotaUnknown) return "未知";
+  return String(Math.max(0, Number(info.quota || 0)));
+}
+
+function formatWebStatus(account: Account) {
+  const info = getWebAccountInfo(account);
+  if (!info) return null;
+  return info.status === "limited" ? "额度受限" : "额度正常";
 }
 
 function safetyValue(value: boolean | null): ContentSafetyFormValue {
@@ -147,10 +201,11 @@ export function ImageBackendPoolAdminPanel() {
     priority: 50,
   });
   const [importForm, setImportForm] = useState({
-    groupId: "default",
-    implementationMode: "web" as AccountBackendFormValue,
+    webGroupId: "default",
+    responsesGroupId: "default",
+    syncMode: "both" as TokenSyncMode,
     contentSafetyEnabled: true,
-    json: "",
+    limit: 100,
   });
 
   const groupOptions = useMemo(
@@ -298,15 +353,17 @@ export function ImageBackendPoolAdminPanel() {
     }
   );
 
-  const { execute: importAccounts, isPending: isImporting } = useAction(
-    importImageBackendAccountsAction,
+  const { execute: syncSub2ApiAccounts, isPending: isSyncingSub2Api } = useAction(
+    syncImageBackendAccountsFromSub2ApiAction,
     {
       onSuccess: ({ data }) => {
-        toast.success(`已导入 ${data?.count || 0} 个账号`);
-        setImportForm((current) => ({ ...current, json: "" }));
+        toast.success(
+          `已读取 ${data?.sourceCount || 0} 个 Sub2API 账号，同步 ${data?.syncedCount || 0} 个本地后端，回写 RT ${data?.refreshTokenWriteBackCount || 0} 个`
+        );
         reload();
       },
-      onError: ({ error }) => toast.error(error.serverError || "导入账号失败"),
+      onError: ({ error }) =>
+        toast.error(error.serverError || "从 Sub2API 获取 AT 失败"),
     }
   );
 
@@ -331,6 +388,19 @@ export function ImageBackendPoolAdminPanel() {
       onError: ({ error }) => toast.error(error.serverError || "删除后端失败"),
     }
   );
+
+  const { execute: refreshAccountInfo, isPending: isRefreshingAccount } =
+    useAction(refreshImageBackendAccountInfoAction, {
+      onSuccess: ({ data }) => {
+        const quota = data?.info?.imageQuotaUnknown
+          ? "未知"
+          : String(data?.info?.quota ?? 0);
+        toast.success(`账号信息已刷新，图片额度 ${quota}`);
+        reload();
+      },
+      onError: ({ error }) =>
+        toast.error(error.serverError || "刷新账号远端信息失败"),
+    });
 
   useEffect(() => {
     loadPool();
@@ -360,7 +430,7 @@ export function ImageBackendPoolAdminPanel() {
           <TabsTrigger value="groups">分组</TabsTrigger>
           <TabsTrigger value="accounts">账号池</TabsTrigger>
           <TabsTrigger value="apis">API 后端</TabsTrigger>
-          <TabsTrigger value="import">Sub2API 导入</TabsTrigger>
+          <TabsTrigger value="import">获取 AT</TabsTrigger>
         </TabsList>
 
         <TabsContent value="groups" className="mt-6 grid gap-4 lg:grid-cols-[360px_1fr]">
@@ -657,13 +727,61 @@ export function ImageBackendPoolAdminPanel() {
                           ? "Codex/Responses"
                           : "Web"}
                       </Badge>
+                      <Badge variant="secondary">{account.status}</Badge>
+                      {formatWebStatus(account) && (
+                        <Badge variant="secondary">
+                          {formatWebStatus(account)}
+                        </Badge>
+                      )}
+                      {isCoolingDown(account.cooldownUntil) && (
+                        <Badge variant="secondary">冷却中</Badge>
+                      )}
                       {!account.isEnabled && <Badge variant="secondary">停用</Badge>}
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      {account.email || "无邮箱"} · {groupName(groups, account.groupId)} · 优先级 {account.priority} · {formatDate(account.lastUsedAt)}
+                      {account.email || getWebAccountInfo(account)?.email || "无邮箱"} ·{" "}
+                      {groupName(groups, account.groupId)} · 优先级{" "}
+                      {account.priority} · {formatDate(account.lastUsedAt)}
                     </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      成功 {account.successCount} · 失败 {account.failCount} · 冷却至{" "}
+                      {formatOptionalDate(account.cooldownUntil)}
+                    </p>
+                    {account.implementationMode === "web" && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Web 套餐 {getWebAccountInfo(account)?.type || "未刷新"} ·
+                        图片额度 {formatWebQuota(account)} · 恢复{" "}
+                        {formatOptionalDate(
+                          getWebAccountInfo(account)?.restoreAt || null
+                        )}{" "}
+                        · 刷新{" "}
+                        {formatOptionalDate(
+                          getWebAccountInfo(account)?.refreshedAt || null
+                        )}
+                      </p>
+                    )}
+                    {account.lastError && (
+                      <p className="mt-1 line-clamp-2 text-xs text-destructive">
+                        {formatOptionalDate(account.lastErrorAt)} · {account.lastError}
+                      </p>
+                    )}
                   </div>
                   <div className="flex gap-2">
+                    {account.implementationMode === "web" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={isRefreshingAccount}
+                        onClick={() => refreshAccountInfo({ id: account.id })}
+                      >
+                        {isRefreshingAccount ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="mr-2 h-4 w-4" />
+                        )}
+                        刷新额度
+                      </Button>
+                    )}
                     <Button
                       variant="outline"
                       size="sm"
@@ -793,11 +911,25 @@ export function ImageBackendPoolAdminPanel() {
                       <Plug className="h-4 w-4 text-muted-foreground" />
                       <span className="font-medium">{api.name}</span>
                       <Badge variant="outline">API 直透</Badge>
+                      <Badge variant="secondary">{api.status}</Badge>
+                      {isCoolingDown(api.cooldownUntil) && (
+                        <Badge variant="secondary">冷却中</Badge>
+                      )}
                       {!api.isEnabled && <Badge variant="secondary">停用</Badge>}
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      {api.baseUrl} · {groupName(groups, api.groupId)} · 优先级 {api.priority} · {formatDate(api.lastUsedAt)}
+                      {api.baseUrl} · {groupName(groups, api.groupId)} · 优先级{" "}
+                      {api.priority} · {formatDate(api.lastUsedAt)}
                     </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      成功 {api.successCount} · 失败 {api.failCount} · 冷却至{" "}
+                      {formatOptionalDate(api.cooldownUntil)}
+                    </p>
+                    {api.lastError && (
+                      <p className="mt-1 line-clamp-2 text-xs text-destructive">
+                        {formatOptionalDate(api.lastErrorAt)} · {api.lastError}
+                      </p>
+                    )}
                   </div>
                   <div className="flex gap-2">
                     <Button variant="outline" size="sm" onClick={() => editApi(api)}>
@@ -825,34 +957,20 @@ export function ImageBackendPoolAdminPanel() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <Database className="h-4 w-4" />
-                从 Sub2API 导出格式导入账号
+                从 Sub2API 获取 AT
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-3">
+              <p className="text-sm text-muted-foreground">
+                连接 Sub2API Postgres。Codex 直接复用 Sub2API 当前 access_token；Web 必须读取 Sub2API 的 RT 换取平台 AT，并把刷新返回的新 RT 写回 Sub2API，避免账号失效。
+              </p>
+              <div className="grid gap-3 md:grid-cols-2">
                 <Select
-                  value={importForm.groupId}
-                  onValueChange={(value) =>
-                    setImportForm((current) => ({ ...current, groupId: value }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {groupOptions.map((group) => (
-                      <SelectItem key={group.id} value={group.id}>
-                        {group.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select
-                  value={importForm.implementationMode}
+                  value={importForm.syncMode}
                   onValueChange={(value) =>
                     setImportForm((current) => ({
                       ...current,
-                      implementationMode: value as AccountBackendFormValue,
+                      syncMode: value as TokenSyncMode,
                     }))
                   }
                 >
@@ -860,8 +978,11 @@ export function ImageBackendPoolAdminPanel() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="web">Web 账号</SelectItem>
-                    <SelectItem value="responses">Codex/Responses 账号</SelectItem>
+                    <SelectItem value="both">同时获取 Web 和 Codex AT</SelectItem>
+                    <SelectItem value="web">只获取 Web AT</SelectItem>
+                    <SelectItem value="responses">
+                      只获取 Codex/Responses AT
+                    </SelectItem>
                   </SelectContent>
                 </Select>
                 <div className="flex items-center justify-between rounded-md border px-3">
@@ -877,23 +998,78 @@ export function ImageBackendPoolAdminPanel() {
                   />
                 </div>
               </div>
-              <Textarea
-                className="min-h-56 font-mono text-xs"
-                placeholder='[{"email":"a@example.com","access_token":"..."}]'
-                value={importForm.json}
+              <div className="grid gap-3 md:grid-cols-2">
+                <Select
+                  value={importForm.webGroupId}
+                  onValueChange={(value) =>
+                    setImportForm((current) => ({
+                      ...current,
+                      webGroupId: value,
+                    }))
+                  }
+                  disabled={importForm.syncMode === "responses"}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Web 账号分组" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {groupOptions.map((group) => (
+                      <SelectItem key={group.id} value={group.id}>
+                        Web：{group.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={importForm.responsesGroupId}
+                  onValueChange={(value) =>
+                    setImportForm((current) => ({
+                      ...current,
+                      responsesGroupId: value,
+                    }))
+                  }
+                  disabled={importForm.syncMode === "web"}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Codex/Responses 账号分组" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {groupOptions.map((group) => (
+                      <SelectItem key={group.id} value={group.id}>
+                        Codex：{group.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Input
+                type="number"
+                min={1}
+                max={500}
+                value={importForm.limit}
                 onChange={(event) =>
                   setImportForm((current) => ({
                     ...current,
-                    json: event.target.value,
+                    limit: Number(event.target.value),
                   }))
                 }
               />
               <Button
-                onClick={() => importAccounts(importForm)}
-                disabled={isImporting || !importForm.json}
+                onClick={() =>
+                  syncSub2ApiAccounts({
+                    webGroupId: importForm.webGroupId,
+                    responsesGroupId: importForm.responsesGroupId,
+                    syncMode: importForm.syncMode,
+                    contentSafetyEnabled: importForm.contentSafetyEnabled,
+                    limit: importForm.limit,
+                  })
+                }
+                disabled={isSyncingSub2Api}
               >
-                {isImporting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                导入账号
+                {isSyncingSub2Api && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                获取 AT
               </Button>
             </CardContent>
           </Card>

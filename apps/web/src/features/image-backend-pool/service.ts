@@ -7,10 +7,19 @@ import {
   imageBackendGroup,
   userImageBackendPreference,
 } from "@repo/database/schema";
-import { and, asc, count, desc, eq, inArray, sql } from "drizzle-orm";
+import {
+  getRuntimeSettingNumber,
+  getRuntimeSettingString,
+} from "@repo/shared/system-settings";
+import { and, asc, count, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { Pool } from "pg";
 
 import type { ApiConfig } from "@/features/image-generation/types";
+import {
+  getChatGptWebAccountInfo,
+  type ChatGptWebAccountInfo,
+} from "@/features/image-generation/chatgpt-web";
 
 import type {
   ImageBackendAccountBackend,
@@ -52,6 +61,7 @@ type PoolMember =
       priority: number;
       lastUsedAt: Date | null;
       createdAt: Date;
+      metadata: Record<string, unknown> | null;
     };
 
 export type ResolvedImageBackendPoolConfig = {
@@ -62,8 +72,29 @@ export type ResolvedImageBackendPoolConfig = {
   contentSafetyEnabled: boolean;
 };
 
+export type ImageBackendReportResultInput = {
+  memberType?: "api" | "account";
+  memberId?: string;
+  success: boolean;
+  error?: string | null;
+};
+
+type WebAccountRuntimeMetadata = ChatGptWebAccountInfo & {
+  refreshedAt?: string;
+};
+
+type BackendMetadata = Record<string, unknown> & {
+  webAccount?: Partial<WebAccountRuntimeMetadata>;
+};
+
 const CHATGPT_CODEX_RESPONSES_URL =
   "https://chatgpt.com/backend-api/codex";
+const OPENAI_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token";
+const OPENAI_CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
+const OPENAI_PLATFORM_OAUTH_CLIENT_ID = "app_2SKx67EdpoN0G6j64rFvigXD";
+const OPENAI_REFRESH_SCOPES = "openid profile email";
+const RATE_LIMIT_COOLDOWN_MINUTES = 10;
+const TEMPORARY_ERROR_COOLDOWN_MINUTES = 2;
 
 function normalizeAccountBackend(value?: string | null): ImageBackendAccountBackend {
   return value === "responses" ? "responses" : "web";
@@ -93,6 +124,160 @@ function effectiveContentSafety(
 function memberTimestamp(value: Date | string | null | undefined) {
   if (!value) return 0;
   return new Date(value).getTime();
+}
+
+function isRetryableBackendError(error?: string | null) {
+  const normalized = (error || "").toLowerCase();
+  return (
+    normalized.includes("429") ||
+    normalized.includes("rate limit") ||
+    normalized.includes("too many requests") ||
+    normalized.includes("timeout") ||
+    normalized.includes("timed out") ||
+    normalized.includes("econnreset") ||
+    normalized.includes("fetch failed") ||
+    normalized.includes("502") ||
+    normalized.includes("503") ||
+    normalized.includes("504") ||
+    normalized.includes("overloaded") ||
+    normalized.includes("temporarily unavailable")
+  );
+}
+
+function classifyFailure(error?: string | null): {
+  status?: string;
+  cooldownUntil?: Date | null;
+} {
+  const normalized = (error || "").toLowerCase();
+  if (
+    normalized.includes("401") ||
+    normalized.includes("unauthorized") ||
+    normalized.includes("invalid api key") ||
+    normalized.includes("invalid access token")
+  ) {
+    return { status: "error", cooldownUntil: null };
+  }
+  if (
+    normalized.includes("429") ||
+    normalized.includes("rate limit") ||
+    normalized.includes("too many requests")
+  ) {
+    return {
+      status: "active",
+      cooldownUntil: new Date(Date.now() + RATE_LIMIT_COOLDOWN_MINUTES * 60_000),
+    };
+  }
+  if (isRetryableBackendError(error)) {
+    return {
+      status: "active",
+      cooldownUntil: new Date(
+        Date.now() + TEMPORARY_ERROR_COOLDOWN_MINUTES * 60_000
+      ),
+    };
+  }
+  return {};
+}
+
+function truncateError(value?: string | null) {
+  if (!value) return null;
+  return value.length > 2000 ? value.slice(0, 2000) : value;
+}
+
+function asBackendMetadata(value: unknown): BackendMetadata {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? ({ ...(value as Record<string, unknown>) } as BackendMetadata)
+    : {};
+}
+
+function normalizeWebAccountMetadata(
+  metadata: Record<string, unknown> | null | undefined
+): WebAccountRuntimeMetadata | null {
+  const raw = asBackendMetadata(metadata).webAccount;
+  if (!raw || typeof raw !== "object") return null;
+  const quota = Number(raw.quota);
+  const type = String(raw.type || "free");
+  return {
+    email: typeof raw.email === "string" ? raw.email : null,
+    userId: typeof raw.userId === "string" ? raw.userId : null,
+    type,
+    quota: Number.isFinite(quota) ? Math.max(0, Math.trunc(quota)) : 0,
+    imageQuotaUnknown: Boolean(raw.imageQuotaUnknown),
+    limitsProgress: Array.isArray(raw.limitsProgress)
+      ? raw.limitsProgress
+      : [],
+    defaultModelSlug:
+      typeof raw.defaultModelSlug === "string" ? raw.defaultModelSlug : null,
+    restoreAt: typeof raw.restoreAt === "string" ? raw.restoreAt : null,
+    status: raw.status === "limited" ? "limited" : "active",
+    refreshedAt:
+      typeof raw.refreshedAt === "string" ? raw.refreshedAt : undefined,
+  };
+}
+
+function mergeWebAccountMetadata(
+  metadata: Record<string, unknown> | null | undefined,
+  accountInfo: ChatGptWebAccountInfo
+): BackendMetadata {
+  return {
+    ...asBackendMetadata(metadata),
+    webAccount: {
+      ...accountInfo,
+      refreshedAt: new Date().toISOString(),
+    },
+  };
+}
+
+function parseMetadataDate(value: string | null | undefined) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isWebAccountQuotaAvailable(
+  backend: ImageBackendAccountBackend,
+  metadata: Record<string, unknown> | null | undefined,
+  now: Date
+) {
+  if (backend !== "web") return true;
+  const webAccount = normalizeWebAccountMetadata(metadata);
+  if (!webAccount) return true;
+  if (webAccount.imageQuotaUnknown) return true;
+  if (webAccount.quota > 0) return true;
+  const restoreAt = parseMetadataDate(webAccount.restoreAt);
+  return Boolean(restoreAt && restoreAt <= now);
+}
+
+function nextWebAccountMetadataAfterSuccess(
+  metadata: Record<string, unknown> | null | undefined
+) {
+  const webAccount = normalizeWebAccountMetadata(metadata);
+  if (!webAccount || webAccount.imageQuotaUnknown) {
+    return {
+      metadata: metadata ?? null,
+      status: "active",
+      cooldownUntil: null as Date | null,
+    };
+  }
+
+  const nextQuota = Math.max(0, webAccount.quota - 1);
+  const nextMetadataStatus = nextQuota === 0 ? "limited" : "active";
+  const restoreAt = parseMetadataDate(webAccount.restoreAt);
+  return {
+    metadata: {
+      ...asBackendMetadata(metadata),
+      webAccount: {
+        ...webAccount,
+        quota: nextQuota,
+        status: nextMetadataStatus,
+      },
+    },
+    status: "active",
+    cooldownUntil: nextMetadataStatus === "limited" ? restoreAt : null,
+  };
+}
+
+function backendKey(member: Pick<PoolMember, "type" | "id">) {
+  return `${member.type}:${member.id}`;
 }
 
 async function getDefaultGroupId() {
@@ -148,18 +333,30 @@ async function ensureGroupUsable(groupId: string | null) {
 
 async function selectPoolMember(
   groupId: string | null,
-  requestKind: ImageBackendRequestKind
+  requestKind: ImageBackendRequestKind,
+  excluded?: Set<string>
 ): Promise<PoolMember | null> {
   const apiGroupFilter = groupId ? eq(imageBackendApi.groupId, groupId) : sql`true`;
   const accountGroupFilter = groupId
     ? eq(imageBackendAccount.groupId, groupId)
     : sql`true`;
+  const now = new Date();
 
   const [apiRows, accountRows] = await Promise.all([
     db
       .select()
       .from(imageBackendApi)
-      .where(and(eq(imageBackendApi.isEnabled, true), apiGroupFilter))
+      .where(
+        and(
+          eq(imageBackendApi.isEnabled, true),
+          apiGroupFilter,
+          eq(imageBackendApi.status, "active"),
+          or(
+            sql`${imageBackendApi.cooldownUntil} IS NULL`,
+            sql`${imageBackendApi.cooldownUntil} <= ${now}`
+          )
+        )
+      )
       .orderBy(
         asc(imageBackendApi.priority),
         asc(imageBackendApi.lastUsedAt),
@@ -167,14 +364,24 @@ async function selectPoolMember(
       )
       .limit(50),
     db
-    .select()
-    .from(imageBackendAccount)
-    .where(and(eq(imageBackendAccount.isEnabled, true), accountGroupFilter))
-    .orderBy(
-      asc(imageBackendAccount.priority),
-      asc(imageBackendAccount.lastUsedAt),
-      asc(imageBackendAccount.createdAt)
-    )
+      .select()
+      .from(imageBackendAccount)
+      .where(
+        and(
+          eq(imageBackendAccount.isEnabled, true),
+          accountGroupFilter,
+          eq(imageBackendAccount.status, "active"),
+          or(
+            sql`${imageBackendAccount.cooldownUntil} IS NULL`,
+            sql`${imageBackendAccount.cooldownUntil} <= ${now}`
+          )
+        )
+      )
+      .orderBy(
+        asc(imageBackendAccount.priority),
+        asc(imageBackendAccount.lastUsedAt),
+        asc(imageBackendAccount.createdAt)
+      )
       .limit(50),
   ]);
 
@@ -196,7 +403,10 @@ async function selectPoolMember(
   const accountMembers: PoolMember[] = accountRows
     .filter((row) => {
       const backend = normalizeAccountBackend(row.implementationMode);
-      return requestKind !== "responses" || backend === "responses";
+      return (
+        (requestKind !== "responses" || backend === "responses") &&
+        isWebAccountQuotaAvailable(backend, row.metadata, now)
+      );
     })
     .map((row) => ({
       type: "account",
@@ -210,9 +420,11 @@ async function selectPoolMember(
       priority: row.priority,
       lastUsedAt: row.lastUsedAt,
       createdAt: row.createdAt,
+      metadata: row.metadata,
     }));
 
   return [...apiMembers, ...accountMembers]
+    .filter((member) => !excluded?.has(backendKey(member)))
     .sort((left, right) => {
       const priorityDiff = left.priority - right.priority;
       if (priorityDiff !== 0) return priorityDiff;
@@ -223,26 +435,33 @@ async function selectPoolMember(
     })[0] ?? null;
 }
 
-export async function resolveImageBackendPoolConfig(
-  options: ResolveBackendOptions
-): Promise<ResolvedImageBackendPoolConfig | null> {
-  const requestedGroupId = await resolveRequestedGroupId(options);
-  const group = await ensureGroupUsable(requestedGroupId);
-  if (!group) return null;
+async function touchSelectedMember(member: PoolMember) {
+  const now = new Date();
+  if (member.type === "api") {
+    await db
+      .update(imageBackendApi)
+      .set({ lastUsedAt: now, lastAcquiredAt: now, updatedAt: now })
+      .where(eq(imageBackendApi.id, member.id));
+    return;
+  }
 
-  const member = await selectPoolMember(group.id, options.requestKind);
-  if (!member) return null;
+  await db
+    .update(imageBackendAccount)
+    .set({ lastUsedAt: now, lastAcquiredAt: now, updatedAt: now })
+    .where(eq(imageBackendAccount.id, member.id));
+}
 
+function toResolvedPoolConfig(
+  groupId: string,
+  groupContentSafetyEnabled: boolean | null,
+  member: PoolMember
+): ResolvedImageBackendPoolConfig {
   const contentSafetyEnabled = effectiveContentSafety(
-    group.contentSafetyEnabled,
+    groupContentSafetyEnabled,
     member.contentSafetyEnabled
   );
 
   if (member.type === "api") {
-    await db
-      .update(imageBackendApi)
-      .set({ lastUsedAt: new Date(), updatedAt: new Date() })
-      .where(eq(imageBackendApi.id, member.id));
     return {
       config: {
         baseUrl: stripTrailingSlash(member.baseUrl),
@@ -254,21 +473,16 @@ export async function resolveImageBackendPoolConfig(
         backend: {
           type: "pool-api",
           id: member.id,
-          groupId: group.id,
-          requestKind: options.requestKind,
+          groupId,
+          reportResult: true,
         },
       },
-      groupId: group.id,
+      groupId,
       memberId: member.id,
       memberType: "api",
       contentSafetyEnabled,
     };
   }
-
-  await db
-    .update(imageBackendAccount)
-    .set({ lastUsedAt: new Date(), updatedAt: new Date() })
-    .where(eq(imageBackendAccount.id, member.id));
 
   const implementationMode = normalizeAccountBackend(member.implementationMode);
   const isResponsesBackend = implementationMode === "responses";
@@ -291,16 +505,197 @@ export async function resolveImageBackendPoolConfig(
       backend: {
         type: "pool-account",
         id: member.id,
-        groupId: group.id,
-        requestKind: options.requestKind,
+        groupId,
         accountBackend: implementationMode,
+        reportResult: true,
       },
     },
-    groupId: group.id,
+    groupId,
     memberId: member.id,
     memberType: "account",
     contentSafetyEnabled,
   };
+}
+
+async function resolvePoolMember(
+  options: ResolveBackendOptions & { excluded?: Set<string> }
+) {
+  const requestedGroupId = await resolveRequestedGroupId(options);
+  const group = await ensureGroupUsable(requestedGroupId);
+  if (!group) return null;
+
+  const member = await selectPoolMember(
+    group.id,
+    options.requestKind,
+    options.excluded
+  );
+  if (!member) return null;
+
+  return { group, member };
+}
+
+export async function resolveImageBackendPoolConfig(
+  options: ResolveBackendOptions
+): Promise<ResolvedImageBackendPoolConfig | null> {
+  const resolved = await resolvePoolMember(options);
+  if (!resolved) return null;
+  await touchSelectedMember(resolved.member);
+  const result = toResolvedPoolConfig(
+    resolved.group.id,
+    resolved.group.contentSafetyEnabled,
+    resolved.member
+  );
+  if (result.config.backend) {
+    result.config.backend.requestKind = options.requestKind;
+  }
+  return result;
+}
+
+export async function reportImageBackendResult(input: ImageBackendReportResultInput) {
+  if (!input.memberId || !input.memberType) return;
+  const now = new Date();
+  const error = truncateError(input.error);
+  const failure = input.success ? {} : classifyFailure(error);
+
+  if (input.memberType === "api") {
+    await db
+      .update(imageBackendApi)
+      .set(
+        input.success
+          ? {
+              successCount: sql`${imageBackendApi.successCount} + 1`,
+              lastError: null,
+              lastErrorAt: null,
+              cooldownUntil: null,
+              updatedAt: now,
+            }
+          : {
+              failCount: sql`${imageBackendApi.failCount} + 1`,
+              ...(failure.status ? { status: failure.status } : {}),
+              ...(failure.cooldownUntil !== undefined
+                ? { cooldownUntil: failure.cooldownUntil }
+                : {}),
+              lastError: error,
+              lastErrorAt: now,
+              updatedAt: now,
+            }
+      )
+      .where(eq(imageBackendApi.id, input.memberId));
+    return;
+  }
+
+  const [account] = await db
+    .select({
+      implementationMode: imageBackendAccount.implementationMode,
+      metadata: imageBackendAccount.metadata,
+    })
+    .from(imageBackendAccount)
+    .where(eq(imageBackendAccount.id, input.memberId))
+    .limit(1);
+  const backend = normalizeAccountBackend(account?.implementationMode);
+  const webSuccess =
+    input.success && backend === "web"
+      ? nextWebAccountMetadataAfterSuccess(account?.metadata)
+      : null;
+
+  await db
+    .update(imageBackendAccount)
+    .set(
+      input.success
+        ? {
+            successCount: sql`${imageBackendAccount.successCount} + 1`,
+            ...(webSuccess?.metadata !== undefined
+              ? { metadata: webSuccess.metadata }
+              : {}),
+            ...(webSuccess?.status ? { status: webSuccess.status } : {}),
+            lastError: null,
+            lastErrorAt: null,
+            cooldownUntil: webSuccess ? webSuccess.cooldownUntil : null,
+            updatedAt: now,
+          }
+        : {
+            failCount: sql`${imageBackendAccount.failCount} + 1`,
+            ...(failure.status ? { status: failure.status } : {}),
+            ...(failure.cooldownUntil !== undefined
+              ? { cooldownUntil: failure.cooldownUntil }
+              : {}),
+            lastError: error,
+            lastErrorAt: now,
+            updatedAt: now,
+          }
+    )
+    .where(eq(imageBackendAccount.id, input.memberId));
+}
+
+export async function refreshImageBackendAccountInfo(accountId: string) {
+  const [account] = await db
+    .select({
+      id: imageBackendAccount.id,
+      email: imageBackendAccount.email,
+      accessToken: imageBackendAccount.accessToken,
+      implementationMode: imageBackendAccount.implementationMode,
+      model: imageBackendAccount.model,
+      metadata: imageBackendAccount.metadata,
+    })
+    .from(imageBackendAccount)
+    .where(eq(imageBackendAccount.id, accountId))
+    .limit(1);
+
+  if (!account) {
+    throw new Error("账号不存在");
+  }
+
+  if (normalizeAccountBackend(account.implementationMode) !== "web") {
+    throw new Error("只有 Web 账号支持远端额度刷新");
+  }
+
+  const now = new Date();
+  try {
+    const info = await getChatGptWebAccountInfo({
+      baseUrl: "https://chatgpt.com",
+      apiKey: account.accessToken,
+      model: account.model || undefined,
+      backend: {
+        type: "pool-account",
+        id: account.id,
+        accountBackend: "web",
+      },
+    });
+    await db
+      .update(imageBackendAccount)
+      .set({
+        email: info.email || account.email,
+        metadata: mergeWebAccountMetadata(account.metadata, info),
+        status: "active",
+        cooldownUntil:
+          !info.imageQuotaUnknown && info.quota === 0
+            ? parseMetadataDate(info.restoreAt)
+            : null,
+        lastError: null,
+        lastErrorAt: null,
+        updatedAt: now,
+      })
+      .where(eq(imageBackendAccount.id, account.id));
+    return info;
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "刷新账号远端信息失败";
+    const failure = classifyFailure(message);
+    await db
+      .update(imageBackendAccount)
+      .set({
+        failCount: sql`${imageBackendAccount.failCount} + 1`,
+        ...(failure.status ? { status: failure.status } : {}),
+        ...(failure.cooldownUntil !== undefined
+          ? { cooldownUntil: failure.cooldownUntil }
+          : {}),
+        lastError: truncateError(message),
+        lastErrorAt: now,
+        updatedAt: now,
+      })
+      .where(eq(imageBackendAccount.id, account.id));
+    throw error;
+  }
 }
 
 export async function listImageBackendGroupOptions(options?: {
@@ -450,21 +845,24 @@ type UpsertAccountInput = {
   priority: number;
   concurrency: number;
   status?: string;
+  metadata?: Record<string, unknown> | null;
 };
 
 export async function upsertImageBackendAccount(input: UpsertAccountInput) {
+  const implementationMode = normalizeAccountBackend(input.implementationMode);
   const update = {
     groupId: input.groupId || null,
     name: input.name,
     email: input.email || null,
     refreshToken: input.refreshToken || null,
-    implementationMode: normalizeAccountBackend(input.implementationMode),
+    implementationMode,
     model: input.model || null,
     contentSafetyEnabled: input.contentSafetyEnabled,
     isEnabled: input.isEnabled,
     priority: input.priority,
     concurrency: input.concurrency,
     status: input.status || "active",
+    ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
     updatedAt: new Date(),
   };
 
@@ -488,55 +886,459 @@ export async function upsertImageBackendAccount(input: UpsertAccountInput) {
     throw new Error("accessToken is required");
   }
 
+  const credentialHash = hashBackendCredential(input.accessToken);
+  const [existing] = await db
+    .select({ id: imageBackendAccount.id })
+    .from(imageBackendAccount)
+    .where(
+      and(
+        eq(imageBackendAccount.credentialHash, credentialHash),
+        eq(imageBackendAccount.implementationMode, implementationMode)
+      )
+    )
+    .limit(1);
+  if (existing) {
+    await db
+      .update(imageBackendAccount)
+      .set({
+        ...update,
+        accessToken: input.accessToken,
+        credentialHash,
+      })
+      .where(eq(imageBackendAccount.id, existing.id));
+    return existing.id;
+  }
+
   const id = nanoid();
   await db.insert(imageBackendAccount).values({
     id,
     ...update,
     accessToken: input.accessToken,
-    credentialHash: hashBackendCredential(input.accessToken),
+    credentialHash,
   });
   return id;
 }
 
-type ImportAccountInput = {
-  groupId?: string | null;
-  implementationMode: ImageBackendAccountBackend;
-  contentSafetyEnabled: boolean;
-  accounts: Array<{
-    name?: string | null;
-    email?: string | null;
-    accessToken: string;
-    refreshToken?: string | null;
-    model?: string | null;
-    priority?: number | null;
-    concurrency?: number | null;
-  }>;
+type Sub2ApiTokenSyncMode = "web" | "responses" | "both";
+
+type Sub2ApiAccountRow = {
+  id: number | string;
+  name: string | null;
+  platform: string | null;
+  type: string | null;
+  status: string | null;
+  schedulable: boolean | null;
+  credentials: Record<string, unknown> | null;
+  priority: number | null;
+  concurrency: number | null;
+  group_names: string[] | null;
 };
 
-export async function importImageBackendAccounts(input: ImportAccountInput) {
-  const imported: string[] = [];
-  for (const [index, account] of input.accounts.entries()) {
-    const accessToken = account.accessToken.trim();
-    if (!accessToken) continue;
-    const id = await upsertImageBackendAccount({
-      groupId: input.groupId,
-      name:
-        account.name?.trim() ||
-        account.email?.trim() ||
-        `导入账号 ${index + 1}`,
-      email: account.email?.trim() || null,
-      accessToken,
-      refreshToken: account.refreshToken?.trim() || null,
-      implementationMode: input.implementationMode,
-      model: account.model?.trim() || null,
-      contentSafetyEnabled: input.contentSafetyEnabled,
-      isEnabled: true,
-      priority: account.priority ?? 50,
-      concurrency: account.concurrency ?? 1,
-    });
-    imported.push(id);
+type Sub2ApiTokenAccount = {
+  sourceId: string;
+  name: string | null;
+  email: string | null;
+  codexAccessToken: string | null;
+  refreshToken: string | null;
+  clientId: string | null;
+  priority: number | null;
+  concurrency: number | null;
+  planType: string | null;
+  groupNames: string[];
+};
+
+function credentialString(
+  credentials: Record<string, unknown> | null | undefined,
+  keys: string[]
+) {
+  for (const key of keys) {
+    const value = credentials?.[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
   }
-  return imported;
+  return "";
+}
+
+function asStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value
+        .map((item) => (typeof item === "string" ? item.trim() : ""))
+        .filter(Boolean)
+    : [];
+}
+
+function mapSub2ApiAccountRow(row: Sub2ApiAccountRow): Sub2ApiTokenAccount | null {
+  const credentials = row.credentials || {};
+  const codexAccessToken = credentialString(credentials, [
+    "access_token",
+    "accessToken",
+    "token",
+  ]);
+  const refreshToken = credentialString(credentials, [
+    "refresh_token",
+    "refreshToken",
+  ]);
+  if (!codexAccessToken && !refreshToken) return null;
+
+  const clientId = credentialString(credentials, ["client_id", "clientId"]);
+  const email = credentialString(credentials, ["email", "account_email", "username"]);
+  const planType = credentialString(credentials, ["plan_type", "planType"]);
+  const sourceId = String(row.id);
+  const name = row.name?.trim() || email || `Sub2API 账号 ${sourceId}`;
+
+  return {
+    sourceId,
+    name,
+    email: email || null,
+    codexAccessToken: codexAccessToken || null,
+    refreshToken: refreshToken || null,
+    clientId: clientId || null,
+    priority: row.priority,
+    concurrency: row.concurrency,
+    planType: planType || null,
+    groupNames: asStringArray(row.group_names),
+  };
+}
+
+async function getSub2ApiPostgresConnectionString() {
+  const connectionString =
+    (await getRuntimeSettingString("SUB2API_POSTGRES_URL")) ||
+    process.env.SUB2API_POSTGRES_URL?.trim();
+  if (!connectionString) {
+    throw new Error("请先配置 SUB2API_POSTGRES_URL");
+  }
+  return connectionString;
+}
+
+function createSub2ApiPool(connectionString: string) {
+  return new Pool({
+    connectionString,
+    max: 2,
+    connectionTimeoutMillis: 5_000,
+    idleTimeoutMillis: 5_000,
+  });
+}
+
+async function listSub2ApiCurrentAccessTokens(
+  pool: Pool,
+  options: { limit: number }
+) {
+  const result = await pool.query<Sub2ApiAccountRow>(
+    `
+      SELECT
+        a.id,
+        a.name,
+        a.platform,
+        a.type,
+        a.status,
+        a.schedulable,
+        a.credentials,
+        a.priority,
+        a.concurrency,
+        COALESCE(
+          ARRAY_AGG(g.name ORDER BY ag.priority, g.name)
+            FILTER (WHERE g.name IS NOT NULL),
+          ARRAY[]::text[]
+        ) AS group_names
+      FROM accounts a
+      LEFT JOIN account_groups ag ON ag.account_id = a.id
+      LEFT JOIN groups g ON g.id = ag.group_id AND g.deleted_at IS NULL
+      WHERE
+        a.deleted_at IS NULL
+        AND a.platform = 'openai'
+        AND a.type = 'oauth'
+        AND a.status = 'active'
+        AND COALESCE(a.schedulable, true) = true
+        AND (
+          a.credentials ? 'access_token'
+          OR a.credentials ? 'accessToken'
+          OR a.credentials ? 'token'
+          OR a.credentials ? 'refresh_token'
+          OR a.credentials ? 'refreshToken'
+        )
+      GROUP BY a.id
+      ORDER BY a.priority ASC, a.last_used_at ASC NULLS FIRST, a.id ASC
+      LIMIT $1
+    `,
+    [options.limit]
+  );
+  return result.rows
+    .map(mapSub2ApiAccountRow)
+    .filter((account): account is Sub2ApiTokenAccount => Boolean(account));
+}
+
+type OpenAITokenRefreshResponse = {
+  access_token?: string;
+  refresh_token?: string;
+  token_type?: string;
+  expires_in?: number;
+  scope?: string;
+};
+
+async function refreshOpenAIAccessToken(
+  refreshToken: string,
+  clientId: string
+): Promise<{ accessToken: string; refreshToken: string | null } | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
+  try {
+    const form = new URLSearchParams();
+    form.set("grant_type", "refresh_token");
+    form.set("refresh_token", refreshToken);
+    form.set("client_id", clientId);
+    form.set("scope", OPENAI_REFRESH_SCOPES);
+
+    const response = await fetch(OPENAI_OAUTH_TOKEN_URL, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent":
+          clientId === OPENAI_CODEX_OAUTH_CLIENT_ID
+            ? "codex-cli/0.91.0"
+            : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+      },
+      body: form.toString(),
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(
+        `OpenAI token refresh failed: HTTP ${response.status}${text ? ` ${text.slice(0, 300)}` : ""}`
+      );
+    }
+    const payload = (await response.json()) as OpenAITokenRefreshResponse;
+    const accessToken = payload.access_token?.trim();
+    if (!accessToken) return null;
+    return {
+      accessToken,
+      refreshToken: payload.refresh_token?.trim() || null,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function writeBackSub2ApiRefreshToken(
+  pool: Pool,
+  sourceId: string,
+  refreshToken: string
+) {
+  const numericSourceId = Number(sourceId);
+  if (!Number.isFinite(numericSourceId)) {
+    throw new Error(`Sub2API 账号 ID 非数字: ${sourceId}`);
+  }
+  await pool.query(
+    `
+      UPDATE accounts
+      SET
+        credentials = COALESCE(credentials, '{}'::jsonb)
+          || jsonb_build_object('refresh_token', $2::text),
+        updated_at = NOW()
+      WHERE id = $1 AND deleted_at IS NULL
+    `,
+    [numericSourceId, refreshToken]
+  );
+}
+
+async function resolveSub2ApiAccessTokenForMode(
+  pool: Pool,
+  account: Sub2ApiTokenAccount,
+  mode: ImageBackendAccountBackend
+) {
+  if (mode === "responses") {
+    return {
+      accessToken: account.codexAccessToken,
+      tokenSource: "sub2api.credentials.access_token",
+      refreshTokenWrittenBack: false,
+    };
+  }
+
+  if (!account.refreshToken) {
+    return {
+      accessToken: null,
+      tokenSource: "sub2api.credentials.refresh_token",
+      refreshTokenWrittenBack: false,
+    };
+  }
+
+  const refreshed = await refreshOpenAIAccessToken(
+    account.refreshToken,
+    OPENAI_PLATFORM_OAUTH_CLIENT_ID
+  );
+  if (!refreshed?.accessToken) {
+    return {
+      accessToken: null,
+      tokenSource: "openai.oauth.platform_refresh",
+      refreshTokenWrittenBack: false,
+    };
+  }
+  const shouldWriteBack =
+    Boolean(refreshed.refreshToken) &&
+    refreshed.refreshToken !== account.refreshToken;
+  if (shouldWriteBack && refreshed.refreshToken) {
+    await writeBackSub2ApiRefreshToken(
+      pool,
+      account.sourceId,
+      refreshed.refreshToken
+    );
+  }
+  return {
+    accessToken: refreshed.accessToken,
+    tokenSource: "openai.oauth.platform_refresh",
+    refreshTokenWrittenBack: shouldWriteBack,
+  };
+}
+
+export async function syncImageBackendAccountsFromSub2Api(input: {
+  webGroupId?: string | null;
+  responsesGroupId?: string | null;
+  syncMode: Sub2ApiTokenSyncMode;
+  contentSafetyEnabled: boolean;
+  limit?: number | null;
+}) {
+  const configuredLimit = await getRuntimeSettingNumber(
+    "SUB2API_POSTGRES_SYNC_LIMIT",
+    100,
+    { positive: true }
+  );
+  const limit = Math.max(
+    1,
+    Math.min(500, Math.trunc(input.limit || configuredLimit))
+  );
+  const modes =
+    input.syncMode === "both"
+      ? (["web", "responses"] as const)
+      : ([input.syncMode] as const);
+  const imported: string[] = [];
+  const skipped = {
+    web: 0,
+    responses: 0,
+  };
+  let refreshTokenWriteBackCount = 0;
+
+  const connectionString = await getSub2ApiPostgresConnectionString();
+  const pool = createSub2ApiPool(connectionString);
+  try {
+    const accounts = await listSub2ApiCurrentAccessTokens(pool, { limit });
+    for (const account of accounts) {
+      for (const mode of modes) {
+        const { accessToken, tokenSource, refreshTokenWrittenBack } =
+          await resolveSub2ApiAccessTokenForMode(pool, account, mode);
+        if (!accessToken) {
+          skipped[mode]++;
+          continue;
+        }
+        if (refreshTokenWrittenBack) refreshTokenWriteBackCount++;
+        const id = await upsertImageBackendAccount({
+          groupId:
+            mode === "responses" ? input.responsesGroupId : input.webGroupId,
+          name:
+            mode === "responses"
+              ? `${account.name} / Codex`
+              : `${account.name} / Web`,
+          email: account.email,
+          accessToken,
+          refreshToken: null,
+          implementationMode: mode,
+          model: null,
+          contentSafetyEnabled: input.contentSafetyEnabled,
+          isEnabled: true,
+          priority: account.priority ?? 50,
+          concurrency: Math.max(1, Math.min(100, account.concurrency ?? 1)),
+          status: "active",
+          metadata: {
+            source: "sub2api_postgres",
+            sourceAccountId: account.sourceId,
+            sourceGroups: account.groupNames,
+            planType: account.planType,
+            syncedAt: new Date().toISOString(),
+            tokenSource,
+            sub2apiClientId: account.clientId,
+            refreshTokenWrittenBack,
+          },
+        });
+        imported.push(id);
+      }
+    }
+
+    return {
+      sourceCount: accounts.length,
+      syncedCount: imported.length,
+      skipped,
+      refreshTokenWriteBackCount,
+    };
+  } finally {
+    await pool.end();
+  }
+}
+
+export async function refreshStaleWebBackendAccounts(options?: {
+  staleMinutes?: number;
+  limit?: number;
+}) {
+  const staleMinutes = Math.max(1, Math.trunc(options?.staleMinutes ?? 30));
+  const limit = Math.max(1, Math.min(200, Math.trunc(options?.limit ?? 20)));
+  const threshold = new Date(Date.now() - staleMinutes * 60_000);
+  const now = new Date();
+  const candidates = await db
+    .select({
+      id: imageBackendAccount.id,
+      metadata: imageBackendAccount.metadata,
+      cooldownUntil: imageBackendAccount.cooldownUntil,
+      lastErrorAt: imageBackendAccount.lastErrorAt,
+    })
+    .from(imageBackendAccount)
+    .where(
+      and(
+        eq(imageBackendAccount.implementationMode, "web"),
+        eq(imageBackendAccount.isEnabled, true),
+        or(
+          eq(imageBackendAccount.status, "active"),
+          eq(imageBackendAccount.status, "limited")
+        ),
+        or(
+          isNull(imageBackendAccount.cooldownUntil),
+          sql`${imageBackendAccount.cooldownUntil} <= ${now}`
+        )
+      )
+    )
+    .orderBy(asc(imageBackendAccount.lastErrorAt), asc(imageBackendAccount.lastUsedAt))
+    .limit(limit * 3);
+
+  const selected = candidates
+    .filter((account) => {
+      const info = normalizeWebAccountMetadata(account.metadata);
+      if (!info?.refreshedAt) return true;
+      return new Date(info.refreshedAt).getTime() <= threshold.getTime();
+    })
+    .slice(0, limit);
+
+  const results = [];
+  for (const account of selected) {
+    try {
+      const info = await refreshImageBackendAccountInfo(account.id);
+      results.push({
+        id: account.id,
+        success: true,
+        quota: info.quota,
+        imageQuotaUnknown: info.imageQuotaUnknown,
+      });
+    } catch (error) {
+      results.push({
+        id: account.id,
+        success: false,
+        error: error instanceof Error ? error.message : "刷新失败",
+      });
+    }
+  }
+
+  return {
+    scanned: candidates.length,
+    processed: selected.length,
+    results,
+  };
 }
 
 type UpsertApiInput = {
@@ -650,7 +1452,13 @@ export async function listAdminImageBackendPool() {
       priority: imageBackendAccount.priority,
       concurrency: imageBackendAccount.concurrency,
       status: imageBackendAccount.status,
+      successCount: imageBackendAccount.successCount,
+      failCount: imageBackendAccount.failCount,
       lastUsedAt: imageBackendAccount.lastUsedAt,
+      cooldownUntil: imageBackendAccount.cooldownUntil,
+      lastError: imageBackendAccount.lastError,
+      lastErrorAt: imageBackendAccount.lastErrorAt,
+      metadata: imageBackendAccount.metadata,
       createdAt: imageBackendAccount.createdAt,
     })
     .from(imageBackendAccount)
@@ -669,7 +1477,12 @@ export async function listAdminImageBackendPool() {
       isEnabled: imageBackendApi.isEnabled,
       priority: imageBackendApi.priority,
       status: imageBackendApi.status,
+      successCount: imageBackendApi.successCount,
+      failCount: imageBackendApi.failCount,
       lastUsedAt: imageBackendApi.lastUsedAt,
+      cooldownUntil: imageBackendApi.cooldownUntil,
+      lastError: imageBackendApi.lastError,
+      lastErrorAt: imageBackendApi.lastErrorAt,
       createdAt: imageBackendApi.createdAt,
     })
     .from(imageBackendApi)

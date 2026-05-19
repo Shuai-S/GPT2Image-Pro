@@ -17,6 +17,7 @@ import {
   Users,
   XCircle,
 } from "lucide-react";
+import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -1192,10 +1193,16 @@ export function AdminUsersManagement() {
                           >
                             <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-md bg-muted">
                               {item.imageUrl ? (
-                                <img
+                                <Image
                                   src={item.imageUrl}
                                   alt={item.prompt}
+                                  width={64}
+                                  height={64}
+                                  sizes="64px"
                                   className="h-full w-full object-cover"
+                                  unoptimized={
+                                    !item.imageUrl.startsWith("/api/storage/")
+                                  }
                                 />
                               ) : item.status === "failed" ? (
                                 <XCircle className="h-5 w-5 text-destructive" />

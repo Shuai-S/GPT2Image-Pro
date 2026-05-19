@@ -18,6 +18,10 @@ const CONTENT_TYPES: Record<string, string> = {
   ".webp": "image/webp",
 };
 
+const GENERATION_CACHE_CONTROL =
+  "public, max-age=86400, s-maxage=2592000, stale-while-revalidate=604800, immutable";
+const PUBLIC_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable";
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ bucket: string; key: string[] }> }
@@ -44,13 +48,16 @@ export async function GET(
   try {
     const storage = await getStorageProvider();
     const data = await storage.getObject(fileKey, bucket);
+    const cacheControl =
+      bucket === GENERATIONS_BUCKET
+        ? GENERATION_CACHE_CONTROL
+        : PUBLIC_ASSET_CACHE_CONTROL;
     return new NextResponse(new Uint8Array(data), {
       headers: {
         "Content-Type": contentType,
-        "Cache-Control":
-          bucket === GENERATIONS_BUCKET
-            ? "private, max-age=300"
-            : "public, max-age=3600, immutable",
+        "Cache-Control": cacheControl,
+        "CDN-Cache-Control": cacheControl,
+        "Cloudflare-CDN-Cache-Control": cacheControl,
         "Content-Length": String(data.length),
       },
     });

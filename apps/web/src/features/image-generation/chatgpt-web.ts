@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { logError } from "@repo/shared/logger";
+import { getRuntimeSettingString } from "@repo/shared/system-settings";
 import type {
   ApiConfig,
   EditImageParams,
@@ -11,9 +12,12 @@ import type {
 const CHATGPT_BASE_URL = "https://chatgpt.com";
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0";
+const DEFAULT_CLIENT_VERSION = "prod-be885abbfcfe7b1f511e88b3003d9ee44757fbad";
+const DEFAULT_CLIENT_BUILD_NUMBER = "5955942";
 const DEFAULT_POW_SCRIPT = "https://chatgpt.com/backend-api/sentinel/sdk.js";
 const IMAGE_POLL_TIMEOUT_MS = 120_000;
 const IMAGE_POLL_INTERVAL_MS = 4_000;
+const WEB_PROXY_REQUEST_TIMEOUT_MS = 310_000;
 
 type ChatRequirements = {
   token: string;
@@ -41,7 +45,25 @@ type PowResources = {
   dataBuild: string;
 };
 
+export type ChatGptWebAccountInfo = {
+  email: string | null;
+  userId: string | null;
+  type: string;
+  quota: number;
+  imageQuotaUnknown: boolean;
+  limitsProgress: unknown[];
+  defaultModelSlug: string | null;
+  restoreAt: string | null;
+  status: "active" | "limited";
+};
+
 const webSessionCache = new Map<string, WebSession>();
+
+type WebProxyResponsePayload = {
+  status: number;
+  headers?: Record<string, string[]>;
+  bodyBase64?: string;
+};
 
 function getPrompt(params: GenerateImageParams | EditImageParams) {
   return params.promptOptimization === false
@@ -59,6 +81,117 @@ function getWebSession(config: ApiConfig) {
   };
   webSessionCache.set(key, session);
   return session;
+}
+
+function getWebSessionKey(config: ApiConfig) {
+  return config.backend?.id || config.apiKey.slice(0, 24) || "default";
+}
+
+function encodeBody(body: BodyInit | null | undefined) {
+  if (body === undefined || body === null) return undefined;
+  if (typeof body === "string") return Buffer.from(body).toString("base64");
+  if (body instanceof Uint8Array) return Buffer.from(body).toString("base64");
+  if (body instanceof ArrayBuffer) return Buffer.from(body).toString("base64");
+  throw new Error("ChatGPT Web proxy only supports string and binary request bodies");
+}
+
+function decodeBody(bodyBase64: string | undefined) {
+  if (!bodyBase64) return new Uint8Array();
+  return Buffer.from(bodyBase64, "base64");
+}
+
+function headersToObject(headers: HeadersInit | undefined) {
+  const result: Record<string, string> = {};
+  if (!headers) return result;
+  const source = new Headers(headers);
+  source.forEach((value, key) => {
+    result[key] = value;
+  });
+  return result;
+}
+
+function toResponseHeaders(headers: WebProxyResponsePayload["headers"]) {
+  const result = new Headers();
+  for (const [key, values] of Object.entries(headers || {})) {
+    if (key.toLowerCase() === "content-encoding") continue;
+    for (const value of values) {
+      result.append(key, value);
+    }
+  }
+  return result;
+}
+
+async function getWebProxyConfig() {
+  const rawUrl =
+    (await getRuntimeSettingString("CHATGPT_WEB_PROXY_URL")) ||
+    process.env.CHATGPT_WEB_PROXY_URL?.trim();
+  const url = rawUrl?.replace(/\/+$/, "");
+  if (!url) return null;
+  return {
+    url,
+    secret:
+      (await getRuntimeSettingString("CHATGPT_WEB_PROXY_SECRET")) ||
+      process.env.CHATGPT_WEB_PROXY_SECRET?.trim() ||
+      "",
+  };
+}
+
+async function fetchChatGptWeb(
+  config: ApiConfig,
+  urlPath: string,
+  targetPath: string,
+  init?: RequestInit,
+  extraHeaders?: Record<string, string>
+) {
+  const headers = {
+    ...headersToObject(init?.headers),
+    ...(extraHeaders || {}),
+  };
+  const proxy = await getWebProxyConfig();
+  if (!proxy) {
+    return fetch(`${CHATGPT_BASE_URL}${urlPath}`, {
+      ...init,
+      headers,
+    });
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, WEB_PROXY_REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${proxy.url}/request`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...(proxy.secret ? { "X-Proxy-Secret": proxy.secret } : {}),
+      },
+      body: JSON.stringify({
+        sessionKey: getWebSessionKey(config),
+        method: init?.method || "GET",
+        urlPath,
+        targetPath,
+        headers,
+        headerOrder: Object.keys(headers),
+        bodyBase64: encodeBody(init?.body),
+      }),
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(
+        `ChatGPT Web proxy failed: HTTP ${response.status}${text ? ` ${text.slice(0, 300)}` : ""}`
+      );
+    }
+    const payload = (await response.json()) as WebProxyResponsePayload;
+    return new Response(decodeBody(payload.bodyBase64), {
+      status: payload.status,
+      headers: toResponseHeaders(payload.headers),
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function powResourcesFromHtml(html: string): PowResources {
@@ -177,12 +310,28 @@ function getHeaders(config: ApiConfig, path: string, extra?: Record<string, stri
     "User-Agent": USER_AGENT,
     Origin: CHATGPT_BASE_URL,
     Referer: `${CHATGPT_BASE_URL}/`,
-    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-US;q=0.7",
     "Cache-Control": "no-cache",
     Pragma: "no-cache",
+    Priority: "u=1, i",
+    "Sec-Ch-Ua": '"Microsoft Edge";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
+    "Sec-Ch-Ua-Arch": '"x86"',
+    "Sec-Ch-Ua-Bitness": '"64"',
+    "Sec-Ch-Ua-Full-Version": '"143.0.3650.96"',
+    "Sec-Ch-Ua-Full-Version-List":
+      '"Microsoft Edge";v="143.0.3650.96", "Chromium";v="143.0.7499.147", "Not A(Brand";v="24.0.0.0"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Model": '""',
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Ch-Ua-Platform-Version": '"19.0.0"',
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
     "OAI-Device-Id": session.deviceId,
     "OAI-Session-Id": session.sessionId,
     "OAI-Language": "zh-CN",
+    "OAI-Client-Version": DEFAULT_CLIENT_VERSION,
+    "OAI-Client-Build-Number": DEFAULT_CLIENT_BUILD_NUMBER,
     "X-OpenAI-Target-Path": path,
     "X-OpenAI-Target-Route": path,
     Authorization: `Bearer ${config.apiKey}`,
@@ -190,8 +339,122 @@ function getHeaders(config: ApiConfig, path: string, extra?: Record<string, stri
   };
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function stringOrNull(value: unknown) {
+  const normalized = String(value || "").trim();
+  return normalized || null;
+}
+
+function numberOrZero(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.trunc(number)) : 0;
+}
+
+function extractQuotaAndRestoreAt(limitsProgress: unknown[]) {
+  for (const item of limitsProgress) {
+    const row = asRecord(item);
+    if (row.feature_name === "image_gen") {
+      return {
+        quota: numberOrZero(row.remaining),
+        restoreAt: stringOrNull(row.reset_after),
+        imageQuotaUnknown: false,
+      };
+    }
+  }
+  return { quota: 0, restoreAt: null, imageQuotaUnknown: true };
+}
+
+async function fetchWebJson<T>(
+  config: ApiConfig,
+  urlPath: string,
+  targetPath: string,
+  init?: RequestInit,
+  extraHeaders?: Record<string, string>
+) {
+  const response = await fetchChatGptWeb(
+    config,
+    urlPath,
+    targetPath,
+    init,
+    getHeaders(config, targetPath, {
+      Accept: "application/json",
+      ...(extraHeaders || {}),
+    })
+  );
+  if (!response.ok) {
+    const message = `${targetPath} failed: HTTP ${response.status}`;
+    if (response.status === 401) {
+      throw new Error(`invalid access token: ${message}`);
+    }
+    throw new Error(message);
+  }
+  return (await response.json()) as T;
+}
+
+export async function getChatGptWebAccountInfo(
+  config: ApiConfig
+): Promise<ChatGptWebAccountInfo> {
+  const mePath = "/backend-api/me";
+  const initPath = "/backend-api/conversation/init";
+  const accountPath = "/backend-api/accounts/check/v4-2023-04-27";
+  const [mePayload, initPayload, accountPayload] = await Promise.all([
+    fetchWebJson<Record<string, unknown>>(config, mePath, mePath),
+    fetchWebJson<Record<string, unknown>>(
+      config,
+      initPath,
+      initPath,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          gizmo_id: null,
+          requested_default_model: null,
+          conversation_id: null,
+          timezone_offset_min: -480,
+        }),
+      },
+      { "Content-Type": "application/json" }
+    ),
+    fetchWebJson<Record<string, unknown>>(
+      config,
+      `${accountPath}?timezone_offset_min=-480`,
+      accountPath
+    ),
+  ]);
+
+  const accounts = asRecord(accountPayload.accounts);
+  const defaultAccount = asRecord(asRecord(accounts.default).account);
+  const planType = String(defaultAccount.plan_type || "free");
+  const limitsProgress = Array.isArray(initPayload.limits_progress)
+    ? initPayload.limits_progress
+    : [];
+  const { quota, restoreAt, imageQuotaUnknown } =
+    extractQuotaAndRestoreAt(limitsProgress);
+
+  return {
+    email: stringOrNull(mePayload.email),
+    userId: stringOrNull(mePayload.id),
+    type: planType,
+    quota,
+    imageQuotaUnknown,
+    limitsProgress,
+    defaultModelSlug: stringOrNull(initPayload.default_model_slug),
+    restoreAt,
+    status:
+      imageQuotaUnknown && planType.toLowerCase() !== "free"
+        ? "active"
+        : quota === 0
+          ? "limited"
+          : "active",
+  };
+}
+
 async function bootstrap(config: ApiConfig) {
-  const response = await fetch(`${CHATGPT_BASE_URL}/`, {
+  const response = await fetchChatGptWeb(config, "/", "/", {
     headers: getHeaders(config, "/", {
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     }),
@@ -205,7 +468,7 @@ async function bootstrap(config: ApiConfig) {
 async function getChatRequirements(config: ApiConfig) {
   const resources = await bootstrap(config);
   const path = "/backend-api/sentinel/chat-requirements";
-  const response = await fetch(`${CHATGPT_BASE_URL}${path}`, {
+  const response = await fetchChatGptWeb(config, path, path, {
     method: "POST",
     headers: getHeaders(config, path, {
       "Content-Type": "application/json",
@@ -277,7 +540,7 @@ async function uploadImage(config: ApiConfig, image: ImageInputFile, index: numb
   const dimensions = imageDimensions(image.data);
   const path = "/backend-api/files";
   const fileName = image.name || `image_${index}.png`;
-  const createResponse = await fetch(`${CHATGPT_BASE_URL}${path}`, {
+  const createResponse = await fetchChatGptWeb(config, path, path, {
     method: "POST",
     headers: getHeaders(config, path, {
       "Content-Type": "application/json",
@@ -314,7 +577,7 @@ async function uploadImage(config: ApiConfig, image: ImageInputFile, index: numb
     throw new Error(`ChatGPT Web file upload failed: HTTP ${uploadResponse.status}`);
   }
   const uploadedPath = `/backend-api/files/${uploadMeta.file_id}/uploaded`;
-  const uploadedResponse = await fetch(`${CHATGPT_BASE_URL}${uploadedPath}`, {
+  const uploadedResponse = await fetchChatGptWeb(config, uploadedPath, uploadedPath, {
     method: "POST",
     headers: getHeaders(config, uploadedPath, {
       "Content-Type": "application/json",
@@ -373,7 +636,7 @@ async function prepareImageConversation(
   model?: string
 ) {
   const path = "/backend-api/f/conversation/prepare";
-  const response = await fetch(`${CHATGPT_BASE_URL}${path}`, {
+  const response = await fetchChatGptWeb(config, path, path, {
     method: "POST",
     headers: imageHeaders(config, path, requirements),
     body: JSON.stringify({
@@ -447,7 +710,7 @@ async function startImageGeneration(
   references: UploadedImage[]
 ) {
   const path = "/backend-api/f/conversation";
-  const response = await fetch(`${CHATGPT_BASE_URL}${path}`, {
+  const response = await fetchChatGptWeb(config, path, path, {
     method: "POST",
     headers: imageHeaders(config, path, requirements, conduitToken),
     body: JSON.stringify({
@@ -511,7 +774,7 @@ function sleep(ms: number) {
 
 async function getConversationText(config: ApiConfig, conversationId: string) {
   const path = `/backend-api/conversation/${conversationId}`;
-  const response = await fetch(`${CHATGPT_BASE_URL}${path}`, {
+  const response = await fetchChatGptWeb(config, path, path, {
     headers: getHeaders(config, path, { Accept: "application/json" }),
   });
   if (!response.ok) return "";
@@ -532,7 +795,7 @@ async function pollImageIds(config: ApiConfig, conversationId: string) {
 }
 
 async function getDownloadUrl(config: ApiConfig, path: string) {
-  const response = await fetch(`${CHATGPT_BASE_URL}${path}`, {
+  const response = await fetchChatGptWeb(config, path, path, {
     headers: getHeaders(config, path, { Accept: "application/json" }),
   });
   if (!response.ok) return "";

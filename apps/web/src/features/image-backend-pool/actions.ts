@@ -9,11 +9,12 @@ import {
   deleteImageBackendMembers,
   fromSafetyOverride,
   getUserImageBackendPreference,
-  importImageBackendAccounts,
   listAdminImageBackendPool,
   listImageBackendGroupOptions,
   listSelectableImageBackendGroups,
+  refreshImageBackendAccountInfo,
   setUserImageBackendPreference,
+  syncImageBackendAccountsFromSub2Api,
   upsertImageBackendAccount,
   upsertImageBackendApi,
   upsertImageBackendGroup,
@@ -27,6 +28,7 @@ const nullableGroupIdSchema = z
 
 const safetyOverrideSchema = z.enum(["inherit", "enabled", "disabled"]);
 const accountBackendSchema = z.enum(["web", "responses"]);
+const sub2ApiTokenSyncModeSchema = z.enum(["web", "responses", "both"]);
 
 const withImageBackendPoolAdminAction = (name: string) =>
   adminAction.metadata({ action: `imageBackendPool.${name}` });
@@ -136,62 +138,26 @@ export const saveImageBackendAccountAction = withImageBackendPoolAdminAction(
     return { success: true, id };
   });
 
-const importedAccountSchema = z.object({
-  name: z.string().trim().optional(),
-  email: z.string().trim().optional(),
-  accessToken: z.string().trim().optional(),
-  access_token: z.string().trim().optional(),
-  token: z.string().trim().optional(),
-  refreshToken: z.string().trim().optional(),
-  refresh_token: z.string().trim().optional(),
-  model: z.string().trim().optional(),
-  priority: z.coerce.number().int().optional(),
-  concurrency: z.coerce.number().int().optional(),
-});
-
-function parseSub2ApiAccounts(raw: string) {
-  const parsed = JSON.parse(raw) as unknown;
-  const rows = Array.isArray(parsed)
-    ? parsed
-    : parsed && typeof parsed === "object" && "accounts" in parsed
-      ? (parsed as { accounts?: unknown }).accounts
-      : [];
-  if (!Array.isArray(rows)) {
-    throw new Error("导入内容需要是数组，或包含 accounts 数组。");
-  }
-  return rows
-    .map((row) => importedAccountSchema.parse(row))
-    .map((row) => ({
-      name: row.name || row.email,
-      email: row.email,
-      accessToken: row.accessToken || row.access_token || row.token || "",
-      refreshToken: row.refreshToken || row.refresh_token,
-      model: row.model,
-      priority: row.priority,
-      concurrency: row.concurrency,
-    }))
-    .filter((row) => row.accessToken);
-}
-
-export const importImageBackendAccountsAction =
-  withImageBackendPoolAdminAction("importAccounts")
+export const syncImageBackendAccountsFromSub2ApiAction =
+  withImageBackendPoolAdminAction("syncSub2ApiAccounts")
     .schema(
       z.object({
-        groupId: nullableGroupIdSchema,
-        implementationMode: accountBackendSchema.default("web"),
+        webGroupId: nullableGroupIdSchema,
+        responsesGroupId: nullableGroupIdSchema,
+        syncMode: sub2ApiTokenSyncModeSchema.default("both"),
         contentSafetyEnabled: z.boolean().default(true),
-        json: z.string().trim().min(2),
+        limit: z.coerce.number().int().min(1).max(500).optional(),
       })
     )
     .action(async ({ parsedInput }) => {
-      const accounts = parseSub2ApiAccounts(parsedInput.json);
-      const ids = await importImageBackendAccounts({
-        groupId: parsedInput.groupId,
-        implementationMode: parsedInput.implementationMode,
+      const result = await syncImageBackendAccountsFromSub2Api({
+        webGroupId: parsedInput.webGroupId,
+        responsesGroupId: parsedInput.responsesGroupId,
+        syncMode: parsedInput.syncMode,
         contentSafetyEnabled: parsedInput.contentSafetyEnabled,
-        accounts,
+        limit: parsedInput.limit,
       });
-      return { success: true, count: ids.length };
+      return { success: true, ...result };
     });
 
 export const saveImageBackendApiAction = withImageBackendPoolAdminAction(
@@ -244,6 +210,14 @@ export const deleteImageBackendMemberAction =
           : { apiIds: [parsedInput.id] }
       );
       return { success: true };
+    });
+
+export const refreshImageBackendAccountInfoAction =
+  withImageBackendPoolAdminAction("refreshAccountInfo")
+    .schema(z.object({ id: z.string().trim().min(1) }))
+    .action(async ({ parsedInput }) => {
+      const info = await refreshImageBackendAccountInfo(parsedInput.id);
+      return { success: true, info };
     });
 
 export const getImageBackendGroupOptionsAction = protectedAction

@@ -219,6 +219,9 @@ const defaultDimensions = parseImageSize(DEFAULT_IMAGE_SIZE) || {
   height: 1024,
 };
 
+const shouldOptimizeStoredImage = (imageUrl: string | undefined) =>
+  Boolean(imageUrl?.startsWith("/api/storage/"));
+
 const MAX_EDIT_IMAGES = 16;
 const DEFAULT_MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 const DEFAULT_MAX_EDIT_REQUEST_BYTES = 75 * 1024 * 1024;
@@ -1723,7 +1726,7 @@ export function CreatePageClient({
               width={320}
               height={320}
               className="h-auto w-full object-contain"
-              unoptimized
+              unoptimized={!shouldOptimizeStoredImage(chatStream.imageUrl)}
             />
           </div>
         )}
@@ -4103,7 +4106,11 @@ export function CreatePageClient({
                                           fill
                                           sizes="(max-width: 768px) 80vw, 420px"
                                           className="object-contain"
-                                          unoptimized
+                                          unoptimized={
+                                            !shouldOptimizeStoredImage(
+                                              activeVariant.imageUrl
+                                            )
+                                          }
                                         />
                                         <span className="absolute right-2 top-2 rounded bg-background/90 px-2 py-1 text-[11px] font-medium text-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100">
                                           <Eye className="mr-1 inline h-3 w-3" />
@@ -4455,7 +4462,9 @@ export function CreatePageClient({
                                 width={640}
                                 height={640}
                                 className="h-auto w-full object-cover"
-                                unoptimized
+                                unoptimized={
+                                  !shouldOptimizeStoredImage(card.imageUrl)
+                                }
                               />
                               {card.state === "loading" && (
                                 <span className="absolute left-2 top-2 rounded-full bg-background/90 px-2 py-1 text-[11px] font-medium text-foreground shadow-sm">
@@ -4584,7 +4593,7 @@ export function CreatePageClient({
                 fill
                 sizes="(max-width: 1024px) 100vw, 768px"
                 className="object-contain"
-                unoptimized
+                unoptimized={!shouldOptimizeStoredImage(streamingPreviewUrl)}
               />
               <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-background/90 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -4625,7 +4634,7 @@ export function CreatePageClient({
               fill
               sizes="(max-width: 1024px) 100vw, 768px"
               className="object-contain"
-              unoptimized
+              unoptimized={!shouldOptimizeStoredImage(result.imageUrl)}
             />
             <span className="absolute right-2 top-2 rounded bg-background/90 px-2 py-1 text-xs font-medium text-foreground opacity-0 shadow-sm transition-opacity hover:opacity-100 focus:opacity-100 group-hover:opacity-100">
               <Eye className="mr-1 inline h-3.5 w-3.5" />
@@ -4725,8 +4734,9 @@ export function CreatePageClient({
                       src={g.imageUrl}
                       alt={g.prompt}
                       fill
+                      sizes="80px"
                       className="object-cover transition-transform group-hover:scale-105"
-                      unoptimized
+                      unoptimized={!shouldOptimizeStoredImage(g.imageUrl)}
                     />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-muted-foreground">

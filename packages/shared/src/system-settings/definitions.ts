@@ -96,6 +96,12 @@ export type SettingKey =
   | "PLATFORM_IMAGE_MODEL"
   | "PLATFORM_RESPONSES_MODEL"
   | "PLATFORM_CHAT_MODEL"
+  | "CHATGPT_WEB_PROXY_URL"
+  | "CHATGPT_WEB_PROXY_SECRET"
+  | "CHATGPT_WEB_ACCOUNT_REFRESH_STALE_MINUTES"
+  | "CHATGPT_WEB_ACCOUNT_REFRESH_LIMIT"
+  | "SUB2API_POSTGRES_URL"
+  | "SUB2API_POSTGRES_SYNC_LIMIT"
   | "OPENAI_API_KEY"
   | "OPENAI_MODEL"
   | "DEEPSEEK_API_KEY"
@@ -807,6 +813,53 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     description: "兼容旧配置。",
     category: "models",
     valueType: "string",
+  },
+  {
+    key: "CHATGPT_WEB_PROXY_URL",
+    label: "ChatGPT Web TLS 代理地址",
+    description: "可选。配置后 Web 账号请求会经 Go tls-client sidecar 转发，例如 http://chatgpt-web-proxy:3021。",
+    category: "models",
+    valueType: "string",
+  },
+  {
+    key: "CHATGPT_WEB_PROXY_SECRET",
+    label: "ChatGPT Web TLS 代理密钥",
+    description: "可选。请求 sidecar 时写入 X-Proxy-Secret。",
+    category: "models",
+    valueType: "string",
+    secret: true,
+  },
+  {
+    key: "CHATGPT_WEB_ACCOUNT_REFRESH_STALE_MINUTES",
+    label: "Web 账号刷新间隔分钟",
+    description: "后台任务刷新超过该时间未同步额度的 Web 账号。",
+    category: "models",
+    valueType: "number",
+    defaultValue: 30,
+  },
+  {
+    key: "CHATGPT_WEB_ACCOUNT_REFRESH_LIMIT",
+    label: "Web 账号单次刷新数量",
+    description: "后台任务每次最多刷新多少个 Web 账号。",
+    category: "models",
+    valueType: "number",
+    defaultValue: 20,
+  },
+  {
+    key: "SUB2API_POSTGRES_URL",
+    label: "Sub2API Postgres 地址",
+    description: "连接 Sub2API 数据库，用于读取当前 AT/RT，并在 Web AT 刷新后回写最新 refresh_token。需要 accounts.credentials 更新权限。",
+    category: "models",
+    valueType: "string",
+    secret: true,
+  },
+  {
+    key: "SUB2API_POSTGRES_SYNC_LIMIT",
+    label: "Sub2API 单次同步账号数",
+    description: "从 Sub2API 数据库单次最多读取多少个 OpenAI OAuth 账号。",
+    category: "models",
+    valueType: "number",
+    defaultValue: 100,
   },
   {
     key: "AI_PROVIDER",

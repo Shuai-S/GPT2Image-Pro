@@ -109,6 +109,7 @@ export interface ApiConfig {
     groupId?: string | null;
     requestKind?: "image_generation" | "image_edit" | "responses";
     accountBackend?: "web" | "responses";
+    reportResult?: boolean;
   };
 }
 

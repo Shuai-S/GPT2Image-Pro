@@ -12,7 +12,10 @@ import { logError } from "@repo/shared/logger";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { getRuntimeSettingString } from "@repo/shared/system-settings";
 import { eq } from "drizzle-orm";
-import { resolveImageBackendPoolConfig } from "@/features/image-backend-pool/service";
+import {
+  reportImageBackendResult,
+  resolveImageBackendPoolConfig,
+} from "@/features/image-backend-pool/service";
 import type { ImageBackendRequestKind } from "@/features/image-backend-pool/types";
 import {
   editImageWithChatGptWeb,
@@ -335,6 +338,54 @@ function isPoolAccountBackend(
 
 function isResponsesBackend(config: ApiConfig) {
   return isPoolAccountBackend(config, "responses");
+}
+
+async function reportPoolBackendResult(
+  config: ApiConfig,
+  result: GenerateImageResult
+) {
+  if (!config.backend?.reportResult) return;
+  if (
+    config.backend.type !== "pool-api" &&
+    config.backend.type !== "pool-account"
+  ) {
+    return;
+  }
+  try {
+    await reportImageBackendResult({
+      memberType: config.backend.type === "pool-api" ? "api" : "account",
+      memberId: config.backend.id,
+      success: !result.error,
+      error: result.error,
+    });
+  } catch (error) {
+    logError(error, {
+      source: "image-backend-pool",
+      operation: "report-result",
+      backendType: config.backend.type,
+      backendId: config.backend.id,
+    });
+  }
+}
+
+async function withPoolBackendReport(
+  config: ApiConfig,
+  run: () => Promise<GenerateImageResult>
+) {
+  const result = await run();
+  await reportPoolBackendResult(config, result);
+  return result;
+}
+
+function withoutPoolBackendReport(config: ApiConfig): ApiConfig {
+  if (!config.backend) return config;
+  return {
+    ...config,
+    backend: {
+      ...config.backend,
+      reportResult: false,
+    },
+  };
 }
 
 function getDataUrl(image: ImageInputFile) {
@@ -1023,6 +1074,12 @@ export async function generateImage(
   params: GenerateImageParams,
   callbacks?: ImageGenerationCallbacks
 ): Promise<GenerateImageResult> {
+  if (config.backend?.reportResult) {
+    return withPoolBackendReport(config, () =>
+      generateImage(withoutPoolBackendReport(config), params, callbacks)
+    );
+  }
+
   const model = getModel(config, params.model);
   if (isPoolAccountBackend(config, "web")) {
     return generateImageWithChatGptWeb(config, { ...params, model });
@@ -1108,6 +1165,12 @@ export async function editImage(
   params: EditImageParams,
   callbacks?: ImageGenerationCallbacks
 ): Promise<GenerateImageResult> {
+  if (config.backend?.reportResult) {
+    return withPoolBackendReport(config, () =>
+      editImage(withoutPoolBackendReport(config), params, callbacks)
+    );
+  }
+
   const model = getModel(config, params.model);
   if (isPoolAccountBackend(config, "web")) {
     return editImageWithChatGptWeb(config, { ...params, model });
@@ -1196,6 +1259,12 @@ export async function generateChatImage(
   params: ChatImageParams,
   callbacks?: ImageGenerationCallbacks
 ): Promise<GenerateImageResult> {
+  if (config.backend?.reportResult) {
+    return withPoolBackendReport(config, () =>
+      generateChatImage(withoutPoolBackendReport(config), params, callbacks)
+    );
+  }
+
   const model = await getResponsesModel(config, params.model, {
     allowGpt55: params.allowGpt55,
   });

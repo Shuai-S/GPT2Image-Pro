@@ -136,6 +136,7 @@ export function DashboardSidebar() {
         <div className="flex h-14 items-center px-4">
           <Link
             href={`/${locale}`}
+            prefetch={false}
             className="flex items-center gap-2"
             onClick={(e) => {
               if (mobile) {
@@ -201,6 +202,7 @@ export function DashboardSidebar() {
                     <Link
                       key={item.href}
                       href={localizedHref(item.href)}
+                      prefetch={false}
                       title={collapsed ? translatedTitle : undefined}
                       onClick={() => mobile && setMobileOpen(false)}
                       className={cn(

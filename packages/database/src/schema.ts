@@ -7,6 +7,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 /**
@@ -690,28 +691,43 @@ export const imageBackendGroup = pgTable("image_backend_group", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-export const imageBackendAccount = pgTable("image_backend_account", {
-  id: text("id").primaryKey(),
-  groupId: text("group_id").references(() => imageBackendGroup.id, {
-    onDelete: "set null",
-  }),
-  name: text("name").notNull(),
-  email: text("email"),
-  credentialHash: text("credential_hash").notNull().unique(),
-  accessToken: text("access_token").notNull(),
-  refreshToken: text("refresh_token"),
-  implementationMode: text("interface_mode").notNull().default("web"),
-  model: text("model"),
-  contentSafetyEnabled: boolean("content_safety_enabled").notNull().default(true),
-  isEnabled: boolean("is_enabled").notNull().default(true),
-  priority: integer("priority").notNull().default(50),
-  concurrency: integer("concurrency").notNull().default(1),
-  status: text("status").notNull().default("active"),
-  lastUsedAt: timestamp("last_used_at"),
-  metadata: json("metadata").$type<Record<string, unknown>>(),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+export const imageBackendAccount = pgTable(
+  "image_backend_account",
+  {
+    id: text("id").primaryKey(),
+    groupId: text("group_id").references(() => imageBackendGroup.id, {
+      onDelete: "set null",
+    }),
+    name: text("name").notNull(),
+    email: text("email"),
+    credentialHash: text("credential_hash").notNull(),
+    accessToken: text("access_token").notNull(),
+    refreshToken: text("refresh_token"),
+    implementationMode: text("interface_mode").notNull().default("web"),
+    model: text("model"),
+    contentSafetyEnabled: boolean("content_safety_enabled").notNull().default(true),
+    isEnabled: boolean("is_enabled").notNull().default(true),
+    priority: integer("priority").notNull().default(50),
+    concurrency: integer("concurrency").notNull().default(1),
+    successCount: integer("success_count").notNull().default(0),
+    failCount: integer("fail_count").notNull().default(0),
+    status: text("status").notNull().default("active"),
+    lastUsedAt: timestamp("last_used_at"),
+    lastAcquiredAt: timestamp("last_acquired_at"),
+    cooldownUntil: timestamp("cooldown_until"),
+    lastError: text("last_error"),
+    lastErrorAt: timestamp("last_error_at"),
+    metadata: json("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("image_backend_account_interface_credential_hash_unique").on(
+      table.implementationMode,
+      table.credentialHash
+    ),
+  ]
+);
 
 export const imageBackendApi = pgTable("image_backend_api", {
   id: text("id").primaryKey(),
@@ -727,8 +743,14 @@ export const imageBackendApi = pgTable("image_backend_api", {
   contentSafetyEnabled: boolean("content_safety_enabled").notNull().default(true),
   isEnabled: boolean("is_enabled").notNull().default(true),
   priority: integer("priority").notNull().default(50),
+  successCount: integer("success_count").notNull().default(0),
+  failCount: integer("fail_count").notNull().default(0),
   status: text("status").notNull().default("active"),
   lastUsedAt: timestamp("last_used_at"),
+  lastAcquiredAt: timestamp("last_acquired_at"),
+  cooldownUntil: timestamp("cooldown_until"),
+  lastError: text("last_error"),
+  lastErrorAt: timestamp("last_error_at"),
   metadata: json("metadata").$type<Record<string, unknown>>(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
