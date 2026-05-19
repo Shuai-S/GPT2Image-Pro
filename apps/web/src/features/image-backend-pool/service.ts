@@ -73,6 +73,13 @@ export type ResolvedImageBackendPoolConfig = {
   contentSafetyEnabled: boolean;
 };
 
+export class ImageBackendPoolUnavailableError extends Error {
+  constructor(message = "当前生图后端分组没有可用账号或 API") {
+    super(message);
+    this.name = "ImageBackendPoolUnavailableError";
+  }
+}
+
 export type ImageBackendReportResultInput = {
   memberType?: "api" | "account";
   memberId?: string;
@@ -310,14 +317,16 @@ async function getDefaultGroupId() {
   return firstGroup?.id ?? null;
 }
 
-async function resolveRequestedGroupId(options: ResolveBackendOptions) {
+async function resolveRequestedGroup(
+  options: ResolveBackendOptions
+): Promise<{ groupId: string | null; explicit: boolean }> {
   if (options.apiKeyId) {
     const [key] = await db
       .select({ groupId: externalApiKey.generationGroupId })
       .from(externalApiKey)
       .where(eq(externalApiKey.id, options.apiKeyId))
       .limit(1);
-    if (key?.groupId) return key.groupId;
+    if (key?.groupId) return { groupId: key.groupId, explicit: true };
   }
 
   const [preference] = await db
@@ -326,7 +335,11 @@ async function resolveRequestedGroupId(options: ResolveBackendOptions) {
     .where(eq(userImageBackendPreference.userId, options.userId))
     .limit(1);
 
-  return preference?.groupId || (await getDefaultGroupId());
+  if (preference?.groupId) {
+    return { groupId: preference.groupId, explicit: true };
+  }
+
+  return { groupId: await getDefaultGroupId(), explicit: false };
 }
 
 async function ensureGroupUsable(groupId: string | null) {
@@ -527,16 +540,29 @@ function toResolvedPoolConfig(
 async function resolvePoolMember(
   options: ResolveBackendOptions & { excluded?: Set<string> }
 ) {
-  const requestedGroupId = await resolveRequestedGroupId(options);
+  const requestedGroup = await resolveRequestedGroup(options);
+  const requestedGroupId = requestedGroup.groupId;
   const group = await ensureGroupUsable(requestedGroupId);
-  if (!group) return null;
+  if (!group) {
+    if (requestedGroup.explicit) {
+      throw new ImageBackendPoolUnavailableError("选择的生图后端分组不可用");
+    }
+    return null;
+  }
 
   const member = await selectPoolMember(
     group.id,
     options.requestKind,
     options.excluded
   );
-  if (!member) return null;
+  if (!member) {
+    if (requestedGroup.explicit) {
+      throw new ImageBackendPoolUnavailableError(
+        `生图后端分组「${group.name}」没有可用账号或 API`
+      );
+    }
+    return null;
+  }
 
   return { group, member };
 }

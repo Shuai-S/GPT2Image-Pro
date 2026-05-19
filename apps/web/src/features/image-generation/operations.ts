@@ -32,6 +32,7 @@ import {
   getUserApiConfig,
 } from "./service";
 import type {
+  ApiConfig,
   ChatHistoryMessage,
   ChatImageParams,
   EditImageParams,
@@ -196,6 +197,25 @@ function buildRevisedPromptMetadata(params: {
   };
 }
 
+function buildBackendExecutionMetadata(params: {
+  config: ApiConfig;
+  useCredits: boolean;
+}) {
+  const backend = params.config.backend || { type: "platform" as const };
+  return {
+    backend: {
+      type: backend.type,
+      id: backend.id,
+      groupId: backend.groupId,
+      requestKind: backend.requestKind,
+      accountBackend: backend.accountBackend,
+      useCredits: params.useCredits,
+      baseUrl: params.config.baseUrl,
+      model: params.config.model,
+    },
+  };
+}
+
 async function getUserModerationBlockRiskLevel(
   userId: string,
   plan: Awaited<ReturnType<typeof getUserPlan>>["plan"],
@@ -295,11 +315,21 @@ export async function runImageGenerationForUser(
       : input.mode === "edit"
         ? "image_edit"
         : undefined);
-  const { config, useCredits } = await getEffectiveConfig(userConfig, {
-    userId: input.userId,
-    apiKeyId: input.apiKeyId,
-    requestKind: backendRequestKind,
-  });
+  let effectiveConfig: Awaited<ReturnType<typeof getEffectiveConfig>>;
+  try {
+    effectiveConfig = await getEffectiveConfig(userConfig, {
+      userId: input.userId,
+      apiKeyId: input.apiKeyId,
+      requestKind: backendRequestKind,
+    });
+  } catch (error) {
+    return {
+      error:
+        error instanceof Error ? error.message : "当前没有可用的生图后端",
+      generationId,
+    };
+  }
+  const { config, useCredits } = effectiveConfig;
   let model: string;
   try {
     if (input.mode === "chat") {
@@ -417,6 +447,7 @@ async function runQueuedImageGenerationForUser({
     promptOptimization,
     apiPrompt,
   });
+  const backendMetadata = buildBackendExecutionMetadata({ config, useCredits });
 
   await db.insert(generation).values({
     id: generationId,
@@ -431,6 +462,7 @@ async function runQueuedImageGenerationForUser({
       input.mode === "edit"
         ? {
             mode: "edit",
+            ...backendMetadata,
             ...promptOptimizationMetadata,
             imageCount: input.images.length,
             hasMask: Boolean(input.mask),
@@ -443,6 +475,7 @@ async function runQueuedImageGenerationForUser({
           ? {
               mode: "chat",
               action: "auto",
+              ...backendMetadata,
               ...promptOptimizationMetadata,
               imageCount: input.images?.length || 0,
               quality: input.quality || "auto",
@@ -453,6 +486,7 @@ async function runQueuedImageGenerationForUser({
             }
           : {
               mode: "generate",
+              ...backendMetadata,
               ...promptOptimizationMetadata,
               quality: input.quality || "auto",
               moderation: input.moderation || "auto",

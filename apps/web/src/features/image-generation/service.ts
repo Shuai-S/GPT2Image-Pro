@@ -13,6 +13,7 @@ import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { getRuntimeSettingString } from "@repo/shared/system-settings";
 import { eq } from "drizzle-orm";
 import {
+  ImageBackendPoolUnavailableError,
   reportImageBackendResult,
   resolveImageBackendPoolConfig,
 } from "@/features/image-backend-pool/service";
@@ -1075,16 +1076,31 @@ export async function getEffectiveConfig(
     return { config: userConfig, useCredits: false };
   }
   if (options?.userId && options.requestKind) {
-    const poolConfig = await resolveImageBackendPoolConfig({
-      userId: options.userId,
-      apiKeyId: options.apiKeyId,
-      requestKind: options.requestKind,
-    });
+    let poolConfig: Awaited<ReturnType<typeof resolveImageBackendPoolConfig>>;
+    try {
+      poolConfig = await resolveImageBackendPoolConfig({
+        userId: options.userId,
+        apiKeyId: options.apiKeyId,
+        requestKind: options.requestKind,
+      });
+    } catch (error) {
+      if (error instanceof ImageBackendPoolUnavailableError) {
+        throw error;
+      }
+      throw error;
+    }
     if (poolConfig) {
       return { config: poolConfig.config, useCredits: true };
     }
   }
-  return { config: await getPlatformConfig(), useCredits: true };
+  const platformConfig = await getPlatformConfig();
+  return {
+    config: {
+      ...platformConfig,
+      backend: { type: "platform", requestKind: options?.requestKind },
+    },
+    useCredits: true,
+  };
 }
 
 export async function generateImage(
