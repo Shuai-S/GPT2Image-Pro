@@ -120,9 +120,7 @@ const OPENAI_CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const OPENAI_PLATFORM_OAUTH_CLIENT_ID = "app_2SKx67EdpoN0G6j64rFvigXD";
 const OPENAI_MOBILE_RT_CLIENT_ID = "app_LlGpXReQgckcGGUo2JrYvtJK";
 const OPENAI_REFRESH_SCOPES = "openid profile email";
-const RATE_LIMIT_COOLDOWN_MINUTES = 10;
-const TEMPORARY_ERROR_COOLDOWN_MINUTES = 2;
-const USAGE_LIMIT_COOLDOWN_HOURS = 6;
+const DEFAULT_BACKEND_COOLDOWN_MINUTES = 15;
 const MAX_PARSED_RESET_COOLDOWN_DAYS = 14;
 const backendInflight = new Map<string, number>();
 
@@ -243,7 +241,9 @@ function isRetryableBackendError(error?: string | null) {
   const normalized = (error || "").toLowerCase();
   return (
     isInvalidBackendCredentialError(error) ||
+    isUnsupportedModelBackendError(error) ||
     normalized.includes("429") ||
+    normalized.includes("529") ||
     normalized.includes("rate limit") ||
     normalized.includes("too many requests") ||
     normalized.includes("usage limit") ||
@@ -263,8 +263,11 @@ function isRetryableBackendError(error?: string | null) {
     normalized.includes("502") ||
     normalized.includes("503") ||
     normalized.includes("504") ||
+    normalized.includes("server overloaded") ||
     normalized.includes("overloaded") ||
-    normalized.includes("temporarily unavailable")
+    normalized.includes("temporarily unavailable") ||
+    normalized.includes("temporary unavailable") ||
+    normalized.includes("service unavailable")
   );
 }
 
@@ -308,6 +311,41 @@ function isUsageLimitBackendError(error?: string | null) {
     normalized.includes("quota exceeded") ||
     normalized.includes("quota_exceeded") ||
     normalized.includes("billing_hard_limit")
+  );
+}
+
+function isOverloadBackendError(error?: string | null) {
+  const normalized = (error || "").toLowerCase();
+  return (
+    normalized.includes("529") ||
+    normalized.includes("overloaded") ||
+    normalized.includes("server overloaded") ||
+    normalized.includes("temporarily unavailable") ||
+    normalized.includes("temporary unavailable") ||
+    normalized.includes("service unavailable") ||
+    normalized.includes("capacity") ||
+    normalized.includes("try again later")
+  );
+}
+
+function isUnsupportedModelBackendError(error?: string | null) {
+  const normalized = (error || "").toLowerCase();
+  return (
+    normalized.includes("unsupported model") ||
+    normalized.includes("model not supported") ||
+    normalized.includes("model is not supported") ||
+    normalized.includes("model_not_supported") ||
+    normalized.includes("unsupported_model") ||
+    normalized.includes("model_not_found") ||
+    normalized.includes("model_not_available") ||
+    normalized.includes("does not support this model") ||
+    normalized.includes("not support this model") ||
+    normalized.includes("not allowed to use model") ||
+    normalized.includes("not have access to the model") ||
+    normalized.includes("account does not support") ||
+    normalized.includes("账户不支持此模型") ||
+    normalized.includes("不支持此模型") ||
+    normalized.includes("不支持该模型")
   );
 }
 
@@ -392,23 +430,67 @@ function resolveCooldownDate(
   return fallback;
 }
 
-function classifyFailure(
+function cooldownFromMinutes(minutes: number) {
+  return new Date(Date.now() + Math.max(1, minutes) * 60_000);
+}
+
+async function getBackendCooldownMinutes(
+  key:
+    | "IMAGE_BACKEND_DEFAULT_COOLDOWN_MINUTES"
+    | "IMAGE_BACKEND_RATE_LIMIT_COOLDOWN_MINUTES"
+    | "IMAGE_BACKEND_OVERLOAD_COOLDOWN_MINUTES"
+    | "IMAGE_BACKEND_USAGE_LIMIT_COOLDOWN_MINUTES"
+    | "IMAGE_BACKEND_UNSUPPORTED_MODEL_COOLDOWN_MINUTES"
+    | "IMAGE_BACKEND_TEMPORARY_ERROR_COOLDOWN_MINUTES"
+) {
+  const defaultMinutes = await getRuntimeSettingNumber(
+    "IMAGE_BACKEND_DEFAULT_COOLDOWN_MINUTES",
+    DEFAULT_BACKEND_COOLDOWN_MINUTES,
+    { positive: true }
+  );
+  if (key === "IMAGE_BACKEND_DEFAULT_COOLDOWN_MINUTES") {
+    return defaultMinutes;
+  }
+  return await getRuntimeSettingNumber(
+    key,
+    defaultMinutes,
+    { positive: true }
+  );
+}
+
+async function classifyFailure(
   error?: string | null,
   input?: Pick<ImageBackendReportResultInput, "upstreamResetAt" | "retryAfterSeconds">
-): {
+): Promise<{
   status?: string;
   cooldownUntil?: Date | null;
-} {
+}> {
   const normalized = (error || "").toLowerCase();
   if (isInvalidBackendCredentialError(error)) {
     return { status: "error", cooldownUntil: null };
   }
   if (isUsageLimitBackendError(error)) {
+    const minutes = await getBackendCooldownMinutes(
+      "IMAGE_BACKEND_USAGE_LIMIT_COOLDOWN_MINUTES"
+    );
     return {
       status: "limited",
       cooldownUntil: resolveCooldownDate(
         error || null,
-        new Date(Date.now() + USAGE_LIMIT_COOLDOWN_HOURS * 60 * 60_000),
+        cooldownFromMinutes(minutes),
+        input
+      ),
+    };
+  }
+  if (isUnsupportedModelBackendError(error)) {
+    const minutes = await getBackendCooldownMinutes(
+      "IMAGE_BACKEND_UNSUPPORTED_MODEL_COOLDOWN_MINUTES"
+    );
+    return {
+      status: "active",
+      cooldownUntil: resolveCooldownDate(
+        error || null,
+        cooldownFromMinutes(minutes),
         input
       ),
     };
@@ -418,26 +500,51 @@ function classifyFailure(
     normalized.includes("rate limit") ||
     normalized.includes("too many requests")
   ) {
+    const minutes = await getBackendCooldownMinutes(
+      "IMAGE_BACKEND_RATE_LIMIT_COOLDOWN_MINUTES"
+    );
     return {
       status: "active",
       cooldownUntil: resolveCooldownDate(
         error || null,
-        new Date(Date.now() + RATE_LIMIT_COOLDOWN_MINUTES * 60_000),
+        cooldownFromMinutes(minutes),
+        input
+      ),
+    };
+  }
+  if (isOverloadBackendError(error)) {
+    const minutes = await getBackendCooldownMinutes(
+      "IMAGE_BACKEND_OVERLOAD_COOLDOWN_MINUTES"
+    );
+    return {
+      status: "active",
+      cooldownUntil: resolveCooldownDate(
+        error || null,
+        cooldownFromMinutes(minutes),
         input
       ),
     };
   }
   if (isRetryableBackendError(error)) {
+    const minutes = await getBackendCooldownMinutes(
+      "IMAGE_BACKEND_TEMPORARY_ERROR_COOLDOWN_MINUTES"
+    );
     return {
       status: "active",
       cooldownUntil: resolveCooldownDate(
         error || null,
-        new Date(Date.now() + TEMPORARY_ERROR_COOLDOWN_MINUTES * 60_000),
+        cooldownFromMinutes(minutes),
         input
       ),
     };
   }
-  return {};
+  const minutes = await getBackendCooldownMinutes(
+    "IMAGE_BACKEND_DEFAULT_COOLDOWN_MINUTES"
+  );
+  return {
+    status: "active",
+    cooldownUntil: cooldownFromMinutes(minutes),
+  };
 }
 
 function isBackendAvailableStatus(
@@ -906,7 +1013,7 @@ export async function reportImageBackendResult(input: ImageBackendReportResultIn
   if (!input.memberId || !input.memberType) return;
   const now = new Date();
   const error = truncateError(input.error);
-  const failure = input.success ? {} : classifyFailure(error, input);
+  const failure = input.success ? {} : await classifyFailure(error, input);
 
   if (input.memberType === "api") {
     await db
@@ -1056,7 +1163,7 @@ export async function refreshImageBackendAccountInfo(accountId: string) {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "刷新账号远端信息失败";
-    const failure = classifyFailure(message);
+    const failure = await classifyFailure(message);
     await db
       .update(imageBackendAccount)
       .set({

@@ -234,6 +234,13 @@ function getApiErrorMessage(errorData: unknown): string | null {
     return errorData.trim();
   }
 
+  if (Array.isArray(errorData)) {
+    const parts = errorData
+      .map((item) => getApiErrorMessage(item))
+      .filter((item): item is string => Boolean(item));
+    return parts.length ? parts.join(" | ") : null;
+  }
+
   if (
     errorData &&
     typeof errorData === "object" &&
@@ -254,13 +261,26 @@ function getApiErrorMessage(errorData: unknown): string | null {
     if (nested) return nested;
   }
 
-  if (
-    errorData &&
-    typeof errorData === "object" &&
-    "message" in errorData &&
-    typeof errorData.message === "string"
-  ) {
-    return errorData.message;
+  if (errorData && typeof errorData === "object") {
+    const record = errorData as Record<string, unknown>;
+    const parts = [
+      record.message,
+      record.detail,
+      record.details,
+      record.code,
+      record.type,
+      record.status,
+    ]
+      .flatMap((value) => {
+        if (typeof value === "string" && value.trim()) return [value.trim()];
+        if (typeof value === "number" && Number.isFinite(value)) {
+          return [String(value)];
+        }
+        const nested = getApiErrorMessage(value);
+        return nested ? [nested] : [];
+      })
+      .filter(Boolean);
+    if (parts.length) return parts.join(" | ");
   }
 
   return null;
@@ -431,7 +451,8 @@ function getHttpErrorMessage(
     return `${fallback}: ${trimmedBody}`;
   }
 
-  return getApiError(errorData, `${fallback}: ${trimmedBody}`);
+  const apiError = getApiErrorMessage(errorData);
+  return apiError ? `${fallback}: ${apiError}` : `${fallback}: ${trimmedBody}`;
 }
 
 function getNonJsonErrorMessage(
