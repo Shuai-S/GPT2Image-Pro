@@ -1741,17 +1741,19 @@ function addToken(tokens: Set<string>, value: string | null | undefined) {
 
 function collectTokensFromJson(
   value: unknown,
-  tokens: { refreshTokens: Set<string>; accessTokens: Set<string> }
+  tokens: { refreshTokens: Set<string>; accessTokens: Set<string> },
+  allowBareString = false
 ) {
   if (!value) return;
   if (typeof value === "string") {
-    for (const match of value.matchAll(/\brt_[A-Za-z0-9._~+/=-]+/g)) {
-      tokens.refreshTokens.add(match[0]);
+    const token = value.trim();
+    if (allowBareString && /^rt_[A-Za-z0-9._~+/=-]+$/.test(token)) {
+      tokens.refreshTokens.add(token);
     }
     return;
   }
   if (Array.isArray(value)) {
-    for (const item of value) collectTokensFromJson(item, tokens);
+    for (const item of value) collectTokensFromJson(item, tokens, true);
     return;
   }
   if (typeof value !== "object") return;
@@ -1777,11 +1779,13 @@ function parseImportTokensText(value: string) {
     refreshTokens: new Set<string>(),
     accessTokens: new Set<string>(),
   };
-  let parsedJson = false;
 
   try {
     collectTokensFromJson(JSON.parse(value), tokens);
-    parsedJson = true;
+    return {
+      refreshTokens: Array.from(tokens.refreshTokens),
+      accessTokens: Array.from(tokens.accessTokens),
+    };
   } catch {
     // Plain RT lists and copied pages are handled by the text parser below.
   }
@@ -1790,20 +1794,14 @@ function parseImportTokensText(value: string) {
     tokens.refreshTokens.add(match[0]);
   }
 
-  for (const match of value.matchAll(
-    /["']?(?:refresh[_-]?token|refreshToken|rt)["']?\s*[:=]\s*["']?([^"',}\]\s;]+)["']?/gi
-  )) {
-    addToken(tokens.refreshTokens, match[1]);
-  }
-
-  for (const match of value.matchAll(
-    /["']?(?:access[_-]?token|accessToken|at)["']?\s*[:=]\s*["']?([^"',}\]\s;]+)["']?/gi
-  )) {
-    addToken(tokens.accessTokens, match[1]);
-  }
+  extractNamedTokens(value, ["refresh_token", "refreshToken", "rt"]).forEach(
+    (token) => addToken(tokens.refreshTokens, token)
+  );
+  extractNamedTokens(value, ["access_token", "accessToken", "at"]).forEach(
+    (token) => addToken(tokens.accessTokens, token)
+  );
 
   const looksStructured =
-    parsedJson ||
     /(?:^|[\s{,])["']?(?:access[_-]?token|accessToken|refresh[_-]?token|refreshToken)["']?\s*[:=]/i.test(
       value
     );
@@ -1822,6 +1820,24 @@ function parseImportTokensText(value: string) {
     refreshTokens: Array.from(tokens.refreshTokens),
     accessTokens: Array.from(tokens.accessTokens),
   };
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function extractNamedTokens(value: string, names: string[]) {
+  const namePattern = names.map(escapeRegExp).join("|");
+  const pattern = new RegExp(
+    `(?:^|[\\s,{\\[])(?:"(?:${namePattern})"|'(?:${namePattern})'|(?:${namePattern}))\\s*[:=]\\s*(?:"([^"]+)"|'([^']+)'|([^"',}\\]\\s;]+))`,
+    "gi"
+  );
+  const results: string[] = [];
+  for (const match of value.matchAll(pattern)) {
+    const token = match[1] || match[2] || match[3];
+    if (token) results.push(token);
+  }
+  return results;
 }
 
 async function importAccessTokens(
