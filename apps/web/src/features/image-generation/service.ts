@@ -15,7 +15,7 @@ import { eq } from "drizzle-orm";
 import {
   acquireImageBackendInflight,
   ImageBackendPoolUnavailableError,
-  isImageBackendRetryableError,
+  isImageBackendSwitchableError,
   reportImageBackendResult,
   releaseImageBackendInflight,
   resolveImageBackendPoolConfig,
@@ -681,7 +681,7 @@ async function reportPoolBackendResult(
       upstreamResetAt: result.upstreamResetAt,
       retryAfterSeconds: result.retryAfterSeconds,
     });
-    return outcome.retryable;
+    return outcome.switchable;
   } catch (error) {
     logError(error, {
       source: "image-backend-pool",
@@ -755,7 +755,7 @@ async function retryPoolBackendResult(
 
     if (
       !result.error ||
-      !(shouldRetry || isImageBackendRetryableError(result.error))
+      !(shouldRetry || isImageBackendSwitchableError(result.error))
     ) {
       return result;
     }

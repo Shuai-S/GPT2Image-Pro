@@ -112,6 +112,7 @@ export type ImageBackendReportResultOutcome = {
   status?: string;
   cooldownUntil?: Date | null;
   retryable: boolean;
+  switchable: boolean;
 };
 
 type WebAccountRuntimeMetadata = ChatGptWebAccountInfo & {
@@ -303,10 +304,9 @@ export function releaseImageBackendInflight(input: {
   backendInflight.set(key, current - 1);
 }
 
-function isRetryableBackendError(error?: string | null) {
+function isRecoverableBackendError(error?: string | null) {
   const normalized = (error || "").toLowerCase();
   return (
-    isInvalidBackendCredentialError(error) ||
     isUnsupportedModelBackendError(error) ||
     normalized.includes("429") ||
     normalized.includes("529") ||
@@ -355,16 +355,37 @@ function isRetryableBackendError(error?: string | null) {
   );
 }
 
-export function isImageBackendRetryableError(error?: string | null) {
-  return isRetryableBackendError(error);
+function isUserRequestBackendError(error?: string | null) {
+  const normalized = (error || "").toLowerCase();
+  return (
+    normalized.includes("moderation_blocked") ||
+    normalized.includes("safety_violations") ||
+    normalized.includes("safety system") ||
+    normalized.includes("image_generation_user_error") ||
+    normalized.includes("user_error") ||
+    normalized.includes("content_policy") ||
+    normalized.includes("policy_violation")
+  );
 }
 
-function isClassifiedFailureRetryable(
+export function isImageBackendSwitchableError(error?: string | null) {
+  return Boolean(
+    error &&
+      !isUserRequestBackendError(error) &&
+      (isRecoverableBackendError(error) ||
+        isInvalidBackendCredentialError(error))
+  );
+}
+
+function isClassifiedFailureRecoverable(
   error: string | null,
   failure: { status?: string; cooldownUntil?: Date | null }
 ) {
   return Boolean(
-    error && (isRetryableBackendError(error) || failure.status === "error")
+    error &&
+      !isUserRequestBackendError(error) &&
+      isRecoverableBackendError(error) &&
+      failure.status !== "error"
   );
 }
 
@@ -595,6 +616,9 @@ async function classifyFailure(
   cooldownUntil?: Date | null;
 }> {
   const normalized = (error || "").toLowerCase();
+  if (isUserRequestBackendError(error)) {
+    return {};
+  }
   if (
     (await isUnrecoverableBackendError(error)) ||
     isInvalidBackendCredentialError(error)
@@ -657,7 +681,7 @@ async function classifyFailure(
       ),
     };
   }
-  if (isRetryableBackendError(error)) {
+  if (isRecoverableBackendError(error)) {
     const minutes = await getBackendCooldownMinutes(
       "IMAGE_BACKEND_TEMPORARY_ERROR_COOLDOWN_MINUTES"
     );
@@ -1160,7 +1184,7 @@ export async function reportImageBackendResult(
   input: ImageBackendReportResultInput
 ): Promise<ImageBackendReportResultOutcome> {
   if (!input.memberId || !input.memberType) {
-    return { success: input.success, retryable: false };
+    return { success: input.success, retryable: false, switchable: false };
   }
   const now = new Date();
   const error = truncateError(input.error);
@@ -1169,7 +1193,8 @@ export async function reportImageBackendResult(
     success: input.success,
     status: failure.status,
     cooldownUntil: failure.cooldownUntil,
-    retryable: !input.success && isClassifiedFailureRetryable(error, failure),
+    retryable: !input.success && isClassifiedFailureRecoverable(error, failure),
+    switchable: !input.success && isImageBackendSwitchableError(error),
   };
 
   if (input.memberType === "api") {
@@ -1205,6 +1230,7 @@ export async function reportImageBackendResult(
           ? failure.cooldownUntil.toISOString()
           : null,
         retryable: outcome.retryable,
+        switchable: outcome.switchable,
         error,
       });
     }
@@ -1262,6 +1288,7 @@ export async function reportImageBackendResult(
         ? failure.cooldownUntil.toISOString()
         : null,
       retryable: outcome.retryable,
+      switchable: outcome.switchable,
       error,
     });
   }
