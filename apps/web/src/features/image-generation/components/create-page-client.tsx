@@ -878,13 +878,7 @@ export function CreatePageClient({
       </Select>
     );
 
-    if (!params.compact) return control;
-    return (
-      <span className="inline-flex items-center gap-1">
-        {control}
-        {helpMarker(copy("GPT model", "GPT 模型"), gptModelHelpText)}
-      </span>
-    );
+    return control;
   };
 
   const renderThinkingSelect = (params: {
@@ -917,13 +911,7 @@ export function CreatePageClient({
       </Select>
     );
 
-    if (!params.compact) return control;
-    return (
-      <span className="inline-flex items-center gap-1">
-        {control}
-        {helpMarker(copy("Thinking", "思考强度"), thinkingHelpText)}
-      </span>
-    );
+    return control;
   };
 
   const clearStreamingPreview = () => {
@@ -1986,7 +1974,6 @@ export function CreatePageClient({
               ))}
             </SelectContent>
           </Select>
-          {helpMarker(copy("Image model", "图片模型"), imageModelHelpText)}
           {renderThinkingSelect({
             id: "chat-thinking",
             value: chatThinking,
@@ -4551,7 +4538,6 @@ export function CreatePageClient({
                         ))}
                       </SelectContent>
                     </Select>
-                    {helpMarker(copy("Image model", "图片模型"), imageModelHelpText)}
                     {renderThinkingSelect({
                       id: "batch-thinking",
                       value: chatThinking,
