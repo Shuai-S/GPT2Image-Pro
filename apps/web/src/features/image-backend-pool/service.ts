@@ -1734,54 +1734,72 @@ export async function bulkUpdateImageBackendAccounts(
   return { updatedCount, failedCount };
 }
 
-function collectRefreshTokensFromJson(value: unknown, tokens: Set<string>) {
+function addToken(tokens: Set<string>, value: string | null | undefined) {
+  const token = value?.trim();
+  if (token) tokens.add(token);
+}
+
+function collectTokensFromJson(
+  value: unknown,
+  tokens: { refreshTokens: Set<string>; accessTokens: Set<string> }
+) {
   if (!value) return;
   if (typeof value === "string") {
     for (const match of value.matchAll(/\brt_[A-Za-z0-9._~+/=-]+/g)) {
-      tokens.add(match[0]);
+      tokens.refreshTokens.add(match[0]);
     }
     return;
   }
   if (Array.isArray(value)) {
-    for (const item of value) collectRefreshTokensFromJson(item, tokens);
+    for (const item of value) collectTokensFromJson(item, tokens);
     return;
   }
   if (typeof value !== "object") return;
 
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
     const normalizedKey = key.toLowerCase().replace(/[-_\s]/g, "");
-    if (
-      typeof item === "string" &&
-      ["refreshtoken", "rt", "refresh"].includes(normalizedKey)
-    ) {
-      const trimmed = item.trim();
-      if (trimmed) tokens.add(trimmed);
-      continue;
+    if (typeof item === "string") {
+      if (["refreshtoken", "rt", "refresh"].includes(normalizedKey)) {
+        addToken(tokens.refreshTokens, item);
+        continue;
+      }
+      if (["accesstoken", "at", "access"].includes(normalizedKey)) {
+        addToken(tokens.accessTokens, item);
+        continue;
+      }
     }
-    collectRefreshTokensFromJson(item, tokens);
+    collectTokensFromJson(item, tokens);
   }
 }
 
-function parseRefreshTokensText(value: string) {
-  const tokens = new Set<string>();
+function parseImportTokensText(value: string) {
+  const tokens = {
+    refreshTokens: new Set<string>(),
+    accessTokens: new Set<string>(),
+  };
   let parsedJson = false;
 
   try {
-    collectRefreshTokensFromJson(JSON.parse(value), tokens);
+    collectTokensFromJson(JSON.parse(value), tokens);
     parsedJson = true;
   } catch {
     // Plain RT lists and copied pages are handled by the text parser below.
   }
 
   for (const match of value.matchAll(/\brt_[A-Za-z0-9._~+/=-]+/g)) {
-    tokens.add(match[0]);
+    tokens.refreshTokens.add(match[0]);
   }
 
   for (const match of value.matchAll(
     /["']?(?:refresh[_-]?token|refreshToken|rt)["']?\s*[:=]\s*["']?([^"',}\]\s;]+)["']?/gi
   )) {
-    const token = match[1]?.trim();
-    if (token) tokens.add(token);
+    addToken(tokens.refreshTokens, match[1]);
+  }
+
+  for (const match of value.matchAll(
+    /["']?(?:access[_-]?token|accessToken|at)["']?\s*[:=]\s*["']?([^"',}\]\s;]+)["']?/gi
+  )) {
+    addToken(tokens.accessTokens, match[1]);
   }
 
   const looksStructured =
@@ -1789,14 +1807,89 @@ function parseRefreshTokensText(value: string) {
     /(?:^|[\s{,])["']?(?:access[_-]?token|accessToken|refresh[_-]?token|refreshToken)["']?\s*[:=]/i.test(
       value
     );
-  if (!tokens.size && !looksStructured) {
+  if (
+    !tokens.refreshTokens.size &&
+    !tokens.accessTokens.size &&
+    !looksStructured
+  ) {
     for (const item of value.split(/[\s,;]+/g)) {
       const token = item.trim();
-      if (token) tokens.add(token);
+      if (token) tokens.refreshTokens.add(token);
     }
   }
 
-  return Array.from(tokens);
+  return {
+    refreshTokens: Array.from(tokens.refreshTokens),
+    accessTokens: Array.from(tokens.accessTokens),
+  };
+}
+
+async function importAccessTokens(
+  input: {
+    accessTokens: string[];
+    webGroupId?: string | null;
+    namePrefix?: string | null;
+    model?: string | null;
+    contentSafetyEnabled: boolean;
+    priority: number;
+    concurrency: number;
+  },
+  counters: {
+    syncedByMode: Record<ImageBackendAccountBackend, number>;
+    failedByMode: Record<ImageBackendAccountBackend, number>;
+    importedIds: string[];
+  },
+  importBatchId: string
+) {
+  for (const [index, accessToken] of input.accessTokens.entries()) {
+    try {
+      const id = await upsertImageBackendAccount({
+        groupId: input.webGroupId,
+        name: `${input.namePrefix?.trim() || "Auth Session 导入"} ${
+          index + 1
+        } / Web`,
+        email: null,
+        accessToken,
+        refreshToken: null,
+        implementationMode: "web",
+        model: input.model || null,
+        contentSafetyEnabled: input.contentSafetyEnabled,
+        isEnabled: true,
+        priority: input.priority,
+        concurrency: Math.max(1, Math.min(100, input.concurrency)),
+        status: "active",
+        metadata: {
+          source: "manual_auth_session_access_token",
+          importBatchId,
+          importIndex: index + 1,
+          syncedAt: new Date().toISOString(),
+          tokenSource: "chatgpt.auth_session.access_token",
+        },
+      });
+      counters.importedIds.push(id);
+      counters.syncedByMode.web++;
+    } catch (error) {
+      counters.failedByMode.web++;
+      logWarn("手工 Auth Session AT 导入生图账号失败，已跳过", {
+        index: index + 1,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+}
+
+function emptyImportResult(message: string) {
+  return {
+    sourceCount: 0,
+    accessTokenSourceCount: 0,
+    syncedCount: 0,
+    syncedByMode: { web: 0, responses: 0 },
+    skipped: { web: 0, responses: 0 },
+    failed: 0,
+    failedByMode: { web: 0, responses: 0 },
+    refreshTokenRotatedCount: 0,
+    message,
+  };
 }
 
 export async function importImageBackendAccountsFromRefreshTokens(input: {
@@ -1811,27 +1904,63 @@ export async function importImageBackendAccountsFromRefreshTokens(input: {
   priority: number;
   concurrency: number;
 }) {
-  const refreshTokens = parseRefreshTokensText(input.refreshTokensText).slice(
-    0,
-    200
-  );
-  if (!refreshTokens.length) {
-    throw new Error(
-      "请粘贴 Refresh Token，或粘贴包含 refresh_token/refreshToken 的 auth session 内容"
-    );
-  }
+  const parsedTokens = parseImportTokensText(input.refreshTokensText);
+  const refreshTokens = parsedTokens.refreshTokens.slice(0, 200);
+  const accessTokens = parsedTokens.accessTokens.slice(0, 200);
 
   const effectiveSyncMode = input.useMobileRt ? input.syncMode : "responses";
   const modes =
     effectiveSyncMode === "both"
       ? (["web", "responses"] as const)
       : ([effectiveSyncMode] as const);
-  const syncedByMode = { web: 0, responses: 0 };
-  const failedByMode = { web: 0, responses: 0 };
-  const skipped = { web: 0, responses: 0 };
+  const syncedByMode: Record<ImageBackendAccountBackend, number> = {
+    web: 0,
+    responses: 0,
+  };
+  const failedByMode: Record<ImageBackendAccountBackend, number> = {
+    web: 0,
+    responses: 0,
+  };
+  const skipped: Record<ImageBackendAccountBackend, number> = {
+    web: 0,
+    responses: 0,
+  };
   let refreshTokenRotatedCount = 0;
   const importedIds: string[] = [];
   const importBatchId = nanoid();
+
+  if (!refreshTokens.length && !accessTokens.length) {
+    return emptyImportResult(
+      "未提取到可导入的 RT。请粘贴 RT 列表，或粘贴包含 refresh_token/refreshToken 的 Auth Session；如果只有 accessToken，请确认复制的是完整 JSON。"
+    );
+  }
+
+  if (!refreshTokens.length && accessTokens.length) {
+    await importAccessTokens(
+      {
+        accessTokens,
+        webGroupId: input.webGroupId,
+        namePrefix: input.namePrefix,
+        model: input.model,
+        contentSafetyEnabled: input.contentSafetyEnabled,
+        priority: input.priority,
+        concurrency: input.concurrency,
+      },
+      { syncedByMode, failedByMode, importedIds },
+      importBatchId
+    );
+    return {
+      sourceCount: 0,
+      accessTokenSourceCount: accessTokens.length,
+      syncedCount: importedIds.length,
+      syncedByMode,
+      skipped,
+      failed: failedByMode.web + failedByMode.responses,
+      failedByMode,
+      refreshTokenRotatedCount,
+      message: "已从 Auth Session 提取 accessToken，并按 Web 账号导入。",
+    };
+  }
 
   for (const [index, originalRefreshToken] of refreshTokens.entries()) {
     let currentRefreshToken = originalRefreshToken;
@@ -1978,12 +2107,14 @@ export async function importImageBackendAccountsFromRefreshTokens(input: {
 
   return {
     sourceCount: refreshTokens.length,
+    accessTokenSourceCount: accessTokens.length,
     syncedCount: importedIds.length,
     syncedByMode,
     skipped,
     failed: failedByMode.web + failedByMode.responses,
     failedByMode,
     refreshTokenRotatedCount,
+    message: null as string | null,
   };
 }
 

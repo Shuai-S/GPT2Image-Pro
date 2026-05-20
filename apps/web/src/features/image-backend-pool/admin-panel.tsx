@@ -612,8 +612,13 @@ export function ImageBackendPoolAdminPanel() {
     isPending: isImportingManualRefreshTokens,
   } = useAction(importImageBackendAccountsFromRefreshTokensAction, {
     onSuccess: ({ data }) => {
+      const prefix = data?.message
+        ? `${data.message} `
+        : `导入完成：提取 RT ${data?.sourceCount || 0} 个，Auth Session AT ${
+            data?.accessTokenSourceCount || 0
+          } 个，`;
       toast.success(
-        `导入完成：提取 RT ${data?.sourceCount || 0} 个，写入 ${
+        `${prefix}写入 ${
           data?.syncedCount || 0
         } 个，失败 ${data?.failed || 0} 个`
       );
@@ -2013,10 +2018,10 @@ export function ImageBackendPoolAdminPanel() {
                 Auth Session 接口
                 <ExternalLink className="h-3 w-3" />
               </a>{" "}
-              并粘贴页面返回的整段内容，系统只会提取其中的
-              refresh_token/refreshToken 作为 RT；如果只有
-              accessToken，则不会导入。默认按 Codex CLI RT 导入；勾选 Mobile RT
-              后由本站使用 mobile client_id 换取 AT，并保存刷新后的
+              并粘贴页面返回的整段内容，系统会优先提取其中的
+              refresh_token/refreshToken 作为 RT；如果只有 accessToken，则按 Web
+              账号导入。默认按 Codex CLI RT 导入；勾选 Mobile RT 后由本站使用
+              mobile client_id 换取 AT，并保存刷新后的
               RT。这里导入的账号可在本站继续更新 RT，不会写入 Sub2API。
             </p>
             <Textarea
