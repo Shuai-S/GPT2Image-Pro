@@ -8,7 +8,6 @@ import {
   DEFAULT_IMAGE_SIZE,
   validateImageSize,
 } from "@/features/image-generation/resolution";
-import { getUserApiConfig } from "@/features/image-generation/service";
 import { createImageStreamResponse } from "@/features/image-generation/streaming";
 
 const generateImageSchema = z.object({
@@ -84,9 +83,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
   const count = parsed.data.count || 1;
 
   try {
-    const useStreamResponse =
-      wantsStreamResponse(request, parsed.data.stream) &&
-      Boolean((await getUserApiConfig(session.user.id))?.useStream);
+    const useStreamResponse = wantsStreamResponse(request, parsed.data.stream);
 
     if (useStreamResponse) {
       return createImageStreamResponse(async (emit) => {

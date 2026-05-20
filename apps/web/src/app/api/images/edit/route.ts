@@ -7,7 +7,6 @@ import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { randomUUID } from "node:crypto";
 import { type NextRequest, NextResponse } from "next/server";
 
-import { getUserApiConfig } from "@/features/image-generation/service";
 import { runImageGenerationForUser } from "@/features/image-generation/operations";
 import {
   parseImageSize,
@@ -323,9 +322,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
       batchId,
       sourceFiles
     );
-    const useStreamResponse =
-      wantsStreamResponse(request, formData) &&
-      Boolean((await getUserApiConfig(session.user.id))?.useStream);
+    const useStreamResponse = wantsStreamResponse(request, formData);
 
     const runEdit = async (
       generationId: string,
