@@ -557,15 +557,24 @@ function getHttpErrorMessage(
 
 function getNonJsonErrorMessage(
   rawBody: string,
-  apiName: "Images API" | "Responses API"
+  apiName: "Images API" | "Responses API",
+  response?: Response
 ) {
   const trimmedBody = truncateResponseBody(rawBody);
+  const statusText = response
+    ? `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`
+    : null;
+  const contentType = response?.headers.get("content-type") || "";
+  const context = [statusText, contentType ? `content-type=${contentType}` : ""]
+    .filter(Boolean)
+    .join(", ");
+  const suffix = context ? ` (${context})` : "";
   if (trimmedBody.startsWith("<")) {
-    return `API returned an HTML page instead of a ${apiName} response. Check that the API base URL points to an OpenAI-compatible /v1 endpoint.`;
+    return `API returned an HTML page instead of a ${apiName} response${suffix}. Check that the API base URL points to an OpenAI-compatible /v1 endpoint.`;
   }
   if (!trimmedBody)
-    return `API returned an empty non-JSON ${apiName} response.`;
-  return `API returned a non-JSON ${apiName} response: ${trimmedBody}`;
+    return `API returned an empty non-JSON ${apiName} response${suffix}.`;
+  return `API returned a non-JSON ${apiName} response${suffix}: ${trimmedBody}`;
 }
 
 function looksLikeEventStreamText(text: string) {
@@ -1284,7 +1293,7 @@ async function parseResponsesResponse(
       );
     }
     return {
-      error: getNonJsonErrorMessage(text, "Responses API"),
+      error: getNonJsonErrorMessage(text, "Responses API", response),
       ...responseRetryMetadata,
     };
   }
@@ -1472,7 +1481,7 @@ async function parseImageResponse(
   if (!contentType.includes("application/json")) {
     const text = await response.text().catch(() => "");
     return {
-      error: getNonJsonErrorMessage(text, "Images API"),
+      error: getNonJsonErrorMessage(text, "Images API", response),
       ...responseRetryMetadata,
     };
   }

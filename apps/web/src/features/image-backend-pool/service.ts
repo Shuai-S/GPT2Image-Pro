@@ -340,6 +340,10 @@ function isRetryableBackendError(error?: string | null) {
     normalized.includes("timed out") ||
     normalized.includes("econnreset") ||
     normalized.includes("fetch failed") ||
+    normalized.includes("empty non-json") ||
+    normalized.includes("empty response") ||
+    normalized.includes("non-json responses api response") ||
+    normalized.includes("non-json images api response") ||
     normalized.includes("502") ||
     normalized.includes("503") ||
     normalized.includes("504") ||
@@ -423,6 +427,8 @@ function isOverloadBackendError(error?: string | null) {
     normalized.includes("529") ||
     normalized.includes("overloaded") ||
     normalized.includes("server overloaded") ||
+    normalized.includes("empty non-json") ||
+    normalized.includes("empty response") ||
     normalized.includes("temporarily unavailable") ||
     normalized.includes("temporary unavailable") ||
     normalized.includes("service unavailable") ||
