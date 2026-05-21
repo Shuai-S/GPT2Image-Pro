@@ -108,6 +108,7 @@ export function SettingsProfileView({ user }: SettingsProfileViewProps) {
       value === "security" ||
       value === "backend" ||
       value === "advanced" ||
+      value === "external-api" ||
       value === "account"
     ) {
       return value;
@@ -322,6 +323,12 @@ export function SettingsProfileView({ user }: SettingsProfileViewProps) {
               className="rounded-md border border-transparent px-4 py-2 data-[state=active]:border-foreground/20 data-[state=active]:bg-foreground/5 data-[state=active]:text-foreground data-[state=active]:shadow-none"
             >
               {tTabs("billing")}
+            </TabsTrigger>
+            <TabsTrigger
+              value="external-api"
+              className="rounded-md border border-transparent px-4 py-2 data-[state=active]:border-foreground/20 data-[state=active]:bg-foreground/5 data-[state=active]:text-foreground data-[state=active]:shadow-none"
+            >
+              {tTabs("externalApi")}
             </TabsTrigger>
             <TabsTrigger
               value="backend"
@@ -623,17 +630,38 @@ export function SettingsProfileView({ user }: SettingsProfileViewProps) {
             <div>
               <h2 className="text-xl font-semibold">{tTabs("billing")}</h2>
               <p className="text-sm text-muted-foreground">
-                订阅、账单历史和积分用量都在这里。
+                {t("billing.description")}
               </p>
             </div>
           </div>
-          <BillingSection />
-          <div className="mt-8">
-            <h3 className="mb-2 text-sm font-medium text-foreground">
-              {tTabs("usage")}
+          <Tabs defaultValue="billing" className="w-full">
+            <TabsList className="mb-6 h-auto gap-1 bg-muted/60 p-1">
+              <TabsTrigger value="billing" className="px-4 py-2">
+                {t("billing.tabs.billing")}
+              </TabsTrigger>
+              <TabsTrigger value="usage" className="px-4 py-2">
+                {t("billing.tabs.usage")}
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="billing" className="mt-0">
+              <BillingSection />
+            </TabsContent>
+            <TabsContent value="usage" className="mt-0">
+              <CreditUsageSection />
+            </TabsContent>
+          </Tabs>
+        </TabsContent>
+
+        <TabsContent value="external-api" className="mt-8 space-y-6 pl-4">
+          <div>
+            <h3 className="font-serif text-lg font-medium">
+              {t("externalApi.title")}
             </h3>
-            <CreditUsageSection />
+            <p className="text-sm text-muted-foreground">
+              {t("externalApi.description")}
+            </p>
           </div>
+          <ExternalApiKeySection />
         </TabsContent>
 
         <TabsContent value="backend" className="mt-8 space-y-6 pl-4">
@@ -657,7 +685,6 @@ export function SettingsProfileView({ user }: SettingsProfileViewProps) {
               {t("advanced.description")}
             </p>
           </div>
-          <ExternalApiKeySection />
           <ApiConfigForm />
         </TabsContent>
       </Tabs>

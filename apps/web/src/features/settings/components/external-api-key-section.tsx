@@ -90,6 +90,9 @@ function groupOptionLabel(group: ImageBackendGroupOption) {
 export function ExternalApiKeySection() {
   const locale = useLocale();
   const t = useTranslations("Settings.externalApi");
+  const baseUrl =
+    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ||
+    "https://gpt2image.superapi.buzz";
   const didLoadRef = useRef(false);
   const [keys, setKeys] = useState<ExternalApiKeySummary[]>([]);
   const [newKey, setNewKey] = useState("");
@@ -214,6 +217,12 @@ export function ExternalApiKeySection() {
           </div>
           <p className="text-xs text-muted-foreground">
             {t("description")}
+          </p>
+          <p className="font-mono text-xs text-muted-foreground">
+            {t("baseUrl", { url: baseUrl })}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {t("responsesRequiresPro")}
           </p>
           {!externalApiAllowed && (
             <p className="text-xs text-muted-foreground">

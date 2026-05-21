@@ -621,6 +621,7 @@
       "security": "Security",
       "billing": "Billing & Usage",
       "usage": "Usage",
+      "externalApi": "External API",
       "backend": "Backend",
       "profile": "Profile",
       "advanced": "Advanced"
@@ -654,8 +655,10 @@
     },
     "externalApi": {
       "title": "External API access",
-      "description": "Starter and higher plans can create API keys for OpenAI-compatible model listing, image generation, and image editing. External calls use your account credits and appear in your generation history.",
+      "description": "Create GPT2IMAGE OpenAI-compatible API keys for other sites or applications. Image generation and image edits require Starter or higher; Responses requires Pro or higher. External calls use your account credits and appear in your generation history.",
       "requiresStarter": "Your current plan cannot create or use external API keys. Upgrade to Starter or higher.",
+      "responsesRequiresPro": "POST /v1/responses requires Pro plan or higher.",
+      "baseUrl": "Base URL: {url}",
       "defaultName": "Default API key",
       "newKeyLabel": "New API key. It is shown only once.",
       "namePlaceholder": "API key name",
@@ -783,6 +786,11 @@
       "avatarUpdated": "Avatar updated successfully"
     },
     "billing": {
+      "description": "Manage subscriptions, billing history, and credit usage here.",
+      "tabs": {
+        "billing": "Billing",
+        "usage": "Usage"
+      },
       "currentPlan": {
         "title": "Current Plan",
         "description": "Manage your subscription and billing cycle.",

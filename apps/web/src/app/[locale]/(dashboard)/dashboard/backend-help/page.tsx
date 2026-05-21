@@ -182,8 +182,12 @@ const sections = {
       subtitle:
         "以下按 OpenAI 官方接口形态整理本站当前支持范围。粗体字段为本站扩展或兼容增强，不属于标准 OpenAI 字段。",
       commonTitle: "通用规则",
+      baseUrlTitle: "Base URL",
+      baseUrl: "https://gpt2image.superapi.buzz",
+      examplesTitle: "请求示例",
       common: [
         "所有外接接口都需要 Authorization: Bearer <本站 API Key>。",
+        "图片生成和图片编辑接口需要入门版及以上；Responses 接口需要专业版及以上。",
         "/api/v1/* 与 /v1/* 使用同一套 handler，只是路径别名。",
         "错误响应采用 OpenAI 风格 error 对象；本站可能额外返回 generation_id、generationId、credits_consumed 方便排查和对账。",
         "外接 API Key 绑定的后端分组优先；未绑定时使用用户默认分组，再回退默认启用分组。",
@@ -217,6 +221,8 @@ const sections = {
           contentType: "无请求体",
           description:
             "兼容 OpenAI List models，用于列出当前 API Key 所属用户可见的图片模型和 Responses 模型。",
+          example: `curl https://gpt2image.superapi.buzz/v1/models \\
+  -H "Authorization: Bearer $GPT2IMAGE_API_KEY"`,
           fields: [
             {
               name: "Authorization",
@@ -251,6 +257,16 @@ const sections = {
           contentType: "application/json",
           description:
             "兼容 OpenAI Images generation。请求会转换成 image_generation 调度类型，进入统一生成链路。",
+          example: `curl https://gpt2image.superapi.buzz/v1/images/generations \\
+  -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "gpt-image-2",
+    "prompt": "一张赛博朋克城市夜景，雨后霓虹反光",
+    "size": "1024x1024",
+    "quality": "medium",
+    "response_format": "url"
+  }'`,
           fields: [
             {
               name: "prompt",
@@ -361,6 +377,13 @@ const sections = {
           contentType: "multipart/form-data 或 application/json",
           description:
             "兼容 OpenAI Images edit。multipart 可上传图片；JSON 可使用公网图片 URL。",
+          example: `curl https://gpt2image.superapi.buzz/v1/images/edits \\
+  -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
+  -F model="gpt-image-2" \\
+  -F prompt="把参考图改成电影海报风格" \\
+  -F size="1024x1024" \\
+  -F response_format="url" \\
+  -F image[]="@/path/to/reference.png"`,
           fields: [
             {
               name: "prompt",
@@ -499,6 +522,14 @@ const sections = {
           contentType: "application/json",
           description:
             "基于 OpenAI Responses API 的生图适配入口。它会按 responses 调度类型选择 Codex/Responses 账号池或外接 /responses API 后端。",
+          example: `curl https://gpt2image.superapi.buzz/v1/responses \\
+  -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "gpt-5.4",
+    "input": "生成一张 1:1 的未来感产品渲染图",
+    "tools": [{ "type": "image_generation", "size": "1024x1024" }]
+  }'`,
           fields: [
             {
               name: "model",
@@ -609,6 +640,7 @@ const sections = {
             },
           ],
           notes: [
+            "该接口需要专业版或更高套餐。",
             "该接口不是通用 Chat Completions；/v1/chat/completions 当前仍不支持。",
             "input_image 只支持 image_url/data URL；file_id/file 输入当前不会作为参考图使用。",
             "显式传 tools 但不包含 image_generation 会返回错误，避免模型只产出文本而不生图。",
@@ -836,8 +868,12 @@ const sections = {
       subtitle:
         "This documents the currently supported OpenAI-compatible surface. Bold fields are GPT2IMAGE extensions or compatibility additions, not standard OpenAI fields.",
       commonTitle: "Common Rules",
+      baseUrlTitle: "Base URL",
+      baseUrl: "https://gpt2image.superapi.buzz",
+      examplesTitle: "Request Example",
       common: [
         "All external endpoints require Authorization: Bearer <GPT2IMAGE API key>.",
+        "Image generation and image edits require Starter or higher; Responses requires Pro or higher.",
         "/api/v1/* and /v1/* use the same handlers; they are path aliases.",
         "Error responses use an OpenAI-style error object. GPT2IMAGE may also return generation_id, generationId, and credits_consumed for debugging and reconciliation.",
         "A backend group bound to the external API key wins first. Otherwise the user's default group is used, then the enabled platform default group.",
@@ -871,6 +907,8 @@ const sections = {
           contentType: "No request body",
           description:
             "Compatible with OpenAI List models. Lists image models and Responses models visible to the current API key's user.",
+          example: `curl https://gpt2image.superapi.buzz/v1/models \\
+  -H "Authorization: Bearer $GPT2IMAGE_API_KEY"`,
           fields: [
             {
               name: "Authorization",
@@ -905,6 +943,16 @@ const sections = {
           contentType: "application/json",
           description:
             "Compatible with OpenAI Images generation. Requests become image_generation jobs in the shared generation path.",
+          example: `curl https://gpt2image.superapi.buzz/v1/images/generations \\
+  -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "gpt-image-2",
+    "prompt": "A cyberpunk city at night after rain, neon reflections",
+    "size": "1024x1024",
+    "quality": "medium",
+    "response_format": "url"
+  }'`,
           fields: [
             {
               name: "prompt",
@@ -1016,6 +1064,13 @@ const sections = {
           contentType: "multipart/form-data or application/json",
           description:
             "Compatible with OpenAI Images edit. multipart uploads files; JSON can reference public image URLs.",
+          example: `curl https://gpt2image.superapi.buzz/v1/images/edits \\
+  -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
+  -F model="gpt-image-2" \\
+  -F prompt="Turn the reference image into a cinematic poster" \\
+  -F size="1024x1024" \\
+  -F response_format="url" \\
+  -F image[]="@/path/to/reference.png"`,
           fields: [
             {
               name: "prompt",
@@ -1154,6 +1209,14 @@ const sections = {
           contentType: "application/json",
           description:
             "A GPT2IMAGE image-generation adapter based on the OpenAI Responses API. It routes as responses and selects Codex/Responses groups or external /responses API backends.",
+          example: `curl https://gpt2image.superapi.buzz/v1/responses \\
+  -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "gpt-5.4",
+    "input": "Generate a 1:1 futuristic product render",
+    "tools": [{ "type": "image_generation", "size": "1024x1024" }]
+  }'`,
           fields: [
             {
               name: "model",
@@ -1264,6 +1327,7 @@ const sections = {
             },
           ],
           notes: [
+            "This endpoint requires Pro plan or higher.",
             "This is not Chat Completions. /v1/chat/completions is still unsupported.",
             "input_image supports image_url/data URLs. file_id/file inputs are not used as references today.",
             "If tools is provided without image_generation, GPT2IMAGE returns an error to avoid text-only responses.",
@@ -1348,6 +1412,7 @@ type ExternalApiDoc = {
   path: string;
   contentType: string;
   description: string;
+  example: string;
   fields: readonly ExternalApiField[];
   responses: readonly ExternalApiResponseField[];
   notes: readonly string[];
@@ -1573,7 +1638,15 @@ function ExternalApiDocs({
       <CardContent className="space-y-6">
         <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
           <div className="rounded-md border p-4">
-            <h3 className="text-sm font-medium">{docs.commonTitle}</h3>
+            <div className="rounded-md bg-muted/50 p-3">
+              <div className="text-xs font-medium text-muted-foreground">
+                {docs.baseUrlTitle}
+              </div>
+              <div className="mt-1 font-mono text-sm text-foreground">
+                {docs.baseUrl}
+              </div>
+            </div>
+            <h3 className="mt-4 text-sm font-medium">{docs.commonTitle}</h3>
             <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
               {docs.common.map((item) => (
                 <li className="flex gap-2" key={item}>
@@ -1610,6 +1683,7 @@ function ExternalApiDocs({
               fieldHeaders={docs.fieldHeaders}
               key={doc.path}
               notesTitle={docs.notesTitle}
+              examplesTitle={docs.examplesTitle}
               requestTitle={docs.requestTitle}
               responseHeaders={docs.responseHeaders}
               responseTitle={docs.responseTitle}
@@ -1657,6 +1731,7 @@ function ExternalEndpointDoc({
   requestTitle,
   responseTitle,
   notesTitle,
+  examplesTitle,
   customLabel,
 }: {
   doc: ExternalApiDoc;
@@ -1665,6 +1740,7 @@ function ExternalEndpointDoc({
   requestTitle: string;
   responseTitle: string;
   notesTitle: string;
+  examplesTitle: string;
   customLabel: string;
 }) {
   return (
@@ -1688,6 +1764,12 @@ function ExternalEndpointDoc({
       </div>
 
       <div className="space-y-5 p-4">
+        <div>
+          <h4 className="text-sm font-medium">{examplesTitle}</h4>
+          <pre className="mt-2 overflow-x-auto rounded-md border bg-muted/40 p-3 text-xs leading-relaxed">
+            <code>{doc.example}</code>
+          </pre>
+        </div>
         <EndpointFieldTable
           customLabel={customLabel}
           fields={doc.fields}

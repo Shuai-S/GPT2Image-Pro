@@ -621,6 +621,7 @@
       "security": "安全",
       "billing": "账单与用量",
       "usage": "用量",
+      "externalApi": "外接 API",
       "backend": "后端",
       "profile": "个人资料",
       "advanced": "高级"
@@ -654,8 +655,10 @@
     },
     "externalApi": {
       "title": "外接 API 访问",
-      "description": "入门版及以上可创建 OpenAI 兼容的模型查询、图片生成和图片编辑 API Key。外部调用会消耗你的账户积分，并写入生成历史。",
+      "description": "创建本站 OpenAI 兼容 API Key，供其他站点或程序调用 GPT2IMAGE。图片生成和图片编辑接口需要入门版及以上；Responses 接口需要专业版及以上。外部调用会消耗你的账户积分，并写入生成历史。",
       "requiresStarter": "当前套餐不能创建或使用外接 API Key，请升级到入门版或更高套餐。",
+      "responsesRequiresPro": "POST /v1/responses 需要专业版或更高套餐。",
+      "baseUrl": "Base URL: {url}",
       "defaultName": "默认 API Key",
       "newKeyLabel": "新的 API Key，仅显示一次。",
       "namePlaceholder": "API Key 名称",
@@ -783,6 +786,11 @@
       "avatarUpdated": "头像更新成功"
     },
     "billing": {
+      "description": "订阅、账单历史和积分用量都在这里。",
+      "tabs": {
+        "billing": "账单",
+        "usage": "用量"
+      },
       "currentPlan": {
         "title": "当前套餐",
         "description": "管理您的订阅和账单周期。",
