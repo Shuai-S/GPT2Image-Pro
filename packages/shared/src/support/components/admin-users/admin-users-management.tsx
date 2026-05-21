@@ -1011,23 +1011,24 @@ export function AdminUsersManagement() {
       </Card>
 
       <Sheet open={detailOpen} onOpenChange={setDetailOpen}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-4xl xl:max-w-5xl">
-          <SheetHeader>
-            <SheetTitle>用户详情</SheetTitle>
-            <SheetDescription>
-              {selectedUser
-                ? `${selectedUser.name} · ${selectedUser.email}`
-                : "查看用户账户、积分、生图和 API Key。"}
-            </SheetDescription>
-          </SheetHeader>
+        <SheetContent className="w-full sm:max-w-4xl xl:max-w-5xl">
+          <div className="flex h-full min-h-0 flex-col">
+            <SheetHeader className="shrink-0">
+              <SheetTitle>用户详情</SheetTitle>
+              <SheetDescription>
+                {selectedUser
+                  ? `${selectedUser.name} · ${selectedUser.email}`
+                  : "查看用户账户、积分、生图和 API Key。"}
+              </SheetDescription>
+            </SheetHeader>
 
-          {isDetailLoading || !detail ? (
-            <div className="flex items-center justify-center py-16">
-              <Loader2 className="h-7 w-7 animate-spin text-muted-foreground" />
-            </div>
-          ) : (
-            <div className="mt-6 space-y-5">
-              <div className="grid gap-3 md:grid-cols-4">
+            {isDetailLoading || !detail ? (
+              <div className="flex flex-1 items-center justify-center py-16">
+                <Loader2 className="h-7 w-7 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <div className="mt-6 min-h-0 flex-1 space-y-5 overflow-y-auto pr-1 pb-6">
+                <div className="grid gap-3 md:grid-cols-4">
                 <Card>
                   <CardContent className="p-4">
                     <div className="text-xs text-muted-foreground">套餐</div>
@@ -1058,54 +1059,54 @@ export function AdminUsersManagement() {
                       {detail.apiKeys.length}
                     </div>
                   </CardContent>
-                </Card>
-              </div>
+                  </Card>
+                </div>
 
-              <Tabs defaultValue="overview" className="space-y-4">
-                <TabsList className="border bg-muted/40">
-                  <TabsTrigger value="overview">概览</TabsTrigger>
-                  <TabsTrigger value="credits">积分</TabsTrigger>
-                  <TabsTrigger value="generations">生图</TabsTrigger>
-                  <TabsTrigger value="api">API Key</TabsTrigger>
-                  <TabsTrigger value="audit">审计</TabsTrigger>
-                </TabsList>
+                <Tabs defaultValue="overview" className="space-y-4">
+                  <TabsList className="border bg-muted/40">
+                    <TabsTrigger value="overview">概览</TabsTrigger>
+                    <TabsTrigger value="credits">积分</TabsTrigger>
+                    <TabsTrigger value="generations">生图</TabsTrigger>
+                    <TabsTrigger value="api">API Key</TabsTrigger>
+                    <TabsTrigger value="audit">审计</TabsTrigger>
+                  </TabsList>
 
-                <TabsContent value="overview" className="space-y-4">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <InfoBlock
-                      title="账户"
-                      rows={[
-                        ["用户 ID", detail.user.id],
-                        ["邮箱", detail.user.email],
-                        ["邮箱验证", detail.user.emailVerified ? "已验证" : "未验证"],
-                        ["角色", detail.user.role],
-                        ["注册时间", formatDateTime(detail.user.createdAt)],
-                        ["更新时间", formatDateTime(detail.user.updatedAt)],
-                      ]}
-                    />
-                    <InfoBlock
-                      title="订阅"
-                      rows={[
-                        ["状态", detail.subscription?.status ?? "无订阅"],
-                        ["Price ID", detail.subscription?.priceId ?? "-"],
-                        [
-                          "周期开始",
-                          formatDateTime(detail.subscription?.currentPeriodStart),
-                        ],
-                        [
-                          "周期结束",
-                          formatDateTime(detail.subscription?.currentPeriodEnd),
-                        ],
-                        [
-                          "到期取消",
-                          detail.subscription?.cancelAtPeriodEnd ? "是" : "否",
-                        ],
-                      ]}
-                    />
-                  </div>
-                </TabsContent>
+                  <TabsContent value="overview" className="space-y-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <InfoBlock
+                        title="账户"
+                        rows={[
+                          ["用户 ID", detail.user.id],
+                          ["邮箱", detail.user.email],
+                          ["邮箱验证", detail.user.emailVerified ? "已验证" : "未验证"],
+                          ["角色", detail.user.role],
+                          ["注册时间", formatDateTime(detail.user.createdAt)],
+                          ["更新时间", formatDateTime(detail.user.updatedAt)],
+                        ]}
+                      />
+                      <InfoBlock
+                        title="订阅"
+                        rows={[
+                          ["状态", detail.subscription?.status ?? "无订阅"],
+                          ["Price ID", detail.subscription?.priceId ?? "-"],
+                          [
+                            "周期开始",
+                            formatDateTime(detail.subscription?.currentPeriodStart),
+                          ],
+                          [
+                            "周期结束",
+                            formatDateTime(detail.subscription?.currentPeriodEnd),
+                          ],
+                          [
+                            "到期取消",
+                            detail.subscription?.cancelAtPeriodEnd ? "是" : "否",
+                          ],
+                        ]}
+                      />
+                    </div>
+                  </TabsContent>
 
-                <TabsContent value="credits" className="space-y-4">
+                  <TabsContent value="credits" className="space-y-4">
                   <InfoBlock
                     title="积分账户"
                     rows={[
@@ -1168,7 +1169,7 @@ export function AdminUsersManagement() {
                   </Panel>
                 </TabsContent>
 
-                <TabsContent value="generations" className="space-y-4">
+                  <TabsContent value="generations" className="space-y-4">
                   <div className="grid gap-3 md:grid-cols-4">
                     <Metric label="总生成" value={detail.generationSummary.total} />
                     <Metric
@@ -1252,7 +1253,7 @@ export function AdminUsersManagement() {
                   </Panel>
                 </TabsContent>
 
-                <TabsContent value="api" className="space-y-4">
+                  <TabsContent value="api" className="space-y-4">
                   <Panel title="外接 API Key">
                     {detail.apiKeys.length === 0 ? (
                       <EmptyText>暂无 API Key</EmptyText>
@@ -1298,7 +1299,7 @@ export function AdminUsersManagement() {
                   </Panel>
                 </TabsContent>
 
-                <TabsContent value="audit" className="space-y-4">
+                  <TabsContent value="audit" className="space-y-4">
                   <Panel title="最近管理员操作">
                     {detail.auditLogs.length === 0 ? (
                       <EmptyText>暂无审计记录</EmptyText>
@@ -1322,9 +1323,10 @@ export function AdminUsersManagement() {
                     )}
                   </Panel>
                 </TabsContent>
-              </Tabs>
-            </div>
-          )}
+                </Tabs>
+              </div>
+            )}
+          </div>
         </SheetContent>
       </Sheet>
 
