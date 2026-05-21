@@ -611,6 +611,8 @@ export const ticketStatusEnum = pgEnum("ticket_status", [
  * @field category - 工单类别 (billing/technical/bug/feature/other)
  * @field priority - 优先级 (low/medium/high)
  * @field status - 状态 (open/in_progress/resolved/closed)
+ * @field userLastSeenAt - 用户最近查看工单详情时间
+ * @field lastAdminActivityAt - 最近一次管理员回复或状态更新时间
  * @field createdAt - 创建时间
  * @field updatedAt - 更新时间
  */
@@ -623,6 +625,8 @@ export const ticket = pgTable("ticket", {
   category: ticketCategoryEnum("category").notNull().default("other"),
   priority: ticketPriorityEnum("priority").notNull().default("medium"),
   status: ticketStatusEnum("status").notNull().default("open"),
+  userLastSeenAt: timestamp("user_last_seen_at").notNull().defaultNow(),
+  lastAdminActivityAt: timestamp("last_admin_activity_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

@@ -70,6 +70,7 @@ const responseSchema = z.object({
   input: z.union([z.string(), z.array(responseInputMessageSchema)]),
   previous_response_id: z.string().optional(),
   tools: z.array(z.object({ type: z.string() }).passthrough()).optional(),
+  tool_choice: z.unknown().optional(),
   stream: z.boolean().optional(),
   store: z.boolean().optional(),
   size: z
@@ -86,7 +87,7 @@ const responseSchema = z.object({
     })
     .passthrough()
     .optional(),
-});
+}).passthrough();
 
 type ResponseRequest = z.infer<typeof responseSchema>;
 

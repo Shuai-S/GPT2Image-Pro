@@ -149,6 +149,7 @@ type ContentSafetyFormValue = "inherit" | "enabled" | "disabled";
 type AccountBackendFormValue = "web" | "responses";
 type GroupBackendTypeFormValue = ImageBackendGroupBackendType;
 type TokenSyncMode = "web" | "responses" | "both";
+type Sub2ApiPlanFilter = "all" | "free" | "plus" | "pro" | "non_free";
 
 type Sub2ApiSourceGroup = {
   id: string;
@@ -565,6 +566,7 @@ export function ImageBackendPoolAdminPanel() {
     responsesGroupId: "default",
     syncMode: "responses" as TokenSyncMode,
     allowMobileRtImport: false,
+    planFilter: "non_free" as Sub2ApiPlanFilter,
     contentSafetyEnabled: true,
     limit: 100,
   });
@@ -1044,6 +1046,7 @@ export function ImageBackendPoolAdminPanel() {
           responsesGroupId: importForm.responsesGroupId,
           syncMode: effectiveImportSyncMode,
           allowMobileRtImport: importForm.allowMobileRtImport,
+          planFilter: importForm.planFilter,
           contentSafetyEnabled: importForm.contentSafetyEnabled,
           limit: batchSize,
           offset,
@@ -1053,7 +1056,7 @@ export function ImageBackendPoolAdminPanel() {
           throw new Error(result.serverError);
         }
         if (!result?.data?.success) {
-          throw new Error("从 Sub2API 获取 AT 失败");
+          throw new Error("从 Sub2API 同步账号失败");
         }
 
         const data = result.data;
@@ -1117,7 +1120,7 @@ export function ImageBackendPoolAdminPanel() {
       reload();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "从 Sub2API 获取 AT 失败";
+        error instanceof Error ? error.message : "从 Sub2API 同步账号失败";
       setSyncProgress({
         status: "error",
         value: 100,
@@ -1237,7 +1240,7 @@ export function ImageBackendPoolAdminPanel() {
           <TabsTrigger value="groups">分组</TabsTrigger>
           <TabsTrigger value="accounts">账号池</TabsTrigger>
           <TabsTrigger value="apis">API 后端</TabsTrigger>
-          <TabsTrigger value="import">获取 AT</TabsTrigger>
+          <TabsTrigger value="import">同步 Sub2API</TabsTrigger>
         </TabsList>
 
         <TabsContent
@@ -1387,16 +1390,23 @@ export function ImageBackendPoolAdminPanel() {
                   也不能绑定。
                 </p>
               </div>
-              <Input
-                type="number"
-                value={groupForm.priority}
-                onChange={(event) =>
-                  setGroupForm((current) => ({
-                    ...current,
-                    priority: Number(event.target.value),
-                  }))
-                }
-              />
+              <div className="space-y-1.5">
+                <Label>分组优先级</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={groupForm.priority}
+                  onChange={(event) =>
+                    setGroupForm((current) => ({
+                      ...current,
+                      priority: Number(event.target.value),
+                    }))
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  数字越小，默认分组候选和分组列表越靠前；账号调度仍会继续比较账号优先级和负载。
+                </p>
+              </div>
               <Button
                 className="w-full"
                 onClick={() => saveGroup(groupForm)}
@@ -1591,26 +1601,41 @@ export function ImageBackendPoolAdminPanel() {
                 }
               />
               <div className="grid grid-cols-2 gap-3">
-                <Input
-                  type="number"
-                  value={accountForm.priority}
-                  onChange={(event) =>
-                    setAccountForm((current) => ({
-                      ...current,
-                      priority: Number(event.target.value),
-                    }))
-                  }
-                />
-                <Input
-                  type="number"
-                  value={accountForm.concurrency}
-                  onChange={(event) =>
-                    setAccountForm((current) => ({
-                      ...current,
-                      concurrency: Number(event.target.value),
-                    }))
-                  }
-                />
+                <div className="space-y-1.5">
+                  <Label>优先级</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={accountForm.priority}
+                    onChange={(event) =>
+                      setAccountForm((current) => ({
+                        ...current,
+                        priority: Number(event.target.value),
+                      }))
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    数字越小越先调度；同优先级再看当前负载、运行中数量和最近使用时间。
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>并发权重</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={accountForm.concurrency}
+                    onChange={(event) =>
+                      setAccountForm((current) => ({
+                        ...current,
+                        concurrency: Number(event.target.value),
+                      }))
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    作为负载分母：运行中请求数 / 并发权重。值越大，同优先级下越容易分到更多请求。
+                  </p>
+                </div>
               </div>
               <div className="flex items-center justify-between rounded-md border p-3">
                 <Label>接入内容安全审核</Label>
@@ -1681,6 +1706,14 @@ export function ImageBackendPoolAdminPanel() {
             </div>
             <Card>
               <CardContent className="space-y-3 p-4">
+                <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                  <div className="font-medium">调度规则</div>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                    调度会先排除停用、错误、限流/冷却、分组类型或请求类型不匹配的账号；剩余后端按优先级从小到大选择。同优先级比较当前负载率（运行中请求数
+                    / 并发权重），再比较运行中请求数和最近使用时间。API
+                    直透后端的并发权重固定为 1。
+                  </p>
+                </div>
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <Label className="flex items-center gap-2 text-sm">
                     <Checkbox
@@ -2141,7 +2174,8 @@ export function ImageBackendPoolAdminPanel() {
                         getWebAccountInfo(account)?.email ||
                         "无邮箱"}{" "}
                       · {groupName(groups, account.groupId)} · 优先级{" "}
-                      {account.priority} · {formatDate(account.lastUsedAt)}
+                      {account.priority} · 并发权重 {account.concurrency} ·{" "}
+                      {formatDate(account.lastUsedAt)}
                     </p>
                     {account.metadata?.sourceAccountId && (
                       <p className="mt-1 text-xs text-muted-foreground">
@@ -2284,16 +2318,23 @@ export function ImageBackendPoolAdminPanel() {
                   }))
                 }
               />
-              <Input
-                type="number"
-                value={apiForm.priority}
-                onChange={(event) =>
-                  setApiForm((current) => ({
-                    ...current,
-                    priority: Number(event.target.value),
-                  }))
-                }
-              />
+              <div className="space-y-1.5">
+                <Label>优先级</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={apiForm.priority}
+                  onChange={(event) =>
+                    setApiForm((current) => ({
+                      ...current,
+                      priority: Number(event.target.value),
+                    }))
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  数字越小越先调度；API 直透后端当前按并发权重 1 参与负载比较。
+                </p>
+              </div>
               <div className="flex items-center justify-between rounded-md border p-3">
                 <Label>流式调用</Label>
                 <Switch
@@ -2352,7 +2393,7 @@ export function ImageBackendPoolAdminPanel() {
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
                       {api.baseUrl} · {groupName(groups, api.groupId)} · 优先级{" "}
-                      {api.priority} · {formatDate(api.lastUsedAt)}
+                      {api.priority} · 并发权重 1 · {formatDate(api.lastUsedAt)}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
                       成功 {api.successCount} · 失败 {api.failCount} · 冷却至{" "}
@@ -2393,15 +2434,16 @@ export function ImageBackendPoolAdminPanel() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
-                <Database className="h-4 w-4" />从 Sub2API 获取 AT
+                <Database className="h-4 w-4" />同步 Sub2API 账号
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                连接 Sub2API Postgres，只读取 OpenAI OAuth 账号。默认只同步
-                Codex/Responses，并复用 Sub2API 当前 access_token；勾选 Mobile
-                RT 后才会把 Sub 中 mobile client 的当前 AT 同步为
-                Web/同时账号，不刷新也不回写 Sub2API 的 RT。
+                连接 Sub2API Postgres，只同步 OpenAI OAuth 账号。默认排除
+                free 套餐并只同步 Codex/Responses，复用 Sub2API 当前
+                access_token；勾选 Mobile RT 后才会把 Sub 中 mobile client
+                的当前 AT 同步为 Web/同时账号，不刷新也不回写 Sub2API 的
+                RT。
               </p>
               <div className="grid gap-3 md:grid-cols-[1fr_auto]">
                 <Select
@@ -2443,10 +2485,10 @@ export function ImageBackendPoolAdminPanel() {
               </div>
               <div className="flex items-start justify-between gap-3 rounded-md border p-3">
                 <div>
-                  <Label>Mobile RT 导入</Label>
+                  <Label>Mobile RT 同步</Label>
                   <p className="mt-1 text-xs text-muted-foreground">
                     仅用于 Sub 中由 Mobile RT client
-                    导入的账号。关闭时强制只同步 Codex/Responses，避免误用普通
+                    同步的账号。关闭时强制只同步 Codex/Responses，避免误用普通
                     Codex RT。
                   </p>
                 </div>
@@ -2460,6 +2502,32 @@ export function ImageBackendPoolAdminPanel() {
                     }))
                   }
                 />
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Select
+                  value={importForm.planFilter}
+                  onValueChange={(value) =>
+                    setImportForm((current) => ({
+                      ...current,
+                      planFilter: value as Sub2ApiPlanFilter,
+                    }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="套餐筛选" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="non_free">排除 free</SelectItem>
+                    <SelectItem value="plus">只导入 plus</SelectItem>
+                    <SelectItem value="pro">只导入 pro</SelectItem>
+                    <SelectItem value="free">只导入 free</SelectItem>
+                    <SelectItem value="all">全部套餐</SelectItem>
+                  </SelectContent>
+                </Select>
+                <div className="rounded-md border px-3 py-2 text-xs text-muted-foreground">
+                  默认排除 Sub2API 中 plan_type=free 的账号，避免将 team
+                  分组里的 free 账号再次导入生图站。
+                </div>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <Select
@@ -2559,7 +2627,7 @@ export function ImageBackendPoolAdminPanel() {
                   {isSyncingSub2Api && (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   )}
-                  获取 AT
+                  同步账号
                 </Button>
                 {(isSyncingSub2Api || syncProgress.status !== "idle") && (
                   <div className="space-y-2 rounded-md border p-3">
@@ -2717,36 +2785,54 @@ export function ImageBackendPoolAdminPanel() {
               </Select>
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <Input
-                placeholder="模型，可选"
-                value={manualImportForm.model}
-                onChange={(event) =>
-                  setManualImportForm((current) => ({
-                    ...current,
-                    model: event.target.value,
-                  }))
-                }
-              />
-              <Input
-                type="number"
-                value={manualImportForm.priority}
-                onChange={(event) =>
-                  setManualImportForm((current) => ({
-                    ...current,
-                    priority: Number(event.target.value),
-                  }))
-                }
-              />
-              <Input
-                type="number"
-                value={manualImportForm.concurrency}
-                onChange={(event) =>
-                  setManualImportForm((current) => ({
-                    ...current,
-                    concurrency: Number(event.target.value),
-                  }))
-                }
-              />
+              <div className="space-y-1.5">
+                <Label>模型</Label>
+                <Input
+                  placeholder="可选"
+                  value={manualImportForm.model}
+                  onChange={(event) =>
+                    setManualImportForm((current) => ({
+                      ...current,
+                      model: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>优先级</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={manualImportForm.priority}
+                  onChange={(event) =>
+                    setManualImportForm((current) => ({
+                      ...current,
+                      priority: Number(event.target.value),
+                    }))
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  数字越小越先调度。
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <Label>并发权重</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={manualImportForm.concurrency}
+                  onChange={(event) =>
+                    setManualImportForm((current) => ({
+                      ...current,
+                      concurrency: Number(event.target.value),
+                    }))
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  作为负载分母，值越大越能分摊请求。
+                </p>
+              </div>
             </div>
             <div className="flex items-center justify-between rounded-md border p-3">
               <Label>接入内容安全审核</Label>
@@ -2859,36 +2945,54 @@ export function ImageBackendPoolAdminPanel() {
               />
             </div>
             <div className="grid gap-3 md:grid-cols-3">
-              <Input
-                placeholder="模型，可选"
-                value={webAtImportForm.model}
-                onChange={(event) =>
-                  setWebAtImportForm((current) => ({
-                    ...current,
-                    model: event.target.value,
-                  }))
-                }
-              />
-              <Input
-                type="number"
-                value={webAtImportForm.priority}
-                onChange={(event) =>
-                  setWebAtImportForm((current) => ({
-                    ...current,
-                    priority: Number(event.target.value),
-                  }))
-                }
-              />
-              <Input
-                type="number"
-                value={webAtImportForm.concurrency}
-                onChange={(event) =>
-                  setWebAtImportForm((current) => ({
-                    ...current,
-                    concurrency: Number(event.target.value),
-                  }))
-                }
-              />
+              <div className="space-y-1.5">
+                <Label>模型</Label>
+                <Input
+                  placeholder="可选"
+                  value={webAtImportForm.model}
+                  onChange={(event) =>
+                    setWebAtImportForm((current) => ({
+                      ...current,
+                      model: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>优先级</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={webAtImportForm.priority}
+                  onChange={(event) =>
+                    setWebAtImportForm((current) => ({
+                      ...current,
+                      priority: Number(event.target.value),
+                    }))
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  数字越小越先调度。
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <Label>并发权重</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={webAtImportForm.concurrency}
+                  onChange={(event) =>
+                    setWebAtImportForm((current) => ({
+                      ...current,
+                      concurrency: Number(event.target.value),
+                    }))
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  作为负载分母，值越大越能分摊请求。
+                </p>
+              </div>
             </div>
             <div className="flex items-center justify-between rounded-md border p-3">
               <Label>接入内容安全审核</Label>

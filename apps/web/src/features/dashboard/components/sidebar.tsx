@@ -22,6 +22,7 @@ import { CreditBalanceBadge } from "@repo/shared/credits/components";
 import { useSidebar } from "@/features/dashboard/context";
 import { ModeToggle } from "@repo/shared/components";
 import { getMyPlanAction } from "@repo/shared/subscription/actions/get-user-plan";
+import { getMyUnreadTicketCountAction } from "@repo/shared/support/actions/ticket";
 import {
   PlanBadge,
   type PlanType,
@@ -60,6 +61,14 @@ export function DashboardSidebar() {
   // 获取用户订阅计划
   const { execute: fetchPlan, result: planResult } = useAction(getMyPlanAction);
   const userPlan = (planResult.data?.plan as PlanType) || "free";
+  const {
+    execute: fetchUnreadTickets,
+    result: unreadTicketsResult,
+  } = useAction(getMyUnreadTicketCountAction);
+  const unreadTicketCount = Math.max(
+    0,
+    Number(unreadTicketsResult.data?.count ?? 0)
+  );
 
   // 用户登录后获取计划
   useEffect(() => {
@@ -67,6 +76,12 @@ export function DashboardSidebar() {
       fetchPlan();
     }
   }, [user, fetchPlan]);
+
+  useEffect(() => {
+    if (user && !isAdmin) {
+      fetchUnreadTickets();
+    }
+  }, [user, isAdmin, pathname, fetchUnreadTickets]);
 
   /**
    * 导航项标题映射到翻译键
@@ -199,6 +214,10 @@ export function DashboardSidebar() {
                       normalizedPath.startsWith(`${item.href}/`));
                   const Icon = item.icon;
                   const translatedTitle = getNavTitle(item.title);
+                  const showSupportUnread =
+                    !isAdmin &&
+                    item.href === "/dashboard/support" &&
+                    unreadTicketCount > 0;
                   return (
                     <Link
                       key={item.href}
@@ -214,9 +233,23 @@ export function DashboardSidebar() {
                         collapsed && "justify-center px-0"
                       )}
                     >
-                      {Icon && <Icon className="h-4 w-4 shrink-0" />}
+                      {Icon && (
+                        <span className="relative inline-flex shrink-0">
+                          <Icon className="h-4 w-4" />
+                          {showSupportUnread && (
+                            <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-red-500 ring-2 ring-sidebar" />
+                          )}
+                        </span>
+                      )}
                       {!collapsed && (
-                        <span className="flex-1">{translatedTitle}</span>
+                        <>
+                          <span className="flex-1">{translatedTitle}</span>
+                          {showSupportUnread && (
+                            <span className="min-w-5 rounded-full bg-red-500 px-1.5 py-0.5 text-center text-[10px] font-semibold leading-none text-white">
+                              {unreadTicketCount > 99 ? "99+" : unreadTicketCount}
+                            </span>
+                          )}
+                        </>
                       )}
                     </Link>
                   );

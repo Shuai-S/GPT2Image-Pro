@@ -120,6 +120,13 @@
       "when": 1779179800000,
       "tag": "0016_image_backend_account_dual_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1779379200000,
+      "tag": "0017_ticket_notifications",
+      "breakpoints": true
     }
   ]
 }

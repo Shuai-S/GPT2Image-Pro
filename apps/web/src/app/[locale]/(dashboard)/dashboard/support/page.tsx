@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { Plus, Ticket } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -41,6 +41,9 @@ export default async function SupportPage() {
             name: user.name,
             email: user.email,
           },
+          unread: sql<boolean>`${ticket.lastAdminActivityAt} > ${ticket.userLastSeenAt}`.mapWith(
+            Boolean
+          ),
         })
         .from(ticket)
         .leftJoin(user, eq(ticket.userId, user.id))
@@ -59,6 +62,9 @@ export default async function SupportPage() {
             name: user.name,
             email: user.email,
           },
+          unread: sql<boolean>`${ticket.lastAdminActivityAt} > ${ticket.userLastSeenAt}`.mapWith(
+            Boolean
+          ),
         })
         .from(ticket)
         .leftJoin(user, eq(ticket.userId, user.id))
@@ -159,7 +165,17 @@ export default async function SupportPage() {
                 <CardHeader className="pb-2">
                   <div className="flex items-start justify-between">
                     <div className="space-y-1">
-                      <CardTitle className="text-base">{tkt.subject}</CardTitle>
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        {!isAdmin && tkt.unread && (
+                          <span className="h-2 w-2 rounded-full bg-red-500" />
+                        )}
+                        <span>{tkt.subject}</span>
+                        {!isAdmin && tkt.unread && (
+                          <Badge className="bg-red-500 text-white" variant="secondary">
+                            新动态
+                          </Badge>
+                        )}
+                      </CardTitle>
                       <p className="text-sm text-muted-foreground">
                         {getCategoryLabel(tkt.category)} ·{" "}
                         {new Date(tkt.createdAt).toLocaleDateString(dateLocale)}

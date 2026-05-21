@@ -81,6 +81,14 @@ export default async function TicketDetailPage({
   const ticketData = ticketRecord.ticket;
   const ticketUser = ticketRecord.user;
 
+  if (!isAdmin) {
+    await db
+      .update(ticket)
+      .set({ userLastSeenAt: new Date() })
+      .where(and(eq(ticket.id, id), eq(ticket.userId, session.user.id)));
+    ticketData.userLastSeenAt = new Date();
+  }
+
   // 获取消息列表
   const messages = await db
     .select({

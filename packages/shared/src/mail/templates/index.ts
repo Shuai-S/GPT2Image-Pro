@@ -8,4 +8,5 @@ export {
   ResetPasswordEmail,
   VerifyEmailEmail,
 } from "./primary-action-email";
+export { SupportTicketNotificationEmail } from "./support-ticket-email";
 export { WelcomeEmail } from "./welcome-email";

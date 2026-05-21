@@ -118,6 +118,10 @@ type ReasoningConfig = {
   summary?: "concise";
 };
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
 function getModel(config: ApiConfig, model?: string) {
   const requestedModel = normalizeImageModel(model);
   if (requestedModel && !isImageModel(requestedModel)) {
@@ -647,6 +651,71 @@ function stripTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
 }
 
+function isImageGenerationTool(value: unknown) {
+  return isPlainRecord(value) && value.type === "image_generation";
+}
+
+function normalizeResponsesImageTool(
+  value: unknown,
+  fallback: Record<string, unknown>
+) {
+  const tool = isPlainRecord(value) ? { ...value } : {};
+  for (const [key, fallbackValue] of Object.entries(fallback)) {
+    if (tool[key] === undefined && fallbackValue !== undefined) {
+      tool[key] = fallbackValue;
+    }
+  }
+  tool.type = "image_generation";
+  return tool;
+}
+
+function normalizeResponsesImageRequestBody(
+  rawBody: Record<string, unknown>,
+  options: {
+    fallbackTool: Record<string, unknown>;
+    instructions: string;
+    stream: boolean;
+    defaultToolChoice?: unknown;
+  }
+) {
+  const body: Record<string, unknown> = {
+    ...rawBody,
+    store: false,
+    instructions:
+      typeof rawBody.instructions === "string" && rawBody.instructions
+        ? rawBody.instructions
+        : options.instructions,
+    ...(options.stream ? { stream: true } : {}),
+  };
+  if (
+    body.tool_choice === undefined &&
+    options.defaultToolChoice !== undefined
+  ) {
+    body.tool_choice = options.defaultToolChoice;
+  }
+
+  const tools = Array.isArray(rawBody.tools) ? rawBody.tools : [];
+  const imageToolIndex = tools.findIndex(isImageGenerationTool);
+  if (imageToolIndex >= 0) {
+    body.tools = tools.map((item, index) =>
+      index === imageToolIndex
+        ? normalizeResponsesImageTool(item, options.fallbackTool)
+        : item
+    );
+  } else {
+    body.tools = [
+      ...tools,
+      normalizeResponsesImageTool(undefined, options.fallbackTool),
+    ];
+  }
+
+  delete body.size;
+  delete body.quality;
+  delete body.moderation;
+
+  return body;
+}
+
 function isPoolAccountBackend(
   config: ApiConfig,
   accountBackend: "web" | "responses"
@@ -874,6 +943,12 @@ function historyVariantText(message: ChatHistoryMessage) {
   return `${variant?.text || message.text || ""}${imageNote}`;
 }
 
+function getHistoryVariantImageUrl(message: ChatHistoryMessage) {
+  const variants = message.variants || [];
+  const variant = variants[message.activeVariant || 0] || variants[0];
+  return variant?.imageUrl;
+}
+
 function buildResponsesInput(
   prompt: string,
   images: ImageInputFile[] | undefined,
@@ -902,6 +977,19 @@ function buildResponsesInput(
       input.push({
         role: "assistant",
         content: [{ type: "output_text", text }],
+      });
+    }
+    const imageUrl = getHistoryVariantImageUrl(message);
+    if (imageUrl && isUsableInputImageUrl(imageUrl)) {
+      input.push({
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: "Reference image from the previous assistant output.",
+          },
+          { type: "input_image", image_url: imageUrl },
+        ],
       });
     }
   }
@@ -1843,7 +1931,7 @@ export async function generateChatImage(
       action: "auto",
     };
 
-    const toolModel = getImageModel(params.imageModel);
+    const toolModel = getImageModel(params.imageModel) || DEFAULT_IMAGE_MODEL;
     if (toolModel) {
       tool.model = toolModel;
     }
@@ -1861,19 +1949,12 @@ export async function generateChatImage(
       : undefined;
 
     const requestBody =
-      params.rawResponsesBody && typeof params.rawResponsesBody === "object"
-        ? {
-            ...(params.rawResponsesBody as Record<string, unknown>),
-            store: false,
-            instructions:
-              typeof (params.rawResponsesBody as Record<string, unknown>)
-                .instructions === "string" &&
-              (params.rawResponsesBody as Record<string, unknown>).instructions
-                ? (params.rawResponsesBody as Record<string, unknown>)
-                    .instructions
-                : instructions,
-            ...(params.stream || config.useStream ? { stream: true } : {}),
-          }
+      params.rawResponsesBody && isPlainRecord(params.rawResponsesBody)
+        ? normalizeResponsesImageRequestBody(params.rawResponsesBody, {
+            fallbackTool: tool,
+            instructions,
+            stream: Boolean(params.stream || config.useStream),
+          })
         : {
             model,
             input,

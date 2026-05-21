@@ -57,6 +57,13 @@
       "when": 1779179000000,
       "tag": "0007_image_backend_pool",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1779379200000,
+      "tag": "0008_ticket_notifications",
+      "breakpoints": true
     }
   ]
 }

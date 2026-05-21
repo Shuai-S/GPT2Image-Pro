@@ -98,6 +98,38 @@ function wantsStreamResponse(request: NextRequest, formData: FormData) {
   return request.headers.get("accept")?.includes("text/event-stream") ?? false;
 }
 
+function getRequestBaseUrl(request: NextRequest) {
+  return (
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.BETTER_AUTH_URL ||
+    new URL(request.url).origin
+  );
+}
+
+function toPublicImageUrl(request: NextRequest, imageUrl?: string) {
+  if (!imageUrl) return imageUrl;
+  if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
+    return imageUrl;
+  }
+  return new URL(imageUrl, getRequestBaseUrl(request)).toString();
+}
+
+function normalizeHistoryImageUrls(
+  request: NextRequest,
+  history: ChatHistoryMessage[]
+) {
+  return history.map((message) => ({
+    ...message,
+    imageUrls: (message.imageUrls || []).map((url) =>
+      toPublicImageUrl(request, url) || url
+    ),
+    variants: message.variants?.map((variant) => ({
+      ...variant,
+      imageUrl: toPublicImageUrl(request, variant.imageUrl),
+    })),
+  }));
+}
+
 function getImageFiles(formData: FormData) {
   const images: File[] = [];
 
@@ -333,7 +365,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
   if (limitedContext.error) {
     return errorResponse(limitedContext.error);
   }
-  history = limitedContext.history;
+  history = normalizeHistoryImageUrls(request, limitedContext.history);
   const preferredBackendMemberId = getPreferredBackendMemberId(history);
 
   const sourceFiles = getImageFiles(formData);

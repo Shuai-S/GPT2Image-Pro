@@ -108,7 +108,7 @@ export function DashboardMainWrapper({
         </header>
 
         {/* 内容区域 */}
-        <div className="flex-1 p-6">{children}</div>
+        <div className="min-w-0 flex-1 overflow-x-auto p-6">{children}</div>
       </div>
     </main>
   );

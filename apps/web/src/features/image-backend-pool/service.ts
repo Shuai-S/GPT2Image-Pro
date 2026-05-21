@@ -5,6 +5,7 @@ import {
   imageBackendAccount,
   imageBackendApi,
   imageBackendGroup,
+  systemSetting,
   userImageBackendPreference,
 } from "@repo/database/schema";
 import {
@@ -15,20 +16,12 @@ import {
 import { logWarn } from "@repo/shared/logger";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import {
+  getRuntimeSettingBoolean,
   getRuntimeSettingNumber,
+  getRuntimeSettingSelect,
   getRuntimeSettingString,
 } from "@repo/shared/system-settings";
-import {
-  and,
-  asc,
-  count,
-  desc,
-  eq,
-  inArray,
-  isNull,
-  or,
-  sql,
-} from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { Pool } from "pg";
 
@@ -140,6 +133,7 @@ const OPENAI_CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const OPENAI_PLATFORM_OAUTH_CLIENT_ID = "app_2SKx67EdpoN0G6j64rFvigXD";
 const OPENAI_MOBILE_RT_CLIENT_ID = "app_LlGpXReQgckcGGUo2JrYvtJK";
 const OPENAI_REFRESH_SCOPES = "openid profile email";
+const AUTO_SUB2API_SYNC_STATE_KEY = "SUB2API_AUTO_SYNC_STATE";
 const DEFAULT_BACKEND_COOLDOWN_MINUTES = 15;
 const MAX_PARSED_RESET_COOLDOWN_DAYS = 14;
 const DEFAULT_UNRECOVERABLE_BACKEND_ERROR_KEYWORDS = [
@@ -216,7 +210,6 @@ function groupBackendAllowsRequest(
   requestKind: ImageBackendRequestKind
 ) {
   const backendType = getGroupBackendType(metadata);
-  if (backendType === "mixed") return true;
   if (requestKind === "responses") {
     return backendType === "responses";
   }
@@ -229,6 +222,14 @@ function groupBackendAllowsAccount(
 ) {
   const backendType = getGroupBackendType(metadata);
   return backendType === "mixed" || backendType === backend;
+}
+
+function accountBackendAllowsRequest(
+  backend: ImageBackendAccountBackend,
+  requestKind: ImageBackendRequestKind
+) {
+  if (requestKind === "responses") return backend === "responses";
+  return true;
 }
 
 function canUseBackendGroupForPlan(
@@ -521,6 +522,11 @@ function isUnsupportedModelBackendError(error?: string | null) {
     normalized.includes("model_not_available") ||
     normalized.includes("does not support this model") ||
     normalized.includes("not support this model") ||
+    normalized.includes("tool choice 'image_generation' not found") ||
+    normalized.includes("tool choice image_generation not found") ||
+    (normalized.includes("image_generation") &&
+      normalized.includes("not found in") &&
+      normalized.includes("tools")) ||
     normalized.includes("not allowed to use model") ||
     normalized.includes("not have access to the model") ||
     normalized.includes("account does not support") ||
@@ -953,6 +959,7 @@ async function ensureGroupUsable(
 async function selectPoolMember(
   groupId: string | null,
   groupMetadata?: Record<string, unknown> | null,
+  requestKind?: ImageBackendRequestKind,
   excluded?: Set<string>,
   preferredMemberId?: string
 ): Promise<PoolMember | null> {
@@ -1036,6 +1043,10 @@ async function selectPoolMember(
       const backend = normalizeAccountBackend(row.implementationMode);
       return (
         groupBackendAllowsAccount(groupMetadata, backend) &&
+        accountBackendAllowsRequest(
+          backend,
+          requestKind || "image_generation"
+        ) &&
         isWebAccountQuotaAvailable(backend, row.metadata, now)
       );
     })
@@ -1213,6 +1224,7 @@ async function resolvePoolMember(
   const member = await selectPoolMember(
     group.id,
     group.metadata,
+    options.requestKind,
     options.excluded,
     options.preferredMemberId
   );
@@ -2435,6 +2447,26 @@ type Sub2ApiTokenAccount = {
   groupNames: string[];
 };
 
+type Sub2ApiPlanFilter = "all" | "free" | "plus" | "pro" | "non_free";
+type AutoSub2ApiSyncMetadata = {
+  lastStartedAt?: string;
+  lastFinishedAt?: string;
+  lastSuccessAt?: string;
+  lastSkippedAt?: string;
+  lastErrorAt?: string;
+  lastStatus?: "success" | "error" | "skipped";
+  lastError?: string;
+  lastResult?: {
+    sourceCount: number;
+    totalSourceCount: number;
+    syncedCount: number;
+    skipped: { web: number; responses: number };
+    failed: number;
+    failedByMode: { web: number; responses: number };
+    syncedByMode: { web: number; responses: number };
+  };
+};
+
 type Sub2ApiSourceGroupRow = {
   id: number | string;
   name: string;
@@ -2569,7 +2601,12 @@ function createSub2ApiPool(connectionString: string) {
 
 async function listSub2ApiCurrentAccessTokens(
   pool: Pool,
-  options: { limit: number; offset?: number; sourceGroupId?: string | null }
+  options: {
+    limit: number;
+    offset?: number;
+    sourceGroupId?: string | null;
+    planFilter?: Sub2ApiPlanFilter;
+  }
 ) {
   const sourceGroupId = options.sourceGroupId
     ? Number(options.sourceGroupId)
@@ -2577,6 +2614,7 @@ async function listSub2ApiCurrentAccessTokens(
   if (options.sourceGroupId && !Number.isFinite(sourceGroupId)) {
     throw new Error("Sub2API 来源分组无效");
   }
+  const planFilter = normalizeSub2ApiPlanFilter(options.planFilter);
   const offset = Math.max(0, Math.trunc(options.offset || 0));
   const result = await pool.query<Sub2ApiAccountRow>(
     `
@@ -2617,12 +2655,17 @@ async function listSub2ApiCurrentAccessTokens(
           WHERE source_ag.account_id = a.id
             AND source_ag.group_id = $2::bigint
         ))
+        AND (
+          $4::text = 'all'
+          OR ($4::text = 'non_free' AND LOWER(COALESCE(a.credentials->>'plan_type', a.credentials->>'planType', '')) <> 'free')
+          OR LOWER(COALESCE(a.credentials->>'plan_type', a.credentials->>'planType', '')) = $4::text
+        )
       GROUP BY a.id
       ORDER BY a.priority ASC, a.last_used_at ASC NULLS FIRST, a.id ASC
       LIMIT $1
       OFFSET $3
     `,
-    [options.limit, sourceGroupId, offset]
+    [options.limit, sourceGroupId, offset, planFilter]
   );
   return result.rows
     .map(mapSub2ApiAccountRow)
@@ -2631,7 +2674,7 @@ async function listSub2ApiCurrentAccessTokens(
 
 async function countSub2ApiCurrentAccessTokens(
   pool: Pool,
-  options: { sourceGroupId?: string | null }
+  options: { sourceGroupId?: string | null; planFilter?: Sub2ApiPlanFilter }
 ) {
   const sourceGroupId = options.sourceGroupId
     ? Number(options.sourceGroupId)
@@ -2639,6 +2682,7 @@ async function countSub2ApiCurrentAccessTokens(
   if (options.sourceGroupId && !Number.isFinite(sourceGroupId)) {
     throw new Error("Sub2API 来源分组无效");
   }
+  const planFilter = normalizeSub2ApiPlanFilter(options.planFilter);
   const result = await pool.query<{ value: number | string }>(
     `
       SELECT COUNT(*) AS value
@@ -2662,10 +2706,48 @@ async function countSub2ApiCurrentAccessTokens(
           WHERE source_ag.account_id = a.id
             AND source_ag.group_id = $1::bigint
         ))
+        AND (
+          $2::text = 'all'
+          OR ($2::text = 'non_free' AND LOWER(COALESCE(a.credentials->>'plan_type', a.credentials->>'planType', '')) <> 'free')
+          OR LOWER(COALESCE(a.credentials->>'plan_type', a.credentials->>'planType', '')) = $2::text
+        )
     `,
-    [sourceGroupId]
+    [sourceGroupId, planFilter]
   );
   return Number(result.rows[0]?.value || 0);
+}
+
+function normalizeSub2ApiPlanFilter(value?: string | null): Sub2ApiPlanFilter {
+  return value === "free" ||
+    value === "plus" ||
+    value === "pro" ||
+    value === "non_free"
+    ? value
+    : "all";
+}
+
+function asAutoSub2ApiSyncMetadata(
+  metadata: Record<string, unknown> | null | undefined
+): AutoSub2ApiSyncMetadata {
+  return (metadata || {}) as AutoSub2ApiSyncMetadata;
+}
+
+async function findSub2ApiSyncedAccountId(
+  sourceAccountId: string,
+  mode: ImageBackendAccountBackend
+) {
+  const [existing] = await db
+    .select({ id: imageBackendAccount.id })
+    .from(imageBackendAccount)
+    .where(
+      and(
+        eq(imageBackendAccount.implementationMode, mode),
+        sql`${imageBackendAccount.metadata}->>'source' = 'sub2api_postgres'`,
+        sql`${imageBackendAccount.metadata}->>'sourceAccountId' = ${sourceAccountId}`
+      )
+    )
+    .limit(1);
+  return existing?.id;
 }
 
 async function listSub2ApiSourceGroupsFromPool(pool: Pool) {
@@ -2828,6 +2910,7 @@ export async function syncImageBackendAccountsFromSub2Api(input: {
   contentSafetyEnabled: boolean;
   limit?: number | null;
   offset?: number | null;
+  planFilter?: Sub2ApiPlanFilter | null;
 }) {
   const configuredLimit = await getRuntimeSettingNumber(
     "SUB2API_POSTGRES_SYNC_LIMIT",
@@ -2839,6 +2922,7 @@ export async function syncImageBackendAccountsFromSub2Api(input: {
     Math.min(500, Math.trunc(input.limit || configuredLimit))
   );
   const offset = Math.max(0, Math.trunc(input.offset || 0));
+  const planFilter = normalizeSub2ApiPlanFilter(input.planFilter);
   const effectiveSyncMode = input.allowMobileRtImport
     ? input.syncMode
     : "responses";
@@ -2865,11 +2949,13 @@ export async function syncImageBackendAccountsFromSub2Api(input: {
   try {
     const totalSourceCount = await countSub2ApiCurrentAccessTokens(pool, {
       sourceGroupId: input.sourceGroupId,
+      planFilter,
     });
     const accounts = await listSub2ApiCurrentAccessTokens(pool, {
       limit,
       offset,
       sourceGroupId: input.sourceGroupId,
+      planFilter,
     });
     for (const account of accounts) {
       for (const mode of modes) {
@@ -2882,7 +2968,12 @@ export async function syncImageBackendAccountsFromSub2Api(input: {
             skipped[mode]++;
             continue;
           }
+          const existingId = await findSub2ApiSyncedAccountId(
+            account.sourceId,
+            mode
+          );
           const id = await upsertImageBackendAccount({
+            id: existingId,
             groupId:
               mode === "responses" ? input.responsesGroupId : input.webGroupId,
             name:
@@ -2891,7 +2982,6 @@ export async function syncImageBackendAccountsFromSub2Api(input: {
                 : `${account.name} / Web`,
             email: account.email,
             accessToken,
-            refreshToken: null,
             implementationMode: mode,
             model: null,
             contentSafetyEnabled: input.contentSafetyEnabled,
@@ -2944,10 +3034,259 @@ export async function syncImageBackendAccountsFromSub2Api(input: {
       skipped,
       failed: failedByMode.web + failedByMode.responses,
       failedByMode,
-      refreshTokenWriteBackCount: 0,
-    };
+    refreshTokenWriteBackCount: 0,
+  };
   } finally {
     await pool.end();
+  }
+}
+
+async function getDefaultGroupIdForBackend(
+  backend: ImageBackendAccountBackend
+) {
+  const rows = await db
+    .select({
+      id: imageBackendGroup.id,
+      isDefault: imageBackendGroup.isDefault,
+      metadata: imageBackendGroup.metadata,
+      priority: imageBackendGroup.priority,
+      createdAt: imageBackendGroup.createdAt,
+    })
+    .from(imageBackendGroup)
+    .where(eq(imageBackendGroup.isEnabled, true))
+    .orderBy(
+      desc(imageBackendGroup.isDefault),
+      asc(imageBackendGroup.priority),
+      asc(imageBackendGroup.createdAt)
+    );
+  return (
+    rows.find((group) =>
+      groupBackendAllowsAccount(group.metadata, backend)
+    )?.id ?? null
+  );
+}
+
+async function getAutoSub2ApiSyncMetadata() {
+  const [row] = await db
+    .select({ value: systemSetting.value })
+    .from(systemSetting)
+    .where(eq(systemSetting.key, AUTO_SUB2API_SYNC_STATE_KEY))
+    .limit(1);
+  return asAutoSub2ApiSyncMetadata(
+    row?.value && typeof row.value === "object"
+      ? (row.value as Record<string, unknown>)
+      : undefined
+  );
+}
+
+async function setAutoSub2ApiSyncMetadata(
+  metadata: AutoSub2ApiSyncMetadata
+) {
+  const now = new Date();
+  await db
+    .insert(systemSetting)
+    .values({
+      key: AUTO_SUB2API_SYNC_STATE_KEY,
+      value: metadata,
+      isSecret: false,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: systemSetting.key,
+      set: {
+        value: metadata,
+        isSecret: false,
+        updatedAt: now,
+      },
+    });
+}
+
+function shouldRunAutoSub2ApiSync(
+  metadata: AutoSub2ApiSyncMetadata,
+  intervalMinutes: number,
+  force: boolean
+) {
+  if (force) return { run: true, nextRunAt: null as string | null };
+  const lastSuccessAt = metadata.lastSuccessAt
+    ? Date.parse(metadata.lastSuccessAt)
+    : Number.NaN;
+  if (!Number.isFinite(lastSuccessAt)) {
+    return { run: true, nextRunAt: null as string | null };
+  }
+  const nextRunAtMs = lastSuccessAt + intervalMinutes * 60_000;
+  if (Date.now() >= nextRunAtMs) {
+    return { run: true, nextRunAt: new Date(nextRunAtMs).toISOString() };
+  }
+  return { run: false, nextRunAt: new Date(nextRunAtMs).toISOString() };
+}
+
+export async function runAutoSub2ApiAccessTokenSync(options?: {
+  force?: boolean;
+}) {
+  const enabled = await getRuntimeSettingBoolean(
+    "SUB2API_AUTO_SYNC_ENABLED",
+    true
+  );
+  if (!enabled && !options?.force) {
+    return {
+      success: true,
+      jobSkipped: true,
+      reason: "disabled",
+      intervalMinutes: 0,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  const intervalMinutes = Math.max(
+    1,
+    Math.trunc(
+      await getRuntimeSettingNumber("SUB2API_AUTO_SYNC_INTERVAL_MINUTES", 720, {
+        positive: true,
+      })
+    )
+  );
+  const previousMetadata = await getAutoSub2ApiSyncMetadata();
+  const schedule = shouldRunAutoSub2ApiSync(
+    previousMetadata,
+    intervalMinutes,
+    Boolean(options?.force)
+  );
+  if (!schedule.run) {
+    const metadata = {
+      ...previousMetadata,
+      lastSkippedAt: new Date().toISOString(),
+      lastStatus: "skipped" as const,
+    };
+    await setAutoSub2ApiSyncMetadata(metadata);
+    return {
+      success: true,
+      jobSkipped: true,
+      reason: "interval_not_reached",
+      intervalMinutes,
+      lastSuccessAt: previousMetadata.lastSuccessAt ?? null,
+      nextRunAt: schedule.nextRunAt,
+      timestamp: metadata.lastSkippedAt,
+    };
+  }
+
+  const startedAt = new Date().toISOString();
+  await setAutoSub2ApiSyncMetadata({
+    ...previousMetadata,
+    lastStartedAt: startedAt,
+  });
+
+  try {
+    const [
+      sourceGroupId,
+      syncMode,
+      allowMobileRtImport,
+      planFilter,
+      configuredLimit,
+    ] = await Promise.all([
+      getRuntimeSettingString("SUB2API_AUTO_SYNC_SOURCE_GROUP_ID"),
+      getRuntimeSettingSelect(
+        "SUB2API_AUTO_SYNC_MODE",
+        ["web", "responses", "both"] as const,
+        "responses"
+      ),
+      getRuntimeSettingBoolean("SUB2API_AUTO_SYNC_ALLOW_MOBILE_RT", false),
+      getRuntimeSettingSelect(
+        "SUB2API_AUTO_SYNC_PLAN_FILTER",
+        ["all", "free", "plus", "pro", "non_free"] as const,
+        "non_free"
+      ),
+      getRuntimeSettingNumber("SUB2API_POSTGRES_SYNC_LIMIT", 100, {
+        positive: true,
+      }),
+    ]);
+    const effectiveSyncMode = allowMobileRtImport ? syncMode : "responses";
+    const [webGroupId, responsesGroupId] = await Promise.all([
+      effectiveSyncMode === "web" || effectiveSyncMode === "both"
+        ? getDefaultGroupIdForBackend("web")
+        : Promise.resolve(null),
+      effectiveSyncMode === "responses" || effectiveSyncMode === "both"
+        ? getDefaultGroupIdForBackend("responses")
+        : Promise.resolve(null),
+    ]);
+    const limit = Math.max(1, Math.min(500, Math.trunc(configuredLimit)));
+    let offset = 0;
+    let hasMore = true;
+    const aggregate = {
+      sourceCount: 0,
+      totalSourceCount: 0,
+      syncedCount: 0,
+      syncedByMode: { web: 0, responses: 0 },
+      skipped: { web: 0, responses: 0 },
+      failed: 0,
+      failedByMode: { web: 0, responses: 0 },
+      refreshTokenWriteBackCount: 0,
+      batches: 0,
+    };
+
+    while (hasMore) {
+      const result = await syncImageBackendAccountsFromSub2Api({
+        webGroupId,
+        responsesGroupId,
+        sourceGroupId,
+        syncMode: effectiveSyncMode,
+        allowMobileRtImport,
+        contentSafetyEnabled: true,
+        planFilter,
+        limit,
+        offset,
+      });
+      aggregate.sourceCount += result.sourceCount;
+      aggregate.totalSourceCount = result.totalSourceCount;
+      aggregate.syncedCount += result.syncedCount;
+      aggregate.syncedByMode.web += result.syncedByMode.web;
+      aggregate.syncedByMode.responses += result.syncedByMode.responses;
+      aggregate.skipped.web += result.skipped.web;
+      aggregate.skipped.responses += result.skipped.responses;
+      aggregate.failed += result.failed;
+      aggregate.failedByMode.web += result.failedByMode.web;
+      aggregate.failedByMode.responses += result.failedByMode.responses;
+      aggregate.refreshTokenWriteBackCount += result.refreshTokenWriteBackCount;
+      aggregate.batches++;
+      hasMore = result.hasMore && result.sourceCount > 0;
+      offset = result.nextOffset;
+    }
+
+    const finishedAt = new Date().toISOString();
+    const metadata: AutoSub2ApiSyncMetadata = {
+      lastStartedAt: startedAt,
+      lastFinishedAt: finishedAt,
+      lastSuccessAt: finishedAt,
+      lastStatus: "success",
+      lastResult: aggregate,
+    };
+    await setAutoSub2ApiSyncMetadata(metadata);
+
+    return {
+      success: true,
+      jobSkipped: false,
+      intervalMinutes,
+      sourceGroupId: sourceGroupId || null,
+      syncMode: effectiveSyncMode,
+      allowMobileRtImport,
+      planFilter,
+      webGroupId,
+      responsesGroupId,
+      ...aggregate,
+      timestamp: finishedAt,
+    };
+  } catch (error) {
+    const finishedAt = new Date().toISOString();
+    const message =
+      error instanceof Error ? error.message : "Sub2API 自动同步失败";
+    await setAutoSub2ApiSyncMetadata({
+      ...previousMetadata,
+      lastStartedAt: startedAt,
+      lastFinishedAt: finishedAt,
+      lastErrorAt: finishedAt,
+      lastStatus: "error",
+      lastError: message,
+    });
+    throw error;
   }
 }
 

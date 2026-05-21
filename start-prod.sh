@@ -75,8 +75,19 @@ if [ -d "apps/web/.next/static" ]; then
     echo "Standalone .next directory not found: $STANDALONE_APP_DIR/.next"
     exit 1
   fi
+  rm -rf "$STANDALONE_APP_DIR/.next/static"
   mkdir -p "$STANDALONE_APP_DIR/.next/static"
   cp -a apps/web/.next/static/. "$STANDALONE_APP_DIR/.next/static/"
+fi
+
+if [ -d "apps/web/.next/server" ]; then
+  if [ ! -d "$STANDALONE_APP_DIR/.next" ]; then
+    echo "Standalone .next directory not found: $STANDALONE_APP_DIR/.next"
+    exit 1
+  fi
+  rm -rf "$STANDALONE_APP_DIR/.next/server"
+  mkdir -p "$STANDALONE_APP_DIR/.next/server"
+  cp -a apps/web/.next/server/. "$STANDALONE_APP_DIR/.next/server/"
 fi
 
 if command -v pm2 >/dev/null 2>&1; then

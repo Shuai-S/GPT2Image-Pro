@@ -52,6 +52,13 @@ const safetyOverrideSchema = z.enum(["inherit", "enabled", "disabled"]);
 const accountBackendSchema = z.enum(["web", "responses"]);
 const groupBackendTypeSchema = z.enum(["mixed", "web", "responses"]);
 const sub2ApiTokenSyncModeSchema = z.enum(["web", "responses", "both"]);
+const sub2ApiPlanFilterSchema = z.enum([
+  "all",
+  "free",
+  "plus",
+  "pro",
+  "non_free",
+]);
 const subscriptionPlanSchema = z
   .string()
   .trim()
@@ -301,6 +308,7 @@ export const syncImageBackendAccountsFromSub2ApiAction =
         contentSafetyEnabled: z.boolean().default(true),
         limit: z.coerce.number().int().min(1).max(500).optional(),
         offset: z.coerce.number().int().min(0).optional(),
+        planFilter: sub2ApiPlanFilterSchema.default("non_free"),
       })
     )
     .action(async ({ parsedInput }) => {
@@ -315,6 +323,7 @@ export const syncImageBackendAccountsFromSub2ApiAction =
         contentSafetyEnabled: parsedInput.contentSafetyEnabled,
         limit: parsedInput.limit,
         offset: parsedInput.offset,
+        planFilter: parsedInput.planFilter,
       });
       return { success: true, ...result };
     });

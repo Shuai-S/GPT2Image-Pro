@@ -106,6 +106,12 @@ export type SettingKey =
   | "IMAGE_BACKEND_UNRECOVERABLE_ERROR_KEYWORDS"
   | "SUB2API_POSTGRES_URL"
   | "SUB2API_POSTGRES_SYNC_LIMIT"
+  | "SUB2API_AUTO_SYNC_ENABLED"
+  | "SUB2API_AUTO_SYNC_INTERVAL_MINUTES"
+  | "SUB2API_AUTO_SYNC_SOURCE_GROUP_ID"
+  | "SUB2API_AUTO_SYNC_MODE"
+  | "SUB2API_AUTO_SYNC_ALLOW_MOBILE_RT"
+  | "SUB2API_AUTO_SYNC_PLAN_FILTER"
   | "STORAGE_ACCESS_KEY_ID"
   | "STORAGE_SECRET_ACCESS_KEY"
   | "STORAGE_ENDPOINT"
@@ -122,6 +128,7 @@ export type SettingKey =
   | "SMTP_USER"
   | "SMTP_PASS"
   | "RESEND_API_KEY"
+  | "SUPPORT_TICKET_NOTIFICATION_EMAIL"
   | "REGISTRATION_BONUS_CREDITS"
   | "FREE_CREDITS_EXPIRY_DAYS"
   | "CREDITS_EXPIRY_DAYS"
@@ -901,6 +908,65 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     defaultValue: 100,
   },
   {
+    key: "SUB2API_AUTO_SYNC_ENABLED",
+    label: "Sub2API 自动同步",
+    description: "启用后，Cron 任务会按配置间隔自动同步 Sub2API 当前 AT 到生图账号池。",
+    category: "models",
+    valueType: "boolean",
+    defaultValue: true,
+  },
+  {
+    key: "SUB2API_AUTO_SYNC_INTERVAL_MINUTES",
+    label: "Sub2API 自动同步间隔（分钟）",
+    description: "两次自动同步之间至少间隔多少分钟。默认 720 分钟，即半天一次。",
+    category: "models",
+    valueType: "number",
+    defaultValue: 720,
+  },
+  {
+    key: "SUB2API_AUTO_SYNC_SOURCE_GROUP_ID",
+    label: "Sub2API 自动同步来源分组 ID",
+    description: "留空同步全部 Sub2API OpenAI OAuth 账号；填写后只同步该 Sub2API 分组 ID。",
+    category: "models",
+    valueType: "string",
+  },
+  {
+    key: "SUB2API_AUTO_SYNC_MODE",
+    label: "Sub2API 自动同步接口",
+    description: "自动同步到哪类生图后端账号。未启用 Mobile RT 时会强制只同步 Codex/Responses。",
+    category: "models",
+    valueType: "select",
+    defaultValue: "responses",
+    options: [
+      { label: "Codex/Responses", value: "responses" },
+      { label: "Web", value: "web" },
+      { label: "同时同步", value: "both" },
+    ],
+  },
+  {
+    key: "SUB2API_AUTO_SYNC_ALLOW_MOBILE_RT",
+    label: "Sub2API 自动同步 Mobile RT",
+    description: "启用后才允许自动同步 Sub2API 中 mobile client 路线账号到 Web 后端。",
+    category: "models",
+    valueType: "boolean",
+    defaultValue: false,
+  },
+  {
+    key: "SUB2API_AUTO_SYNC_PLAN_FILTER",
+    label: "Sub2API 自动同步套餐筛选",
+    description: "自动同步时按 Sub2API credentials.plan_type 过滤账号，默认排除 free。",
+    category: "models",
+    valueType: "select",
+    defaultValue: "non_free",
+    options: [
+      { label: "排除 free", value: "non_free" },
+      { label: "只同步 plus", value: "plus" },
+      { label: "只同步 pro", value: "pro" },
+      { label: "只同步 free", value: "free" },
+      { label: "全部套餐", value: "all" },
+    ],
+  },
+  {
     key: "STORAGE_ACCESS_KEY_ID",
     label: "存储 AccessKey ID",
     description: "S3/R2/MinIO AccessKey ID。",
@@ -1023,6 +1089,14 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     category: "mail",
     valueType: "string",
     secret: true,
+  },
+  {
+    key: "SUPPORT_TICKET_NOTIFICATION_EMAIL",
+    label: "工单通知邮箱",
+    description:
+      "有用户新建工单或追加回复时，发送新动态提醒到这个邮箱；留空则不发送。",
+    category: "mail",
+    valueType: "string",
   },
   {
     key: "REGISTRATION_BONUS_CREDITS",
