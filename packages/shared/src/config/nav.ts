@@ -169,7 +169,7 @@ export const dashboardNav: NavGroup[] = [
         icon: Clock,
       },
       {
-        title: "Backend Help",
+        title: "System Docs",
         href: "/dashboard/backend-help",
         icon: BookOpen,
       },

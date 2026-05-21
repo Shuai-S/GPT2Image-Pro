@@ -372,10 +372,10 @@ export function BuyCreditPackagesView() {
           variant="ghost"
           size="sm"
           className="gap-2 text-muted-foreground"
-          onClick={() => router.push(`/${locale}/dashboard/settings?tab=usage`)}
+          onClick={() => router.push(`/${locale}/dashboard/settings?tab=billing`)}
         >
           <ArrowLeft className="h-4 w-4" />
-          {copy("Back to Usage", "返回用量")}
+          {copy("Back to Billing & Usage", "返回账单与用量")}
         </Button>
       </div>
     </div>

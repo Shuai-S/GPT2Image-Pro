@@ -17,8 +17,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@repo/ui/components/select";
-import { Copy, KeyRound, Loader2, RefreshCw, Trash2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import {
+  Copy,
+  ExternalLink,
+  KeyRound,
+  Loader2,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
+import Link from "next/link";
+import { useLocale, useTranslations } from "next-intl";
 import { useAction } from "next-safe-action/hooks";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -80,6 +88,7 @@ function groupOptionLabel(group: ImageBackendGroupOption) {
 }
 
 export function ExternalApiKeySection() {
+  const locale = useLocale();
   const t = useTranslations("Settings.externalApi");
   const didLoadRef = useRef(false);
   const [keys, setKeys] = useState<ExternalApiKeySummary[]>([]);
@@ -217,6 +226,13 @@ export function ExternalApiKeySection() {
             <p>POST /v1/images/generations</p>
             <p>POST /v1/images/edits</p>
           </div>
+          <Link
+            href={`/${locale}/dashboard/backend-help`}
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+          >
+            详细文档
+            <ExternalLink className="h-3 w-3" />
+          </Link>
         </div>
         <Button
           type="button"

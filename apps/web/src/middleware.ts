@@ -13,7 +13,8 @@ import { routing } from "@/i18n/routing";
  * 创建国际化中间件
  */
 const intlMiddleware = createIntlMiddleware(routing);
-const VERSIONED_ASSET_PREFIX_PATTERN = /^\/gpt2-assets-[^/]+(\/_next\/.*)$/;
+const VERSIONED_ASSET_PREFIX_PATTERN =
+  /^\/(?:gpt2-assets|next-assets)-[^/]+(\/_next\/.*)$/;
 
 /**
  * API 路由限流配置（白名单模式）
@@ -71,7 +72,10 @@ export async function middleware(request: NextRequest) {
 
   if (VERSIONED_ASSET_PREFIX_PATTERN.test(pathname)) {
     const rewrittenUrl = request.nextUrl.clone();
-    rewrittenUrl.pathname = pathname.replace(/^\/gpt2-assets-[^/]+/, "");
+    rewrittenUrl.pathname = pathname.replace(
+      /^\/(?:gpt2-assets|next-assets)-[^/]+/,
+      ""
+    );
     return NextResponse.rewrite(rewrittenUrl);
   }
 

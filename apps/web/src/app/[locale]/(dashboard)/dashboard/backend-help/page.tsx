@@ -6,19 +6,26 @@ import {
   CardHeader,
   CardTitle,
 } from "@repo/ui/components/card";
-import { ArrowDown, ArrowRight, Check, CircleHelp, X } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowRight,
+  Check,
+  CircleHelp,
+  ExternalLink,
+  X,
+} from "lucide-react";
 import { getLocale } from "next-intl/server";
 import { redirect } from "next/navigation";
 
 const sections = {
   zh: {
-    title: "后端链路说明",
+    title: "系统文档",
     subtitle:
-      "这里按当前代码真实链路说明：页面请求、外接 API 请求如何进入后端池，以及 Web、Codex/Responses、外接 API 后端各自如何承接。",
+      "这里按当前代码真实链路说明：六个入口都是协议适配层，不互相 HTTP 调用，最终统一进入同一套生成、扣费、调度和存储链路。",
     flow: {
       title: "请求路由图",
       note:
-        "用户自接 API 目前仍保留最高优先级；没有可用的用户自接 API 时，才进入平台后端池。",
+        "用户自接 API 目前仍保留最高优先级；没有可用的用户自接 API 时，才进入平台后端池。外接接口不会反向请求站内 /api/images/*。",
       entryTitle: "入口",
       resolverTitle: "统一处理",
       groupTitle: "分组选择",
@@ -57,7 +64,7 @@ const sections = {
       ],
       resolver: [
         "校验登录态或外部 API Key",
-        "解析模型、尺寸、质量、审核强度、提示词优化、流式参数",
+        "把页面表单或 OpenAI 兼容请求转换为统一运行参数",
         "计算积分和审核成本",
         "调用 runImageGenerationForUser 进入统一生成链路",
       ],
@@ -76,7 +83,7 @@ const sections = {
         {
           title: "Web 账号池",
           description:
-            "通过 ChatGPT Web 链路承接图片生成/编辑；外部 Responses 请求命中 Web 时会走 Web 适配。",
+            "通过 ChatGPT Web 链路承接页面文生图、图生图和对话生图。",
         },
         {
           title: "Codex/Responses 账号池",
@@ -113,7 +120,7 @@ const sections = {
           "创作页对话生图",
           "/api/images/chat",
           "chat",
-          "当前页面 Chat 入口按 chat 类型选择后端；账号候选以 Responses 账号为主，外接 API 后端需支持 /responses。",
+          "按 chat 类型选择后端；可命中 Web 账号、Codex/Responses 账号或支持 /responses 的外接 API 后端。",
         ],
       ],
       apiRows: [
@@ -121,7 +128,7 @@ const sections = {
           "OpenAI images generation",
           "/v1/images/generations",
           "image_generation",
-          "先验证 API Key 和套餐，再进入同一生成链路；默认返回 b64_json，可显式请求 url。",
+          "验证 API Key 和套餐后进入同一生成链路；默认返回 b64_json，可显式请求 url。",
         ],
         [
           "OpenAI images edit",
@@ -133,7 +140,7 @@ const sections = {
           "OpenAI Responses",
           "/v1/responses",
           "responses",
-          "要求带 image_generation tool；可命中 Codex/Responses 账号，也可命中 Web 适配或外接 /responses API。",
+          "无 tools 时平台补 image_generation；显式传 tools 时必须包含 image_generation。按 responses 类型只调度 Codex/Responses 分组或外接 /responses API。",
         ],
         [
           "OpenAI models",
@@ -143,10 +150,476 @@ const sections = {
         ],
       ],
     },
+    relationship: {
+      title: "六个接口的关系",
+      rows: [
+        [
+          "页面三接口",
+          "/api/images/generate、/api/images/edit、/api/images/chat",
+          "浏览器登录态入口，只负责页面表单、参考图和站内流式事件适配。",
+        ],
+        [
+          "外接三接口",
+          "/v1/images/generations、/v1/images/edits、/v1/responses",
+          "/api/v1/* 是同一 handler 的别名；只负责 API Key、OpenAI 兼容请求和响应格式适配。",
+        ],
+        [
+          "共同核心",
+          "runImageGenerationForUser",
+          "扣费、审核、排队、账号池选择、错误标记、冷却、失败退款和图片存储都在这一层。",
+        ],
+        [
+          "后端执行",
+          "generateImage / editImage / generateChatImage",
+          "按命中的成员转换成 ChatGPT Web、Codex/Responses 或外接 API 请求。",
+        ],
+      ],
+      note:
+        "所以关系不是“外接 API 调页面 API”，而是“六个入口共享同一个 service 层”。",
+    },
+    externalDocs: {
+      title: "外接 API 详细文档",
+      subtitle:
+        "以下按 OpenAI 官方接口形态整理本站当前支持范围。粗体字段为本站扩展或兼容增强，不属于标准 OpenAI 字段。",
+      commonTitle: "通用规则",
+      common: [
+        "所有外接接口都需要 Authorization: Bearer <本站 API Key>。",
+        "/api/v1/* 与 /v1/* 使用同一套 handler，只是路径别名。",
+        "错误响应采用 OpenAI 风格 error 对象；本站可能额外返回 generation_id、generationId、credits_consumed 方便排查和对账。",
+        "外接 API Key 绑定的后端分组优先；未绑定时使用用户默认分组，再回退默认启用分组。",
+      ],
+      officialRefsTitle: "官方参考",
+      officialRefs: [
+        {
+          label: "Images API",
+          href: "https://developers.openai.com/api/reference/resources/images",
+        },
+        {
+          label: "Responses API",
+          href: "https://developers.openai.com/api/reference/resources/responses/methods/create",
+        },
+        {
+          label: "Models API",
+          href: "https://developers.openai.com/api/reference/resources/models/methods/list",
+        },
+      ],
+      fieldHeaders: ["字段", "要求", "说明"],
+      responseHeaders: ["返回字段", "说明"],
+      requestTitle: "请求字段",
+      responseTitle: "返回与流式",
+      notesTitle: "实现说明",
+      customLabel: "本站扩展",
+      docs: [
+        {
+          title: "List models",
+          method: "GET",
+          path: "/v1/models",
+          contentType: "无请求体",
+          description:
+            "兼容 OpenAI List models，用于列出当前 API Key 所属用户可见的图片模型和 Responses 模型。",
+          fields: [
+            {
+              name: "Authorization",
+              requirement: "必填 header",
+              description: "Bearer <本站 API Key>。",
+            },
+          ],
+          responses: [
+            {
+              name: "object",
+              description: "固定为 list。",
+            },
+            {
+              name: "data[].id",
+              description:
+                "模型 ID。包含本站开放的图片模型以及当前套餐可用的 Responses 模型。",
+            },
+            {
+              name: "data[].object / created / owned_by",
+              description: "兼容 OpenAI model object 结构。",
+            },
+          ],
+          notes: [
+            "本站当前只实现模型列表，不实现 /v1/models/{model} 详情。",
+            "返回模型会按套餐过滤；Ultra 用户可见更多 Responses 模型。",
+          ],
+        },
+        {
+          title: "Create image",
+          method: "POST",
+          path: "/v1/images/generations",
+          contentType: "application/json",
+          description:
+            "兼容 OpenAI Images generation。请求会转换成 image_generation 调度类型，进入统一生成链路。",
+          fields: [
+            {
+              name: "prompt",
+              requirement: "必填",
+              description: "图片提示词，最多 4000 字符。",
+            },
+            {
+              name: "model",
+              requirement: "可选",
+              description:
+                "图片模型。本站只接受 gpt-image-* 类图片模型；Responses 对话模型请使用 /v1/responses。",
+            },
+            {
+              name: "n",
+              requirement: "可选",
+              description: "生成数量，1 到 10。",
+            },
+            {
+              name: "size",
+              requirement: "可选",
+              description:
+                "目标尺寸。支持本站分辨率校验规则，非法尺寸会返回参数错误。",
+            },
+            {
+              name: "quality",
+              requirement: "可选",
+              description: "auto、low、medium、high。",
+            },
+            {
+              name: "moderation",
+              requirement: "可选",
+              description: "auto 或 low。",
+            },
+            {
+              name: "response_format",
+              requirement: "可选",
+              description:
+                "url 或 b64_json。默认 b64_json；url 会返回本站存储 URL。",
+            },
+            {
+              name: "stream",
+              requirement: "可选",
+              description: "true 时返回 text/event-stream。",
+            },
+            {
+              name: "apiPrompt / api_prompt",
+              requirement: "可选",
+              custom: true,
+              description:
+                "平台侧已优化或外部传入的实际提示词。传入后会参与提示词优化控制和审核链路。",
+            },
+            {
+              name: "promptOptimization / prompt_optimization",
+              requirement: "可选",
+              custom: true,
+              description:
+                "控制是否使用 apiPrompt 或平台提示词优化。false 时尽量发送原始 prompt。",
+            },
+            {
+              name: "gptModel / gpt_model",
+              requirement: "可选",
+              custom: true,
+              description:
+                "当命中 Codex/Responses 账号池时，作为 Responses 顶层 GPT 模型；普通 Images API 后端可能忽略。",
+            },
+            {
+              name: "thinking",
+              requirement: "可选",
+              custom: true,
+              description:
+                "none、low、medium、high、xhigh。用于支持思考强度的后端。",
+            },
+          ],
+          responses: [
+            {
+              name: "created",
+              description: "Unix 秒时间戳。",
+            },
+            {
+              name: "data[].b64_json / data[].url",
+              description: "按 response_format 返回 base64 或 URL。",
+            },
+            {
+              name: "data[].revised_prompt",
+              description: "上游返回的改写提示词，若有则返回。",
+            },
+            {
+              name: "SSE image_generation.partial_image",
+              description: "流式局部图片事件，包含 partial_image_index 和 b64_json/url。",
+            },
+            {
+              name: "SSE image_generation.completed",
+              description:
+                "流式完成事件；本站额外带 generation_id、generationId、credits_consumed、model、size。",
+              custom: true,
+            },
+          ],
+          notes: [
+            "该接口不会调用页面 /api/images/generate，而是直接进入共享 service 层。",
+            "如果命中 Responses 账号池，内部会把图片请求转换成 Responses image_generation tool 请求。",
+            "如果实际生成尺寸与请求尺寸不一致，本站会按检测到的实际尺寸修正记录和计费。",
+          ],
+        },
+        {
+          title: "Create image edit",
+          method: "POST",
+          path: "/v1/images/edits",
+          contentType: "multipart/form-data 或 application/json",
+          description:
+            "兼容 OpenAI Images edit。multipart 可上传图片；JSON 可使用公网图片 URL。",
+          fields: [
+            {
+              name: "prompt",
+              requirement: "必填",
+              description: "编辑提示词，最多 4000 字符。",
+            },
+            {
+              name: "image / image[] / image_*",
+              requirement: "multipart 必填",
+              description: "参考图文件，最多 16 张。",
+            },
+            {
+              name: "images",
+              requirement: "JSON 可选",
+              description:
+                "图片引用数组。本站支持字符串 URL 或 { image_url/url }；file_id 当前不支持。",
+            },
+            {
+              name: "mask",
+              requirement: "可选",
+              description:
+                "PNG mask 文件；JSON 中可传 URL 形式的 mask 引用。",
+            },
+            {
+              name: "model",
+              requirement: "可选",
+              description: "图片模型，需为 gpt-image-* 类图片模型。",
+            },
+            {
+              name: "n",
+              requirement: "可选",
+              description: "生成数量，1 到 10。",
+            },
+            {
+              name: "size",
+              requirement: "可选",
+              description: "目标尺寸。",
+            },
+            {
+              name: "quality",
+              requirement: "可选",
+              description: "auto、low、medium、high。",
+            },
+            {
+              name: "moderation",
+              requirement: "可选",
+              description: "auto 或 low。",
+            },
+            {
+              name: "response_format",
+              requirement: "可选",
+              description: "url 或 b64_json。默认 b64_json。",
+            },
+            {
+              name: "stream",
+              requirement: "可选",
+              description: "true 时返回 text/event-stream。",
+            },
+            {
+              name: "image_url / image_urls",
+              requirement: "JSON 或表单可选",
+              custom: true,
+              description:
+                "本站便捷写法：直接传单个或多个公网图片 URL，不必包成 images 数组。",
+            },
+            {
+              name: "mask_url / mask_image_url",
+              requirement: "JSON 或表单可选",
+              custom: true,
+              description: "本站便捷写法：直接传 mask 图片 URL。",
+            },
+            {
+              name: "count",
+              requirement: "可选",
+              custom: true,
+              description: "n 的别名。",
+            },
+            {
+              name: "display_size / displaySize",
+              requirement: "可选",
+              custom: true,
+              description:
+                "用于覆盖记录和计费展示尺寸；主要兼容站内 UI 流程。",
+            },
+            {
+              name: "apiPrompt / api_prompt",
+              requirement: "可选",
+              custom: true,
+              description: "同文生图接口。",
+            },
+            {
+              name: "promptOptimization / prompt_optimization",
+              requirement: "可选",
+              custom: true,
+              description: "同文生图接口。",
+            },
+            {
+              name: "gptModel / gpt_model",
+              requirement: "可选",
+              custom: true,
+              description: "同文生图接口。",
+            },
+            {
+              name: "thinking",
+              requirement: "可选",
+              custom: true,
+              description: "同文生图接口。",
+            },
+          ],
+          responses: [
+            {
+              name: "created / data[]",
+              description: "与 /v1/images/generations 相同。",
+            },
+            {
+              name: "SSE image_edit.partial_image",
+              description: "流式局部编辑图片事件。",
+            },
+            {
+              name: "SSE image_edit.completed",
+              description:
+                "流式完成事件；本站额外带 generation_id、generationId、credits_consumed、model、size。",
+              custom: true,
+            },
+          ],
+          notes: [
+            "URL 图片会先由本站服务端下载并校验公网可访问性、类型和大小。",
+            "不支持私网、localhost、metadata/internal 域名或带用户名密码的 URL。",
+            "官方 JSON file_id 图片引用当前未实现，请使用公网 image_url 或 multipart 上传。",
+          ],
+        },
+        {
+          title: "Create response",
+          method: "POST",
+          path: "/v1/responses",
+          contentType: "application/json",
+          description:
+            "基于 OpenAI Responses API 的生图适配入口。它会按 responses 调度类型选择 Codex/Responses 账号池或外接 /responses API 后端。",
+          fields: [
+            {
+              name: "model",
+              requirement: "可选",
+              description:
+                "Responses 顶层模型。可用模型以 /v1/models 返回和套餐权限为准。",
+            },
+            {
+              name: "input",
+              requirement: "必填",
+              description:
+                "字符串，或消息数组。消息 content 支持字符串、input_text/output_text，以及 input_image.image_url。",
+            },
+            {
+              name: "previous_response_id",
+              requirement: "可选",
+              description:
+                "续接上一轮 response。本站会读取内部保存的 webConversation/fallbackHistory 延续上下文。",
+            },
+            {
+              name: "tools",
+              requirement: "可选",
+              description:
+                "若显式传入，必须包含 { type: \"image_generation\" }；未传时本站会自动补 image_generation。",
+            },
+            {
+              name: "tool_choice",
+              requirement: "可选",
+              description: "按 Responses 请求体透传给支持的上游后端。",
+            },
+            {
+              name: "stream",
+              requirement: "可选",
+              description: "true 时返回 Responses 风格 SSE 事件。",
+            },
+            {
+              name: "store",
+              requirement: "可选",
+              description:
+                "兼容接收字段；本站内部会自行保存必要续聊状态，不保证按官方 store 语义透传。",
+            },
+            {
+              name: "reasoning.effort",
+              requirement: "可选",
+              description: "low、medium、high 等思考强度。",
+            },
+            {
+              name: "size",
+              requirement: "可选",
+              custom: true,
+              description:
+                "本站便捷字段：作为 image_generation tool 的 size 默认值。",
+            },
+            {
+              name: "quality",
+              requirement: "可选",
+              custom: true,
+              description:
+                "本站便捷字段：作为 image_generation tool 的 quality 默认值。",
+            },
+            {
+              name: "moderation",
+              requirement: "可选",
+              custom: true,
+              description:
+                "本站便捷字段：作为 image_generation tool 的 moderation 默认值。",
+            },
+            {
+              name: "tools[].model",
+              requirement: "可选",
+              custom: true,
+              description:
+                "当 image_generation tool 中提供 model 时，本站将其作为图片模型。",
+            },
+            {
+              name: "reasoning.effort = none / xhigh",
+              requirement: "可选",
+              custom: true,
+              description:
+                "本站额外接受的思考强度值；最终是否生效取决于命中的后端。",
+            },
+          ],
+          responses: [
+            {
+              name: "id / object / created_at / status / model / output",
+              description: "兼容 Responses response 对象的基本结构。",
+            },
+            {
+              name: "output[].type = image_generation_call",
+              description: "图片结果放在 result 字段，值为 b64_json。",
+            },
+            {
+              name: "output[].type = message",
+              description: "若上游返回文本，会以 output_text 返回。",
+            },
+            {
+              name: "metadata.generation_id / credits_consumed / size",
+              description: "本站生成记录、扣费和尺寸信息。",
+              custom: true,
+            },
+            {
+              name: "SSE response.output_item.done / response.completed",
+              description: "流式输出项完成和整体完成事件。",
+            },
+            {
+              name: "SSE response.output_text.delta / response.reasoning_summary_text.delta",
+              description: "文本和思考摘要增量事件。",
+            },
+          ],
+          notes: [
+            "该接口不是通用 Chat Completions；/v1/chat/completions 当前仍不支持。",
+            "input_image 只支持 image_url/data URL；file_id/file 输入当前不会作为参考图使用。",
+            "显式传 tools 但不包含 image_generation 会返回错误，避免模型只产出文本而不生图。",
+          ],
+        },
+      ],
+    },
     web: {
       title: "Web 账号",
       description:
-        "Web 后端走 ChatGPT 网页接口，主要可控的是主 GPT 对话模型和思考强度。",
+        "Web 后端走 ChatGPT 网页接口，可用于页面文生图、图生图和对话生图，主要可控的是主 GPT 对话模型和思考强度。",
       valid: [
         "GPT 模型会作为 Web 主对话模型传入。",
         "Web 生图没有稳定的独立图片模型字段；本站不会把图片模型映射成 Web 生图模型。",
@@ -156,7 +629,7 @@ const sections = {
       invalid: [
         "Web 账号不提供原生 Responses API 能力。",
         "上游 Web 不一定接受所有 Responses 模型名；不可用时由后端调度和错误标记处理。",
-        "页面 Chat 入口当前不会把普通 Web 账号作为 chat 账号候选；外部 /v1/responses 命中 Web 时会走适配链路。",
+        "外部 /v1/responses 按 responses 类型调度，不会选择 Web 账号。",
         "关闭提示词优化不能保证上游完全不理解或改写提示词，只能尽量减少平台侧改动。",
       ],
     },
@@ -200,13 +673,13 @@ const sections = {
     },
   },
   en: {
-    title: "Backend Routing Help",
+    title: "System Docs",
     subtitle:
-      "The current real request path: how page requests and external API requests enter backend pools, and how Web, Codex/Responses, and external API backends handle them.",
+      "The six endpoints are protocol adapters. They do not call each other over HTTP; they enter the same generation, billing, scheduling, and storage path.",
     flow: {
       title: "Request Routing Diagram",
       note:
-        "User custom API keeps the highest priority for now; when unavailable, the request enters the platform backend pool.",
+        "User custom API keeps the highest priority for now; when unavailable, the request enters the platform backend pool. External endpoints do not call internal /api/images/* routes.",
       entryTitle: "Entry",
       resolverTitle: "Unified Handler",
       groupTitle: "Group Selection",
@@ -245,7 +718,7 @@ const sections = {
       ],
       resolver: [
         "Validate session or external API key",
-        "Parse model, size, quality, moderation, prompt optimization, and streaming",
+        "Convert page forms or OpenAI-compatible requests into unified run parameters",
         "Calculate credits and moderation cost",
         "Call runImageGenerationForUser for the shared generation path",
       ],
@@ -264,7 +737,7 @@ const sections = {
         {
           title: "Web Account Pool",
           description:
-            "Uses the ChatGPT Web path for generation/edit; external Responses requests can be adapted to Web when routed there.",
+            "Uses the ChatGPT Web path for page generation, edit, and image chat.",
         },
         {
           title: "Codex/Responses Pool",
@@ -301,7 +774,7 @@ const sections = {
           "Create page image chat",
           "/api/images/chat",
           "chat",
-          "The page Chat entry uses chat routing; account candidates are mainly Responses accounts, and external API backends must support /responses.",
+          "Uses chat routing; can select Web accounts, Codex/Responses accounts, or external API backends that support /responses.",
         ],
       ],
       apiRows: [
@@ -321,7 +794,7 @@ const sections = {
           "OpenAI Responses",
           "/v1/responses",
           "responses",
-          "Requires the image_generation tool; can route to Codex/Responses accounts, Web adaptation, or external /responses API.",
+          "Adds the image_generation tool when tools are omitted; explicit tools must include image_generation. Responses routing selects Codex/Responses groups or external /responses API backends.",
         ],
         [
           "OpenAI models",
@@ -331,10 +804,477 @@ const sections = {
         ],
       ],
     },
+    relationship: {
+      title: "How The Six Endpoints Relate",
+      rows: [
+        [
+          "Three page endpoints",
+          "/api/images/generate, /api/images/edit, /api/images/chat",
+          "Browser-session entrypoints that adapt page forms, reference images, and internal stream events.",
+        ],
+        [
+          "Three external endpoints",
+          "/v1/images/generations, /v1/images/edits, /v1/responses",
+          "/api/v1/* is an alias to the same handlers; these adapt API keys and OpenAI-compatible request/response formats.",
+        ],
+        [
+          "Shared core",
+          "runImageGenerationForUser",
+          "Credits, moderation, queueing, backend pool selection, error marking, cooldowns, refunds, and storage live here.",
+        ],
+        [
+          "Backend execution",
+          "generateImage / editImage / generateChatImage",
+          "The selected member is converted to a ChatGPT Web, Codex/Responses, or external API request.",
+        ],
+      ],
+      note:
+        "The relationship is not external API -> page API. It is six adapters -> one shared service layer.",
+    },
+    externalDocs: {
+      title: "External API Reference",
+      subtitle:
+        "This documents the currently supported OpenAI-compatible surface. Bold fields are GPT2IMAGE extensions or compatibility additions, not standard OpenAI fields.",
+      commonTitle: "Common Rules",
+      common: [
+        "All external endpoints require Authorization: Bearer <GPT2IMAGE API key>.",
+        "/api/v1/* and /v1/* use the same handlers; they are path aliases.",
+        "Error responses use an OpenAI-style error object. GPT2IMAGE may also return generation_id, generationId, and credits_consumed for debugging and reconciliation.",
+        "A backend group bound to the external API key wins first. Otherwise the user's default group is used, then the enabled platform default group.",
+      ],
+      officialRefsTitle: "Official References",
+      officialRefs: [
+        {
+          label: "Images API",
+          href: "https://developers.openai.com/api/reference/resources/images",
+        },
+        {
+          label: "Responses API",
+          href: "https://developers.openai.com/api/reference/resources/responses/methods/create",
+        },
+        {
+          label: "Models API",
+          href: "https://developers.openai.com/api/reference/resources/models/methods/list",
+        },
+      ],
+      fieldHeaders: ["Field", "Requirement", "Notes"],
+      responseHeaders: ["Response field", "Notes"],
+      requestTitle: "Request Fields",
+      responseTitle: "Response And Streaming",
+      notesTitle: "Implementation Notes",
+      customLabel: "Extension",
+      docs: [
+        {
+          title: "List models",
+          method: "GET",
+          path: "/v1/models",
+          contentType: "No request body",
+          description:
+            "Compatible with OpenAI List models. Lists image models and Responses models visible to the current API key's user.",
+          fields: [
+            {
+              name: "Authorization",
+              requirement: "Required header",
+              description: "Bearer <GPT2IMAGE API key>.",
+            },
+          ],
+          responses: [
+            {
+              name: "object",
+              description: "Always list.",
+            },
+            {
+              name: "data[].id",
+              description:
+                "Model ID. Includes exposed image models and Responses models available to the current plan.",
+            },
+            {
+              name: "data[].object / created / owned_by",
+              description: "Compatible with the OpenAI model object shape.",
+            },
+          ],
+          notes: [
+            "Only model listing is implemented; /v1/models/{model} is not implemented.",
+            "Returned models are filtered by plan. Ultra users can see additional Responses models.",
+          ],
+        },
+        {
+          title: "Create image",
+          method: "POST",
+          path: "/v1/images/generations",
+          contentType: "application/json",
+          description:
+            "Compatible with OpenAI Images generation. Requests become image_generation jobs in the shared generation path.",
+          fields: [
+            {
+              name: "prompt",
+              requirement: "Required",
+              description: "Image prompt, up to 4000 characters.",
+            },
+            {
+              name: "model",
+              requirement: "Optional",
+              description:
+                "Image model. GPT2IMAGE accepts gpt-image-* style image models here. Use /v1/responses for Responses chat models.",
+            },
+            {
+              name: "n",
+              requirement: "Optional",
+              description: "Number of images, 1 to 10.",
+            },
+            {
+              name: "size",
+              requirement: "Optional",
+              description:
+                "Target size. GPT2IMAGE validates the size and rejects invalid values.",
+            },
+            {
+              name: "quality",
+              requirement: "Optional",
+              description: "auto, low, medium, or high.",
+            },
+            {
+              name: "moderation",
+              requirement: "Optional",
+              description: "auto or low.",
+            },
+            {
+              name: "response_format",
+              requirement: "Optional",
+              description:
+                "url or b64_json. Defaults to b64_json. url returns a GPT2IMAGE storage URL.",
+            },
+            {
+              name: "stream",
+              requirement: "Optional",
+              description: "true returns text/event-stream.",
+            },
+            {
+              name: "apiPrompt / api_prompt",
+              requirement: "Optional",
+              custom: true,
+              description:
+                "The effective prompt supplied by the caller or platform prompt optimizer. It participates in prompt optimization control and moderation.",
+            },
+            {
+              name: "promptOptimization / prompt_optimization",
+              requirement: "Optional",
+              custom: true,
+              description:
+                "Controls whether apiPrompt/platform prompt optimization is used. false tries to send the original prompt.",
+            },
+            {
+              name: "gptModel / gpt_model",
+              requirement: "Optional",
+              custom: true,
+              description:
+                "When routed to Codex/Responses accounts, this is the top-level Responses GPT model. Plain Images API backends may ignore it.",
+            },
+            {
+              name: "thinking",
+              requirement: "Optional",
+              custom: true,
+              description:
+                "none, low, medium, high, or xhigh. Used only by backends that support thinking effort.",
+            },
+          ],
+          responses: [
+            {
+              name: "created",
+              description: "Unix timestamp in seconds.",
+            },
+            {
+              name: "data[].b64_json / data[].url",
+              description: "Base64 or URL according to response_format.",
+            },
+            {
+              name: "data[].revised_prompt",
+              description: "Returned when the upstream provides a revised prompt.",
+            },
+            {
+              name: "SSE image_generation.partial_image",
+              description:
+                "Streaming partial image event with partial_image_index and b64_json/url.",
+            },
+            {
+              name: "SSE image_generation.completed",
+              description:
+                "Streaming completion event. GPT2IMAGE also includes generation_id, generationId, credits_consumed, model, and size.",
+              custom: true,
+            },
+          ],
+          notes: [
+            "This endpoint does not call page /api/images/generate; it directly enters the shared service layer.",
+            "When routed to a Responses account, the image request is converted into a Responses image_generation tool request.",
+            "If the actual generated dimensions differ from the requested size, GPT2IMAGE records and bills using the detected actual size.",
+          ],
+        },
+        {
+          title: "Create image edit",
+          method: "POST",
+          path: "/v1/images/edits",
+          contentType: "multipart/form-data or application/json",
+          description:
+            "Compatible with OpenAI Images edit. multipart uploads files; JSON can reference public image URLs.",
+          fields: [
+            {
+              name: "prompt",
+              requirement: "Required",
+              description: "Edit prompt, up to 4000 characters.",
+            },
+            {
+              name: "image / image[] / image_*",
+              requirement: "Required for multipart",
+              description: "Reference image files, up to 16 images.",
+            },
+            {
+              name: "images",
+              requirement: "Optional for JSON",
+              description:
+                "Image reference array. GPT2IMAGE accepts string URLs or { image_url/url }. file_id is not supported.",
+            },
+            {
+              name: "mask",
+              requirement: "Optional",
+              description:
+                "PNG mask file; JSON can provide a mask URL reference.",
+            },
+            {
+              name: "model",
+              requirement: "Optional",
+              description: "Image model; must be a gpt-image-* style image model.",
+            },
+            {
+              name: "n",
+              requirement: "Optional",
+              description: "Number of outputs, 1 to 10.",
+            },
+            {
+              name: "size",
+              requirement: "Optional",
+              description: "Target size.",
+            },
+            {
+              name: "quality",
+              requirement: "Optional",
+              description: "auto, low, medium, or high.",
+            },
+            {
+              name: "moderation",
+              requirement: "Optional",
+              description: "auto or low.",
+            },
+            {
+              name: "response_format",
+              requirement: "Optional",
+              description: "url or b64_json. Defaults to b64_json.",
+            },
+            {
+              name: "stream",
+              requirement: "Optional",
+              description: "true returns text/event-stream.",
+            },
+            {
+              name: "image_url / image_urls",
+              requirement: "Optional JSON or form field",
+              custom: true,
+              description:
+                "Convenience fields for one or more public image URLs, without wrapping them in images.",
+            },
+            {
+              name: "mask_url / mask_image_url",
+              requirement: "Optional JSON or form field",
+              custom: true,
+              description: "Convenience fields for a mask image URL.",
+            },
+            {
+              name: "count",
+              requirement: "Optional",
+              custom: true,
+              description: "Alias for n.",
+            },
+            {
+              name: "display_size / displaySize",
+              requirement: "Optional",
+              custom: true,
+              description:
+                "Overrides display/recorded size for compatibility with the internal UI flow.",
+            },
+            {
+              name: "apiPrompt / api_prompt",
+              requirement: "Optional",
+              custom: true,
+              description: "Same as Create image.",
+            },
+            {
+              name: "promptOptimization / prompt_optimization",
+              requirement: "Optional",
+              custom: true,
+              description: "Same as Create image.",
+            },
+            {
+              name: "gptModel / gpt_model",
+              requirement: "Optional",
+              custom: true,
+              description: "Same as Create image.",
+            },
+            {
+              name: "thinking",
+              requirement: "Optional",
+              custom: true,
+              description: "Same as Create image.",
+            },
+          ],
+          responses: [
+            {
+              name: "created / data[]",
+              description: "Same as /v1/images/generations.",
+            },
+            {
+              name: "SSE image_edit.partial_image",
+              description: "Streaming partial edited image event.",
+            },
+            {
+              name: "SSE image_edit.completed",
+              description:
+                "Streaming completion event. GPT2IMAGE also includes generation_id, generationId, credits_consumed, model, and size.",
+              custom: true,
+            },
+          ],
+          notes: [
+            "URL images are downloaded server-side and checked for public reachability, type, and size.",
+            "Private networks, localhost, metadata/internal hosts, and URLs with credentials are rejected.",
+            "Official JSON file_id image references are not implemented. Use public image_url or multipart uploads.",
+          ],
+        },
+        {
+          title: "Create response",
+          method: "POST",
+          path: "/v1/responses",
+          contentType: "application/json",
+          description:
+            "A GPT2IMAGE image-generation adapter based on the OpenAI Responses API. It routes as responses and selects Codex/Responses groups or external /responses API backends.",
+          fields: [
+            {
+              name: "model",
+              requirement: "Optional",
+              description:
+                "Top-level Responses model. Availability is determined by /v1/models and the current plan.",
+            },
+            {
+              name: "input",
+              requirement: "Required",
+              description:
+                "A string or message array. Message content supports strings, input_text/output_text, and input_image.image_url.",
+            },
+            {
+              name: "previous_response_id",
+              requirement: "Optional",
+              description:
+                "Continues a previous response. GPT2IMAGE loads stored webConversation/fallbackHistory continuation state.",
+            },
+            {
+              name: "tools",
+              requirement: "Optional",
+              description:
+                "If provided, must include { type: \"image_generation\" }. If omitted, GPT2IMAGE adds image_generation automatically.",
+            },
+            {
+              name: "tool_choice",
+              requirement: "Optional",
+              description: "Passed through to compatible Responses upstreams.",
+            },
+            {
+              name: "stream",
+              requirement: "Optional",
+              description: "true returns Responses-style SSE events.",
+            },
+            {
+              name: "store",
+              requirement: "Optional",
+              description:
+                "Accepted for compatibility. GPT2IMAGE stores continuation state internally and does not guarantee official store semantics.",
+            },
+            {
+              name: "reasoning.effort",
+              requirement: "Optional",
+              description: "low, medium, high, etc.",
+            },
+            {
+              name: "size",
+              requirement: "Optional",
+              custom: true,
+              description:
+                "Convenience field used as the image_generation tool size default.",
+            },
+            {
+              name: "quality",
+              requirement: "Optional",
+              custom: true,
+              description:
+                "Convenience field used as the image_generation tool quality default.",
+            },
+            {
+              name: "moderation",
+              requirement: "Optional",
+              custom: true,
+              description:
+                "Convenience field used as the image_generation tool moderation default.",
+            },
+            {
+              name: "tools[].model",
+              requirement: "Optional",
+              custom: true,
+              description:
+                "When provided on the image_generation tool, GPT2IMAGE treats it as the image model.",
+            },
+            {
+              name: "reasoning.effort = none / xhigh",
+              requirement: "Optional",
+              custom: true,
+              description:
+                "Additional thinking effort values accepted by GPT2IMAGE. Actual support depends on the selected backend.",
+            },
+          ],
+          responses: [
+            {
+              name: "id / object / created_at / status / model / output",
+              description: "Compatible with the basic Responses response object.",
+            },
+            {
+              name: "output[].type = image_generation_call",
+              description: "Image result is returned in result as b64_json.",
+            },
+            {
+              name: "output[].type = message",
+              description: "Upstream text, when present, is returned as output_text.",
+            },
+            {
+              name: "metadata.generation_id / credits_consumed / size",
+              description: "GPT2IMAGE generation record, billing, and size metadata.",
+              custom: true,
+            },
+            {
+              name: "SSE response.output_item.done / response.completed",
+              description: "Streaming output item and completion events.",
+            },
+            {
+              name: "SSE response.output_text.delta / response.reasoning_summary_text.delta",
+              description: "Text and reasoning summary delta events.",
+            },
+          ],
+          notes: [
+            "This is not Chat Completions. /v1/chat/completions is still unsupported.",
+            "input_image supports image_url/data URLs. file_id/file inputs are not used as references today.",
+            "If tools is provided without image_generation, GPT2IMAGE returns an error to avoid text-only responses.",
+          ],
+        },
+      ],
+    },
     web: {
       title: "Web Accounts",
       description:
-        "Web backends use the ChatGPT web interface; the controllable fields are mainly the main GPT conversation model and thinking level.",
+        "Web backends use the ChatGPT web interface for page generation, edit, and image chat. The controllable fields are mainly the main GPT conversation model and thinking level.",
       valid: [
         "GPT model is sent as the main Web conversation model.",
         "Web image generation has no stable separate image model field; this service does not map image models into Web image model slugs.",
@@ -344,7 +1284,7 @@ const sections = {
       invalid: [
         "Web accounts do not provide native Responses API capability.",
         "The upstream Web endpoint may not accept every Responses model name; backend routing and error marking handle unavailable accounts.",
-        "The page Chat entry currently does not select ordinary Web accounts as chat account candidates; external /v1/responses routed to Web uses the adaptation path.",
+        "External /v1/responses uses responses routing and does not select Web accounts.",
         "Disabling prompt optimization cannot guarantee the upstream never interprets or revises the prompt.",
       ],
     },
@@ -390,6 +1330,28 @@ const sections = {
 } as const;
 
 type TableRow = readonly [string, string, string, string];
+type RelationshipRow = readonly [string, string, string];
+type ExternalApiField = {
+  name: string;
+  requirement?: string;
+  description: string;
+  custom?: boolean;
+};
+type ExternalApiResponseField = {
+  name: string;
+  description: string;
+  custom?: boolean;
+};
+type ExternalApiDoc = {
+  title: string;
+  method: string;
+  path: string;
+  contentType: string;
+  description: string;
+  fields: readonly ExternalApiField[];
+  responses: readonly ExternalApiResponseField[];
+  notes: readonly string[];
+};
 
 function ListBlock({
   items,
@@ -560,6 +1522,275 @@ function RouteTable({
   );
 }
 
+function RelationshipTable({
+  relationship,
+}: {
+  relationship:
+    | (typeof sections.zh.relationship)
+    | (typeof sections.en.relationship);
+}) {
+  return (
+    <Card className="rounded-lg">
+      <CardHeader>
+        <CardTitle className="text-base">{relationship.title}</CardTitle>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          {relationship.note}
+        </p>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-hidden rounded-md border">
+          {relationship.rows.map(([name, endpoints, description]: RelationshipRow) => (
+            <div
+              className="grid gap-2 border-b p-3 text-sm last:border-b-0 md:grid-cols-[160px_1.3fr_1.7fr]"
+              key={name}
+            >
+              <div className="font-medium text-foreground">{name}</div>
+              <div className="font-mono text-xs leading-relaxed text-muted-foreground">
+                {endpoints}
+              </div>
+              <div className="text-muted-foreground">{description}</div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ExternalApiDocs({
+  docs,
+}: {
+  docs: (typeof sections.zh.externalDocs) | (typeof sections.en.externalDocs);
+}) {
+  return (
+    <Card className="rounded-lg">
+      <CardHeader>
+        <CardTitle className="text-base">{docs.title}</CardTitle>
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          {docs.subtitle}
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+          <div className="rounded-md border p-4">
+            <h3 className="text-sm font-medium">{docs.commonTitle}</h3>
+            <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
+              {docs.common.map((item) => (
+                <li className="flex gap-2" key={item}>
+                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="rounded-md border p-4">
+            <h3 className="text-sm font-medium">{docs.officialRefsTitle}</h3>
+            <div className="mt-3 space-y-2">
+              {docs.officialRefs.map((ref) => (
+                <a
+                  className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+                  href={ref.href}
+                  key={ref.href}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  <span>{ref.label}</span>
+                  <ExternalLink className="h-4 w-4 text-muted-foreground" />
+                </a>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-5">
+          {docs.docs.map((doc) => (
+            <ExternalEndpointDoc
+              customLabel={docs.customLabel}
+              doc={doc}
+              fieldHeaders={docs.fieldHeaders}
+              key={doc.path}
+              notesTitle={docs.notesTitle}
+              requestTitle={docs.requestTitle}
+              responseHeaders={docs.responseHeaders}
+              responseTitle={docs.responseTitle}
+            />
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function CustomMarker({ label }: { label: string }) {
+  return (
+    <Badge variant="secondary" className="rounded-sm text-[10px]">
+      {label}
+    </Badge>
+  );
+}
+
+function FieldName({
+  field,
+  customLabel,
+}: {
+  field: ExternalApiField | ExternalApiResponseField;
+  customLabel: string;
+}) {
+  return (
+    <div className="space-y-1">
+      <div
+        className={`font-mono text-xs leading-relaxed ${
+          field.custom ? "font-bold text-foreground" : "text-muted-foreground"
+        }`}
+      >
+        {field.name}
+      </div>
+      {field.custom && <CustomMarker label={customLabel} />}
+    </div>
+  );
+}
+
+function ExternalEndpointDoc({
+  doc,
+  fieldHeaders,
+  responseHeaders,
+  requestTitle,
+  responseTitle,
+  notesTitle,
+  customLabel,
+}: {
+  doc: ExternalApiDoc;
+  fieldHeaders: readonly string[];
+  responseHeaders: readonly string[];
+  requestTitle: string;
+  responseTitle: string;
+  notesTitle: string;
+  customLabel: string;
+}) {
+  return (
+    <section className="overflow-hidden rounded-md border">
+      <div className="space-y-3 border-b bg-muted/20 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline" className="rounded-sm font-mono">
+            {doc.method}
+          </Badge>
+          <span className="font-mono text-sm font-medium">{doc.path}</span>
+          <Badge variant="secondary" className="rounded-sm font-mono text-[10px]">
+            {doc.contentType}
+          </Badge>
+        </div>
+        <div>
+          <h3 className="text-base font-medium">{doc.title}</h3>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+            {doc.description}
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-5 p-4">
+        <EndpointFieldTable
+          customLabel={customLabel}
+          fields={doc.fields}
+          headers={fieldHeaders}
+          title={requestTitle}
+        />
+        <EndpointResponseTable
+          customLabel={customLabel}
+          fields={doc.responses}
+          headers={responseHeaders}
+          title={responseTitle}
+        />
+        <div>
+          <h4 className="text-sm font-medium">{notesTitle}</h4>
+          <ul className="mt-2 space-y-2 text-sm text-muted-foreground">
+            {doc.notes.map((note) => (
+              <li className="flex gap-2" key={note}>
+                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/60" />
+                <span>{note}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function EndpointFieldTable({
+  title,
+  headers,
+  fields,
+  customLabel,
+}: {
+  title: string;
+  headers: readonly string[];
+  fields: readonly ExternalApiField[];
+  customLabel: string;
+}) {
+  return (
+    <div>
+      <h4 className="text-sm font-medium">{title}</h4>
+      <div className="mt-2 overflow-hidden rounded-md border">
+        <div className="hidden grid-cols-[1.1fr_0.75fr_1.8fr] border-b bg-muted/40 text-xs font-medium text-muted-foreground md:grid">
+          {headers.map((header) => (
+            <div className="px-3 py-2" key={header}>
+              {header}
+            </div>
+          ))}
+        </div>
+        {fields.map((field) => (
+          <div
+            className="grid gap-2 border-b p-3 text-sm last:border-b-0 md:grid-cols-[1.1fr_0.75fr_1.8fr]"
+            key={field.name}
+          >
+            <FieldName customLabel={customLabel} field={field} />
+            <div className="text-muted-foreground">
+              {field.requirement || "-"}
+            </div>
+            <div className="text-muted-foreground">{field.description}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EndpointResponseTable({
+  title,
+  headers,
+  fields,
+  customLabel,
+}: {
+  title: string;
+  headers: readonly string[];
+  fields: readonly ExternalApiResponseField[];
+  customLabel: string;
+}) {
+  return (
+    <div>
+      <h4 className="text-sm font-medium">{title}</h4>
+      <div className="mt-2 overflow-hidden rounded-md border">
+        <div className="hidden grid-cols-[1.2fr_2fr] border-b bg-muted/40 text-xs font-medium text-muted-foreground md:grid">
+          {headers.map((header) => (
+            <div className="px-3 py-2" key={header}>
+              {header}
+            </div>
+          ))}
+        </div>
+        {fields.map((field) => (
+          <div
+            className="grid gap-2 border-b p-3 text-sm last:border-b-0 md:grid-cols-[1.2fr_2fr]"
+            key={field.name}
+          >
+            <FieldName customLabel={customLabel} field={field} />
+            <div className="text-muted-foreground">{field.description}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default async function BackendHelpPage() {
   const user = await getCurrentUser();
   const locale = await getLocale();
@@ -582,6 +1813,10 @@ export default async function BackendHelpPage() {
       </div>
 
       <RouteDiagram flow={content.flow} />
+
+      <RelationshipTable relationship={content.relationship} />
+
+      <ExternalApiDocs docs={content.externalDocs} />
 
       <Card className="rounded-lg">
         <CardHeader>

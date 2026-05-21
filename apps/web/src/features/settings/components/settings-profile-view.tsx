@@ -2,10 +2,10 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Camera, Loader2 } from "lucide-react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useAction } from "next-safe-action/hooks";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import type { z } from "zod";
@@ -92,6 +92,7 @@ export function SettingsProfileView({ user }: SettingsProfileViewProps) {
   const locale = useLocale();
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const params = useParams();
   const [isChangingLocale, startLocaleTransition] = useTransition();
 
@@ -101,6 +102,21 @@ export function SettingsProfileView({ user }: SettingsProfileViewProps) {
   const [userPlan, setUserPlan] = useState<SubscriptionPlan>("free");
   const moderationOptions = getAllowedModerationBlockRiskLevels(userPlan);
   const moderationControlAllowed = canUseModerationRiskLevelControl(userPlan);
+  const normalizeTab = useCallback((value: string | null) => {
+    if (value === "billing" || value === "usage") return "billing";
+    if (
+      value === "security" ||
+      value === "backend" ||
+      value === "advanced" ||
+      value === "account"
+    ) {
+      return value;
+    }
+    return "account";
+  }, []);
+  const [activeTab, setActiveTab] = useState(() =>
+    normalizeTab(searchParams.get("tab"))
+  );
 
   const handleLanguageChange = (newLocale: string) => {
     startLocaleTransition(() => {
@@ -144,6 +160,10 @@ export function SettingsProfileView({ user }: SettingsProfileViewProps) {
       }
     });
   }, [form]);
+
+  useEffect(() => {
+    setActiveTab(normalizeTab(searchParams.get("tab")));
+  }, [searchParams, normalizeTab]);
 
   const { execute: executeUpdateProfile, isPending } = useAction(
     updateProfileAction,
@@ -282,7 +302,7 @@ export function SettingsProfileView({ user }: SettingsProfileViewProps) {
 
   return (
     <div className="max-w-4xl space-y-8">
-      <Tabs defaultValue="account" className="w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <div className="border-b border-border pb-2">
           <TabsList className="h-auto gap-1 bg-transparent p-0">
             <TabsTrigger
@@ -302,12 +322,6 @@ export function SettingsProfileView({ user }: SettingsProfileViewProps) {
               className="rounded-md border border-transparent px-4 py-2 data-[state=active]:border-foreground/20 data-[state=active]:bg-foreground/5 data-[state=active]:text-foreground data-[state=active]:shadow-none"
             >
               {tTabs("billing")}
-            </TabsTrigger>
-            <TabsTrigger
-              value="usage"
-              className="rounded-md border border-transparent px-4 py-2 data-[state=active]:border-foreground/20 data-[state=active]:bg-foreground/5 data-[state=active]:text-foreground data-[state=active]:shadow-none"
-            >
-              {tTabs("usage")}
             </TabsTrigger>
             <TabsTrigger
               value="backend"
@@ -605,11 +619,21 @@ export function SettingsProfileView({ user }: SettingsProfileViewProps) {
         </TabsContent>
 
         <TabsContent value="billing" className="mt-8 pl-4">
+          <div className="mb-6 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-semibold">{tTabs("billing")}</h2>
+              <p className="text-sm text-muted-foreground">
+                订阅、账单历史和积分用量都在这里。
+              </p>
+            </div>
+          </div>
           <BillingSection />
-        </TabsContent>
-
-        <TabsContent value="usage" className="mt-8 pl-4">
-          <CreditUsageSection />
+          <div className="mt-8">
+            <h3 className="mb-2 text-sm font-medium text-foreground">
+              {tTabs("usage")}
+            </h3>
+            <CreditUsageSection />
+          </div>
         </TabsContent>
 
         <TabsContent value="backend" className="mt-8 space-y-6 pl-4">

@@ -542,7 +542,7 @@ export const createCreditsPurchaseCheckout = withProtectedCreditsAction(
       product_id: `credits_${packageId}`, // 需要在 Creem 后台创建对应产品
       success_url:
         successUrl ??
-        `${baseUrl}/dashboard/settings?tab=usage&success=true&credits=${creditsAmount}`,
+        `${baseUrl}/dashboard/settings?tab=billing&success=true&credits=${creditsAmount}`,
       request_id: `credit_purchase_${userId}_${Date.now()}`,
       metadata: {
         userId,

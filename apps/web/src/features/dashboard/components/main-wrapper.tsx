@@ -23,6 +23,7 @@ function getPageTitleKey(pathname: string): string {
     "/dashboard/credits/buy": "creditsBuy",
     "/dashboard/support": "support",
     "/dashboard/support/new": "newTicket",
+    "/dashboard/backend-help": "backendHelp",
     "/dashboard/settings": "settings",
     "/dashboard/admin/users": "userManagement",
     "/dashboard/admin/settings": "systemSettings",
