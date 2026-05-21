@@ -106,15 +106,6 @@ export type SettingKey =
   | "IMAGE_BACKEND_UNRECOVERABLE_ERROR_KEYWORDS"
   | "SUB2API_POSTGRES_URL"
   | "SUB2API_POSTGRES_SYNC_LIMIT"
-  | "OPENAI_API_KEY"
-  | "OPENAI_MODEL"
-  | "DEEPSEEK_API_KEY"
-  | "DEEPSEEK_MODEL"
-  | "MIMO_API_KEY"
-  | "MIMO_MODEL"
-  | "CF_AIG_BASE_URL"
-  | "CF_AIG_TOKEN"
-  | "AI_PROVIDER"
   | "STORAGE_ACCESS_KEY_ID"
   | "STORAGE_SECRET_ACCESS_KEY"
   | "STORAGE_ENDPOINT"
@@ -908,82 +899,6 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     category: "models",
     valueType: "number",
     defaultValue: 100,
-  },
-  {
-    key: "AI_PROVIDER",
-    label: "旧 AI 提供商",
-    description: "兼容旧对话/文档模块，可选 openai、deepseek、mimo。",
-    category: "models",
-    valueType: "select",
-    options: [
-      { label: "OpenAI", value: "openai" },
-      { label: "DeepSeek", value: "deepseek" },
-      { label: "MiMo", value: "mimo" },
-    ],
-    defaultValue: "openai",
-  },
-  {
-    key: "OPENAI_API_KEY",
-    label: "OpenAI API Key",
-    description: "旧通用 OpenAI 客户端密钥；审核优先使用专用审核密钥。",
-    category: "models",
-    valueType: "string",
-    secret: true,
-  },
-  {
-    key: "OPENAI_MODEL",
-    label: "OpenAI 文本模型",
-    description: "旧通用 OpenAI 客户端默认模型。",
-    category: "models",
-    valueType: "string",
-    defaultValue: "gpt-4o-mini",
-  },
-  {
-    key: "DEEPSEEK_API_KEY",
-    label: "DeepSeek API Key",
-    description: "旧 DeepSeek 客户端密钥。",
-    category: "models",
-    valueType: "string",
-    secret: true,
-  },
-  {
-    key: "DEEPSEEK_MODEL",
-    label: "DeepSeek 文本模型",
-    description: "旧 DeepSeek 客户端默认模型。",
-    category: "models",
-    valueType: "string",
-    defaultValue: "deepseek-chat",
-  },
-  {
-    key: "MIMO_API_KEY",
-    label: "MiMo API Key",
-    description: "旧小米 MiMo 客户端密钥。",
-    category: "models",
-    valueType: "string",
-    secret: true,
-  },
-  {
-    key: "MIMO_MODEL",
-    label: "MiMo 文本模型",
-    description: "旧小米 MiMo 客户端默认模型。",
-    category: "models",
-    valueType: "string",
-    defaultValue: "mimo-v2-flash",
-  },
-  {
-    key: "CF_AIG_BASE_URL",
-    label: "Cloudflare AI Gateway",
-    description: "旧 AI Gateway 基础地址。",
-    category: "models",
-    valueType: "string",
-  },
-  {
-    key: "CF_AIG_TOKEN",
-    label: "Cloudflare AI Gateway Token",
-    description: "旧 AI Gateway 鉴权 Token。",
-    category: "models",
-    valueType: "string",
-    secret: true,
   },
   {
     key: "STORAGE_ACCESS_KEY_ID",

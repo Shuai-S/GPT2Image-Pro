@@ -80,7 +80,7 @@ SMTP_PASS="your-smtp-password-or-app-password"
 |------|---------|------|
 | **Creem 支付** | `CREEM_API_KEY`, `CREEM_WEBHOOK_SECRET` | 订阅和一次性支付 |
 | **S3/R2 存储** | `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY_ID`, `STORAGE_SECRET_ACCESS_KEY` | 文件上传 |
-| **AI 集成** | `AI_PROVIDER`, `OPENAI_API_KEY` 等 | LLM 调用抽象层 |
+| **图像后端** | 后台账号池 / 后端分组 | API、Web、Codex 账号调度 |
 | **Upstash Redis** | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | API 限流 |
 | **Axiom 日志** | `AXIOM_TOKEN`, `AXIOM_DATASET` | 云端结构化日志 |
 | **Sentry 监控** | `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_AUTH_TOKEN` | 错误追踪 |

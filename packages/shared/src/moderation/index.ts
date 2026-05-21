@@ -147,8 +147,7 @@ async function getAliyunConfig(): Promise<AliyunConfig | null> {
 async function getOpenAiApiKey() {
   return (
     (await runtimeValue("OPENAI_MODERATION_API_KEY")) ||
-    envValue("MODERATION_OPENAI_API_KEY") ||
-    envValue("OPENAI_API_KEY")
+    envValue("MODERATION_OPENAI_API_KEY")
   );
 }
 
