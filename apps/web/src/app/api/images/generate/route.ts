@@ -5,6 +5,10 @@ import { z } from "zod";
 
 import { runImageGenerationForUser } from "@/features/image-generation/operations";
 import {
+  firstBatchError,
+  runBatchImageGeneration,
+} from "@/features/image-generation/batch-runner";
+import {
   DEFAULT_IMAGE_SIZE,
   validateImageSize,
 } from "@/features/image-generation/resolution";
@@ -87,8 +91,11 @@ export const POST = withApiLogging(async (request: NextRequest) => {
 
     if (useStreamResponse) {
       return createImageStreamResponse(async (emit) => {
-        for (let index = 0; index < count; index++) {
-          const result = await runImageGenerationForUser(input, {
+        await runBatchImageGeneration({
+          count,
+          run: (generationId, callbacks) =>
+            runImageGenerationForUser({ ...input, generationId }, callbacks),
+          callbacks: (index) => ({
             onPartialImage: async (image) => {
               await emit({
                 type: "partial_image",
@@ -98,20 +105,21 @@ export const POST = withApiLogging(async (request: NextRequest) => {
                 url: image.imageUrl,
               });
             },
-          });
-
-          if (result.error) {
-            await emit({
-              type: "error",
-              error: result.error,
-              generationId: result.generationId,
-              creditsConsumed: result.creditsConsumed,
-            });
-            return null;
-          }
-
-          await emit({ type: "completed", ...result });
-        }
+          }),
+          onResult: async (result) => {
+            if (result.error) {
+              await emit({
+                type: "error",
+                error: result.error,
+                generationId: result.generationId,
+                creditsConsumed: result.creditsConsumed,
+              });
+              return;
+            }
+            await emit({ type: "completed", ...result });
+          },
+          stopOnError: true,
+        });
 
         return null;
       });
@@ -121,16 +129,14 @@ export const POST = withApiLogging(async (request: NextRequest) => {
       return NextResponse.json(await runImageGenerationForUser(input));
     }
 
-    const results = [];
-    for (let index = 0; index < count; index++) {
-      const result = await runImageGenerationForUser(input);
-      results.push(result);
-      if (result.error) break;
-    }
+    const results = await runBatchImageGeneration({
+      count,
+      run: () => runImageGenerationForUser(input),
+    });
 
     return NextResponse.json({
       results,
-      error: results.find((result) => result.error)?.error,
+      error: firstBatchError(results)?.error,
     });
   } catch (error) {
     return generationErrorResponse(error);

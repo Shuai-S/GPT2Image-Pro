@@ -124,7 +124,7 @@ export function HistoryClient({
   return (
     <>
       <div className="overflow-hidden rounded-lg border border-border bg-background">
-        <div className="hidden grid-cols-[64px_1fr_120px_100px_80px_100px_150px] items-center gap-4 border-b border-border bg-muted/30 px-4 py-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground md:grid">
+        <div className="hidden grid-cols-[64px_minmax(0,1fr)_150px_90px_74px_92px_128px] items-center gap-3 border-b border-border bg-muted/30 px-4 py-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground md:grid">
           <div>{copy("Image", "图片")}</div>
           <div>{copy("Prompt", "提示词")}</div>
           <div>{copy("Model", "模型")}</div>
@@ -140,7 +140,7 @@ export function HistoryClient({
               <button
                 type="button"
                 onClick={() => setSelectedId(item.id)}
-                className="grid w-full grid-cols-[48px_1fr] items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40 md:grid-cols-[64px_1fr_120px_100px_80px_100px_150px] md:gap-4"
+                className="grid w-full grid-cols-[56px_minmax(0,1fr)] items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40 md:grid-cols-[64px_minmax(0,1fr)_150px_90px_74px_92px_128px] md:items-center md:gap-3"
               >
                 <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded border border-border bg-muted md:h-14 md:w-14">
                   {item.imageUrl && item.status === "completed" ? (
@@ -160,9 +160,14 @@ export function HistoryClient({
                 </div>
 
                 <div className="min-w-0">
-                  <p className="truncate text-sm text-foreground">
+                  <p className="line-clamp-2 break-words text-sm leading-snug text-foreground">
                     {item.prompt}
                   </p>
+                  {item.error ? (
+                    <p className="mt-1 line-clamp-2 break-words text-xs leading-snug text-destructive">
+                      {item.error}
+                    </p>
+                  ) : null}
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground md:hidden">
                     <span className="font-mono">{item.model}</span>
                     <span>·</span>
@@ -177,7 +182,10 @@ export function HistoryClient({
                   </div>
                 </div>
 
-                <div className="hidden font-mono text-xs text-foreground md:block">
+                <div
+                  className="hidden min-w-0 truncate font-mono text-xs text-foreground md:block"
+                  title={item.model}
+                >
                   {item.model}
                 </div>
                 <div className="hidden font-mono text-xs text-foreground md:block">
@@ -196,7 +204,7 @@ export function HistoryClient({
                 </div>
                 <div className="hidden items-center gap-1 text-xs text-muted-foreground md:flex">
                   <Clock className="h-3 w-3" />
-                  {formatDate(item.createdAt, locale)}
+                  <span className="truncate">{formatDate(item.createdAt, locale)}</span>
                 </div>
               </button>
             </li>

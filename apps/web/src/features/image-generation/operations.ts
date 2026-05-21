@@ -21,6 +21,7 @@ import {
   DEFAULT_IMAGE_SIZE,
   getImageCreditCostBreakdown,
   getImageModel,
+  normalizeImageSize,
   roundCreditAmount,
 } from "./resolution";
 import {
@@ -37,6 +38,7 @@ import type {
   ChatImageParams,
   EditImageParams,
   GenerateImageParams,
+  GenerateImageResult,
   ImageGenerationCallbacks,
   ImageInputFile,
   ModerationBlockRiskLevel,
@@ -49,6 +51,7 @@ type RunImageGenerationInput =
       generationId?: string;
       apiKeyId?: string;
       backendRequestKind?: ImageBackendRequestKind;
+      preferredBackendMemberId?: string;
     } & GenerateImageParams)
   | ({
       mode: "edit";
@@ -56,6 +59,7 @@ type RunImageGenerationInput =
       generationId?: string;
       apiKeyId?: string;
       backendRequestKind?: ImageBackendRequestKind;
+      preferredBackendMemberId?: string;
     } & EditImageParams)
   | ({
       mode: "chat";
@@ -63,6 +67,7 @@ type RunImageGenerationInput =
       generationId?: string;
       apiKeyId?: string;
       backendRequestKind?: ImageBackendRequestKind;
+      preferredBackendMemberId?: string;
     } & ChatImageParams);
 
 const CHAT_TEXT_ONLY_CREDITS = 1;
@@ -79,6 +84,7 @@ export type ImageGenerationOperationResult = {
   revisedPrompt?: string;
   responseText?: string;
   responseThinking?: string;
+  webConversation?: GenerateImageResult["webConversation"];
   creditsConsumed?: number;
 };
 
@@ -104,6 +110,103 @@ async function toImageBuffer(result: {
   }
 
   return Buffer.from(await response.arrayBuffer());
+}
+
+function readUInt24LE(buffer: Buffer, offset: number) {
+  return buffer.readUIntLE(offset, 3);
+}
+
+function getPngDimensions(buffer: Buffer) {
+  if (
+    buffer.length < 24 ||
+    buffer.readUInt32BE(0) !== 0x89504e47 ||
+    buffer.readUInt32BE(4) !== 0x0d0a1a0a
+  ) {
+    return null;
+  }
+  return {
+    width: buffer.readUInt32BE(16),
+    height: buffer.readUInt32BE(20),
+  };
+}
+
+function getJpegDimensions(buffer: Buffer) {
+  if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8) {
+    return null;
+  }
+
+  let offset = 2;
+  while (offset + 9 < buffer.length) {
+    if (buffer[offset] !== 0xff) {
+      offset++;
+      continue;
+    }
+
+    const marker = buffer.readUInt8(offset + 1);
+    offset += 2;
+    if (marker === 0xd9 || marker === 0xda) break;
+    if (offset + 2 > buffer.length) break;
+
+    const length = buffer.readUInt16BE(offset);
+    if (length < 2 || offset + length > buffer.length) break;
+
+    const isStartOfFrame =
+      (marker >= 0xc0 && marker <= 0xc3) ||
+      (marker >= 0xc5 && marker <= 0xc7) ||
+      (marker >= 0xc9 && marker <= 0xcb) ||
+      (marker >= 0xcd && marker <= 0xcf);
+    if (isStartOfFrame && length >= 7) {
+      return {
+        height: buffer.readUInt16BE(offset + 3),
+        width: buffer.readUInt16BE(offset + 5),
+      };
+    }
+    offset += length;
+  }
+
+  return null;
+}
+
+function getWebpDimensions(buffer: Buffer) {
+  if (
+    buffer.length < 30 ||
+    buffer.toString("ascii", 0, 4) !== "RIFF" ||
+    buffer.toString("ascii", 8, 12) !== "WEBP"
+  ) {
+    return null;
+  }
+
+  const chunk = buffer.toString("ascii", 12, 16);
+  if (chunk === "VP8 " && buffer.length >= 30) {
+    return {
+      width: buffer.readUInt16LE(26) & 0x3fff,
+      height: buffer.readUInt16LE(28) & 0x3fff,
+    };
+  }
+  if (chunk === "VP8L" && buffer.length >= 25) {
+    const bits = buffer.readUInt32LE(21);
+    return {
+      width: (bits & 0x3fff) + 1,
+      height: ((bits >> 14) & 0x3fff) + 1,
+    };
+  }
+  if (chunk === "VP8X" && buffer.length >= 30) {
+    return {
+      width: readUInt24LE(buffer, 24) + 1,
+      height: readUInt24LE(buffer, 27) + 1,
+    };
+  }
+
+  return null;
+}
+
+function getImageDimensionsFromBuffer(buffer: Buffer) {
+  const dimensions =
+    getPngDimensions(buffer) ||
+    getJpegDimensions(buffer) ||
+    getWebpDimensions(buffer);
+  if (!dimensions?.width || !dimensions.height) return null;
+  return dimensions;
 }
 
 function getInputImages(input: RunImageGenerationInput): ImageInputFile[] {
@@ -357,11 +460,11 @@ export async function runImageGenerationForUser(
       userId: input.userId,
       apiKeyId: input.apiKeyId,
       requestKind: backendRequestKind,
+      preferredMemberId: input.preferredBackendMemberId,
     });
   } catch (error) {
     return {
-      error:
-        error instanceof Error ? error.message : "当前没有可用的生图后端",
+      error: error instanceof Error ? error.message : "当前没有可用的生图后端",
       generationId,
     };
   }
@@ -861,49 +964,27 @@ async function runQueuedImageGenerationForUser({
       revisedPrompt: result.revisedPrompt,
       responseText: result.responseText,
       responseThinking: result.responseThinking,
+      webConversation: result.webConversation,
       creditsConsumed: finalChargedCredits,
     };
   }
 
-  if (isTextOnlyChatInput) {
-    try {
-      await settleChargedCredits(
-        creditsPerImage,
-        "image-generation",
-        `${generationId}:chat-image-upgrade`,
-        `Settle chat image generation: ${input.prompt.substring(0, 50)}`,
-        {
-          generationId,
-          mode: input.mode,
-          size,
-          creditCost,
-        }
-      );
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Insufficient credits";
-      await db
-        .update(generation)
-        .set({
-          status: "failed",
-          error: message,
-          creditsConsumed: chargedCredits,
-        })
-        .where(eq(generation.id, generationId));
-      return {
-        error: "Insufficient credits",
-        generationId,
-        creditsConsumed: chargedCredits,
-      };
-    }
-  }
-
   let storageKey = "";
   let fileSize = 0;
+  let actualSize = size;
+  let actualSizeDetected = false;
   try {
     const imageBuffer = await toImageBuffer(result);
     storageKey = `${input.userId}/${nanoid(32)}.png`;
     fileSize = imageBuffer.length;
+    const actualDimensions = getImageDimensionsFromBuffer(imageBuffer);
+    if (actualDimensions) {
+      actualSizeDetected = true;
+      actualSize = normalizeImageSize(
+        actualDimensions.width,
+        actualDimensions.height
+      );
+    }
     const storage = await getStorageProvider();
     await storage.putObject(storageKey, bucket, imageBuffer, "image/png");
   } catch (storageError: unknown) {
@@ -940,16 +1021,64 @@ async function runQueuedImageGenerationForUser({
     };
   }
 
+  const actualCreditCost = getImageCreditCostBreakdown(actualSize, {
+    imageModerationCount: inputImages.length,
+  });
+  const actualCreditsPerImage = actualCreditCost.totalCredits;
+  try {
+    await settleChargedCredits(
+      actualCreditsPerImage,
+      "image-generation",
+      `${generationId}:image-actual-size`,
+      `Settle image generation: ${input.prompt.substring(0, 50)}`,
+      {
+        generationId,
+        mode: input.mode,
+        requestedSize: size,
+        actualSize,
+        requestedCreditCost: creditCost,
+        actualCreditCost,
+      }
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Insufficient credits";
+    await db
+      .update(generation)
+      .set({
+        status: "failed",
+        error: message,
+        creditsConsumed: chargedCredits,
+      })
+      .where(eq(generation.id, generationId));
+    return {
+      error: "Insufficient credits",
+      generationId,
+      creditsConsumed: chargedCredits,
+    };
+  }
+
   await db
     .update(generation)
     .set({
       status: "completed",
       storageKey,
       fileSize,
+      size: actualSize,
       revisedPrompt: result.revisedPrompt,
       creditsConsumed: chargedCredits,
       metadata: sql`COALESCE(${generation.metadata}, '{}'::json)::jsonb || ${JSON.stringify(
-        buildRevisedPromptMetadata({ input, apiPrompt, result })
+        {
+          ...buildRevisedPromptMetadata({ input, apiPrompt, result }),
+          outputImage: {
+            requestedSize: size,
+            actualSize,
+            actualSizeDetected,
+            actualSizeMatchesRequested: actualSize === size,
+            requestedCreditCost: creditCost,
+            actualCreditCost,
+          },
+        }
       )}::jsonb`,
       completedAt: new Date(),
     })
@@ -959,10 +1088,11 @@ async function runQueuedImageGenerationForUser({
     generationId,
     imageUrl: await getStoredImageUrl(bucket, storageKey),
     model: recordModel,
-    size,
+    size: actualSize,
     revisedPrompt: result.revisedPrompt,
     responseText: result.responseText,
     responseThinking: result.responseThinking,
+    webConversation: result.webConversation,
     creditsConsumed: chargedCredits,
   };
 }

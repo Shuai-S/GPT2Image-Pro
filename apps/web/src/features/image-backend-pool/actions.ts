@@ -50,6 +50,7 @@ const optionalGroupIdSchema = z
 
 const safetyOverrideSchema = z.enum(["inherit", "enabled", "disabled"]);
 const accountBackendSchema = z.enum(["web", "responses"]);
+const groupBackendTypeSchema = z.enum(["mixed", "web", "responses"]);
 const sub2ApiTokenSyncModeSchema = z.enum(["web", "responses", "both"]);
 const subscriptionPlanSchema = z
   .string()
@@ -116,6 +117,7 @@ export const saveImageBackendGroupAction = withImageBackendPoolAdminAction(
       isDefault: z.boolean().default(false),
       isUserSelectable: z.boolean().default(true),
       contentSafety: safetyOverrideSchema.default("inherit"),
+      backendType: groupBackendTypeSchema.default("mixed"),
       minPlan: subscriptionPlanSchema,
       priority: z.coerce.number().int().min(0).max(10000).default(50),
     })
@@ -129,6 +131,7 @@ export const saveImageBackendGroupAction = withImageBackendPoolAdminAction(
       isDefault: parsedInput.isDefault,
       isUserSelectable: parsedInput.isUserSelectable,
       contentSafetyEnabled: fromSafetyOverride(parsedInput.contentSafety),
+      backendType: parsedInput.backendType,
       minPlan: parsedInput.minPlan,
       priority: parsedInput.priority,
     });

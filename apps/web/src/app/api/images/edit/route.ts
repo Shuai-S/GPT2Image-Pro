@@ -1,7 +1,5 @@
 import { withApiLogging } from "@repo/shared/api-logger";
 import { auth } from "@repo/shared/auth";
-import { getStorageProvider } from "@repo/shared/storage/providers";
-import { getRuntimeSettingString } from "@repo/shared/system-settings";
 import { getPlanUploadLimits } from "@repo/shared/subscription/services/upload-limits";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { randomUUID } from "node:crypto";
@@ -9,21 +7,29 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { runImageGenerationForUser } from "@/features/image-generation/operations";
 import {
+  firstBatchError,
+  runBatchImageGeneration,
+} from "@/features/image-generation/batch-runner";
+import {
   parseImageSize,
   validateImageSize,
 } from "@/features/image-generation/resolution";
+import {
+  deleteModerationImages,
+  filesToImageInputs,
+  formatMegabytes,
+  getTotalUploadSize,
+  uploadModerationImages,
+  validateImageFile,
+} from "@/features/image-generation/request-utils";
 import { createImageStreamResponse } from "@/features/image-generation/streaming";
 import type {
-  ImageInputFile,
   ImageModeration,
   ImageQuality,
   ThinkingLevel,
 } from "@/features/image-generation/types";
 
 const MAX_EDIT_IMAGES = 16;
-const DEFAULT_MAX_IMAGE_BYTES = 25 * 1024 * 1024;
-const MODERATION_UPLOAD_URL_EXPIRES = 600;
-const VALID_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const VALID_QUALITIES = new Set<ImageQuality>([
   "auto",
   "low",
@@ -39,10 +45,6 @@ const VALID_THINKING = new Set<ThinkingLevel>([
   "xhigh",
 ]);
 const MAX_BATCH_COUNT = 10;
-
-function formatMegabytes(bytes: number) {
-  return `${bytes / 1024 / 1024}MB`;
-}
 
 function errorResponse(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
@@ -94,114 +96,6 @@ function getImageFiles(formData: FormData) {
   }
 
   return images;
-}
-
-function validateImageFile(
-  file: File,
-  options?: { mask?: boolean; maxImageBytes?: number }
-) {
-  if (file.size <= 0) {
-    throw new Error(`${file.name || "Image"} is empty.`);
-  }
-
-  const maxImageBytes = options?.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES;
-  if (file.size > maxImageBytes) {
-    throw new Error(
-      `${file.name || "Image"} exceeds the ${formatMegabytes(maxImageBytes)} limit.`
-    );
-  }
-
-  if (options?.mask) {
-    if (file.type !== "image/png") {
-      throw new Error("Mask must be a PNG file.");
-    }
-    return;
-  }
-
-  if (!VALID_IMAGE_TYPES.has(file.type)) {
-    throw new Error("Source images must be PNG, JPEG, or WebP files.");
-  }
-}
-
-function getTotalUploadSize(files: File[], maskFile?: File) {
-  return (
-    files.reduce((total, file) => total + file.size, 0) + (maskFile?.size || 0)
-  );
-}
-
-async function toImageInput(
-  file: File,
-  options?: { publicUrl?: string }
-): Promise<ImageInputFile> {
-  return {
-    data: Buffer.from(await file.arrayBuffer()),
-    name: file.name || "image.png",
-    type: file.type || "image/png",
-    url: options?.publicUrl,
-  };
-}
-
-async function uploadModerationImages(
-  userId: string,
-  generationId: string,
-  files: File[]
-) {
-  const publicBaseUrl =
-    (await getRuntimeSettingString("ALIYUN_MODERATION_PUBLIC_BASE_URL")) ||
-    (await getRuntimeSettingString("CONTENT_MODERATION_PUBLIC_BASE_URL")) ||
-    (await getRuntimeSettingString("NEXT_PUBLIC_APP_URL")) ||
-    (await getRuntimeSettingString("BETTER_AUTH_URL"));
-  if (!(await getRuntimeSettingString("STORAGE_ENDPOINT")) && !publicBaseUrl) {
-    return undefined;
-  }
-
-  const storage = await getStorageProvider();
-  const bucket =
-    (await getRuntimeSettingString("NEXT_PUBLIC_GENERATIONS_BUCKET_NAME")) ||
-    "generations";
-
-  return Promise.all(
-    files.map(async (file, index) => {
-      const extension =
-        file.type === "image/jpeg"
-          ? "jpg"
-          : file.type === "image/webp"
-            ? "webp"
-            : "png";
-      const key = `${userId}/moderation/${generationId}-${index}.${extension}`;
-      await storage.putObject(
-        key,
-        bucket,
-        Buffer.from(await file.arrayBuffer()),
-        file.type || "image/png"
-      );
-      const url = await storage.getSignedUrl(
-        key,
-        bucket,
-        MODERATION_UPLOAD_URL_EXPIRES
-      );
-      return {
-        bucket,
-        key,
-        url: url.startsWith("http")
-          ? url
-          : `${publicBaseUrl?.replace(/\/$/, "")}${url}`,
-      };
-    })
-  );
-}
-
-async function deleteModerationImages(
-  images: Awaited<ReturnType<typeof uploadModerationImages>> | undefined
-) {
-  if (!images?.length) {
-    return;
-  }
-
-  const storage = await getStorageProvider();
-  await Promise.allSettled(
-    images.map((image) => storage.deleteObject(image.key, image.bucket))
-  );
 }
 
 export const POST = withApiLogging(async (request: NextRequest) => {
@@ -344,13 +238,11 @@ export const POST = withApiLogging(async (request: NextRequest) => {
           quality,
           moderation,
           n: 1,
-          images: await Promise.all(
-            sourceFiles.map((file, index) =>
-              toImageInput(file, { publicUrl: moderationImages?.[index]?.url })
-            )
-          ),
+          images: await filesToImageInputs(sourceFiles, moderationImages),
           mask:
-            maskFile instanceof File ? await toImageInput(maskFile) : undefined,
+            maskFile instanceof File
+              ? (await filesToImageInputs([maskFile]))[0]
+              : undefined,
         },
         onPartialImage
       );
@@ -359,8 +251,10 @@ export const POST = withApiLogging(async (request: NextRequest) => {
       if (useStreamResponse) {
         return createImageStreamResponse(async (emit) => {
           try {
-            for (let index = 0; index < count; index++) {
-              const result = await runEdit(randomUUID(), {
+            await runBatchImageGeneration({
+              count,
+              run: runEdit,
+              callbacks: (index) => ({
                 onPartialImage: async (image) => {
                   await emit({
                     type: "partial_image",
@@ -370,20 +264,21 @@ export const POST = withApiLogging(async (request: NextRequest) => {
                     url: image.imageUrl,
                   });
                 },
-              });
+              }),
+              onResult: async (result) => {
+                if (result.error) {
+                  await emit({
+                    type: "error",
+                    error: result.error,
+                    generationId: result.generationId,
+                    creditsConsumed: result.creditsConsumed,
+                  });
+                  return;
+                }
 
-              if (result.error) {
-                await emit({
-                  type: "error",
-                  error: result.error,
-                  generationId: result.generationId,
-                  creditsConsumed: result.creditsConsumed,
-                });
-                return null;
-              }
-
-              await emit({ type: "completed", ...result });
-            }
+                await emit({ type: "completed", ...result });
+              },
+            });
 
             return null;
           } finally {
@@ -397,16 +292,14 @@ export const POST = withApiLogging(async (request: NextRequest) => {
         return NextResponse.json(result);
       }
 
-      const results = [];
-      for (let index = 0; index < count; index++) {
-        const result = await runEdit(randomUUID());
-        results.push(result);
-        if (result.error) break;
-      }
+      const results = await runBatchImageGeneration({
+        count,
+        run: runEdit,
+      });
 
       return NextResponse.json({
         results,
-        error: results.find((result) => result.error)?.error,
+        error: firstBatchError(results)?.error,
       });
     } finally {
       if (!useStreamResponse) {

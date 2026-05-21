@@ -1,31 +1,37 @@
+import { randomUUID } from "node:crypto";
 import { withApiLogging } from "@repo/shared/api-logger";
 import { auth } from "@repo/shared/auth";
 import { canUseChat } from "@repo/shared/config/subscription-plan";
-import { getStorageProvider } from "@repo/shared/storage/providers";
-import { getRuntimeSettingString } from "@repo/shared/system-settings";
 import { getPlanUploadLimits } from "@repo/shared/subscription/services/upload-limits";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
-import { randomUUID } from "node:crypto";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { runImageGenerationForUser } from "@/features/image-generation/operations";
 import {
+  firstBatchError,
+  runBatchImageGeneration,
+} from "@/features/image-generation/batch-runner";
+import {
   DEFAULT_IMAGE_SIZE,
   validateImageSize,
 } from "@/features/image-generation/resolution";
+import {
+  deleteModerationImages,
+  filesToImageInputs,
+  formatMegabytes,
+  getTotalUploadSize,
+  uploadModerationImages,
+  validateImageFile,
+} from "@/features/image-generation/request-utils";
 import { createImageStreamResponse } from "@/features/image-generation/streaming";
 import type {
-  ImageInputFile,
+  ChatHistoryMessage,
   ImageModeration,
   ImageQuality,
-  ChatHistoryMessage,
   ThinkingLevel,
 } from "@/features/image-generation/types";
 
 const MAX_CHAT_IMAGES = 16;
-const DEFAULT_MAX_IMAGE_BYTES = 25 * 1024 * 1024;
-const MODERATION_UPLOAD_URL_EXPIRES = 600;
-const VALID_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const VALID_QUALITIES = new Set<ImageQuality>([
   "auto",
   "low",
@@ -43,8 +49,16 @@ const VALID_THINKING = new Set<ThinkingLevel>([
 const MAX_BATCH_COUNT = 10;
 const MAX_CHAT_CONTEXT_CHARS = 30_000;
 
-function formatMegabytes(bytes: number) {
-  return `${bytes / 1024 / 1024}MB`;
+function getPreferredBackendMemberId(history: ChatHistoryMessage[]) {
+  for (let index = history.length - 1; index >= 0; index--) {
+    const message = history[index];
+    if (!message || message.role !== "assistant" || message.error) continue;
+    const variants = message.variants || [];
+    const variant = variants[message.activeVariant || 0] || variants[0];
+    const accountId = variant?.webConversation?.accountId;
+    if (accountId) return accountId;
+  }
+  return undefined;
 }
 
 function errorResponse(message: string, status = 400) {
@@ -143,6 +157,28 @@ function getHistory(formData: FormData): ChatHistoryMessage[] {
               size: typeof item.size === "string" ? item.size : undefined,
               timestamp:
                 typeof item.timestamp === "string" ? item.timestamp : undefined,
+              webConversation:
+                item.webConversation &&
+                typeof item.webConversation === "object" &&
+                typeof (item.webConversation as Record<string, unknown>)
+                  .conversationId === "string" &&
+                typeof (item.webConversation as Record<string, unknown>)
+                  .parentMessageId === "string"
+                  ? {
+                      conversationId: (
+                        item.webConversation as Record<string, unknown>
+                      ).conversationId as string,
+                      parentMessageId: (
+                        item.webConversation as Record<string, unknown>
+                      ).parentMessageId as string,
+                      accountId:
+                        typeof (item.webConversation as Record<string, unknown>)
+                          .accountId === "string"
+                          ? ((item.webConversation as Record<string, unknown>)
+                              .accountId as string)
+                          : undefined,
+                    }
+                  : undefined,
             };
           })
       : undefined;
@@ -236,97 +272,6 @@ function limitChatContext(params: {
   return { history: limited };
 }
 
-function validateImageFile(file: File, maxImageBytes = DEFAULT_MAX_IMAGE_BYTES) {
-  if (file.size <= 0) {
-    throw new Error(`${file.name || "Image"} is empty.`);
-  }
-
-  if (file.size > maxImageBytes) {
-    throw new Error(
-      `${file.name || "Image"} exceeds the ${formatMegabytes(maxImageBytes)} limit.`
-    );
-  }
-
-  if (!VALID_IMAGE_TYPES.has(file.type)) {
-    throw new Error("Reference images must be PNG, JPEG, or WebP files.");
-  }
-}
-
-async function toImageInput(
-  file: File,
-  options?: { publicUrl?: string }
-): Promise<ImageInputFile> {
-  return {
-    data: Buffer.from(await file.arrayBuffer()),
-    name: file.name || "image.png",
-    type: file.type || "image/png",
-    url: options?.publicUrl,
-  };
-}
-
-async function uploadModerationImages(
-  userId: string,
-  generationId: string,
-  files: File[]
-) {
-  if (files.length === 0) return undefined;
-
-  const publicBaseUrl =
-    (await getRuntimeSettingString("ALIYUN_MODERATION_PUBLIC_BASE_URL")) ||
-    (await getRuntimeSettingString("CONTENT_MODERATION_PUBLIC_BASE_URL")) ||
-    (await getRuntimeSettingString("NEXT_PUBLIC_APP_URL")) ||
-    (await getRuntimeSettingString("BETTER_AUTH_URL"));
-  if (!(await getRuntimeSettingString("STORAGE_ENDPOINT")) && !publicBaseUrl) {
-    return undefined;
-  }
-
-  const storage = await getStorageProvider();
-  const bucket =
-    (await getRuntimeSettingString("NEXT_PUBLIC_GENERATIONS_BUCKET_NAME")) ||
-    "generations";
-
-  return Promise.all(
-    files.map(async (file, index) => {
-      const extension =
-        file.type === "image/jpeg"
-          ? "jpg"
-          : file.type === "image/webp"
-            ? "webp"
-            : "png";
-      const key = `${userId}/moderation/${generationId}-${index}.${extension}`;
-      await storage.putObject(
-        key,
-        bucket,
-        Buffer.from(await file.arrayBuffer()),
-        file.type || "image/png"
-      );
-      const url = await storage.getSignedUrl(
-        key,
-        bucket,
-        MODERATION_UPLOAD_URL_EXPIRES
-      );
-      return {
-        bucket,
-        key,
-        url: url.startsWith("http")
-          ? url
-          : `${publicBaseUrl?.replace(/\/$/, "")}${url}`,
-      };
-    })
-  );
-}
-
-async function deleteModerationImages(
-  images: Awaited<ReturnType<typeof uploadModerationImages>> | undefined
-) {
-  if (!images?.length) return;
-
-  const storage = await getStorageProvider();
-  await Promise.allSettled(
-    images.map((image) => storage.deleteObject(image.key, image.bucket))
-  );
-}
-
 export const POST = withApiLogging(async (request: NextRequest) => {
   const session = await auth.api.getSession({
     headers: request.headers,
@@ -389,11 +334,17 @@ export const POST = withApiLogging(async (request: NextRequest) => {
     return errorResponse(limitedContext.error);
   }
   history = limitedContext.history;
+  const preferredBackendMemberId = getPreferredBackendMemberId(history);
 
-  const size = getText(formData, "size") || DEFAULT_IMAGE_SIZE;
+  const sourceFiles = getImageFiles(formData);
+  let size = getText(formData, "size") || DEFAULT_IMAGE_SIZE;
   const sizeCheck = validateImageSize(size);
   if (!sizeCheck.valid) {
-    return errorResponse(sizeCheck.message);
+    if (sourceFiles.length > 0) {
+      size = DEFAULT_IMAGE_SIZE;
+    } else {
+      return errorResponse(sizeCheck.message);
+    }
   }
 
   const qualityValue = getText(formData, "quality") || "auto";
@@ -428,20 +379,19 @@ export const POST = withApiLogging(async (request: NextRequest) => {
     getText(formData, "imageModel") ||
     getText(formData, "image_model") ||
     undefined;
-  const sourceFiles = getImageFiles(formData);
   if (sourceFiles.length > MAX_CHAT_IMAGES) {
     return errorResponse(`No more than ${MAX_CHAT_IMAGES} images are allowed.`);
   }
 
   try {
     for (const file of sourceFiles) {
-      validateImageFile(file, maxImageBytes);
+      validateImageFile(file, {
+        maxImageBytes,
+        invalidTypeMessage: "Reference images must be PNG, JPEG, or WebP files.",
+      });
     }
 
-    const totalUploadSize = sourceFiles.reduce(
-      (total, file) => total + file.size,
-      0
-    );
+    const totalUploadSize = getTotalUploadSize(sourceFiles);
     if (totalUploadSize > maxRequestBytes) {
       return errorResponse(
         `Total upload size must be no more than ${formatMegabytes(maxRequestBytes)}.`,
@@ -458,11 +408,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
     const useStreamResponse = wantsStreamResponse(request, formData);
 
     const buildImages = async () =>
-      await Promise.all(
-        sourceFiles.map((file, index) =>
-          toImageInput(file, { publicUrl: moderationImages?.[index]?.url })
-        )
-      );
+      await filesToImageInputs(sourceFiles, moderationImages);
 
     const runChat = async (
       generationId: string,
@@ -478,6 +424,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
           promptOptimization,
           images: await buildImages(),
           history,
+          preferredBackendMemberId,
           size,
           model,
           imageModel,
@@ -494,8 +441,10 @@ export const POST = withApiLogging(async (request: NextRequest) => {
       if (useStreamResponse) {
         return createImageStreamResponse(async (emit) => {
           try {
-            for (let index = 0; index < count; index++) {
-              const result = await runChat(randomUUID(), {
+            await runBatchImageGeneration({
+              count,
+              run: runChat,
+              callbacks: (index) => ({
                 onPartialImage: async (image) => {
                   await emit({
                     type: "partial_image",
@@ -511,20 +460,21 @@ export const POST = withApiLogging(async (request: NextRequest) => {
                 onThinkingDelta: async (delta) => {
                   await emit({ type: "thinking_delta", index, delta });
                 },
-              });
+              }),
+              onResult: async (result) => {
+                if (result.error) {
+                  await emit({
+                    type: "error",
+                    error: result.error,
+                    generationId: result.generationId,
+                    creditsConsumed: result.creditsConsumed,
+                  });
+                  return;
+                }
 
-              if (result.error) {
-                await emit({
-                  type: "error",
-                  error: result.error,
-                  generationId: result.generationId,
-                  creditsConsumed: result.creditsConsumed,
-                });
-                return null;
-              }
-
-              await emit({ type: "completed", ...result });
-            }
+                await emit({ type: "completed", ...result });
+              },
+            });
 
             return null;
           } finally {
@@ -538,16 +488,14 @@ export const POST = withApiLogging(async (request: NextRequest) => {
         return NextResponse.json(result);
       }
 
-      const results = [];
-      for (let index = 0; index < count; index++) {
-        const result = await runChat(randomUUID());
-        results.push(result);
-        if (result.error) break;
-      }
+      const results = await runBatchImageGeneration({
+        count,
+        run: runChat,
+      });
 
       return NextResponse.json({
         results,
-        error: results.find((result) => result.error)?.error,
+        error: firstBatchError(results)?.error,
       });
     } finally {
       if (!useStreamResponse) {

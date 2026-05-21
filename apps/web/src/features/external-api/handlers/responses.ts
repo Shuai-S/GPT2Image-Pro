@@ -1,6 +1,10 @@
+import { db } from "@repo/database";
+import { generation } from "@repo/database/schema";
 import { withApiLogging } from "@repo/shared/api-logger";
 import { canUseExternalResponsesImageApi } from "@repo/shared/config/subscription-plan";
+import { logError } from "@repo/shared/logger";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 
@@ -23,12 +27,27 @@ import {
   validateImageSize,
 } from "@/features/image-generation/resolution";
 import type {
+  ChatGptWebConversationState,
   ChatHistoryMessage,
   ImageInputFile,
   ImageModeration,
   ImageQuality,
   ThinkingLevel,
 } from "@/features/image-generation/types";
+
+type ImageGenerationResult = Awaited<
+  ReturnType<typeof runImageGenerationForUser>
+>;
+
+type StoredResponsesContinuation = {
+  webConversation?: ChatGptWebConversationState;
+  fallbackHistory?: ChatHistoryMessage[];
+};
+
+const CONTINUATION_CACHE_LIMIT = 1000;
+const MAX_STORED_HISTORY_MESSAGES = 24;
+const MAX_STORED_HISTORY_TEXT = 4000;
+const responseContinuationCache = new Map<string, StoredResponsesContinuation>();
 
 const responseInputContentSchema = z.union([
   z.object({
@@ -49,8 +68,10 @@ const responseInputMessageSchema = z.object({
 const responseSchema = z.object({
   model: z.string().optional(),
   input: z.union([z.string(), z.array(responseInputMessageSchema)]),
+  previous_response_id: z.string().optional(),
   tools: z.array(z.object({ type: z.string() }).passthrough()).optional(),
   stream: z.boolean().optional(),
+  store: z.boolean().optional(),
   size: z
     .string()
     .optional()
@@ -71,6 +92,271 @@ type ResponseRequest = z.infer<typeof responseSchema>;
 
 function responseId(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "")}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function continuationCacheKey(params: {
+  userId: string;
+  apiKeyId: string;
+  responseId: string;
+}) {
+  return `${params.userId}:${params.apiKeyId}:${params.responseId}`;
+}
+
+function setContinuationCache(
+  key: string,
+  value: StoredResponsesContinuation
+) {
+  responseContinuationCache.set(key, value);
+  if (responseContinuationCache.size <= CONTINUATION_CACHE_LIMIT) return;
+  const oldestKey = responseContinuationCache.keys().next().value;
+  if (oldestKey) responseContinuationCache.delete(oldestKey);
+}
+
+function normalizeWebConversationState(
+  value: unknown
+): ChatGptWebConversationState | undefined {
+  if (!isRecord(value)) return undefined;
+  if (
+    typeof value.conversationId !== "string" ||
+    typeof value.parentMessageId !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    conversationId: value.conversationId,
+    parentMessageId: value.parentMessageId,
+    accountId: typeof value.accountId === "string" ? value.accountId : undefined,
+  };
+}
+
+function normalizeHistoryVariant(value: unknown) {
+  if (!isRecord(value)) return null;
+  const webConversation = normalizeWebConversationState(value.webConversation);
+  return {
+    text:
+      typeof value.text === "string"
+        ? value.text.slice(0, MAX_STORED_HISTORY_TEXT)
+        : undefined,
+    imageUrl:
+      typeof value.imageUrl === "string"
+        ? value.imageUrl.slice(0, MAX_STORED_HISTORY_TEXT)
+        : undefined,
+    size: typeof value.size === "string" ? value.size : undefined,
+    timestamp:
+      typeof value.timestamp === "string" ? value.timestamp : undefined,
+    webConversation,
+  };
+}
+
+function normalizeStoredHistory(value: unknown): ChatHistoryMessage[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(-MAX_STORED_HISTORY_MESSAGES).flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const role = entry.role === "assistant" ? "assistant" : "user";
+    const variants = Array.isArray(entry.variants)
+      ? entry.variants
+          .map(normalizeHistoryVariant)
+          .filter((item): item is NonNullable<typeof item> => Boolean(item))
+          .slice(0, 10)
+      : undefined;
+    return [
+      {
+        role,
+        text:
+          typeof entry.text === "string"
+            ? entry.text.slice(0, MAX_STORED_HISTORY_TEXT)
+            : undefined,
+        imageUrls: Array.isArray(entry.imageUrls)
+          ? entry.imageUrls
+              .filter((url): url is string => typeof url === "string")
+              .filter((url) => url.startsWith("http://") || url.startsWith("https://"))
+              .slice(0, 16)
+          : undefined,
+        variants,
+        activeVariant:
+          typeof entry.activeVariant === "number" ? entry.activeVariant : 0,
+        error: typeof entry.error === "string" ? entry.error : undefined,
+      },
+    ] satisfies ChatHistoryMessage[];
+  });
+}
+
+function getStoredContinuationFromMetadata(
+  metadata: Record<string, unknown> | null | undefined,
+  params: { responseId: string; apiKeyId: string }
+): StoredResponsesContinuation | null {
+  if (!isRecord(metadata)) return null;
+  const externalResponse = metadata.externalResponse;
+  if (!isRecord(externalResponse)) return null;
+  if (
+    externalResponse.responseId !== params.responseId ||
+    externalResponse.apiKeyId !== params.apiKeyId
+  ) {
+    return null;
+  }
+  const webConversation = normalizeWebConversationState(
+    externalResponse.webConversation
+  );
+  const fallbackHistory = normalizeStoredHistory(
+    externalResponse.fallbackHistory
+  );
+  if (!webConversation && !fallbackHistory.length) return null;
+  return {
+    webConversation,
+    fallbackHistory: fallbackHistory.length ? fallbackHistory : undefined,
+  };
+}
+
+async function getStoredResponsesContinuation(params: {
+  userId: string;
+  apiKeyId: string;
+  responseId?: string;
+}) {
+  if (!params.responseId) return null;
+  const key = continuationCacheKey({
+    userId: params.userId,
+    apiKeyId: params.apiKeyId,
+    responseId: params.responseId,
+  });
+  const cached = responseContinuationCache.get(key);
+  if (cached) return cached;
+
+  const rows = await db
+    .select({ metadata: generation.metadata })
+    .from(generation)
+    .where(
+      and(
+        eq(generation.userId, params.userId),
+        sql`${generation.metadata}::jsonb @> ${JSON.stringify({
+          externalResponse: {
+            responseId: params.responseId,
+            apiKeyId: params.apiKeyId,
+          },
+        })}::jsonb`
+      )
+    )
+    .orderBy(desc(generation.createdAt))
+    .limit(1);
+  const state = getStoredContinuationFromMetadata(rows[0]?.metadata, {
+    responseId: params.responseId,
+    apiKeyId: params.apiKeyId,
+  });
+  if (state) setContinuationCache(key, state);
+  return state;
+}
+
+function withWebContinuationMarker(
+  history: ChatHistoryMessage[],
+  webConversation?: ChatGptWebConversationState
+) {
+  if (!webConversation) return history;
+  return [
+    ...history,
+    {
+      role: "assistant" as const,
+      variants: [{ webConversation }],
+      activeVariant: 0,
+    },
+  ];
+}
+
+function trimHistoryForStorage(history: ChatHistoryMessage[]) {
+  return normalizeStoredHistory(history).slice(-MAX_STORED_HISTORY_MESSAGES);
+}
+
+function storableImageUrl(url: string) {
+  return url.startsWith("http://") || url.startsWith("https://");
+}
+
+function buildFallbackHistoryForStorage(params: {
+  baseHistory: ChatHistoryMessage[];
+  prompt: string;
+  promptImageUrls: string[];
+  result: ImageGenerationResult;
+}) {
+  const promptImageUrls = params.promptImageUrls.filter(storableImageUrl);
+  const assistantVariant = {
+    text: params.result.responseText,
+    imageUrl: params.result.imageUrl,
+    size: params.result.size,
+    timestamp: new Date().toISOString(),
+    webConversation: params.result.webConversation,
+  };
+  return trimHistoryForStorage([
+    ...params.baseHistory,
+    {
+      role: "user",
+      text: params.prompt,
+      imageUrls: promptImageUrls.length ? promptImageUrls : undefined,
+    },
+    {
+      role: "assistant",
+      text: params.result.responseText,
+      variants: [assistantVariant],
+      activeVariant: 0,
+    },
+  ]);
+}
+
+async function storeResponsesContinuation(params: {
+  userId: string;
+  apiKeyId: string;
+  responseId: string;
+  previousResponseId?: string;
+  result: ImageGenerationResult;
+  fallbackHistory: ChatHistoryMessage[];
+}) {
+  if (!params.result.generationId) return;
+  const state: StoredResponsesContinuation = {
+    webConversation: params.result.webConversation,
+    fallbackHistory: params.fallbackHistory,
+  };
+  try {
+    await db
+      .update(generation)
+      .set({
+        metadata: sql`COALESCE(${generation.metadata}, '{}'::json)::jsonb || ${JSON.stringify(
+          {
+            externalResponse: {
+              responseId: params.responseId,
+              previousResponseId: params.previousResponseId || null,
+              apiKeyId: params.apiKeyId,
+              endpoint: "responses",
+              hasWebConversation: Boolean(params.result.webConversation),
+              webConversation: params.result.webConversation || null,
+              fallbackHistory: params.fallbackHistory,
+              storedAt: new Date().toISOString(),
+            },
+          }
+        )}::jsonb`,
+      })
+      .where(
+        and(
+          eq(generation.id, params.result.generationId),
+          eq(generation.userId, params.userId)
+        )
+      );
+    if (state.webConversation || state.fallbackHistory?.length) {
+      setContinuationCache(
+        continuationCacheKey({
+          userId: params.userId,
+          apiKeyId: params.apiKeyId,
+          responseId: params.responseId,
+        }),
+        state
+      );
+    }
+  } catch (error) {
+    logError(error, {
+      source: "external-responses-continuation",
+      responseId: params.responseId,
+      generationId: params.result.generationId,
+    });
+  }
 }
 
 function getContentText(
@@ -107,20 +393,26 @@ function inputToChatParams(input: ResponseRequest["input"]) {
   let prompt = "";
   let promptImages: string[] = [];
 
+  const flushPromptToHistory = () => {
+    if (!prompt && !promptImages.length) return;
+    history.push({ role: "user", text: prompt, imageUrls: promptImages });
+    prompt = "";
+    promptImages = [];
+  };
+
   for (const item of input) {
     const role = item.role || "user";
     const text = getContentText(item.content);
     const imageUrls = getContentImages(item.content);
 
     if (role === "assistant") {
+      flushPromptToHistory();
       history.push({ role: "assistant", text });
       continue;
     }
 
     if (role === "user") {
-      if (prompt) {
-        history.push({ role: "user", text: prompt, imageUrls: promptImages });
-      }
+      flushPromptToHistory();
       prompt = text;
       promptImages = imageUrls;
     }
@@ -190,11 +482,29 @@ function getRequestedToolImageModel(tools: ResponseRequest["tools"]) {
   return getImageModel(imageTool.model) || undefined;
 }
 
+async function loadPreviousContinuation(params: {
+  userId: string;
+  apiKeyId: string;
+  responseId?: string;
+}) {
+  try {
+    return await getStoredResponsesContinuation(params);
+  } catch (error) {
+    logError(error, {
+      source: "external-responses-continuation-load",
+      responseId: params.responseId,
+    });
+    return null;
+  }
+}
+
 function toResponsePayload(params: {
   requestId: string;
   model?: string;
-  result: Awaited<ReturnType<typeof runImageGenerationForUser>>;
+  result: ImageGenerationResult;
   imageBase64?: string;
+  previousResponseId?: string;
+  previousContinuation?: StoredResponsesContinuation | null;
 }) {
   const output = [];
   if (params.imageBase64) {
@@ -227,6 +537,20 @@ function toResponsePayload(params: {
       generation_id: params.result.generationId,
       credits_consumed: params.result.creditsConsumed,
       size: params.result.size,
+      ...(params.previousResponseId
+        ? { previous_response_id: params.previousResponseId }
+        : {}),
+      ...(params.previousContinuation
+        ? {
+            web_native_continuation_available: Boolean(
+              params.previousContinuation.webConversation
+            ),
+            fallback_history_loaded: Boolean(
+              params.previousContinuation.fallbackHistory?.length
+            ),
+          }
+        : {}),
+      web_conversation_stored: Boolean(params.result.webConversation),
     },
   };
 }
@@ -300,6 +624,23 @@ export const postExternalResponses = withApiLogging(
       return openAIImageError("Responses input must include user text.");
     }
 
+    const previousResponseId = parsed.data.previous_response_id?.trim();
+    const previousContinuation = await loadPreviousContinuation({
+      userId: auth.userId,
+      apiKeyId: auth.apiKeyId,
+      responseId: previousResponseId,
+    });
+    const baseHistory = [
+      ...(previousContinuation?.fallbackHistory || []),
+      ...history,
+    ];
+    const requestHistory = withWebContinuationMarker(
+      baseHistory,
+      previousContinuation?.webConversation
+    );
+    const preferredBackendMemberId =
+      previousContinuation?.webConversation?.accountId;
+
     let images: ImageInputFile[] = [];
     try {
       images = await inputImageUrlsToFiles(promptImageUrls);
@@ -314,8 +655,9 @@ export const postExternalResponses = withApiLogging(
       userId: auth.userId,
       apiKeyId: auth.apiKeyId,
       backendRequestKind: "responses" as const,
+      preferredBackendMemberId,
       prompt,
-      history,
+      history: requestHistory,
       images,
       moderationBlockRiskLevel: auth.moderationBlockRiskLevel,
       size: parsed.data.size || DEFAULT_IMAGE_SIZE,
@@ -373,11 +715,27 @@ export const postExternalResponses = withApiLogging(
         const imageBase64 = result.imageUrl
           ? await getImageBase64(request, result.imageUrl)
           : undefined;
+        const fallbackHistory = buildFallbackHistoryForStorage({
+          baseHistory,
+          prompt,
+          promptImageUrls,
+          result,
+        });
+        await storeResponsesContinuation({
+          userId: auth.userId,
+          apiKeyId: auth.apiKeyId,
+          responseId: requestId,
+          previousResponseId,
+          result,
+          fallbackHistory,
+        });
         const response = toResponsePayload({
           requestId,
           model: parsed.data.model,
           result,
           imageBase64,
+          previousResponseId,
+          previousContinuation,
         });
 
         for (const item of response.output) {
@@ -418,12 +776,28 @@ export const postExternalResponses = withApiLogging(
       const imageBase64 = result.imageUrl
         ? await getImageBase64(request, result.imageUrl)
         : undefined;
+      const fallbackHistory = buildFallbackHistoryForStorage({
+        baseHistory,
+        prompt,
+        promptImageUrls,
+        result,
+      });
+      await storeResponsesContinuation({
+        userId: auth.userId,
+        apiKeyId: auth.apiKeyId,
+        responseId: requestId,
+        previousResponseId,
+        result,
+        fallbackHistory,
+      });
 
       return toResponsePayload({
         requestId,
         model: parsed.data.model,
         result,
         imageBase64,
+        previousResponseId,
+        previousContinuation,
       });
     });
   }

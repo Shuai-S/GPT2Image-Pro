@@ -73,6 +73,7 @@ import {
   saveImageBackendGroupAction,
   syncImageBackendAccountsFromSub2ApiAction,
 } from "./actions";
+import type { ImageBackendGroupBackendType } from "./types";
 
 type Group = {
   id: string;
@@ -82,6 +83,7 @@ type Group = {
   isDefault: boolean;
   isUserSelectable: boolean;
   contentSafetyEnabled: boolean | null;
+  backendType: ImageBackendGroupBackendType;
   minPlan: SubscriptionPlan;
   priority: number;
   apiCount: number;
@@ -145,6 +147,7 @@ type Api = {
 
 type ContentSafetyFormValue = "inherit" | "enabled" | "disabled";
 type AccountBackendFormValue = "web" | "responses";
+type GroupBackendTypeFormValue = ImageBackendGroupBackendType;
 type TokenSyncMode = "web" | "responses" | "both";
 
 type Sub2ApiSourceGroup = {
@@ -183,6 +186,28 @@ const PLAN_OPTIONS: Array<{ value: SubscriptionPlan; label: string }> = [
   { value: "pro", label: "专业版" },
   { value: "ultra", label: "旗舰版" },
   { value: "enterprise", label: "企业版" },
+];
+
+const GROUP_BACKEND_TYPE_OPTIONS: Array<{
+  value: GroupBackendTypeFormValue;
+  label: string;
+  detail: string;
+}> = [
+  {
+    value: "mixed",
+    label: "混合",
+    detail: "Web 与 Codex/Responses 账号均可调度，参数全部显示。",
+  },
+  {
+    value: "web",
+    label: "仅 Web",
+    detail: "只调度 Web 账号，界面隐藏 Codex/Responses 独有参数。",
+  },
+  {
+    value: "responses",
+    label: "仅 Codex/Responses",
+    detail: "只调度 Codex/Responses 账号，界面隐藏 Web 独有提示。",
+  },
 ];
 
 const ACCOUNT_STATUS_FILTER_OPTIONS: Array<{
@@ -250,6 +275,12 @@ function safetyLabel(value: boolean | null) {
   if (value === true) return "内容安全强制开启";
   if (value === false) return "内容安全强制关闭";
   return "内容安全继承成员";
+}
+
+function groupBackendTypeLabel(value: ImageBackendGroupBackendType) {
+  if (value === "web") return "仅 Web";
+  if (value === "responses") return "仅 Codex";
+  return "混合";
 }
 
 function formatDate(value: Date | string | null) {
@@ -457,6 +488,7 @@ export function ImageBackendPoolAdminPanel() {
     isDefault: false,
     isUserSelectable: true,
     contentSafety: "inherit" as ContentSafetyFormValue,
+    backendType: "mixed" as GroupBackendTypeFormValue,
     minPlan: "free" as SubscriptionPlan,
     priority: 50,
   });
@@ -588,6 +620,13 @@ export function ImageBackendPoolAdminPanel() {
     ]
   );
   const accountPageSize = Math.max(10, bulkAccountForm.pageSize || 20);
+  const accountFilterKey = [
+    bulkAccountForm.selectionGroupId,
+    bulkAccountForm.selectionMode,
+    bulkAccountForm.statusFilter,
+    bulkAccountForm.search,
+    bulkAccountForm.pageSize,
+  ].join("|");
   const accountTotalPages = Math.max(
     1,
     Math.ceil(filteredAccounts.length / accountPageSize)
@@ -656,6 +695,7 @@ export function ImageBackendPoolAdminPanel() {
       isDefault: false,
       isUserSelectable: true,
       contentSafety: "inherit" as ContentSafetyFormValue,
+      backendType: "mixed" as GroupBackendTypeFormValue,
       minPlan: "free" as SubscriptionPlan,
       priority: 50,
     });
@@ -724,6 +764,7 @@ export function ImageBackendPoolAdminPanel() {
       isDefault: group.isDefault,
       isUserSelectable: group.isUserSelectable,
       contentSafety: safetyValue(group.contentSafetyEnabled),
+      backendType: group.backendType || "mixed",
       minPlan: group.minPlan || "free",
       priority: group.priority,
     });
@@ -1162,13 +1203,7 @@ export function ImageBackendPoolAdminPanel() {
 
   useEffect(() => {
     setAccountPage(1);
-  }, [
-    bulkAccountForm.selectionGroupId,
-    bulkAccountForm.selectionMode,
-    bulkAccountForm.statusFilter,
-    bulkAccountForm.search,
-    bulkAccountForm.pageSize,
-  ]);
+  }, [accountFilterKey]);
 
   useEffect(() => {
     if (accountPage > accountTotalPages) {
@@ -1296,6 +1331,36 @@ export function ImageBackendPoolAdminPanel() {
                 </Select>
               </div>
               <div className="space-y-2">
+                <Label>分组类型</Label>
+                <Select
+                  value={groupForm.backendType}
+                  onValueChange={(value) =>
+                    setGroupForm((current) => ({
+                      ...current,
+                      backendType: value as GroupBackendTypeFormValue,
+                    }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {GROUP_BACKEND_TYPE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {
+                    GROUP_BACKEND_TYPE_OPTIONS.find(
+                      (option) => option.value === groupForm.backendType
+                    )?.detail
+                  }
+                </p>
+              </div>
+              <div className="space-y-2">
                 <Label>最低套餐</Label>
                 <Select
                   value={groupForm.minPlan}
@@ -1370,6 +1435,9 @@ export function ImageBackendPoolAdminPanel() {
                       )}
                       <Badge variant="outline">
                         最低 {planLabel(group.minPlan)}
+                      </Badge>
+                      <Badge variant="outline">
+                        {groupBackendTypeLabel(group.backendType)}
                       </Badge>
                       <Badge
                         variant={

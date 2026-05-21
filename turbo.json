@@ -59,10 +59,7 @@
         "CRON_SECRET",
         "NEXT_PUBLIC_GENERATIONS_BUCKET_NAME",
         "NEXT_PUBLIC_AVATARS_BUCKET_NAME",
-        "NEXT_PUBLIC_GA_ID",
-        "PLATFORM_API_BASE_URL",
-        "PLATFORM_API_KEY",
-        "PLATFORM_IMAGE_MODEL"
+        "NEXT_PUBLIC_GA_ID"
       ]
     },
     "dev": {

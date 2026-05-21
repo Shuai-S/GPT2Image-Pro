@@ -129,6 +129,60 @@ export function normalizeImageSize(width: number, height: number) {
   return `${width}x${height}`;
 }
 
+function clampDimension(value: number) {
+  return Math.min(MAX_IMAGE_DIMENSION, Math.max(MIN_IMAGE_DIMENSION, value));
+}
+
+function roundToImageStep(value: number) {
+  return Math.round(value / IMAGE_DIMENSION_STEP) * IMAGE_DIMENSION_STEP;
+}
+
+function floorToImageStep(value: number) {
+  return Math.floor(value / IMAGE_DIMENSION_STEP) * IMAGE_DIMENSION_STEP;
+}
+
+export function fitImageDimensionsToValidSize(
+  dimensions: ImageDimensions
+): ImageDimensions {
+  const originalWidth = Math.max(1, dimensions.width);
+  const originalHeight = Math.max(1, dimensions.height);
+  const pixelScale = Math.min(
+    1,
+    Math.sqrt(MAX_IMAGE_PIXELS / (originalWidth * originalHeight))
+  );
+  const maxScale = Math.min(
+    MAX_IMAGE_DIMENSION / originalWidth,
+    MAX_IMAGE_DIMENSION / originalHeight,
+    pixelScale
+  );
+  const scaledWidth = originalWidth * maxScale;
+  const scaledHeight = originalHeight * maxScale;
+  let width = clampDimension(roundToImageStep(scaledWidth));
+  let height = clampDimension(roundToImageStep(scaledHeight));
+
+  while (width * height > MAX_IMAGE_PIXELS) {
+    const widthOverflow = width / scaledWidth;
+    const heightOverflow = height / scaledHeight;
+    if (widthOverflow >= heightOverflow && width > MIN_IMAGE_DIMENSION) {
+      width -= IMAGE_DIMENSION_STEP;
+    } else if (height > MIN_IMAGE_DIMENSION) {
+      height -= IMAGE_DIMENSION_STEP;
+    } else {
+      break;
+    }
+  }
+
+  return {
+    width: floorToImageStep(width),
+    height: floorToImageStep(height),
+  };
+}
+
+export function normalizeValidImageSize(dimensions: ImageDimensions) {
+  const valid = fitImageDimensionsToValidSize(dimensions);
+  return normalizeImageSize(valid.width, valid.height);
+}
+
 export function isValidImageDimension(value: number) {
   return (
     Number.isInteger(value) &&

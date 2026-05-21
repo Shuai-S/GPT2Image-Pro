@@ -30,6 +30,7 @@ import {
   updateExternalApiKeyGroup,
   updateExternalApiKeyModeration,
 } from "../actions";
+import type { ImageBackendGroupBackendType } from "@/features/image-backend-pool/types";
 
 type ImageBackendGroupOption = {
   id: string;
@@ -39,6 +40,7 @@ type ImageBackendGroupOption = {
   isUserSelectable: boolean;
   isEnabled: boolean;
   contentSafetyEnabled: boolean | null;
+  backendType: ImageBackendGroupBackendType;
 };
 
 type ExternalApiKeySummary = {
@@ -62,13 +64,19 @@ function formatDate(value: Date | string | null, emptyLabel: string) {
 }
 
 function groupOptionLabel(group: ImageBackendGroupOption) {
+  const backend =
+    group.backendType === "web"
+      ? "仅 Web"
+      : group.backendType === "responses"
+        ? "仅 Codex"
+        : "混合";
   const safety =
     group.contentSafetyEnabled === true
       ? "内容审核开启"
       : group.contentSafetyEnabled === false
         ? "内容审核关闭"
         : "内容审核按成员配置";
-  return `${group.name}${group.isDefault ? "（默认）" : ""} · ${safety}`;
+  return `${group.name}${group.isDefault ? "（默认）" : ""} · ${backend} · ${safety}`;
 }
 
 export function ExternalApiKeySection() {

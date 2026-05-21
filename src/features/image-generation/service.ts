@@ -13,21 +13,6 @@ import type {
   GenerateImageResult,
 } from "./types";
 
-function getPlatformConfig(): ApiConfig {
-  const baseUrl = process.env.PLATFORM_API_BASE_URL;
-  const apiKey = process.env.PLATFORM_API_KEY;
-  if (!baseUrl || !apiKey) {
-    throw new Error("Platform API configuration is missing");
-  }
-  return {
-    baseUrl,
-    apiKey,
-    model:
-      normalizeImageModel(process.env.PLATFORM_IMAGE_MODEL) ||
-      DEFAULT_IMAGE_MODEL,
-  };
-}
-
 export async function getUserApiConfig(
   userId: string
 ): Promise<ApiConfig | null> {
@@ -55,7 +40,9 @@ export function getEffectiveConfig(userConfig: ApiConfig | null): {
   if (userConfig) {
     return { config: userConfig, useCredits: false };
   }
-  return { config: getPlatformConfig(), useCredits: true };
+  throw new Error(
+    "No default image backend is configured. Configure the image backend pool."
+  );
 }
 
 export async function generateImage(

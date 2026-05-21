@@ -149,4 +149,4 @@ Double-entry bookkeeping with FIFO batch expiration. Atomic balance updates prev
 
 ## Environment Variables
 
-See `.env.example`. Required: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `PLATFORM_API_KEY`. Everything else is optional.
+See `.env.example`. Required: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`. Configure the default image backend in the image backend pool instead of environment variables.

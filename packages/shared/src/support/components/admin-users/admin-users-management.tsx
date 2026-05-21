@@ -1011,7 +1011,7 @@ export function AdminUsersManagement() {
       </Card>
 
       <Sheet open={detailOpen} onOpenChange={setDetailOpen}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-3xl">
+        <SheetContent className="w-full overflow-y-auto sm:max-w-4xl xl:max-w-5xl">
           <SheetHeader>
             <SheetTitle>用户详情</SheetTitle>
             <SheetDescription>
@@ -1185,20 +1185,20 @@ export function AdminUsersManagement() {
                     {detail.generations.length === 0 ? (
                       <EmptyText>暂无生图记录</EmptyText>
                     ) : (
-                      <div className="space-y-3">
+                      <div className="max-h-[62vh] space-y-3 overflow-y-auto pr-1">
                         {detail.generations.map((item) => (
                           <div
                             key={item.id}
-                            className="grid gap-3 rounded-md border p-3 text-sm md:grid-cols-[72px_1fr]"
+                            className="grid gap-3 rounded-md border bg-background p-3 text-sm md:grid-cols-[84px_minmax(0,1fr)]"
                           >
-                            <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-md bg-muted">
+                            <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-md bg-muted">
                               {item.imageUrl ? (
                                 <Image
                                   src={item.imageUrl}
                                   alt={item.prompt}
-                                  width={64}
-                                  height={64}
-                                  sizes="64px"
+                                  width={80}
+                                  height={80}
+                                  sizes="80px"
                                   className="h-full w-full object-cover"
                                   unoptimized={
                                     !item.imageUrl.startsWith("/api/storage/")
@@ -1210,23 +1210,38 @@ export function AdminUsersManagement() {
                                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                               )}
                             </div>
-                            <div className="min-w-0">
-                              <div className="flex flex-wrap items-center gap-2">
+                            <div className="min-w-0 space-y-1">
+                              <div className="flex flex-wrap items-center gap-2 text-xs">
                                 {generationStatusBadge(item.status)}
-                                <span className="text-xs text-muted-foreground">
-                                  {item.model} · {item.size} ·{" "}
+                                <Badge
+                                  variant="secondary"
+                                  className="max-w-[180px] truncate font-mono font-normal"
+                                  title={item.model}
+                                >
+                                  {item.model}
+                                </Badge>
+                                <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-muted-foreground">
+                                  {item.size}
+                                </span>
+                                <span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
                                   {formatCredits(item.creditsConsumed)}
                                 </span>
                               </div>
-                              <p className="mt-1 line-clamp-2 break-words">
+                              <p
+                                className="line-clamp-2 break-words leading-snug"
+                                title={item.prompt}
+                              >
                                 {item.prompt}
                               </p>
                               {item.error ? (
-                                <p className="mt-1 line-clamp-2 break-words text-xs text-destructive">
+                                <p
+                                  className="line-clamp-2 break-words text-xs leading-snug text-destructive"
+                                  title={item.error}
+                                >
                                   {item.error}
                                 </p>
                               ) : null}
-                              <p className="mt-1 text-xs text-muted-foreground">
+                              <p className="text-xs text-muted-foreground">
                                 {formatDateTime(item.createdAt)}
                               </p>
                             </div>

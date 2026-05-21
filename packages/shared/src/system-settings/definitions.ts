@@ -91,9 +91,6 @@ export type SettingKey =
   | "ALIYUN_MODERATION_PUBLIC_BASE_URL"
   | "OPENAI_MODERATION_API_KEY"
   | "OPENAI_MODERATION_MODEL"
-  | "PLATFORM_API_BASE_URL"
-  | "PLATFORM_API_KEY"
-  | "PLATFORM_IMAGE_MODEL"
   | "PLATFORM_RESPONSES_MODEL"
   | "PLATFORM_CHAT_MODEL"
   | "CHATGPT_WEB_PROXY_URL"
@@ -784,28 +781,6 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     category: "moderation",
     valueType: "string",
     defaultValue: "omni-moderation-latest",
-  },
-  {
-    key: "PLATFORM_API_BASE_URL",
-    label: "平台模型 API 地址",
-    description: "OpenAI 兼容 /v1 基础地址。",
-    category: "models",
-    valueType: "string",
-  },
-  {
-    key: "PLATFORM_API_KEY",
-    label: "平台模型 API Key",
-    description: "站内默认模型调用密钥。",
-    category: "models",
-    valueType: "string",
-    secret: true,
-  },
-  {
-    key: "PLATFORM_IMAGE_MODEL",
-    label: "默认生图模型",
-    description: "图片生成默认模型。",
-    category: "models",
-    valueType: "string",
   },
   {
     key: "PLATFORM_RESPONSES_MODEL",

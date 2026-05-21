@@ -6,6 +6,7 @@ export type ImageBackendRequestKind =
   | "chat"
   | "responses";
 export type ImageBackendAccountBackend = "web" | "responses";
+export type ImageBackendGroupBackendType = "mixed" | "web" | "responses";
 export type ImageBackendMemberType = "api" | "account";
 export type ContentSafetyOverride = "inherit" | "enabled" | "disabled";
 
@@ -17,6 +18,7 @@ export type ImageBackendGroupSummary = {
   isDefault: boolean;
   isUserSelectable: boolean;
   contentSafetyEnabled: boolean | null;
+  backendType: ImageBackendGroupBackendType;
   minPlan: SubscriptionPlan;
   priority: number;
   apiCount: number;

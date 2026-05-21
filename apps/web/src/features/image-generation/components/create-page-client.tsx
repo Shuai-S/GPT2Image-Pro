@@ -58,6 +58,7 @@ import { useLocale } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import type { ImageBackendGroupBackendType } from "@/features/image-backend-pool/types";
 import {
   DEFAULT_IMAGE_MODEL,
   DEFAULT_IMAGE_SIZE,
@@ -66,6 +67,7 @@ import {
   IMAGE_RESOLUTION_PRESETS,
   MAX_IMAGE_DIMENSION,
   normalizeImageSize,
+  normalizeValidImageSize,
   parseImageSize,
   validateImageSize,
 } from "../resolution";
@@ -101,6 +103,7 @@ type ImageApiResult = {
   revisedPrompt?: string;
   responseText?: string;
   responseThinking?: string;
+  webConversation?: ChatGptWebConversationState;
   creditsConsumed?: number;
   results?: ImageApiResult[];
 };
@@ -154,8 +157,15 @@ type ChatVariant = {
   revisedPrompt?: string;
   responseText?: string;
   responseThinking?: string;
+  webConversation?: ChatGptWebConversationState;
   creditsConsumed?: number;
   createdAt?: string;
+};
+
+type ChatGptWebConversationState = {
+  conversationId: string;
+  parentMessageId: string;
+  accountId?: string;
 };
 
 type ChatMessage = {
@@ -217,6 +227,13 @@ type ImageQuality = "auto" | "low" | "medium" | "high";
 type ImageModeration = "auto" | "low";
 
 type ActiveMode = "text" | "image" | "chat";
+
+type BackendGroupOption = {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  backendType: ImageBackendGroupBackendType;
+};
 
 const defaultDimensions = parseImageSize(DEFAULT_IMAGE_SIZE) || {
   width: 1024,
@@ -315,6 +332,8 @@ interface CreatePageClientProps {
     maxFileSizeBytes: number;
     maxUploadBytes: number;
   };
+  backendGroups: BackendGroupOption[];
+  selectedBackendGroupId: string | null;
 }
 
 function isImageFile(file: File) {
@@ -403,13 +422,43 @@ function sanitizeChatMessages(value: unknown): ChatMessage[] {
     const item = message as Partial<ChatMessage>;
     if (item.role !== "user" && item.role !== "assistant") return [];
     if (typeof item.text !== "string") return [];
+    const messageText = item.text;
+    const variants = Array.isArray(item.variants)
+      ? item.variants.flatMap((variant) => {
+          if (!variant || typeof variant !== "object") return [];
+          const value = variant as Partial<ChatVariant>;
+          const webConversation =
+            value.webConversation &&
+            typeof value.webConversation === "object" &&
+            typeof value.webConversation.conversationId === "string" &&
+            typeof value.webConversation.parentMessageId === "string"
+              ? {
+                  conversationId: value.webConversation.conversationId,
+                  parentMessageId: value.webConversation.parentMessageId,
+                  accountId:
+                    typeof value.webConversation.accountId === "string"
+                      ? value.webConversation.accountId
+                      : undefined,
+                }
+              : undefined;
+          return [
+            {
+              ...value,
+              prompt: value.prompt || messageText,
+              model: value.model || DEFAULT_IMAGE_MODEL,
+              size: value.size || DEFAULT_IMAGE_SIZE,
+              webConversation,
+            },
+          ];
+        })
+      : undefined;
     return [
       {
         id: typeof item.id === "string" ? item.id : createLocalId(),
         role: item.role,
-        text: item.text,
+        text: messageText,
         attachments: item.attachments,
-        variants: item.variants,
+        variants,
         activeVariant: item.activeVariant,
         error: item.error,
         createdAt:
@@ -558,6 +607,7 @@ function toChatHistory(messages: ChatMessage[]) {
         imageUrl: variant.imageUrl,
         size: variant.size,
         timestamp: variant.createdAt,
+        webConversation: variant.webConversation,
       })),
       activeVariant: message.activeVariant || 0,
       error: message.error,
@@ -591,10 +641,22 @@ export function CreatePageClient({
   recentGenerations: initialRecent,
   plan,
   uploadLimits,
+  backendGroups,
+  selectedBackendGroupId,
 }: CreatePageClientProps) {
   const locale = useLocale();
   const isZh = locale === "zh";
   const copy = (en: string, zh: string) => (isZh ? zh : en);
+  const selectedBackendGroup =
+    backendGroups.find((group) => group.id === selectedBackendGroupId) ||
+    backendGroups.find((group) => group.isDefault) ||
+    null;
+  const activeBackendType = selectedBackendGroup?.backendType || "mixed";
+  const isWebOnlyBackend = activeBackendType === "web";
+  const isResponsesOnlyBackend = activeBackendType === "responses";
+  const showImageModelControls = !isWebOnlyBackend;
+  const showResponsesOnlyControls = !isWebOnlyBackend;
+  const showWebOnlyControls = !isResponsesOnlyBackend;
   const imageCountLabel = (count: number) =>
     copy(`${count} image${count > 1 ? "s" : ""}`, `${count} 张图片`);
   const batchCostSuffix = (count: number) =>
@@ -672,6 +734,10 @@ export function CreatePageClient({
     "Turning this off is best effort: the platform sends the original prompt and uses instant on Web, but an upstream backend may still internally revise or interpret the prompt.",
     "关闭后是尽量少改动：平台会发送原始提示词，并让 Web 使用 instant；但上游后端仍可能在内部改写或理解提示词。"
   );
+  const resolutionHelpText = copy(
+    "Reference images can use their original pixels for preview and masks. The requested output size must still be valid, so non-step reference sizes are rounded to the nearest supported size. Web backend treats resolution as best-effort aspect-ratio guidance and cannot guarantee exact pixels or native 4K. After generation, the actual output size is recorded and credits are settled against the actual size.",
+    "参考图预览和蒙版仍使用原始像素。请求的输出尺寸必须合法，所以非步进参考图尺寸会贴近到支持的尺寸。Web 后端只能把分辨率作为尽量遵循的画幅提示，不能保证精确像素或原生 4K。生成完成后会记录实际输出尺寸，并按实际尺寸修正计费。"
+  );
   const validationMessage = (message?: string) => {
     if (!message || !isZh) return message;
     if (message === "Use WIDTHxHEIGHT format.") {
@@ -738,11 +804,13 @@ export function CreatePageClient({
   const [editBatchCount, setEditBatchCount] = useState(1);
   const [textModel, setTextModel] = useState("default");
   const [editModel, setEditModel] = useState("default");
-  const [useFirstImageSize, setUseFirstImageSize] = useState(true);
+  const [useEditFirstImageSize, setUseEditFirstImageSize] = useState(true);
   const [chatCustomResolutionOpen, setChatCustomResolutionOpen] =
     useState(false);
   const [editWidth, setEditWidth] = useState(defaultDimensions.width);
   const [editHeight, setEditHeight] = useState(defaultDimensions.height);
+  const [chatEditWidth, setChatEditWidth] = useState(defaultDimensions.width);
+  const [chatEditHeight, setChatEditHeight] = useState(defaultDimensions.height);
   const [editImages, setEditImages] = useState<EditImageFile[]>([]);
   const [maskFile, setMaskFile] = useState<EditImageFile | null>(null);
   const [maskEditorOpen, setMaskEditorOpen] = useState(false);
@@ -801,42 +869,49 @@ export function CreatePageClient({
     () => normalizeImageSize(editWidth, editHeight),
     [editWidth, editHeight]
   );
-  const effectiveEditSize = useMemo(() => {
-    if (useFirstImageSize) {
-      return firstImageSize
+  const chatCustomEditSize = useMemo(
+    () => normalizeImageSize(chatEditWidth, chatEditHeight),
+    [chatEditWidth, chatEditHeight]
+  );
+  const firstImageOriginalSize = useMemo(
+    () =>
+      firstImageSize
         ? normalizeImageSize(firstImageSize.width, firstImageSize.height)
-        : null;
+        : null,
+    [firstImageSize]
+  );
+  const firstImageOutputSize = useMemo(
+    () => (firstImageSize ? normalizeValidImageSize(firstImageSize) : null),
+    [firstImageSize]
+  );
+  const chatFirstImageOriginalSize = useMemo(
+    () =>
+      chatFirstImageSize
+        ? normalizeImageSize(chatFirstImageSize.width, chatFirstImageSize.height)
+        : null,
+    [chatFirstImageSize]
+  );
+  const effectiveEditSize = useMemo(() => {
+    if (useEditFirstImageSize) {
+      return firstImageOutputSize;
     }
     return customEditSize;
-  }, [customEditSize, firstImageSize, useFirstImageSize]);
-  const chatEffectiveEditSize = useMemo(() => {
-    if (useFirstImageSize) {
-      return chatFirstImageSize
-        ? normalizeImageSize(
-            chatFirstImageSize.width,
-            chatFirstImageSize.height
-          )
-        : null;
-    }
-    return customEditSize;
-  }, [chatFirstImageSize, customEditSize, useFirstImageSize]);
+  }, [customEditSize, firstImageOutputSize, useEditFirstImageSize]);
   const editImageCreditCost = effectiveEditSize
     ? getImageCreditCost(effectiveEditSize, {
         imageModerationCount: editImages.length,
       })
     : getImageCreditCost();
   const editBatchCreditCost = editImageCreditCost * editBatchCount;
-  const chatEditImageCreditCost = chatEffectiveEditSize
-    ? getImageCreditCost(chatEffectiveEditSize, {
+  const chatEditImageCreditCost = chatCustomEditSize
+    ? getImageCreditCost(chatCustomEditSize, {
         imageModerationCount: chatAttachments.length,
       })
     : getImageCreditCost();
   const chatSingleCreditCost =
     chatAttachments.length > 0 ? chatEditImageCreditCost : CHAT_TEXT_ONLY_CREDITS;
   const batchFallbackSize =
-    chatAttachments.length > 0 && chatEffectiveEditSize
-      ? chatEffectiveEditSize
-      : size;
+    chatAttachments.length > 0 ? chatCustomEditSize : size;
   const batchSingleCreditCost = getImageCreditCost(batchFallbackSize, {
     imageModerationCount: chatAttachments.length,
   });
@@ -854,24 +929,35 @@ export function CreatePageClient({
     () => validateImageSize(customEditSize),
     [customEditSize]
   );
+  const chatCustomEditSizeCheck = useMemo(
+    () => validateImageSize(chatCustomEditSize),
+    [chatCustomEditSize]
+  );
   const chatSizeCheck = useMemo(
-    () =>
-      chatAttachments.length > 0 && !useFirstImageSize
-        ? customEditSizeCheck
-        : sizeCheck,
-    [chatAttachments.length, customEditSizeCheck, sizeCheck, useFirstImageSize]
+    () => (chatAttachments.length > 0 ? chatCustomEditSizeCheck : sizeCheck),
+    [chatAttachments.length, chatCustomEditSizeCheck, sizeCheck]
   );
   const busy = isGenerating || isEditing || isChatGenerating;
   const firstPreviewUrl = editImages[0]?.previewUrl || null;
   const chatFirstPreviewUrl = chatAttachments[0]?.previewUrl || null;
   const editDisplaySize = effectiveEditSize || copy("Reference image", "参考图片");
+  const editReferenceSizeNote =
+    useEditFirstImageSize && firstImageOriginalSize && effectiveEditSize
+      ? firstImageOriginalSize === effectiveEditSize
+        ? copy(
+            `Reference image: ${firstImageOriginalSize}`,
+            `参考图：${firstImageOriginalSize}`
+          )
+        : copy(
+            `Reference image: ${firstImageOriginalSize}; output adjusted to ${effectiveEditSize}.`,
+            `参考图：${firstImageOriginalSize}；输出已贴近为 ${effectiveEditSize}。`
+          )
+      : null;
   const loadingSize =
     activeMode === "image" && effectiveEditSize
       ? effectiveEditSize
-      : activeMode === "chat" &&
-          chatAttachments.length > 0 &&
-          chatEffectiveEditSize
-        ? chatEffectiveEditSize
+      : activeMode === "chat" && chatAttachments.length > 0
+        ? chatCustomEditSize
         : size;
   const loadingDimensions = parseImageSize(loadingSize) || {
     width,
@@ -1156,14 +1242,22 @@ export function CreatePageClient({
     streamMessageId?: string;
     streamCardId?: string;
   }) => {
+    const requestSize =
+      attachments.length > 0
+        ? chatCustomEditSize
+        : validateImageSize(fallbackSize).valid
+          ? fallbackSize
+          : size;
     const formData = new FormData();
     formData.append("prompt", prompt);
     formData.append("history", JSON.stringify(toChatHistory(historyMessages)));
     formData.append("quality", quality);
     formData.append("moderation", moderation);
     formData.append("model", chatModel);
-    formData.append("thinking", chatThinking);
-    formData.append("size", fallbackSize);
+    if (showWebOnlyControls) {
+      formData.append("thinking", chatThinking);
+    }
+    formData.append("size", requestSize);
     formData.append("count", "1");
     formData.append("stream", "true");
     if (promptOptimizationAllowed) {
@@ -1339,6 +1433,7 @@ export function CreatePageClient({
       ...completed,
       responseText: completed.responseText || text || undefined,
       responseThinking: completed.responseThinking || thinking || undefined,
+      webConversation: completed.webConversation,
     };
   };
 
@@ -1525,18 +1620,6 @@ export function CreatePageClient({
   }, [chatFirstPreviewUrl]);
 
   useEffect(() => {
-    if (!useFirstImageSize || !firstImageSize) return;
-    setEditWidth(firstImageSize.width);
-    setEditHeight(firstImageSize.height);
-  }, [firstImageSize, useFirstImageSize]);
-
-  useEffect(() => {
-    if (!useFirstImageSize || !chatFirstImageSize) return;
-    setEditWidth(chatFirstImageSize.width);
-    setEditHeight(chatFirstImageSize.height);
-  }, [chatFirstImageSize, useFirstImageSize]);
-
-  useEffect(() => {
     const canvas = maskCanvasRef.current;
     if (!canvas || !firstImageSize) return;
     const ctx = canvas.getContext("2d");
@@ -1560,6 +1643,7 @@ export function CreatePageClient({
       revisedPrompt?: string;
       responseText?: string;
       responseThinking?: string;
+      webConversation?: ChatGptWebConversationState;
       creditsConsumed?: number;
     },
     resultPrompt: string,
@@ -1611,6 +1695,7 @@ export function CreatePageClient({
       revisedPrompt: data.revisedPrompt,
       responseText: data.responseText,
       responseThinking: data.responseThinking,
+      webConversation: data.webConversation,
       creditsConsumed: data.creditsConsumed,
       createdAt: new Date().toISOString(),
     };
@@ -1752,7 +1837,8 @@ export function CreatePageClient({
     setChatAttachments((prev) => {
       const target = prev[index];
       if (target) revokePreview(target.previewUrl);
-      return prev.filter((_, itemIndex) => itemIndex !== index);
+      const next = prev.filter((_, itemIndex) => itemIndex !== index);
+      return next;
     });
   };
 
@@ -1845,7 +1931,13 @@ export function CreatePageClient({
     if (!assistantMessage) return;
     const activeVariant = getActiveChatVariant(assistantMessage);
     const retrySize = activeVariant?.size || size;
-    const historyMessages = chatMessages.slice(0, assistantIndex);
+    const userIndex = chatMessages.findIndex(
+      (message) => message.id === userMessage.id
+    );
+    const historyMessages =
+      userIndex >= 0
+        ? chatMessages.slice(0, userIndex)
+        : chatMessages.slice(0, assistantIndex);
 
     setRetryingChatMessageId(assistantId);
     setIsChatGenerating(true);
@@ -1988,37 +2080,21 @@ export function CreatePageClient({
 
   const renderChatInput = () => {
     const isEditChat = chatAttachments.length > 0;
-    const activeChatSize =
-      isEditChat && useFirstImageSize
-        ? chatEffectiveEditSize || copy("Reference image", "参考图片")
-        : isEditChat
-          ? customEditSize
-          : size;
+    const activeChatSize = isEditChat ? chatCustomEditSize : size;
     const selectedChatPreset =
-      isEditChat && useFirstImageSize && chatEffectiveEditSize
-        ? "reference"
-        : typeof activeChatSize === "string" &&
-            IMAGE_RESOLUTION_PRESETS.some(
-              (preset) => preset.value === activeChatSize
-            )
-          ? activeChatSize
-          : "custom";
+      typeof activeChatSize === "string" &&
+      IMAGE_RESOLUTION_PRESETS.some((preset) => preset.value === activeChatSize)
+        ? activeChatSize
+        : "custom";
 
     const applyChatPreset = (value: string) => {
-      if (value === "reference") {
-        setUseFirstImageSize(true);
-        setChatCustomResolutionOpen(false);
-        return;
-      }
-
       if (value === "custom") {
         setChatCustomResolutionOpen(true);
-        if (isEditChat) setUseFirstImageSize(false);
         return;
       }
 
       if (isEditChat) {
-        applyEditPreset(value);
+        applyChatEditPreset(value);
       } else {
         applyPreset(value);
       }
@@ -2068,13 +2144,14 @@ export function CreatePageClient({
             disabled: isChatGenerating,
             compact: true,
           })}
-          {renderThinkingSelect({
-            id: "chat-thinking",
-            value: chatThinking,
-            onChange: setChatThinking,
-            disabled: isChatGenerating,
-            compact: true,
-          })}
+          {showWebOnlyControls &&
+            renderThinkingSelect({
+              id: "chat-thinking",
+              value: chatThinking,
+              onChange: setChatThinking,
+              disabled: isChatGenerating,
+              compact: true,
+            })}
           <Select
             value={selectedChatPreset}
             onValueChange={applyChatPreset}
@@ -2084,11 +2161,6 @@ export function CreatePageClient({
               <SelectValue placeholder={activeChatSize} />
             </SelectTrigger>
             <SelectContent>
-              {isEditChat && chatEffectiveEditSize && (
-                <SelectItem value="reference">
-                  {copy("Reference", "参考图")} · {chatEffectiveEditSize}
-                </SelectItem>
-              )}
               {IMAGE_RESOLUTION_PRESETS.map((preset) => (
                 <SelectItem key={preset.value} value={preset.value}>
                   {presetLabel(preset.label)} · {preset.detail}
@@ -2099,16 +2171,11 @@ export function CreatePageClient({
               </SelectItem>
             </SelectContent>
           </Select>
-          {isEditChat && (
-            <Button
-              type="button"
-              variant={useFirstImageSize ? "secondary" : "outline"}
-              size="sm"
-              onClick={() => setUseFirstImageSize((value) => !value)}
-              disabled={isChatGenerating || !chatFirstImageSize}
-            >
-              {copy("Reference size", "参考图尺寸")}
-            </Button>
+          {helpMarker(copy("Resolution", "分辨率"), resolutionHelpText)}
+          {isEditChat && chatFirstImageOriginalSize && (
+            <span className="text-xs text-muted-foreground">
+              {copy("Reference", "参考图")} {chatFirstImageOriginalSize}
+            </span>
           )}
           <span className="ml-auto text-xs text-muted-foreground">
             {copy("Cost", "费用")}{" "}
@@ -2137,12 +2204,11 @@ export function CreatePageClient({
                   min={256}
                   max={MAX_IMAGE_DIMENSION}
                   step={IMAGE_DIMENSION_STEP}
-                  value={isEditChat ? editWidth : width}
+                  value={isEditChat ? chatEditWidth : width}
                   onChange={(event) => {
                     const next = Number(event.target.value) || 0;
                     if (isEditChat) {
-                      setUseFirstImageSize(false);
-                      setEditWidth(next);
+                      setChatEditWidth(next);
                     } else {
                       setWidth(next);
                     }
@@ -2165,12 +2231,11 @@ export function CreatePageClient({
                   min={256}
                   max={MAX_IMAGE_DIMENSION}
                   step={IMAGE_DIMENSION_STEP}
-                  value={isEditChat ? editHeight : height}
+                  value={isEditChat ? chatEditHeight : height}
                   onChange={(event) => {
                     const next = Number(event.target.value) || 0;
                     if (isEditChat) {
-                      setUseFirstImageSize(false);
-                      setEditHeight(next);
+                      setChatEditHeight(next);
                     } else {
                       setHeight(next);
                     }
@@ -2251,10 +2316,7 @@ export function CreatePageClient({
   };
 
   const getBatchFallbackSize = () => {
-    if (chatAttachments.length > 0 && chatEffectiveEditSize) {
-      return chatEffectiveEditSize;
-    }
-    return size;
+    return chatAttachments.length > 0 ? chatCustomEditSize : size;
   };
 
   const validateChatAttachments = (attachments: ChatAttachment[]) => {
@@ -2268,15 +2330,6 @@ export function CreatePageClient({
         description: copy(
           `Reference images total ${formatMegabytes(totalUploadSize)}. Keep the total under ${formatMegabytes(maxEditRequestBytes)}.`,
           `参考图片总大小为 ${formatMegabytes(totalUploadSize)}，请控制在 ${formatMegabytes(maxEditRequestBytes)} 以内。`
-        ),
-      });
-      return false;
-    }
-    if (!chatEffectiveEditSize) {
-      toast.error(copy("Waiting for reference image size", "正在读取参考图片尺寸"), {
-        description: copy(
-          "The first reference image is still loading.",
-          "第一张参考图片仍在加载。"
         ),
       });
       return false;
@@ -2489,31 +2542,17 @@ export function CreatePageClient({
       file: cloneFile(item.file),
     }));
     const isEditRequest = attachments.length > 0;
-    const fallbackSize = isEditRequest ? chatEffectiveEditSize : size;
+    const fallbackSize = isEditRequest ? chatCustomEditSize : size;
     const cost = isEditRequest ? chatEditImageCreditCost : CHAT_TEXT_ONLY_CREDITS;
+    const outputSizeCheck = isEditRequest ? chatCustomEditSizeCheck : sizeCheck;
 
     if (balance < cost) {
       showGenerationError("Insufficient credits");
       return;
     }
-    if (!isEditRequest && !sizeCheck.valid) {
+    if (!outputSizeCheck.valid) {
       toast.error(copy("Invalid resolution", "分辨率无效"), {
-        description: validationMessage(sizeCheck.message),
-      });
-      return;
-    }
-    if (isEditRequest && !fallbackSize) {
-      toast.error(copy("Waiting for reference image size", "正在读取参考图片尺寸"), {
-        description: copy(
-          "The first reference image is still loading.",
-          "第一张参考图片仍在加载。"
-        ),
-      });
-      return;
-    }
-    if (isEditRequest && !useFirstImageSize && !customEditSizeCheck.valid) {
-      toast.error(copy("Invalid resolution", "分辨率无效"), {
-        description: validationMessage(customEditSizeCheck.message),
+        description: validationMessage(outputSizeCheck.message),
       });
       return;
     }
@@ -2711,9 +2750,11 @@ export function CreatePageClient({
         count: params.count || 1,
         quality,
         moderation,
-        ...(textModel !== "default" ? { model: textModel } : {}),
+        ...(showImageModelControls && textModel !== "default"
+          ? { model: textModel }
+          : {}),
         ...(imageGptModel !== "default" ? { gptModel: imageGptModel } : {}),
-        thinking: imageThinking,
+        ...(showWebOnlyControls ? { thinking: imageThinking } : {}),
         ...(promptOptimizationAllowed ? { promptOptimization } : {}),
       }),
     });
@@ -2813,7 +2854,7 @@ export function CreatePageClient({
       });
       return;
     }
-    if (!useFirstImageSize && !customEditSizeCheck.valid) {
+    if (!useEditFirstImageSize && !customEditSizeCheck.valid) {
       toast.error(copy("Invalid resolution", "分辨率无效"), {
         description: validationMessage(customEditSizeCheck.message),
       });
@@ -2840,14 +2881,16 @@ export function CreatePageClient({
     formData.append("prompt", editPrompt.trim());
     formData.append("quality", quality);
     formData.append("moderation", moderation);
-    if (editModel !== "default") {
+    if (showImageModelControls && editModel !== "default") {
       formData.append("model", editModel);
     }
     if (imageGptModel !== "default") {
       formData.append("gptModel", imageGptModel);
     }
-    formData.append("thinking", imageThinking);
-    if (useFirstImageSize) {
+    if (showWebOnlyControls) {
+      formData.append("thinking", imageThinking);
+    }
+    if (useEditFirstImageSize) {
       formData.append("displaySize", effectiveEditSize);
     } else {
       formData.append("size", effectiveEditSize);
@@ -2923,9 +2966,20 @@ export function CreatePageClient({
     if (!preset) return;
     const dimensions = parseImageSize(preset.value);
     if (!dimensions) return;
-    setUseFirstImageSize(false);
+    setUseEditFirstImageSize(false);
     setEditWidth(dimensions.width);
     setEditHeight(dimensions.height);
+  };
+
+  const applyChatEditPreset = (presetValue: string) => {
+    const preset = IMAGE_RESOLUTION_PRESETS.find(
+      (item) => item.value === presetValue
+    );
+    if (!preset) return;
+    const dimensions = parseImageSize(preset.value);
+    if (!dimensions) return;
+    setChatEditWidth(dimensions.width);
+    setChatEditHeight(dimensions.height);
   };
 
   const addImages = (files: FileList | File[] | null) => {
@@ -3310,34 +3364,36 @@ export function CreatePageClient({
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <div className="space-y-1.5">
-              <label
-                htmlFor={`text-model-${mode}`}
-                className="text-xs font-medium text-muted-foreground"
-              >
-                {labelWithHelp(copy("Image model", "图片模型"), imageModelHelpText)}
-              </label>
-              <Select
-                value={textModel}
-                onValueChange={setTextModel}
-                disabled={busy}
-              >
-                <SelectTrigger
-                  id={`text-model-${mode}`}
-                  className="w-full"
-                  title={imageModelHelpText}
+            {showImageModelControls && (
+              <div className="space-y-1.5">
+                <label
+                  htmlFor={`text-model-${mode}`}
+                  className="text-xs font-medium text-muted-foreground"
                 >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {TEXT_MODEL_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {textModelLabel(option.label)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+                  {labelWithHelp(copy("Image model", "图片模型"), imageModelHelpText)}
+                </label>
+                <Select
+                  value={textModel}
+                  onValueChange={setTextModel}
+                  disabled={busy}
+                >
+                  <SelectTrigger
+                    id={`text-model-${mode}`}
+                    className="w-full"
+                    title={imageModelHelpText}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TEXT_MODEL_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {textModelLabel(option.label)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <label
@@ -3361,7 +3417,8 @@ export function CreatePageClient({
               </p>
             </div>
 
-            <div className="space-y-1.5">
+            {showWebOnlyControls && (
+              <div className="space-y-1.5">
               <label
                 htmlFor={`text-thinking-${mode}`}
                 className="text-xs font-medium text-muted-foreground"
@@ -3374,7 +3431,8 @@ export function CreatePageClient({
                 onChange: setImageThinking,
                 disabled: busy,
               })}
-            </div>
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <label
@@ -3409,7 +3467,7 @@ export function CreatePageClient({
 
           <div>
             <span className="text-sm font-medium text-foreground">
-              {copy("Resolution", "分辨率")}
+              {labelWithHelp(copy("Resolution", "分辨率"), resolutionHelpText)}
             </span>
             <p className="mt-1 text-xs text-muted-foreground">
               {copy(
@@ -3485,7 +3543,8 @@ export function CreatePageClient({
             <div className="text-xs text-muted-foreground sm:pb-2">{size}</div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
+          {showResponsesOnlyControls && (
+            <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <label
                 htmlFor={`image-quality-${mode}`}
@@ -3539,7 +3598,8 @@ export function CreatePageClient({
                 </SelectContent>
               </Select>
             </div>
-          </div>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground lg:justify-end">
@@ -3972,6 +4032,7 @@ export function CreatePageClient({
               </div>
 
               <div className="space-y-4 rounded-lg border border-border bg-background p-4">
+                {showImageModelControls && (
                 <div className="space-y-2">
                   <label
                     htmlFor="edit-model"
@@ -4000,6 +4061,7 @@ export function CreatePageClient({
                     </SelectContent>
                   </Select>
                 </div>
+                )}
 
                 <div className="space-y-2">
                   <label
@@ -4023,6 +4085,7 @@ export function CreatePageClient({
                   </p>
                 </div>
 
+                {showWebOnlyControls && (
                 <div className="space-y-2">
                   <label
                     htmlFor="edit-thinking"
@@ -4037,7 +4100,10 @@ export function CreatePageClient({
                     disabled: isEditing,
                   })}
                 </div>
+                )}
 
+                {showResponsesOnlyControls && (
+                <>
                 <div className="space-y-2">
                   <label
                     htmlFor="edit-quality"
@@ -4089,6 +4155,8 @@ export function CreatePageClient({
                     </SelectContent>
                   </Select>
                 </div>
+                </>
+                )}
 
                 <div className="space-y-2">
                   <label
@@ -4122,9 +4190,9 @@ export function CreatePageClient({
                   >
                     <Checkbox
                       id="edit-use-source-size"
-                      checked={useFirstImageSize}
+                      checked={useEditFirstImageSize}
                       onCheckedChange={(checked) =>
-                        setUseFirstImageSize(checked === true)
+                        setUseEditFirstImageSize(checked === true)
                       }
                       disabled={isEditing}
                       className="mt-0.5"
@@ -4133,14 +4201,14 @@ export function CreatePageClient({
                       {copy("Use first image resolution", "使用第一张图片分辨率")}
                       <span className="mt-1 block text-xs font-normal text-muted-foreground">
                         {copy(
-                          "Default for edits. Turn off for outpainting or canvas extension.",
-                          "编辑默认使用该尺寸；扩图或扩展画布时可关闭。"
+                          "Default for edits. If the reference dimensions are not supported as an output size, the request is rounded to the nearest valid size. Turn off for outpainting or canvas extension.",
+                          "编辑默认使用该尺寸；如果参考图尺寸不能作为输出尺寸，请求会贴近到合法尺寸。扩图或扩展画布时可关闭。"
                         )}
                       </span>
                     </span>
                   </label>
 
-                  {!useFirstImageSize && (
+                  {!useEditFirstImageSize && (
                     <div className="space-y-3 border-t border-border pt-3">
                       <div className="grid grid-cols-2 gap-2">
                         {IMAGE_RESOLUTION_PRESETS.map((preset) => {
@@ -4220,11 +4288,18 @@ export function CreatePageClient({
 
                 <div className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
                   <p>
-                    {copy("Output size", "输出尺寸")}:{" "}
+                    {labelWithHelp(
+                      copy("Output size", "输出尺寸"),
+                      resolutionHelpText
+                    )}
+                    :{" "}
                     <span className="font-medium text-foreground">
                       {editDisplaySize}
                     </span>
                   </p>
+                  {editReferenceSizeNote && (
+                    <p className="mt-1">{editReferenceSizeNote}</p>
+                  )}
                   <p className="mt-1">
                     {copy("Cost", "费用")}:{" "}
                     <span className="font-medium text-foreground">

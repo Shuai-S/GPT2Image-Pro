@@ -16,8 +16,8 @@ import {
   acquireImageBackendInflight,
   ImageBackendPoolUnavailableError,
   isImageBackendSwitchableError,
-  reportImageBackendResult,
   releaseImageBackendInflight,
+  reportImageBackendResult,
   resolveImageBackendPoolConfig,
 } from "@/features/image-backend-pool/service";
 import type { ImageBackendRequestKind } from "@/features/image-backend-pool/types";
@@ -1499,22 +1499,6 @@ async function parseImageResponse(
   return withRetryMetadata(result, responseRetryMetadata);
 }
 
-async function getPlatformConfig(): Promise<ApiConfig> {
-  const baseUrl = await getRuntimeSettingString("PLATFORM_API_BASE_URL");
-  const apiKey = await getRuntimeSettingString("PLATFORM_API_KEY");
-  if (!baseUrl || !apiKey) {
-    throw new Error("Platform API configuration is missing");
-  }
-  return {
-    baseUrl,
-    apiKey,
-    model:
-      normalizeImageModel(
-        await getRuntimeSettingString("PLATFORM_IMAGE_MODEL")
-      ) || DEFAULT_IMAGE_MODEL,
-  };
-}
-
 export async function getUserApiConfig(
   userId: string
 ): Promise<ApiConfig | null> {
@@ -1549,6 +1533,7 @@ export async function getEffectiveConfig(
     userId?: string;
     apiKeyId?: string;
     requestKind?: ImageBackendRequestKind;
+    preferredMemberId?: string;
   }
 ): Promise<{
   config: ApiConfig;
@@ -1564,6 +1549,7 @@ export async function getEffectiveConfig(
         userId: options.userId,
         apiKeyId: options.apiKeyId,
         requestKind: options.requestKind,
+        preferredMemberId: options.preferredMemberId,
       });
     } catch (error) {
       if (error instanceof ImageBackendPoolUnavailableError) {
@@ -1575,14 +1561,9 @@ export async function getEffectiveConfig(
       return { config: poolConfig.config, useCredits: true };
     }
   }
-  const platformConfig = await getPlatformConfig();
-  return {
-    config: {
-      ...platformConfig,
-      backend: { type: "platform", requestKind: options?.requestKind },
-    },
-    useCredits: true,
-  };
+  throw new ImageBackendPoolUnavailableError(
+    "没有可用的默认生图后端，请在账号池中配置默认分组和 API/账号"
+  );
 }
 
 export async function generateImage(
@@ -1821,6 +1802,7 @@ export async function generateChatImage(
       prompt: params.prompt,
       apiPrompt: params.apiPrompt,
       promptOptimization: params.promptOptimization,
+      history: params.history,
       size: params.size,
       model: params.imageModel || DEFAULT_IMAGE_MODEL,
       gptModel: model,

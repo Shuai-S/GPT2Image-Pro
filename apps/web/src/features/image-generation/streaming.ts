@@ -25,6 +25,11 @@ export type ImageStreamEvent =
       revisedPrompt?: string;
       responseText?: string;
       responseThinking?: string;
+      webConversation?: {
+        conversationId: string;
+        parentMessageId: string;
+        accountId?: string;
+      };
       creditsConsumed?: number;
     }
   | {

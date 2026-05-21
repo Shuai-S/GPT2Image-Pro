@@ -7,6 +7,10 @@ import { getLocale } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { CreatePageClient } from "@/features/image-generation/components/create-page-client";
 import { getUserRecentGenerations } from "@/features/image-generation/queries";
+import {
+  getUserImageBackendPreference,
+  listSelectableImageBackendGroups,
+} from "@/features/image-backend-pool/service";
 
 export default async function CreatePage() {
   const user = await getCurrentUser();
@@ -18,7 +22,12 @@ export default async function CreatePage() {
     getUserRecentGenerations(user.id, 6),
     getUserPlan(user.id),
   ]);
-  const uploadLimits = await getPlanUploadLimits(plan.plan);
+  const [uploadLimits, backendGroups, selectedBackendGroupId] =
+    await Promise.all([
+      getPlanUploadLimits(plan.plan),
+      listSelectableImageBackendGroups(plan.plan),
+      getUserImageBackendPreference(user.id),
+    ]);
 
   const balance = creditsData?.balance || 0;
 
@@ -42,6 +51,13 @@ export default async function CreatePage() {
       recentGenerations={recents}
       plan={plan.plan}
       uploadLimits={uploadLimits}
+      backendGroups={backendGroups.map((group) => ({
+        id: group.id,
+        name: group.name,
+        isDefault: group.isDefault,
+        backendType: group.backendType,
+      }))}
+      selectedBackendGroupId={selectedBackendGroupId}
     />
   );
 }

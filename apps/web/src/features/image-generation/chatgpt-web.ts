@@ -1,8 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { logError } from "@repo/shared/logger";
 import { getRuntimeSettingString } from "@repo/shared/system-settings";
+import { parseImageSize } from "./resolution";
 import type {
   ApiConfig,
+  ChatGptWebConversationState,
+  ChatHistoryMessage,
   EditImageParams,
   GenerateImageParams,
   GenerateImageResult,
@@ -66,11 +69,131 @@ type WebProxyResponsePayload = {
   bodyBase64?: string;
 };
 
-function getPrompt(params: GenerateImageParams | EditImageParams) {
+type WebImageParams = (GenerateImageParams | EditImageParams) & {
+  history?: ChatHistoryMessage[];
+};
+
+type WebContinuationState = ChatGptWebConversationState & {
+  useNativeContinuation: boolean;
+};
+
+function getPrompt(params: WebImageParams) {
   if (params.promptOptimization === false) {
     return params.prompt;
   }
   return params.apiPrompt || params.prompt;
+}
+
+function gcd(a: number, b: number): number {
+  return b === 0 ? a : gcd(b, a % b);
+}
+
+function aspectRatioFromSize(size?: string) {
+  const normalized = size?.trim().toLowerCase();
+  if (!normalized || normalized === "auto") return null;
+  if (/^\d{1,3}:\d{1,3}$/.test(normalized)) return normalized;
+
+  const dimensions = parseImageSize(normalized);
+  if (!dimensions) return null;
+
+  const divisor = gcd(dimensions.width, dimensions.height);
+  return `${dimensions.width / divisor}:${dimensions.height / divisor}`;
+}
+
+function buildImageSizePrompt(size?: string) {
+  const ratio = aspectRatioFromSize(size);
+  if (!ratio) return null;
+
+  const hints: Record<string, string> = {
+    "1:1": "Output the image in a strict 1:1 square composition.",
+    "16:9": "Output the image in a 16:9 landscape composition.",
+    "9:16": "Output the image in a 9:16 portrait composition.",
+    "4:3": "Output the image in a 4:3 composition.",
+    "3:4": "Output the image in a 3:4 portrait composition.",
+    "3:2": "Output the image in a 3:2 landscape composition.",
+    "2:3": "Output the image in a 2:3 portrait composition.",
+  };
+  const hint = hints[ratio] || `Output the image with a ${ratio} aspect ratio.`;
+  const normalized = size?.trim();
+  if (!normalized || normalized === ratio) return hint;
+  return `${hint} Target size requested by the API is ${normalized}.`;
+}
+
+function applyImageSizePrompt(prompt: string, size?: string) {
+  const hint = buildImageSizePrompt(size);
+  if (!hint) return prompt;
+  return `${prompt.trim()}\n\n${hint}`;
+}
+
+function webHistoryVariantText(message: ChatHistoryMessage) {
+  const variants = message.variants || [];
+  const variant = variants[message.activeVariant || 0] || variants[0];
+  const imageNote = variant?.imageUrl
+    ? `\nGenerated image: ${variant.imageUrl}`
+    : "";
+  return `${variant?.text || message.text || ""}${imageNote}`;
+}
+
+function usableHistoryImageUrl(url: string) {
+  return url.startsWith("http://") || url.startsWith("https://");
+}
+
+function buildWebHistoryPrompt(
+  prompt: string,
+  history: ChatHistoryMessage[] | undefined
+) {
+  const lines: string[] = [];
+
+  for (const message of history || []) {
+    if (message.error) continue;
+    const role = message.role === "user" ? "User" : "Assistant";
+    const text =
+      message.role === "user"
+        ? message.text || ""
+        : webHistoryVariantText(message);
+    const imageUrls =
+      message.role === "user"
+        ? (message.imageUrls || []).filter(usableHistoryImageUrl)
+        : [];
+    const imageNote = imageUrls.length
+      ? `\nAttached image URLs: ${imageUrls.join(", ")}`
+      : "";
+    const content = `${text}${imageNote}`.trim();
+    if (content) lines.push(`${role}: ${content}`);
+  }
+
+  if (!lines.length) return prompt;
+
+  return [
+    "Use the previous conversation below as context for the current image request. Keep the current request as the task to satisfy.",
+    "",
+    "Previous conversation:",
+    lines.join("\n\n"),
+    "",
+    "Current user request:",
+    prompt,
+  ].join("\n");
+}
+
+function lastWebConversationState(
+  history: ChatHistoryMessage[] | undefined,
+  accountId?: string
+): WebContinuationState | null {
+  for (let index = (history || []).length - 1; index >= 0; index--) {
+    const message = history?.[index];
+    if (!message || message.role !== "assistant" || message.error) continue;
+    const variants = message.variants || [];
+    const variant = variants[message.activeVariant || 0] || variants[0];
+    const state = variant?.webConversation;
+    if (!state?.conversationId || !state.parentMessageId) continue;
+    const sameAccount =
+      !accountId || !state.accountId || state.accountId === accountId;
+    return {
+      ...state,
+      useNativeContinuation: sameAccount,
+    };
+  }
+  return null;
 }
 
 function getWebSession(config: ApiConfig) {
@@ -682,6 +805,8 @@ async function prepareImageConversation(
     gptModel?: string;
     thinking?: ThinkingLevel;
     promptOptimization?: boolean;
+    continuation?: WebContinuationState | null;
+    requestMessageId: string;
   }
 ) {
   const path = "/backend-api/f/conversation/prepare";
@@ -691,7 +816,12 @@ async function prepareImageConversation(
     body: JSON.stringify({
       action: "next",
       fork_from_shared_post: false,
-      parent_message_id: randomUUID(),
+      ...(options.continuation?.useNativeContinuation
+        ? { conversation_id: options.continuation.conversationId }
+        : {}),
+      parent_message_id: options.continuation?.useNativeContinuation
+        ? options.continuation.parentMessageId
+        : randomUUID(),
       model: webGptModelSlug(options.gptModel),
       paragen_thinking_level: webThinkingValue(
         options.thinking,
@@ -706,7 +836,7 @@ async function prepareImageConversation(
       conversation_mode: { kind: "primary_assistant" },
       system_hints: ["picture_v2"],
       partial_query: {
-        id: randomUUID(),
+        id: options.requestMessageId,
         author: { role: "user" },
         content: { content_type: "text", parts: [prompt] },
       },
@@ -722,7 +852,11 @@ async function prepareImageConversation(
   return data.conduit_token || "";
 }
 
-function buildMessage(prompt: string, references: UploadedImage[]) {
+function buildMessage(
+  prompt: string,
+  references: UploadedImage[],
+  messageId: string
+) {
   const parts = references.map((item) => ({
     content_type: "image_asset_pointer",
     asset_pointer: `file-service://${item.file_id}`,
@@ -732,7 +866,7 @@ function buildMessage(prompt: string, references: UploadedImage[]) {
   })) as Array<Record<string, unknown> | string>;
   parts.push(prompt);
   return {
-    id: randomUUID(),
+    id: messageId,
     author: { role: "user" },
     create_time: Date.now() / 1000,
     content: references.length
@@ -766,6 +900,8 @@ async function startImageGeneration(
     gptModel?: string;
     thinking?: ThinkingLevel;
     promptOptimization?: boolean;
+    continuation?: WebContinuationState | null;
+    requestMessageId: string;
   },
   references: UploadedImage[]
 ) {
@@ -775,8 +911,13 @@ async function startImageGeneration(
     headers: imageHeaders(config, path, requirements, conduitToken),
     body: JSON.stringify({
       action: "next",
-      messages: [buildMessage(prompt, references)],
-      parent_message_id: randomUUID(),
+      messages: [buildMessage(prompt, references, options.requestMessageId)],
+      ...(options.continuation?.useNativeContinuation
+        ? { conversation_id: options.continuation.conversationId }
+        : {}),
+      parent_message_id: options.continuation?.useNativeContinuation
+        ? options.continuation.parentMessageId
+        : randomUUID(),
       model: webGptModelSlug(options.gptModel),
       client_prepare_state: "sent",
       timezone_offset_min: -480,
@@ -822,6 +963,55 @@ function extractConversationId(text: string) {
   return matches.at(-1)?.[1] || "";
 }
 
+function messageIdFromValue(value: unknown): string {
+  if (!value || typeof value !== "object") return "";
+  const record = value as Record<string, unknown>;
+  if (typeof record.id === "string") return record.id;
+  const message = record.message;
+  if (message && typeof message === "object") {
+    const id = (message as Record<string, unknown>).id;
+    if (typeof id === "string") return id;
+  }
+  return "";
+}
+
+function extractLastMessageId(text: string) {
+  let messageId = "";
+  const normalized = text.replace(/\r\n/g, "\n");
+  for (const block of normalized.split("\n\n")) {
+    const data = block
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart())
+      .join("\n")
+      .trim();
+    if (!data || data === "[DONE]" || data === "v1") continue;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(data);
+    } catch {
+      continue;
+    }
+    if (!payload || typeof payload !== "object") continue;
+    const record = payload as Record<string, unknown>;
+    const directId = messageIdFromValue(record);
+    if (directId) messageId = directId;
+    const valueId = messageIdFromValue(record.v);
+    if (valueId) messageId = valueId;
+    if (Array.isArray(record.v)) {
+      for (const item of record.v) {
+        const patchId = messageIdFromValue(
+          item && typeof item === "object"
+            ? (item as Record<string, unknown>).v
+            : undefined
+        );
+        if (patchId) messageId = patchId;
+      }
+    }
+  }
+  return messageId;
+}
+
 function extractImageIds(text: string) {
   const fileIds = new Set<string>();
   const sedimentIds = new Set<string>();
@@ -833,6 +1023,137 @@ function extractImageIds(text: string) {
     if (match[1]) sedimentIds.add(match[1]);
   }
   return { fileIds: [...fileIds], sedimentIds: [...sedimentIds] };
+}
+
+type WebImageIds = ReturnType<typeof extractImageIds>;
+
+function emptyImageIds(): WebImageIds {
+  return { fileIds: [], sedimentIds: [] };
+}
+
+function hasImageIds(ids: WebImageIds) {
+  return ids.fileIds.length > 0 || ids.sedimentIds.length > 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function getConversationMapping(data: unknown) {
+  if (!isRecord(data) || !isRecord(data.mapping)) return null;
+  return data.mapping;
+}
+
+function conversationNodeParentId(node: unknown) {
+  if (!isRecord(node)) return "";
+  if (typeof node.parent === "string") return node.parent;
+  if (typeof node.parent_id === "string") return node.parent_id;
+  const message = node.message;
+  if (isRecord(message) && isRecord(message.metadata)) {
+    const parentId = message.metadata.parent_id;
+    if (typeof parentId === "string") return parentId;
+  }
+  return "";
+}
+
+function conversationNodeId(node: unknown, fallbackId = "") {
+  if (!isRecord(node)) return fallbackId;
+  if (typeof node.id === "string") return node.id;
+  if (isRecord(node.message) && typeof node.message.id === "string") {
+    return node.message.id;
+  }
+  return fallbackId;
+}
+
+function directConversationChildren(
+  mapping: Record<string, unknown>,
+  parentId: string
+) {
+  const ids = new Set<string>();
+  const parentNode = mapping[parentId];
+  if (isRecord(parentNode) && Array.isArray(parentNode.children)) {
+    for (const child of parentNode.children) {
+      if (typeof child === "string") ids.add(child);
+    }
+  }
+  for (const [id, node] of Object.entries(mapping)) {
+    if (conversationNodeParentId(node) === parentId) ids.add(id);
+  }
+  return [...ids];
+}
+
+function descendantConversationNodes(
+  mapping: Record<string, unknown>,
+  parentId: string
+) {
+  const nodes: Array<{ id: string; node: unknown }> = [];
+  const queue = directConversationChildren(mapping, parentId);
+  const seen = new Set<string>([parentId]);
+  while (queue.length) {
+    const id = queue.shift() || "";
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const node = mapping[id];
+    if (!node) continue;
+    nodes.push({ id, node });
+    queue.push(...directConversationChildren(mapping, id));
+  }
+  return nodes;
+}
+
+function conversationNodesAfterMessage(
+  conversationText: string,
+  requestMessageId: string
+) {
+  if (!conversationText || !requestMessageId) return [];
+  let data: unknown;
+  try {
+    data = JSON.parse(conversationText);
+  } catch {
+    return [];
+  }
+  const mapping = getConversationMapping(data);
+  if (!mapping) return [];
+
+  const currentNode = isRecord(data) && typeof data.current_node === "string"
+    ? data.current_node
+    : "";
+  const chain: Array<{ id: string; node: unknown }> = [];
+  const seen = new Set<string>();
+  let cursor = currentNode;
+  let reachedRequest = false;
+  while (cursor && !seen.has(cursor)) {
+    if (cursor === requestMessageId) {
+      reachedRequest = true;
+      break;
+    }
+    seen.add(cursor);
+    const node = mapping[cursor];
+    if (!node) break;
+    chain.push({ id: cursor, node });
+    cursor = conversationNodeParentId(node);
+  }
+  if (reachedRequest) return chain.reverse();
+
+  return descendantConversationNodes(mapping, requestMessageId);
+}
+
+function scopedConversationTextAfterMessage(
+  conversationText: string,
+  requestMessageId: string
+) {
+  return conversationNodesAfterMessage(conversationText, requestMessageId)
+    .map(({ node }) => JSON.stringify(node))
+    .join("\n");
+}
+
+function latestConversationMessageIdAfter(
+  conversationText: string,
+  requestMessageId: string
+) {
+  const nodes = conversationNodesAfterMessage(conversationText, requestMessageId);
+  const latest = nodes.at(-1);
+  return latest ? conversationNodeId(latest.node, latest.id) : "";
 }
 
 function extractWebStreamError(text: string) {
@@ -912,17 +1233,41 @@ async function getConversationText(config: ApiConfig, conversationId: string) {
   return JSON.stringify(await response.json());
 }
 
-async function pollImageIds(config: ApiConfig, conversationId: string) {
+function latestConversationMessageId(text: string) {
+  if (!text) return "";
+  try {
+    const data = JSON.parse(text) as { current_node?: unknown };
+    if (typeof data.current_node === "string") return data.current_node;
+  } catch {
+    /* fall back to scanning below */
+  }
+  const idMatches = [...text.matchAll(/"id"\s*:\s*"([^"]+)"/g)];
+  return idMatches.at(-1)?.[1] || "";
+}
+
+async function pollImageIds(
+  config: ApiConfig,
+  conversationId: string,
+  requestMessageId?: string
+) {
   const deadline = Date.now() + IMAGE_POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const text = await getConversationText(config, conversationId);
-    const ids = extractImageIds(text);
-    if (ids.fileIds.length || ids.sedimentIds.length) {
-      return ids;
+    const scopedText = requestMessageId
+      ? scopedConversationTextAfterMessage(text, requestMessageId)
+      : text;
+    const ids = extractImageIds(scopedText);
+    if (hasImageIds(ids)) {
+      return {
+        ids,
+        parentMessageId: requestMessageId
+          ? latestConversationMessageIdAfter(text, requestMessageId)
+          : latestConversationMessageId(text),
+      };
     }
     await sleep(IMAGE_POLL_INTERVAL_MS);
   }
-  return { fileIds: [], sedimentIds: [] };
+  return { ids: emptyImageIds(), parentMessageId: "" };
 }
 
 async function getDownloadUrl(config: ApiConfig, path: string) {
@@ -940,12 +1285,19 @@ async function getDownloadUrl(config: ApiConfig, path: string) {
 async function resolveImageUrls(
   config: ApiConfig,
   conversationId: string,
-  ids: ReturnType<typeof extractImageIds>
+  ids: WebImageIds,
+  requestMessageId?: string
 ) {
-  const resolvedIds =
-    conversationId && !ids.fileIds.length && !ids.sedimentIds.length
+  const polled =
+    conversationId && requestMessageId
+      ? await pollImageIds(config, conversationId, requestMessageId)
+      : null;
+  const shouldPollUnscoped = conversationId && !hasImageIds(ids);
+  const unscopedPolled =
+    !polled && shouldPollUnscoped
       ? await pollImageIds(config, conversationId)
-      : ids;
+      : null;
+  const resolvedIds = polled?.ids || unscopedPolled?.ids || ids;
   const urls: string[] = [];
   for (const fileId of resolvedIds.fileIds) {
     const url = await getDownloadUrl(
@@ -954,7 +1306,12 @@ async function resolveImageUrls(
     );
     if (url) urls.push(url);
   }
-  if (urls.length || !conversationId) return urls;
+  if (urls.length || !conversationId) {
+    return {
+      urls,
+      parentMessageId: polled?.parentMessageId || unscopedPolled?.parentMessageId || "",
+    };
+  }
   for (const sedimentId of resolvedIds.sedimentIds) {
     const url = await getDownloadUrl(
       config,
@@ -962,7 +1319,10 @@ async function resolveImageUrls(
     );
     if (url) urls.push(url);
   }
-  return urls;
+  return {
+    urls,
+    parentMessageId: polled?.parentMessageId || unscopedPolled?.parentMessageId || "",
+  };
 }
 
 async function downloadImage(config: ApiConfig, url: string) {
@@ -982,11 +1342,19 @@ async function downloadImage(config: ApiConfig, url: string) {
 
 async function runWebImage(
   config: ApiConfig,
-  params: GenerateImageParams | EditImageParams,
+  params: WebImageParams,
   images: ImageInputFile[]
 ): Promise<GenerateImageResult> {
   try {
-    const prompt = getPrompt(params);
+    const requestMessageId = randomUUID();
+    const continuation = lastWebConversationState(
+      params.history,
+      config.backend?.id
+    );
+    const promptBase = continuation?.useNativeContinuation
+      ? getPrompt(params)
+      : buildWebHistoryPrompt(getPrompt(params), params.history);
+    const prompt = applyImageSizePrompt(promptBase, params.size);
     const references = await Promise.all(
       images.map((image, index) => uploadImage(config, image, index + 1))
     );
@@ -999,6 +1367,8 @@ async function runWebImage(
         gptModel: params.gptModel,
         thinking: params.thinking,
         promptOptimization: params.promptOptimization,
+        continuation,
+        requestMessageId,
       }
     );
     const response = await startImageGeneration(
@@ -1010,6 +1380,8 @@ async function runWebImage(
         gptModel: params.gptModel,
         thinking: params.thinking,
         promptOptimization: params.promptOptimization,
+        continuation,
+        requestMessageId,
       },
       references
     );
@@ -1019,12 +1391,36 @@ async function runWebImage(
       return { error: streamError };
     }
     const conversationId = extractConversationId(text);
+    let parentMessageId = extractLastMessageId(text);
     const ids = extractImageIds(text);
-    const urls = await resolveImageUrls(config, conversationId, ids);
+    const resolved = await resolveImageUrls(
+      config,
+      conversationId,
+      ids,
+      requestMessageId
+    );
+    const urls = resolved.urls;
+    parentMessageId = resolved.parentMessageId || parentMessageId;
+    if (conversationId && !parentMessageId) {
+      parentMessageId = latestConversationMessageId(
+        await getConversationText(config, conversationId)
+      );
+    }
     if (!urls[0]) {
       return { error: "ChatGPT Web backend returned no image output" };
     }
-    return { imageBase64: await downloadImage(config, urls[0]) };
+    return {
+      imageBase64: await downloadImage(config, urls[0]),
+      ...(conversationId && parentMessageId
+        ? {
+            webConversation: {
+              conversationId,
+              parentMessageId,
+              accountId: config.backend?.id,
+            },
+          }
+        : {}),
+    };
   } catch (error) {
     logError(error, {
       source: "chatgpt-web-image",

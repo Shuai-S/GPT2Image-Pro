@@ -12,12 +12,12 @@ import {
   normalizeSubscriptionPlan,
   type SubscriptionPlan,
 } from "@repo/shared/config/subscription-plan";
+import { logWarn } from "@repo/shared/logger";
+import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import {
   getRuntimeSettingNumber,
   getRuntimeSettingString,
 } from "@repo/shared/system-settings";
-import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
-import { logWarn } from "@repo/shared/logger";
 import {
   and,
   asc,
@@ -32,15 +32,16 @@ import {
 import { nanoid } from "nanoid";
 import { Pool } from "pg";
 
-import type { ApiConfig } from "@/features/image-generation/types";
 import {
-  getChatGptWebAccountInfo,
   type ChatGptWebAccountInfo,
+  getChatGptWebAccountInfo,
 } from "@/features/image-generation/chatgpt-web";
+import type { ApiConfig } from "@/features/image-generation/types";
 
 import type {
-  ImageBackendAccountBackend,
   ContentSafetyOverride,
+  ImageBackendAccountBackend,
+  ImageBackendGroupBackendType,
   ImageBackendGroupSummary,
   ImageBackendRequestKind,
 } from "./types";
@@ -49,6 +50,7 @@ type ResolveBackendOptions = {
   userId: string;
   apiKeyId?: string;
   requestKind: ImageBackendRequestKind;
+  preferredMemberId?: string;
 };
 
 type PoolMember =
@@ -127,6 +129,7 @@ type BackendMetadata = Record<string, unknown> & {
 
 type ImageBackendGroupMetadata = Record<string, unknown> & {
   minPlan?: unknown;
+  backendType?: unknown;
 };
 
 const CHATGPT_CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex";
@@ -163,6 +166,12 @@ function normalizeAccountBackend(
   return value === "responses" ? "responses" : "web";
 }
 
+function normalizeGroupBackendType(
+  value?: unknown
+): ImageBackendGroupBackendType {
+  return value === "web" || value === "responses" ? value : "mixed";
+}
+
 function stripTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
 }
@@ -194,6 +203,32 @@ function getGroupMinPlan(
   metadata: Record<string, unknown> | null | undefined
 ): SubscriptionPlan {
   return normalizeSubscriptionPlan(asGroupMetadata(metadata).minPlan, "free");
+}
+
+function getGroupBackendType(
+  metadata: Record<string, unknown> | null | undefined
+) {
+  return normalizeGroupBackendType(asGroupMetadata(metadata).backendType);
+}
+
+function groupBackendAllowsRequest(
+  metadata: Record<string, unknown> | null | undefined,
+  requestKind: ImageBackendRequestKind
+) {
+  const backendType = getGroupBackendType(metadata);
+  if (backendType === "mixed") return true;
+  if (requestKind === "responses") {
+    return backendType === "responses";
+  }
+  return true;
+}
+
+function groupBackendAllowsAccount(
+  metadata: Record<string, unknown> | null | undefined,
+  backend: ImageBackendAccountBackend
+) {
+  const backendType = getGroupBackendType(metadata);
+  return backendType === "mixed" || backendType === backend;
 }
 
 function canUseBackendGroupForPlan(
@@ -917,8 +952,9 @@ async function ensureGroupUsable(
 
 async function selectPoolMember(
   groupId: string | null,
-  requestKind: ImageBackendRequestKind,
-  excluded?: Set<string>
+  groupMetadata?: Record<string, unknown> | null,
+  excluded?: Set<string>,
+  preferredMemberId?: string
 ): Promise<PoolMember | null> {
   const apiGroupFilter = groupId
     ? eq(imageBackendApi.groupId, groupId)
@@ -999,7 +1035,7 @@ async function selectPoolMember(
     .filter((row) => {
       const backend = normalizeAccountBackend(row.implementationMode);
       return (
-        (requestKind !== "chat" || backend === "responses") &&
+        groupBackendAllowsAccount(groupMetadata, backend) &&
         isWebAccountQuotaAvailable(backend, row.metadata, now)
       );
     })
@@ -1023,6 +1059,10 @@ async function selectPoolMember(
     [...apiMembers, ...accountMembers]
       .filter((member) => !excluded?.has(backendKey(member)))
       .sort((left, right) => {
+        const preferredDiff =
+          (right.id === preferredMemberId ? 1 : 0) -
+          (left.id === preferredMemberId ? 1 : 0);
+        if (preferredDiff !== 0) return preferredDiff;
         const priorityDiff = left.priority - right.priority;
         if (priorityDiff !== 0) return priorityDiff;
         const loadDiff = backendLoadRate(left) - backendLoadRate(right);
@@ -1161,10 +1201,20 @@ async function resolvePoolMember(
     return null;
   }
 
+  if (!groupBackendAllowsRequest(group.metadata, options.requestKind)) {
+    if (requestedGroup.explicit) {
+      throw new ImageBackendPoolUnavailableError(
+        `生图后端分组「${group.name}」不支持当前请求类型`
+      );
+    }
+    return null;
+  }
+
   const member = await selectPoolMember(
     group.id,
-    options.requestKind,
-    options.excluded
+    group.metadata,
+    options.excluded,
+    options.preferredMemberId
   );
   if (!member) {
     if (requestedGroup.explicit) {
@@ -1493,6 +1543,7 @@ export async function listImageBackendGroupOptions(options?: {
     .map(({ metadata, ...group }) => ({
       ...group,
       minPlan: getGroupMinPlan(metadata),
+      backendType: getGroupBackendType(metadata),
     }));
 }
 
@@ -1564,6 +1615,7 @@ type UpsertGroupInput = {
   isDefault: boolean;
   isUserSelectable: boolean;
   contentSafetyEnabled: boolean | null;
+  backendType: ImageBackendGroupBackendType;
   minPlan: SubscriptionPlan;
   priority: number;
 };
@@ -1585,6 +1637,7 @@ export async function upsertImageBackendGroup(input: UpsertGroupInput) {
     const metadata = {
       ...asGroupMetadata(existing?.metadata),
       minPlan: input.minPlan,
+      backendType: input.backendType,
     };
     await db
       .update(imageBackendGroup)
@@ -1612,7 +1665,7 @@ export async function upsertImageBackendGroup(input: UpsertGroupInput) {
     isDefault: input.isDefault,
     isUserSelectable: input.isUserSelectable,
     contentSafetyEnabled: input.contentSafetyEnabled,
-    metadata: { minPlan: input.minPlan },
+    metadata: { minPlan: input.minPlan, backendType: input.backendType },
     priority: input.priority,
   });
   return id;
@@ -1945,12 +1998,20 @@ function parseImportTokensText(
     tokens.refreshTokens.add(match[0]);
   }
 
-  extractNamedTokens(value, ["refresh_token", "refreshToken", "rt"]).forEach(
-    (token) => addToken(tokens.refreshTokens, token)
-  );
-  extractNamedTokens(value, ["access_token", "accessToken", "at"]).forEach(
-    (token) => addAccessToken(tokens.accessTokens, token)
-  );
+  for (const token of extractNamedTokens(value, [
+    "refresh_token",
+    "refreshToken",
+    "rt",
+  ])) {
+    addToken(tokens.refreshTokens, token);
+  }
+  for (const token of extractNamedTokens(value, [
+    "access_token",
+    "accessToken",
+    "at",
+  ])) {
+    addAccessToken(tokens.accessTokens, token);
+  }
 
   const looksStructured =
     /(?:^|[\s{,])["']?(?:access[_-]?token|accessToken|refresh[_-]?token|refreshToken)["']?\s*[:=]/i.test(
@@ -3068,6 +3129,7 @@ export async function listAdminImageBackendPool() {
     isDefault: group.isDefault,
     isUserSelectable: group.isUserSelectable,
     contentSafetyEnabled: group.contentSafetyEnabled,
+    backendType: getGroupBackendType(group.metadata),
     minPlan: getGroupMinPlan(group.metadata),
     priority: group.priority,
     apiCount: apiCountMap.get(group.id) ?? 0,

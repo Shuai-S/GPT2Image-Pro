@@ -21,6 +21,7 @@ export interface GenerateImageResult {
   upstreamRevisedPrompt?: string;
   responseText?: string;
   responseThinking?: string;
+  webConversation?: ChatGptWebConversationState;
   error?: string;
   upstreamResetAt?: string;
   retryAfterSeconds?: number;
@@ -87,11 +88,18 @@ export interface ChatImageParams {
   rawResponsesBody?: unknown;
 }
 
+export interface ChatGptWebConversationState {
+  conversationId: string;
+  parentMessageId: string;
+  accountId?: string;
+}
+
 export interface ChatHistoryVariant {
   text?: string;
   imageUrl?: string;
   size?: string;
   timestamp?: string;
+  webConversation?: ChatGptWebConversationState;
 }
 
 export interface ChatHistoryMessage {

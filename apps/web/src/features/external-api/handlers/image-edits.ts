@@ -1,8 +1,8 @@
 import { withApiLogging } from "@repo/shared/api-logger";
-import { getStorageProvider } from "@repo/shared/storage/providers";
-import { getRuntimeSettingString } from "@repo/shared/system-settings";
 import { getPlanUploadLimits } from "@repo/shared/subscription/services/upload-limits";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
 
@@ -17,14 +17,23 @@ import {
   toOpenAIErrorPayload,
   wantsImageStreamResponse,
 } from "@/features/external-api/images";
+import { runBatchImageGeneration } from "@/features/image-generation/batch-runner";
 import { runImageGenerationForUser } from "@/features/image-generation/operations";
 import {
   getImageModel,
   parseImageSize,
   validateImageSize,
 } from "@/features/image-generation/resolution";
+import {
+  DEFAULT_MAX_IMAGE_BYTES,
+  deleteModerationImages,
+  filesToImageInputs,
+  formatMegabytes,
+  getTotalUploadSize,
+  uploadModerationImages,
+  validateImageFile,
+} from "@/features/image-generation/request-utils";
 import type {
-  ImageInputFile,
   ImageModeration,
   ImageQuality,
   PartialImageResult,
@@ -32,10 +41,7 @@ import type {
 } from "@/features/image-generation/types";
 
 const MAX_EDIT_IMAGES = 16;
-const DEFAULT_MAX_IMAGE_BYTES = 25 * 1024 * 1024;
-const MODERATION_UPLOAD_URL_EXPIRES = 600;
 const MAX_BATCH_COUNT = 10;
-const VALID_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const VALID_QUALITIES = new Set<ImageQuality>([
   "auto",
   "low",
@@ -50,8 +56,95 @@ const VALID_THINKING = new Set<ThinkingLevel>([
   "high",
   "xhigh",
 ]);
-function formatMegabytes(bytes: number) {
-  return `${bytes / 1024 / 1024}MB`;
+
+const JSON_SCALAR_FIELDS = [
+  "prompt",
+  "apiPrompt",
+  "api_prompt",
+  "promptOptimization",
+  "prompt_optimization",
+  "size",
+  "display_size",
+  "displaySize",
+  "quality",
+  "moderation",
+  "n",
+  "count",
+  "response_format",
+  "model",
+  "gptModel",
+  "gpt_model",
+  "thinking",
+  "stream",
+] as const;
+
+type ImageReference =
+  | { type: "file"; file: File }
+  | { type: "url"; url: string };
+type JsonRecord = Record<string, unknown>;
+
+class ImageReferenceError extends Error {
+  constructor(
+    message: string,
+    readonly status = 400
+  ) {
+    super(message);
+  }
+}
+
+function isPrivateIpAddress(address: string) {
+  const normalized = address.toLowerCase();
+  if (normalized === "::1" || normalized === "0:0:0:0:0:0:0:1") return true;
+  if (normalized === "::" || normalized.startsWith("fe80:")) return true;
+  if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true;
+  if (normalized.startsWith("::ffff:")) {
+    return isPrivateIpAddress(normalized.replace(/^::ffff:/, ""));
+  }
+
+  const parts = normalized.split(".");
+  if (parts.length !== 4 || parts.some((part) => !/^\d+$/.test(part))) {
+    return false;
+  }
+
+  const [a = 0, b = 0] = parts.map(Number);
+  if (a === 10 || a === 127 || a === 0) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 198 && (b === 18 || b === 19)) return true;
+  if (a >= 224) return true;
+  return false;
+}
+
+async function assertPublicImageUrl(url: URL) {
+  const hostname = url.hostname.toLowerCase();
+  if (url.username || url.password) {
+    throw new ImageReferenceError("Image URL must not include credentials.");
+  }
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) {
+    throw new ImageReferenceError("Image URL must be publicly reachable.");
+  }
+  if (hostname === "metadata.google.internal" || hostname.endsWith(".internal")) {
+    throw new ImageReferenceError("Image URL must be publicly reachable.");
+  }
+
+  const strippedHostname = hostname.replace(/^\[|\]$/g, "");
+  const literalIp = isIP(strippedHostname);
+  if (literalIp) {
+    if (isPrivateIpAddress(strippedHostname)) {
+      throw new ImageReferenceError("Image URL must be publicly reachable.");
+    }
+    return;
+  }
+
+  const addresses = await lookup(hostname, { all: true, verbatim: true });
+  if (
+    addresses.length === 0 ||
+    addresses.some((entry) => isPrivateIpAddress(entry.address))
+  ) {
+    throw new ImageReferenceError("Image URL must be publicly reachable.");
+  }
 }
 
 function getText(formData: FormData, key: string) {
@@ -87,125 +180,240 @@ function getOptionalBoolean(formData: FormData, ...keys: string[]) {
   return undefined;
 }
 
-function getImageFiles(formData: FormData) {
-  const images: File[] = [];
+function isPlainRecord(value: unknown): value is JsonRecord {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isScalarJsonValue(value: unknown) {
+  return (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  );
+}
+
+function formDataFromJson(body: JsonRecord) {
+  const formData = new FormData();
+  for (const key of JSON_SCALAR_FIELDS) {
+    const value = body[key];
+    if (isScalarJsonValue(value)) {
+      formData.append(key, String(value));
+    }
+  }
+  return formData;
+}
+
+function splitUrlList(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => item.trim())
+          .filter(Boolean);
+      }
+    } catch {
+      /* fall through to delimiter parsing */
+    }
+  }
+  return trimmed
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function getFormImageReferences(formData: FormData) {
+  const images: ImageReference[] = [];
 
   for (const [key, value] of formData.entries()) {
     if (
       value instanceof File &&
       (key === "image" || key === "image[]" || key.startsWith("image_"))
     ) {
-      images.push(value);
+      images.push({ type: "file", file: value });
+      continue;
+    }
+
+    if (
+      typeof value === "string" &&
+      (key === "image" ||
+        key === "images" ||
+        key === "image_url" ||
+        key === "image_url[]" ||
+        key === "image_urls")
+    ) {
+      for (const url of splitUrlList(value)) {
+        images.push({ type: "url", url });
+      }
     }
   }
 
   return images;
 }
 
-function validateImageFile(
-  file: File,
-  options?: { mask?: boolean; maxImageBytes?: number }
-) {
-  if (file.size <= 0) {
-    throw new Error(`${file.name || "Image"} is empty.`);
+function jsonReferenceToUrl(value: unknown): string | null {
+  if (typeof value === "string") return value.trim() || null;
+  if (!isPlainRecord(value)) return null;
+
+  const imageUrl = value.image_url ?? value.url;
+  if (typeof imageUrl === "string" && imageUrl.trim()) {
+    return imageUrl.trim();
   }
 
-  const maxImageBytes = options?.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES;
-  if (file.size > maxImageBytes) {
-    throw new Error(
-      `${file.name || "Image"} exceeds the ${formatMegabytes(maxImageBytes)} limit.`
+  if (typeof value.file_id === "string" && value.file_id.trim()) {
+    throw new ImageReferenceError(
+      "file_id image references are not supported. Use image_url or multipart image uploads."
     );
   }
 
-  if (options?.mask) {
-    if (file.type !== "image/png") {
-      throw new Error("Mask must be a PNG file.");
+  return null;
+}
+
+function getJsonImageReferences(body: JsonRecord) {
+  const references: ImageReference[] = [];
+  const images = body.images;
+  if (Array.isArray(images)) {
+    for (const item of images) {
+      const url = jsonReferenceToUrl(item);
+      if (url) references.push({ type: "url", url });
     }
-    return;
+  } else {
+    const url = jsonReferenceToUrl(images);
+    if (url) references.push({ type: "url", url });
   }
 
-  if (!VALID_IMAGE_TYPES.has(file.type)) {
-    throw new Error("Source images must be PNG, JPEG, or WebP files.");
+  const imageUrl = jsonReferenceToUrl(body.image_url ?? body.image);
+  if (imageUrl) references.push({ type: "url", url: imageUrl });
+
+  const imageUrls = body.image_urls;
+  if (Array.isArray(imageUrls)) {
+    for (const item of imageUrls) {
+      const url = jsonReferenceToUrl(item);
+      if (url) references.push({ type: "url", url });
+    }
+  } else if (typeof imageUrls === "string") {
+    for (const url of splitUrlList(imageUrls)) {
+      references.push({ type: "url", url });
+    }
   }
+
+  return references;
 }
 
-function getTotalUploadSize(files: File[], maskFile?: File) {
-  return (
-    files.reduce((total, file) => total + file.size, 0) + (maskFile?.size || 0)
+function getFormMaskReference(formData: FormData) {
+  const mask = formData.get("mask");
+  if (mask instanceof File) {
+    return { type: "file", file: mask } satisfies ImageReference;
+  }
+  if (typeof mask === "string" && mask.trim()) {
+    return { type: "url", url: mask.trim() } satisfies ImageReference;
+  }
+
+  const maskUrl =
+    getText(formData, "mask_url") || getText(formData, "mask_image_url");
+  if (maskUrl) return { type: "url", url: maskUrl } satisfies ImageReference;
+  return undefined;
+}
+
+function getJsonMaskReference(body: JsonRecord) {
+  const url = jsonReferenceToUrl(
+    body.mask ?? body.mask_url ?? body.mask_image_url
   );
+  if (!url) return undefined;
+  return { type: "url", url } satisfies ImageReference;
 }
 
-async function toImageInput(
-  file: File,
-  options?: { publicUrl?: string }
-): Promise<ImageInputFile> {
-  return {
-    data: Buffer.from(await file.arrayBuffer()),
-    name: file.name || "image.png",
-    type: file.type || "image/png",
-    url: options?.publicUrl,
-  };
+function getFileExtension(contentType: string) {
+  if (contentType.includes("jpeg") || contentType.includes("jpg")) return "jpg";
+  if (contentType.includes("webp")) return "webp";
+  return "png";
 }
 
-async function uploadModerationImages(
-  userId: string,
-  generationId: string,
-  files: File[]
+async function fetchImageReference(
+  reference: ImageReference,
+  index: number,
+  options?: { mask?: boolean; maxImageBytes?: number }
 ) {
-  const publicBaseUrl =
-    (await getRuntimeSettingString("ALIYUN_MODERATION_PUBLIC_BASE_URL")) ||
-    (await getRuntimeSettingString("CONTENT_MODERATION_PUBLIC_BASE_URL")) ||
-    (await getRuntimeSettingString("NEXT_PUBLIC_APP_URL")) ||
-    (await getRuntimeSettingString("BETTER_AUTH_URL"));
-  if (!(await getRuntimeSettingString("STORAGE_ENDPOINT")) && !publicBaseUrl) {
-    return undefined;
+  if (reference.type === "file") return reference.file;
+
+  let url: URL;
+  try {
+    url = new URL(reference.url);
+  } catch {
+    throw new ImageReferenceError("Image URL is invalid.");
   }
 
-  const storage = await getStorageProvider();
-  const bucket =
-    (await getRuntimeSettingString("NEXT_PUBLIC_GENERATIONS_BUCKET_NAME")) ||
-    "generations";
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new ImageReferenceError("Image URL must use http or https.");
+  }
+  await assertPublicImageUrl(url);
 
-  return Promise.all(
-    files.map(async (file, index) => {
-      const extension =
-        file.type === "image/jpeg"
-          ? "jpg"
-          : file.type === "image/webp"
-            ? "webp"
-            : "png";
-      const key = `${userId}/moderation/${generationId}-${index}.${extension}`;
-      await storage.putObject(
-        key,
-        bucket,
-        Buffer.from(await file.arrayBuffer()),
-        file.type || "image/png"
-      );
-      const url = await storage.getSignedUrl(
-        key,
-        bucket,
-        MODERATION_UPLOAD_URL_EXPIRES
-      );
-      return {
-        bucket,
-        key,
-        url: url.startsWith("http")
-          ? url
-          : `${publicBaseUrl?.replace(/\/$/, "")}${url}`,
-      };
-    })
+  const response = await fetch(url, {
+    headers: {
+      Accept: options?.mask ? "image/png" : "image/png,image/jpeg,image/webp",
+    },
+    redirect: "follow",
+  });
+  if (!response.ok) {
+    throw new ImageReferenceError(
+      `Failed to fetch image URL: HTTP ${response.status}`,
+      response.status >= 500 ? 502 : 400
+    );
+  }
+
+  const contentType = (
+    (response.headers.get("content-type") || "").split(";")[0] || ""
+  ).trim();
+  const type = contentType || (options?.mask ? "image/png" : "image/png");
+  const contentLength = Number(response.headers.get("content-length") || 0);
+  const maxImageBytes = options?.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES;
+  if (contentLength > maxImageBytes) {
+    throw new ImageReferenceError(
+      `${options?.mask ? "Mask" : "Image URL"} exceeds the ${formatMegabytes(maxImageBytes)} limit.`,
+      413
+    );
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length > maxImageBytes) {
+    throw new ImageReferenceError(
+      `${options?.mask ? "Mask" : "Image URL"} exceeds the ${formatMegabytes(maxImageBytes)} limit.`,
+      413
+    );
+  }
+
+  return new File(
+    [buffer],
+    `${options?.mask ? "mask" : `image-${index + 1}`}.${getFileExtension(
+      type
+    )}`,
+    { type }
   );
 }
 
-async function deleteModerationImages(
-  images: Awaited<ReturnType<typeof uploadModerationImages>> | undefined
+async function resolveImageReferences(
+  references: ImageReference[],
+  maxImageBytes: number
 ) {
-  if (!images?.length) return;
-
-  const storage = await getStorageProvider();
-  await Promise.allSettled(
-    images.map((image) => storage.deleteObject(image.key, image.bucket))
+  return await Promise.all(
+    references.map((reference, index) =>
+      fetchImageReference(reference, index, { maxImageBytes })
+    )
   );
+}
+
+async function resolveMaskReference(
+  reference: ImageReference | undefined,
+  maxImageBytes: number
+) {
+  if (!reference) return undefined;
+  return await fetchImageReference(reference, 0, {
+    mask: true,
+    maxImageBytes,
+  });
 }
 
 async function toStreamCompletedPayload(
@@ -271,9 +479,27 @@ export const postExternalImageEdits = withApiLogging(
     const maxRequestBytes = uploadLimits.maxUploadBytes;
 
     let formData: FormData;
+    let imageReferences: ImageReference[];
+    let maskReference: ImageReference | undefined;
     try {
-      formData = await request.formData();
-    } catch {
+      const contentType = request.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        const body = (await request.json()) as unknown;
+        if (!isPlainRecord(body)) {
+          return openAIImageError("Request body must be a JSON object.");
+        }
+        formData = formDataFromJson(body);
+        imageReferences = getJsonImageReferences(body);
+        maskReference = getJsonMaskReference(body);
+      } else {
+        formData = await request.formData();
+        imageReferences = getFormImageReferences(formData);
+        maskReference = getFormMaskReference(formData);
+      }
+    } catch (error) {
+      if (error instanceof ImageReferenceError) {
+        return openAIImageError(error.message, error.status);
+      }
       return openAIImageError(
         `Upload is too large or incomplete. Each source image must be ${formatMegabytes(maxImageBytes)} or smaller, and the total upload must be ${formatMegabytes(maxRequestBytes)} or smaller.`,
         413
@@ -351,35 +577,30 @@ export const postExternalImageEdits = withApiLogging(
       return openAIImageError("Invalid thinking level.");
     }
     const thinking = thinkingValue as ThinkingLevel | undefined;
-    const sourceFiles = getImageFiles(formData);
-    if (sourceFiles.length === 0) {
+    if (imageReferences.length === 0) {
       return openAIImageError("At least one source image is required.");
     }
-    if (sourceFiles.length > MAX_EDIT_IMAGES) {
+    if (imageReferences.length > MAX_EDIT_IMAGES) {
       return openAIImageError(
         `No more than ${MAX_EDIT_IMAGES} images are allowed.`
       );
     }
 
     try {
+      const sourceFiles = await resolveImageReferences(
+        imageReferences,
+        maxImageBytes
+      );
       for (const file of sourceFiles) {
         validateImageFile(file, { maxImageBytes });
       }
 
-      const maskFile = formData.get("mask");
-      if (maskFile !== null && !(maskFile instanceof File)) {
-        return openAIImageError("Mask must be a PNG file.");
-      }
-      if (maskFile instanceof File) {
+      const maskFile = await resolveMaskReference(maskReference, maxImageBytes);
+      if (maskFile) {
         validateImageFile(maskFile, { mask: true, maxImageBytes });
       }
 
-      if (
-        getTotalUploadSize(
-          sourceFiles,
-          maskFile instanceof File ? maskFile : undefined
-        ) > maxRequestBytes
-      ) {
+      if (getTotalUploadSize(sourceFiles, maskFile) > maxRequestBytes) {
         return openAIImageError(
           `Total upload size must be no more than ${formatMegabytes(maxRequestBytes)}.`,
           413
@@ -394,14 +615,10 @@ export const postExternalImageEdits = withApiLogging(
       );
 
       const buildImages = async () =>
-        await Promise.all(
-          sourceFiles.map((file, index) =>
-            toImageInput(file, { publicUrl: moderationImages?.[index]?.url })
-          )
-        );
+        await filesToImageInputs(sourceFiles, moderationImages);
 
       const buildMask = async () =>
-        maskFile instanceof File ? await toImageInput(maskFile) : undefined;
+        maskFile ? (await filesToImageInputs([maskFile]))[0] : undefined;
 
       const runEdit = async (
         generationId: string,
@@ -439,44 +656,47 @@ export const postExternalImageEdits = withApiLogging(
       if (useStreamResponse) {
         return createExternalImageStreamResponse(async (emit) => {
           try {
-            for (let index = 0; index < count; index++) {
-              const result = await runEdit(randomUUID(), {
+            await runBatchImageGeneration({
+              count,
+              run: runEdit,
+              callbacks: (index) => ({
                 onPartialImage: async (image) => {
                   await emit({
                     event: "image_edit.partial_image",
                     data: toPartialPayload(image, index),
                   });
                 },
-              });
-
-              if (result.error) {
-                await emit({
-                  event: "error",
-                  data: {
-                    type: "upstream_error",
-                    message: result.error,
-                    error: toOpenAIErrorPayload(result.error, {
+              }),
+              onResult: async (result, index) => {
+                if (result.error) {
+                  await emit({
+                    event: "error",
+                    data: {
+                      type: "upstream_error",
+                      message: result.error,
+                      error: toOpenAIErrorPayload(result.error, {
+                        generationId: result.generationId,
+                        creditsConsumed: result.creditsConsumed,
+                      }).error,
+                      generation_id: result.generationId,
                       generationId: result.generationId,
-                      creditsConsumed: result.creditsConsumed,
-                    }).error,
-                    generation_id: result.generationId,
-                    generationId: result.generationId,
-                    credits_consumed: result.creditsConsumed,
-                  },
-                });
-                return;
-              }
+                      credits_consumed: result.creditsConsumed,
+                    },
+                  });
+                  return;
+                }
 
-              await emit({
-                event: "image_edit.completed",
-                data: await toStreamCompletedPayload(
-                  request,
-                  result,
-                  responseFormat,
-                  index
-                ),
-              });
-            }
+                await emit({
+                  event: "image_edit.completed",
+                  data: await toStreamCompletedPayload(
+                    request,
+                    result,
+                    responseFormat,
+                    index
+                  ),
+                });
+              },
+            });
           } finally {
             await deleteModerationImages(moderationImages);
           }
@@ -488,8 +708,11 @@ export const postExternalImageEdits = withApiLogging(
           const data = [];
           const created = Math.floor(Date.now() / 1000);
 
-          for (let index = 0; index < count; index++) {
-            const result = await runEdit(randomUUID());
+          const results = await runBatchImageGeneration({
+            count,
+            run: runEdit,
+          });
+          for (const result of results) {
             if (result.error) {
               return toOpenAIErrorPayload(result.error, {
                 generationId: result.generationId,
@@ -508,6 +731,9 @@ export const postExternalImageEdits = withApiLogging(
         }
       });
     } catch (error) {
+      if (error instanceof ImageReferenceError) {
+        return openAIImageError(error.message, error.status);
+      }
       return openAIImageError(
         error instanceof Error ? error.message : "Failed to edit image."
       );

@@ -18,6 +18,7 @@ import {
   getSelectableImageBackendGroupsAction,
   setUserImageBackendPreferenceAction,
 } from "./actions";
+import type { ImageBackendGroupBackendType } from "./types";
 
 type GroupOption = {
   id: string;
@@ -25,12 +26,19 @@ type GroupOption = {
   description: string | null;
   isDefault: boolean;
   contentSafetyEnabled: boolean | null;
+  backendType: ImageBackendGroupBackendType;
 };
 
 function safetyLabel(value: boolean | null) {
   if (value === true) return "内容审核开启";
   if (value === false) return "内容审核关闭";
   return "内容审核按成员配置";
+}
+
+function backendTypeLabel(value: ImageBackendGroupBackendType) {
+  if (value === "web") return "仅 Web";
+  if (value === "responses") return "仅 Codex";
+  return "混合";
 }
 
 export function ImageBackendPreferenceSection() {
@@ -97,9 +105,11 @@ export function ImageBackendPreferenceSection() {
               {groups.map((group) => (
                 <SelectItem key={group.id} value={group.id}>
                   {group.name}
-                  {group.isDefault ? "（默认）" : ""}
-                  {" · "}
-                  {safetyLabel(group.contentSafetyEnabled)}
+	                  {group.isDefault ? "（默认）" : ""}
+	                  {" · "}
+	                  {backendTypeLabel(group.backendType)}
+	                  {" · "}
+	                  {safetyLabel(group.contentSafetyEnabled)}
                 </SelectItem>
               ))}
             </SelectContent>

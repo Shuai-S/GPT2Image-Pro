@@ -13,6 +13,7 @@ import {
   toOpenAIErrorPayload,
   wantsImageStreamResponse,
 } from "@/features/external-api/images";
+import { runBatchImageGeneration } from "@/features/image-generation/batch-runner";
 import { runImageGenerationForUser } from "@/features/image-generation/operations";
 import {
   DEFAULT_IMAGE_SIZE,
@@ -142,44 +143,51 @@ export const postExternalImageGenerations = withApiLogging(
 
     if (wantsImageStreamResponse(request, parsed.data.stream)) {
       return createExternalImageStreamResponse(async (emit) => {
-        for (let index = 0; index < count; index++) {
-          const result = await runImageGenerationForUser(input, {
+        await runBatchImageGeneration({
+          count,
+          run: (generationId, callbacks) =>
+            runImageGenerationForUser(
+              { ...input, generationId },
+              callbacks
+            ),
+          callbacks: (index) => ({
             onPartialImage: async (image) => {
               await emit({
                 event: "image_generation.partial_image",
                 data: toPartialPayload(image, index),
               });
             },
-          });
-
-          if (result.error) {
-            await emit({
-              event: "error",
-              data: {
-                type: "upstream_error",
-                message: result.error,
-                error: toOpenAIErrorPayload(result.error, {
+          }),
+          onResult: async (result, index) => {
+            if (result.error) {
+              await emit({
+                event: "error",
+                data: {
+                  type: "upstream_error",
+                  message: result.error,
+                  error: toOpenAIErrorPayload(result.error, {
+                    generationId: result.generationId,
+                    creditsConsumed: result.creditsConsumed,
+                  }).error,
+                  generation_id: result.generationId,
                   generationId: result.generationId,
-                  creditsConsumed: result.creditsConsumed,
-                }).error,
-                generation_id: result.generationId,
-                generationId: result.generationId,
-                credits_consumed: result.creditsConsumed,
-              },
-            });
-            return;
-          }
+                  credits_consumed: result.creditsConsumed,
+                },
+              });
+              return;
+            }
 
-          await emit({
-            event: "image_generation.completed",
-            data: await toStreamCompletedPayload(
-              request,
-              result,
-              responseFormat,
-              index
-            ),
-          });
-        }
+            await emit({
+              event: "image_generation.completed",
+              data: await toStreamCompletedPayload(
+                request,
+                result,
+                responseFormat,
+                index
+              ),
+            });
+          },
+        });
       });
     }
 
@@ -187,8 +195,11 @@ export const postExternalImageGenerations = withApiLogging(
       const data = [];
       const created = Math.floor(Date.now() / 1000);
 
-      for (let index = 0; index < count; index++) {
-        const result = await runImageGenerationForUser(input);
+      const results = await runBatchImageGeneration({
+        count,
+        run: () => runImageGenerationForUser(input),
+      });
+      for (const result of results) {
         if (result.error) {
           return toOpenAIErrorPayload(result.error, {
             generationId: result.generationId,
