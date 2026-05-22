@@ -7,7 +7,10 @@ import {
   refundGenerationCredits,
 } from "@repo/shared/generation-maintenance";
 import { getFailedGenerationTargetCredits } from "@repo/shared/generation-settlement";
-import { moderateContent } from "@repo/shared/moderation";
+import {
+  isContentModerationEnabled,
+  moderateContent,
+} from "@repo/shared/moderation";
 import { getStorageProvider } from "@repo/shared/storage/providers";
 import {
   getPlanCapabilitySnapshot,
@@ -417,14 +420,7 @@ export async function runImageGenerationForUser(
   const size = input.size || DEFAULT_IMAGE_SIZE;
   const mixWebFirst = Boolean(input.mixWebFirst && isOneKImageSize(size));
   const inputImages = getInputImages(input);
-  const creditCost = getImageCreditCostBreakdown(size, {
-    imageModerationCount: inputImages.length,
-  });
-  const creditsPerImage = creditCost.totalCredits;
   const isTextOnlyChatInput = input.mode === "chat" && inputImages.length === 0;
-  const initialCreditCharge = isTextOnlyChatInput
-    ? CHAT_TEXT_ONLY_CREDITS
-    : creditsPerImage;
   const bucket =
     (await getRuntimeSettingString("NEXT_PUBLIC_GENERATIONS_BUCKET_NAME")) ||
     "generations";
@@ -436,13 +432,6 @@ export async function runImageGenerationForUser(
     userPlan.plan,
     input.moderationBlockRiskLevel
   );
-  const moderationFailureCredits = planCapabilities.features[
-    "moderation.onlyFailureSettlement"
-  ]
-    ? isTextOnlyChatInput
-      ? Math.min(TEXT_MODERATION_ONLY_CREDITS, CHAT_TEXT_ONLY_CREDITS)
-      : creditCost.moderationOnlyCredits
-    : initialCreditCharge;
   const moderationBlockingEnabled =
     planCapabilities.features["moderation.blocking"];
   const promptOptimizationAllowed =
@@ -567,6 +556,26 @@ export async function runImageGenerationForUser(
     };
   }
   const { config, useCredits } = effectiveConfig;
+  const moderationEnabled =
+    (await isContentModerationEnabled()) &&
+    moderationBlockingEnabled &&
+    config.contentSafetyEnabled !== false;
+  const moderationImageCount = moderationEnabled ? inputImages.length : 0;
+  const creditCost = getImageCreditCostBreakdown(size, {
+    textModerationCount: moderationEnabled ? undefined : 0,
+    imageModerationCount: moderationImageCount,
+  });
+  const creditsPerImage = creditCost.totalCredits;
+  const initialCreditCharge = isTextOnlyChatInput
+    ? CHAT_TEXT_ONLY_CREDITS
+    : creditsPerImage;
+  const moderationFailureCredits = moderationEnabled
+    ? planCapabilities.features["moderation.onlyFailureSettlement"]
+      ? isTextOnlyChatInput
+        ? Math.min(TEXT_MODERATION_ONLY_CREDITS, CHAT_TEXT_ONLY_CREDITS)
+        : creditCost.moderationOnlyCredits
+      : initialCreditCharge
+    : 0;
   let imageModel: string;
   let gptModel: string | undefined;
   let recordModel: string;
@@ -650,7 +659,7 @@ export async function runImageGenerationForUser(
           gptModel,
           recordModel,
           allowGpt55: planCapabilities.features["models.gpt55"],
-          moderationBlockingEnabled,
+          moderationEnabled,
         })
     );
   } catch (error) {
@@ -687,7 +696,7 @@ async function runQueuedImageGenerationForUser({
   gptModel,
   recordModel,
   allowGpt55,
-  moderationBlockingEnabled,
+  moderationEnabled,
 }: {
   input: RunImageGenerationInput;
   callbacks?: ImageGenerationCallbacks;
@@ -711,7 +720,7 @@ async function runQueuedImageGenerationForUser({
   gptModel?: string;
   recordModel: string;
   allowGpt55: boolean;
-  moderationBlockingEnabled: boolean;
+  moderationEnabled: boolean;
 }): Promise<ImageGenerationOperationResult> {
   const startedAt = Date.now();
   const promptOptimizationMetadata = buildPromptOptimizationMetadata({
@@ -750,7 +759,7 @@ async function runQueuedImageGenerationForUser({
             outputCompression: input.outputCompression ?? null,
             batchCount: input.n || 1,
             creditCost,
-            moderationBlockingEnabled,
+            moderationBlockingEnabled: moderationEnabled,
             moderationFailureCredits,
           }
         : input.mode === "chat"
@@ -767,7 +776,7 @@ async function runQueuedImageGenerationForUser({
               outputCompression: input.outputCompression ?? null,
               batchCount: input.n || 1,
               creditCost,
-              moderationBlockingEnabled,
+              moderationBlockingEnabled: moderationEnabled,
               moderationFailureCredits,
             }
           : {
@@ -781,7 +790,7 @@ async function runQueuedImageGenerationForUser({
               outputCompression: input.outputCompression ?? null,
               batchCount: input.n || 1,
               creditCost,
-              moderationBlockingEnabled,
+              moderationBlockingEnabled: moderationEnabled,
               moderationFailureCredits,
             },
   });
@@ -946,7 +955,7 @@ async function runQueuedImageGenerationForUser({
     };
 
   const moderation =
-    config.contentSafetyEnabled === false || !moderationBlockingEnabled
+    !moderationEnabled
       ? ({ decision: "skipped" } as const)
       : await moderateContent({
           prompt: moderationPrompt,
@@ -1293,7 +1302,8 @@ async function runQueuedImageGenerationForUser({
   }
 
   const actualCreditCost = getImageCreditCostBreakdown(actualSize, {
-    imageModerationCount: inputImages.length,
+    textModerationCount: moderationEnabled ? undefined : 0,
+    imageModerationCount: moderationEnabled ? inputImages.length : 0,
   });
   const actualCreditsPerImage = actualCreditCost.totalCredits;
   try {

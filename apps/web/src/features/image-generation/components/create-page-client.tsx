@@ -314,6 +314,7 @@ type BackendGroupOption = {
   name: string;
   isDefault: boolean;
   backendType: ImageBackendGroupBackendType;
+  contentSafetyEnabled: boolean | null;
 };
 
 const defaultDimensions = parseImageSize(DEFAULT_IMAGE_SIZE) || {
@@ -789,6 +790,7 @@ interface CreatePageClientProps {
   backendGroups: BackendGroupOption[];
   selectedBackendGroupId: string | null;
   customApiActive: boolean;
+  moderationEnabled: boolean;
 }
 
 function isImageFile(file: File) {
@@ -1099,6 +1101,7 @@ export function CreatePageClient({
   backendGroups,
   selectedBackendGroupId,
   customApiActive,
+  moderationEnabled,
 }: CreatePageClientProps) {
   const locale = useLocale();
   const searchParams = useSearchParams();
@@ -1122,6 +1125,8 @@ export function CreatePageClient({
   const editModelLabel = (label: string) =>
     label === "Default" ? copy("Default", "默认") : label;
   const textModelLabel = (label: string) =>
+    label === "Default" ? copy("Default", "默认") : label;
+  const chatImageModelLabel = (label: string) =>
     label === "Default" ? copy("Default", "默认") : label;
   const qualityLabel = (qualityValue: ImageQuality) =>
     copy(
@@ -1394,6 +1399,7 @@ export function CreatePageClient({
 
   const [textModel, setTextModel] = useState("default");
   const [editModel, setEditModel] = useState("default");
+  const [chatImageModel, setChatImageModel] = useState("default");
   const [useEditFirstImageSize, setUseEditFirstImageSize] = useState(true);
   const [useAutoEditSize, setUseAutoEditSize] = useState(false);
   const [useAutoChatEditSize, setUseAutoChatEditSize] = useState(false);
@@ -1487,12 +1493,29 @@ export function CreatePageClient({
     ]
   );
 
+  const effectiveContentSafetyEnabled =
+    moderationEnabled &&
+    capabilities.features["moderation.blocking"] &&
+    selectedBackendGroup?.contentSafetyEnabled !== false;
+  const moderationCostOptions = useMemo(
+    () => ({
+      textModerationCount: effectiveContentSafetyEnabled ? undefined : 0,
+    }),
+    [effectiveContentSafetyEnabled]
+  );
+  const getModerationCostOptions = (imageCount: number) => ({
+    ...moderationCostOptions,
+    imageModerationCount: effectiveContentSafetyEnabled ? imageCount : 0,
+  });
   const manualSize = useMemo(
     () => normalizeImageSize(width, height),
     [width, height]
   );
   const size = useAutoSize ? AUTO_IMAGE_SIZE : manualSize;
-  const textImageCreditCost = useMemo(() => getImageCreditCost(size), [size]);
+  const textImageCreditCost = useMemo(
+    () => getImageCreditCost(size, moderationCostOptions),
+    [moderationCostOptions, size]
+  );
   const textBatchCreditCost = textImageCreditCost * batchCount;
   const linePromptItems = useMemo(
     () =>
@@ -1542,16 +1565,18 @@ export function CreatePageClient({
     return customEditSize;
   }, [customEditSize, firstImageOutputSize, useEditFirstImageSize]);
   const editImageCreditCost = effectiveEditSize
-    ? getImageCreditCost(effectiveEditSize, {
-        imageModerationCount: editImages.length,
-      })
-    : getImageCreditCost();
+    ? getImageCreditCost(
+        effectiveEditSize,
+        getModerationCostOptions(editImages.length)
+      )
+    : getImageCreditCost(undefined, moderationCostOptions);
   const editBatchCreditCost = editImageCreditCost * editBatchCount;
   const chatEditImageCreditCost = chatCustomEditSize
-    ? getImageCreditCost(chatCustomEditSize, {
-        imageModerationCount: chatAttachments.length,
-      })
-    : getImageCreditCost();
+    ? getImageCreditCost(
+        chatCustomEditSize,
+        getModerationCostOptions(chatAttachments.length)
+      )
+    : getImageCreditCost(undefined, moderationCostOptions);
   const chatSingleCreditCost =
     chatAttachments.length > 0 ? chatEditImageCreditCost : CHAT_TEXT_ONLY_CREDITS;
   const batchFallbackSize =
@@ -1581,9 +1606,10 @@ export function CreatePageClient({
         "1K 混合路由优先走 Web 时置灰；这些控制仅在回退到 Codex/Responses 后生效。"
       )
     : undefined;
-  const batchSingleCreditCost = getImageCreditCost(batchFallbackSize, {
-    imageModerationCount: chatAttachments.length,
-  });
+  const batchSingleCreditCost = getImageCreditCost(
+    batchFallbackSize,
+    getModerationCostOptions(chatAttachments.length)
+  );
   const formattedBalance = formatCredits(balance);
   const formattedTextBatchCreditCost = formatCredits(textBatchCreditCost);
   const formattedLineBatchCreditCost = formatCredits(lineBatchCreditCost);
@@ -1717,6 +1743,35 @@ export function CreatePageClient({
 
     return control;
   };
+
+  const renderImageModelSelect = (params: {
+    id: string;
+    value: string;
+    onChange: (value: string) => void;
+    disabled?: boolean;
+    compact?: boolean;
+  }) => (
+    <Select
+      value={params.value}
+      onValueChange={params.onChange}
+      disabled={params.disabled}
+    >
+      <SelectTrigger
+        id={params.id}
+        className={params.compact ? "h-8 w-[146px]" : "w-full"}
+        title={imageModelHelpText}
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {TEXT_MODEL_OPTIONS.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            {chatImageModelLabel(option.label)}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
 
   const renderThinkingSelect = (params: {
     id: string;
@@ -1928,6 +1983,9 @@ export function CreatePageClient({
       formData.append("output_compression", String(outputCompression));
     }
     formData.append("model", chatModel);
+    if (showImageModelControls && chatImageModel !== "default") {
+      formData.append("image_model", chatImageModel);
+    }
     if (showWebOnlyControls) {
       formData.append("thinking", chatThinking);
     }
@@ -2802,6 +2860,22 @@ export function CreatePageClient({
             disabled: isChatGenerating,
             compact: true,
           })}
+          {showImageModelControls && (
+            <div
+              className={chatMixWebFirstActive ? "opacity-55" : ""}
+              title={
+                chatMixWebFirstActive ? responsesOnlyDisabledReason : undefined
+              }
+            >
+              {renderImageModelSelect({
+                id: "chat-image-model",
+                value: chatImageModel,
+                onChange: setChatImageModel,
+                disabled: isChatGenerating || chatMixWebFirstActive,
+                compact: true,
+              })}
+            </div>
+          )}
           {showWebOnlyControls &&
             renderThinkingSelect({
               id: "chat-thinking",
@@ -2951,9 +3025,10 @@ export function CreatePageClient({
     const loadSize = Math.min(requestCount, Math.max(available, 0));
     if (loadSize <= 0) return;
 
-    const creditsPerRequest = getImageCreditCost(fallbackSize, {
-      imageModerationCount: attachments.length,
-    });
+    const creditsPerRequest = getImageCreditCost(
+      fallbackSize,
+      getModerationCostOptions(attachments.length)
+    );
     const pendingCredits = batchActiveRequestsRef.current * creditsPerRequest;
     const requiredCredits = creditsPerRequest * loadSize + pendingCredits;
     if (!customApiActive && balance < requiredCredits) {

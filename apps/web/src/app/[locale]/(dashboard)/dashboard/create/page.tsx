@@ -1,6 +1,7 @@
 import { getCurrentUser } from "@repo/shared/auth/server";
 
 import { getCreditsBalance } from "@repo/shared/credits/core";
+import { isContentModerationEnabled } from "@repo/shared/moderation";
 import { getPlanCapabilitySnapshot } from "@repo/shared/subscription/services/plan-capabilities";
 import { getPlanUploadLimits } from "@repo/shared/subscription/services/upload-limits";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
@@ -26,11 +27,12 @@ export default async function CreatePage() {
       getUserPlan(user.id),
       getUserApiConfig(user.id),
     ]);
-  const [uploadLimits, backendGroups, selectedBackendGroupId] =
+  const [uploadLimits, backendGroups, selectedBackendGroupId, moderationEnabled] =
     await Promise.all([
       getPlanUploadLimits(plan.plan),
       listSelectableImageBackendGroups(plan.plan),
       getUserImageBackendPreference(user.id),
+      isContentModerationEnabled(),
     ]);
   const capabilities = await getPlanCapabilitySnapshot(plan.plan);
 
@@ -62,9 +64,11 @@ export default async function CreatePage() {
         name: group.name,
         isDefault: group.isDefault,
         backendType: group.backendType,
+        contentSafetyEnabled: group.contentSafetyEnabled,
       }))}
       selectedBackendGroupId={selectedBackendGroupId}
       customApiActive={Boolean(userApiConfig)}
+      moderationEnabled={moderationEnabled}
     />
   );
 }

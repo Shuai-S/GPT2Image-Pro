@@ -83,7 +83,7 @@ function envValue(name: string) {
   return value || undefined;
 }
 
-async function isModerationEnabled() {
+export async function isContentModerationEnabled() {
   return getRuntimeSettingBoolean("CONTENT_MODERATION_ENABLED", true);
 }
 
@@ -216,7 +216,7 @@ function shouldBlockAliyunRisk(
 export async function getConfiguredModerationProviders(): Promise<
   ModerationProvider[]
 > {
-  if (!(await isModerationEnabled())) {
+  if (!(await isContentModerationEnabled())) {
     return [];
   }
 
@@ -717,6 +717,10 @@ async function moderateWithProxy(
 export async function moderateContent(
   input: ModerateContentInput
 ): Promise<ModerationResult> {
+  if (!(await isContentModerationEnabled())) {
+    return { decision: "skipped" };
+  }
+
   const providers = await getConfiguredModerationProviders();
   const proxyUrl = await getProxyUrl();
   if (providers.length === 0 && (!proxyUrl || input.skipProxy)) {

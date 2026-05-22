@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   AUTO_IMAGE_SIZE,
+  getImageCreditCostBreakdown,
   IMAGE_1K_BASE_SIZE,
   IMAGE_RESOLUTION_PRESETS,
   isOneKImageSize,
@@ -36,5 +37,21 @@ describe("image resolution", () => {
     expect(isOneKImageSize("1248x704")).toBe(true);
     expect(isOneKImageSize("1536x1024")).toBe(false);
     expect(isOneKImageSize(AUTO_IMAGE_SIZE)).toBe(false);
+  });
+
+  it("can remove moderation costs when moderation is disabled", () => {
+    const withModeration = getImageCreditCostBreakdown("1024x1024", {
+      imageModerationCount: 2,
+    });
+    const withoutModeration = getImageCreditCostBreakdown("1024x1024", {
+      textModerationCount: 0,
+      imageModerationCount: 0,
+    });
+
+    expect(withModeration.moderationOnlyCredits).toBeGreaterThan(0);
+    expect(withoutModeration.moderationOnlyCredits).toBe(0);
+    expect(withoutModeration.totalCredits).toBeLessThan(
+      withModeration.totalCredits
+    );
   });
 });
