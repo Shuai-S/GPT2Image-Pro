@@ -37,6 +37,7 @@ import {
   Check,
   CircleHelp,
   Coins,
+  Info,
   ChevronDown,
   Download,
   Eraser,
@@ -381,9 +382,16 @@ function ImageSizeDialog({
     mode === "ratio"
       ? getNearestSupportedSizeForRatio(base, activeRatio)
       : getNearestSupportedSizeForRatio(base, selectedRatio);
-  const customSize = normalizeImageSize(customWidth, customHeight);
+  const normalizedCustomSize = normalizeValidImageSize({
+    width: customWidth,
+    height: customHeight,
+  });
   const previewSize =
-    mode === "auto" ? AUTO_IMAGE_SIZE : mode === "custom" ? customSize : ratioSize;
+    mode === "auto"
+      ? AUTO_IMAGE_SIZE
+      : mode === "custom"
+        ? normalizedCustomSize
+        : ratioSize;
   const previewCheck = validateImageSize(previewSize);
   const canConfirm =
     mode === "auto" ||
@@ -398,7 +406,7 @@ function ImageSizeDialog({
       onOpenChange(false);
       return;
     }
-    const size = mode === "custom" ? customSize : ratioSize;
+    const size = mode === "custom" ? normalizedCustomSize : ratioSize;
     const dimensions = parseImageSize(size);
     if (!dimensions) return;
     onConfirm({ auto: false, width: dimensions.width, height: dimensions.height });
@@ -576,6 +584,16 @@ function ImageSizeDialog({
                 {copy("Use a ratio like 16:9.", "请使用类似 16:9 的比例。")}
               </p>
             )}
+          </div>
+
+          <div className="flex gap-3 rounded-2xl border border-border bg-muted/20 p-4 text-xs leading-5 text-muted-foreground">
+            <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            <p>
+              {copy(
+                "Due to model constraints, the final output is automatically adjusted to a valid size: width and height are multiples of 16, the maximum edge is 3840px, aspect ratio is no more than 3:1, and total pixels are between 655,360 and 8,294,400.",
+                "由于模型限制，最终输出会自动规整到合法尺寸：宽高均为 16 的倍数，最大边长 3840px，宽高比不超过 3:1，总像素限制为 655360-8294400。"
+              )}
+            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -1135,6 +1153,12 @@ export function CreatePageClient({
     }
     if (message.startsWith("Total pixels must be no more than")) {
       return "总像素不能超过 8,294,400。";
+    }
+    if (message.startsWith("Total pixels must be at least")) {
+      return "总像素不能低于 655,360。";
+    }
+    if (message.startsWith("Aspect ratio must be no more than")) {
+      return "宽高比不能超过 3:1。";
     }
     return message;
   };

@@ -6,6 +6,8 @@ export const DEFAULT_IMAGE_SIZE = "1024x1024";
 export const IMAGE_DIMENSION_STEP = 16;
 export const MIN_IMAGE_DIMENSION = 256;
 export const MAX_IMAGE_DIMENSION = 3840;
+export const MAX_IMAGE_ASPECT_RATIO = 3;
+export const MIN_IMAGE_PIXELS = 655360;
 export const MAX_IMAGE_PIXELS = 3840 * 2160;
 export const IMAGE_4K_BASE_CREDIT_COST = 10;
 export const REFERENCE_CREDIT_PRICE_CNY = 0.05;
@@ -139,8 +141,69 @@ function roundToImageStep(value: number) {
   return Math.round(value / IMAGE_DIMENSION_STEP) * IMAGE_DIMENSION_STEP;
 }
 
+function ceilToImageStep(value: number) {
+  return Math.ceil(value / IMAGE_DIMENSION_STEP) * IMAGE_DIMENSION_STEP;
+}
+
 function floorToImageStep(value: number) {
   return Math.floor(value / IMAGE_DIMENSION_STEP) * IMAGE_DIMENSION_STEP;
+}
+
+function enforceMaxAspectRatio(dimensions: ImageDimensions): ImageDimensions {
+  let width = dimensions.width;
+  let height = dimensions.height;
+
+  if (width > height * MAX_IMAGE_ASPECT_RATIO) {
+    height = ceilToImageStep(width / MAX_IMAGE_ASPECT_RATIO);
+  } else if (height > width * MAX_IMAGE_ASPECT_RATIO) {
+    width = ceilToImageStep(height / MAX_IMAGE_ASPECT_RATIO);
+  }
+
+  if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+    const scale = Math.min(
+      MAX_IMAGE_DIMENSION / width,
+      MAX_IMAGE_DIMENSION / height
+    );
+    width = floorToImageStep(width * scale);
+    height = floorToImageStep(height * scale);
+  }
+
+  return {
+    width: clampDimension(width),
+    height: clampDimension(height),
+  };
+}
+
+function growToMinPixels(dimensions: ImageDimensions): ImageDimensions {
+  let width = dimensions.width;
+  let height = dimensions.height;
+
+  if (width * height < MIN_IMAGE_PIXELS) {
+    const scale = Math.sqrt(MIN_IMAGE_PIXELS / (width * height));
+    width = clampDimension(ceilToImageStep(width * scale));
+    height = clampDimension(ceilToImageStep(height * scale));
+  }
+
+  ({ width, height } = enforceMaxAspectRatio({ width, height }));
+
+  while (width * height < MIN_IMAGE_PIXELS) {
+    const canGrowWidth =
+      width < MAX_IMAGE_DIMENSION &&
+      (width + IMAGE_DIMENSION_STEP) / height <= MAX_IMAGE_ASPECT_RATIO;
+    const canGrowHeight =
+      height < MAX_IMAGE_DIMENSION &&
+      (height + IMAGE_DIMENSION_STEP) / width <= MAX_IMAGE_ASPECT_RATIO;
+
+    if (!canGrowWidth && !canGrowHeight) break;
+
+    if ((width <= height && canGrowWidth) || !canGrowHeight) {
+      width += IMAGE_DIMENSION_STEP;
+    } else {
+      height += IMAGE_DIMENSION_STEP;
+    }
+  }
+
+  return { width, height };
 }
 
 export function fitImageDimensionsToValidSize(
@@ -162,6 +225,8 @@ export function fitImageDimensionsToValidSize(
   let width = clampDimension(roundToImageStep(scaledWidth));
   let height = clampDimension(roundToImageStep(scaledHeight));
 
+  ({ width, height } = enforceMaxAspectRatio({ width, height }));
+
   while (width * height > MAX_IMAGE_PIXELS) {
     const widthOverflow = width / scaledWidth;
     const heightOverflow = height / scaledHeight;
@@ -173,6 +238,8 @@ export function fitImageDimensionsToValidSize(
       break;
     }
   }
+
+  ({ width, height } = growToMinPixels({ width, height }));
 
   return {
     width: floorToImageStep(width),
@@ -222,6 +289,22 @@ export function validateImageSize(
     return {
       valid: false,
       message: `Total pixels must be no more than ${MAX_IMAGE_PIXELS.toLocaleString()}.`,
+    };
+  }
+
+  if (dimensions.width * dimensions.height < MIN_IMAGE_PIXELS) {
+    return {
+      valid: false,
+      message: `Total pixels must be at least ${MIN_IMAGE_PIXELS.toLocaleString()}.`,
+    };
+  }
+
+  const longEdge = Math.max(dimensions.width, dimensions.height);
+  const shortEdge = Math.min(dimensions.width, dimensions.height);
+  if (longEdge / shortEdge > MAX_IMAGE_ASPECT_RATIO) {
+    return {
+      valid: false,
+      message: `Aspect ratio must be no more than ${MAX_IMAGE_ASPECT_RATIO}:1.`,
     };
   }
 
