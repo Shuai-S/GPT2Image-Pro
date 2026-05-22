@@ -53,13 +53,349 @@ type SettingUpdate = {
   clear?: boolean;
 };
 
+const PLAN_OPTIONS = [
+  { value: "free", label: "Free" },
+  { value: "starter", label: "Starter" },
+  { value: "pro", label: "Pro" },
+  { value: "ultra", label: "Ultra" },
+  { value: "enterprise", label: "Enterprise" },
+] as const;
+
+const QUEUE_PRIORITY_OPTIONS = [
+  { value: "normal", label: "普通" },
+  { value: "priority", label: "优先" },
+  { value: "highest", label: "最高" },
+] as const;
+
+const MODERATION_LEVEL_OPTIONS = [
+  { value: "low", label: "低" },
+  { value: "medium", label: "中" },
+  { value: "high", label: "高" },
+] as const;
+
+const FEATURE_ROWS = [
+  {
+    key: "imageGeneration.text",
+    label: "文生图",
+    description: "页面/API 文本生成图片",
+  },
+  {
+    key: "imageGeneration.edit",
+    label: "图生图/编辑",
+    description: "上传参考图、编辑图片",
+  },
+  {
+    key: "imageGeneration.chat",
+    label: "对话生图",
+    description: "连续对话式生图",
+  },
+  {
+    key: "imageGeneration.batch",
+    label: "批量生成",
+    description: "一次请求生成多张",
+  },
+  {
+    key: "promptOptimization.control",
+    label: "关闭提示词优化",
+    description: "允许用户控制 prompt_optimization",
+  },
+  {
+    key: "models.gpt55",
+    label: "GPT-5.5",
+    description: "允许选择旗舰模型",
+  },
+  {
+    key: "customApi.configure",
+    label: "接入其他站 API",
+    description: "用户配置自己的上游 API",
+  },
+  {
+    key: "backendGroups.select",
+    label: "选择后端分组",
+    description: "允许选择平台后端分组",
+  },
+  {
+    key: "externalApi.keys.manage",
+    label: "管理外接 API Key",
+    description: "本站对外 API Key 管理",
+  },
+  {
+    key: "externalApi.models.list",
+    label: "外接 /v1/models",
+    description: "允许模型列表接口",
+  },
+  {
+    key: "externalApi.chat.completions",
+    label: "外接 Chat",
+    description: "允许 /v1/chat/completions",
+  },
+  {
+    key: "externalApi.images.generate",
+    label: "外接文生图",
+    description: "允许 /v1/images/generations",
+  },
+  {
+    key: "externalApi.images.edit",
+    label: "外接图片编辑",
+    description: "允许 /v1/images/edits",
+  },
+  {
+    key: "externalApi.responses",
+    label: "外接 Responses",
+    description: "允许 /v1/responses，通常要求 Pro+",
+  },
+  {
+    key: "externalApi.streaming",
+    label: "外接流式",
+    description: "允许 stream=true",
+  },
+  {
+    key: "moderation.blocking",
+    label: "审核拦截",
+    description: "本站内容审核是否对该套餐生效",
+  },
+  {
+    key: "moderation.riskLevelControl",
+    label: "审核强度控制",
+    description: "允许用户调整拦截等级",
+  },
+  {
+    key: "moderation.onlyFailureSettlement",
+    label: "审核失败只扣审核积分",
+    description: "审核拦截后只结算审核成本",
+  },
+] as const;
+
+const LIMIT_ROWS = [
+  {
+    key: "monthlyCredits",
+    label: "月积分配额",
+    description: "Free 为一次性额度，订阅为每月额度",
+    inputMode: "numeric",
+  },
+  {
+    key: "imageGenerationConcurrency",
+    label: "生图并发",
+    description: "单用户图片生成并发上限",
+    inputMode: "numeric",
+  },
+  {
+    key: "maxFileMb",
+    label: "单文件大小 MB",
+    description: "单个上传文件大小上限",
+    inputMode: "decimal",
+  },
+  {
+    key: "maxUploadMb",
+    label: "单次上传总量 MB",
+    description: "一次编辑/对话请求的总上传上限",
+    inputMode: "decimal",
+  },
+  {
+    key: "maxBatchCount",
+    label: "批量张数",
+    description: "n/count 最大值",
+    inputMode: "numeric",
+  },
+  {
+    key: "maxEditImages",
+    label: "编辑参考图数",
+    description: "图生图/编辑最多参考图数量",
+    inputMode: "numeric",
+  },
+  {
+    key: "maxChatImages",
+    label: "对话参考图数",
+    description: "对话生图最多参考图数量",
+    inputMode: "numeric",
+  },
+  {
+    key: "maxChatContextChars",
+    label: "对话上下文字符",
+    description: "对话历史和当前输入的字符上限",
+    inputMode: "numeric",
+  },
+  {
+    key: "queuePriority",
+    label: "队列优先级",
+    description: "调度队列优先级",
+    inputMode: "select",
+  },
+] as const;
+
+const MODERATION_ROWS = [
+  {
+    key: "defaultBlockRiskLevel",
+    label: "默认拦截等级",
+    description: "用户未选择时使用",
+  },
+  {
+    key: "maxBlockRiskLevel",
+    label: "最高可选等级",
+    description: "用户可选择的最高拦截强度",
+  },
+] as const;
+
+type PlanValue = (typeof PLAN_OPTIONS)[number]["value"];
+type QueuePriorityValue = (typeof QUEUE_PRIORITY_OPTIONS)[number]["value"];
+type ModerationLevelValue = (typeof MODERATION_LEVEL_OPTIONS)[number]["value"];
+type FeatureKey = (typeof FEATURE_ROWS)[number]["key"];
+type LimitKey = (typeof LIMIT_ROWS)[number]["key"];
+type ModerationKey = (typeof MODERATION_ROWS)[number]["key"];
+
+type CapabilityMatrixDraft = {
+  version: 1;
+  features: Record<FeatureKey, PlanValue>;
+  limits: Record<PlanValue, Record<LimitKey, string | number>>;
+  moderation: Record<PlanValue, Record<ModerationKey, ModerationLevelValue>>;
+};
+
 function formatJsonExample(value: unknown) {
   return JSON.stringify(value ?? {}, null, 2);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function recordValue(
+  record: Record<string, unknown>,
+  key: string
+): Record<string, unknown> {
+  const value = record[key];
+  return isRecord(value) ? value : {};
+}
+
+function parseJsonDraft(value: DraftValue) {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function asPlan(value: unknown, fallback: PlanValue): PlanValue {
+  return PLAN_OPTIONS.some((option) => option.value === value)
+    ? (value as PlanValue)
+    : fallback;
+}
+
+function asQueuePriority(
+  value: unknown,
+  fallback: QueuePriorityValue
+): QueuePriorityValue {
+  return QUEUE_PRIORITY_OPTIONS.some((option) => option.value === value)
+    ? (value as QueuePriorityValue)
+    : fallback;
+}
+
+function asModerationLevel(
+  value: unknown,
+  fallback: ModerationLevelValue
+): ModerationLevelValue {
+  return MODERATION_LEVEL_OPTIONS.some((option) => option.value === value)
+    ? (value as ModerationLevelValue)
+    : fallback;
+}
+
+function numberValue(value: unknown, fallback: number) {
+  const numeric = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;
+}
+
+function normalizeCapabilityMatrixDraft(
+  rawValue: DraftValue,
+  fallbackValue: unknown
+): CapabilityMatrixDraft {
+  const parsedRaw = parseJsonDraft(rawValue);
+  const raw = isRecord(parsedRaw) ? parsedRaw : {};
+  const fallback = isRecord(fallbackValue) ? fallbackValue : {};
+  const rawFeatures = isRecord(raw.features) ? raw.features : {};
+  const fallbackFeatures = isRecord(fallback.features) ? fallback.features : {};
+  const rawLimits = isRecord(raw.limits) ? raw.limits : {};
+  const fallbackLimits = isRecord(fallback.limits) ? fallback.limits : {};
+  const rawModeration = isRecord(raw.moderation) ? raw.moderation : {};
+  const fallbackModeration = isRecord(fallback.moderation)
+    ? fallback.moderation
+    : {};
+
+  const features = Object.fromEntries(
+    FEATURE_ROWS.map((row) => [
+      row.key,
+      asPlan(rawFeatures[row.key], asPlan(fallbackFeatures[row.key], "free")),
+    ])
+  ) as CapabilityMatrixDraft["features"];
+
+  const limits = Object.fromEntries(
+    PLAN_OPTIONS.map((plan) => {
+      const rawPlanLimits = recordValue(rawLimits, plan.value);
+      const fallbackPlanLimits = recordValue(fallbackLimits, plan.value);
+
+      const entries = LIMIT_ROWS.map((row) => {
+        if (row.key === "queuePriority") {
+          return [
+            row.key,
+            asQueuePriority(
+              rawPlanLimits[row.key],
+              asQueuePriority(fallbackPlanLimits[row.key], "normal")
+            ),
+          ] as const;
+        }
+
+        return [
+          row.key,
+          numberValue(
+            rawPlanLimits[row.key],
+            numberValue(fallbackPlanLimits[row.key], 1)
+          ),
+        ] as const;
+      });
+
+      return [plan.value, Object.fromEntries(entries)] as const;
+    })
+  ) as CapabilityMatrixDraft["limits"];
+
+  const moderation = Object.fromEntries(
+    PLAN_OPTIONS.map((plan) => {
+      const rawPlanModeration = recordValue(rawModeration, plan.value);
+      const fallbackPlanModeration = recordValue(
+        fallbackModeration,
+        plan.value
+      );
+
+      return [
+        plan.value,
+        {
+          defaultBlockRiskLevel: asModerationLevel(
+            rawPlanModeration.defaultBlockRiskLevel,
+            asModerationLevel(
+              fallbackPlanModeration.defaultBlockRiskLevel,
+              "low"
+            )
+          ),
+          maxBlockRiskLevel: asModerationLevel(
+            rawPlanModeration.maxBlockRiskLevel,
+            asModerationLevel(fallbackPlanModeration.maxBlockRiskLevel, "low")
+          ),
+        },
+      ] as const;
+    })
+  ) as CapabilityMatrixDraft["moderation"];
+
+  return {
+    version: 1,
+    features,
+    limits,
+    moderation,
+  };
+}
+
 function getJsonSettingHint(key: string) {
   if (key === "PLAN_CAPABILITY_MATRIX") {
-    return "留空表示使用代码默认矩阵，并继续兼容旧上传/月积分配置。占位内容只是示例，填写 JSON 后保存才会启用自定义矩阵；套餐积分配额和上传限制在 limits.* 中配置。";
+    return "留空表示使用代码默认矩阵，并继续兼容旧上传/月积分配置。后台矩阵保存后会写入 JSON；功能门槛按最低套餐生效，高级套餐自动包含低级套餐能力。";
   }
   if (key === "CREDIT_PACKAGE_MATRIX") {
     return "留空表示使用代码默认积分包。占位内容只是示例，填写 JSON 后保存才会启用自定义积分包；pricesByPlan 可按套餐配置不同价格，Creem 按套餐定价时需配置对应产品 ID。";
@@ -109,6 +445,17 @@ function SettingInput({
   disabled: boolean;
   onChange: (value: DraftValue) => void;
 }) {
+  if (setting.key === "PLAN_CAPABILITY_MATRIX") {
+    return (
+      <PlanCapabilityMatrixInput
+        value={value}
+        fallbackValue={setting.exampleValue}
+        disabled={disabled}
+        onChange={onChange}
+      />
+    );
+  }
+
   if (setting.valueType === "boolean") {
     return (
       <Switch
@@ -171,6 +518,286 @@ function SettingInput({
         )
       }
     />
+  );
+}
+
+function MatrixSelect({
+  value,
+  options,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  options: readonly { value: string; label: string }[];
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <Select value={value} disabled={disabled} onValueChange={onChange}>
+      <SelectTrigger className="h-9 min-w-24">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function PlanCapabilityMatrixInput({
+  value,
+  fallbackValue,
+  disabled,
+  onChange,
+}: {
+  value: DraftValue;
+  fallbackValue: unknown;
+  disabled: boolean;
+  onChange: (value: DraftValue) => void;
+}) {
+  const matrix = useMemo(
+    () => normalizeCapabilityMatrixDraft(value, fallbackValue),
+    [value, fallbackValue]
+  );
+  const preview = useMemo(() => JSON.stringify(matrix, null, 2), [matrix]);
+
+  const updateMatrix = (next: CapabilityMatrixDraft) => {
+    onChange(JSON.stringify(next, null, 2));
+  };
+
+  const updateFeature = (key: FeatureKey, plan: PlanValue) => {
+    updateMatrix({
+      ...matrix,
+      features: {
+        ...matrix.features,
+        [key]: plan,
+      },
+    });
+  };
+
+  const updateLimit = (
+    plan: PlanValue,
+    key: LimitKey,
+    nextValue: string
+  ) => {
+    updateMatrix({
+      ...matrix,
+      limits: {
+        ...matrix.limits,
+        [plan]: {
+          ...matrix.limits[plan],
+          [key]: key === "queuePriority" ? nextValue : Number(nextValue),
+        },
+      },
+    });
+  };
+
+  const updateModeration = (
+    plan: PlanValue,
+    key: ModerationKey,
+    nextValue: ModerationLevelValue
+  ) => {
+    updateMatrix({
+      ...matrix,
+      moderation: {
+        ...matrix.moderation,
+        [plan]: {
+          ...matrix.moderation[plan],
+          [key]: nextValue,
+        },
+      },
+    });
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+        按最低套餐配置功能门槛；Starter/Pro/Ultra/Enterprise 自动包含更低套餐能力。并发、上传大小、月积分、批量张数、参考图数量和审核等级都在这里统一配置。
+      </div>
+
+      <section className="space-y-2">
+        <div>
+          <h4 className="text-sm font-semibold">功能门槛</h4>
+          <p className="text-xs text-muted-foreground">
+            选择启用某项能力所需的最低套餐。
+          </p>
+        </div>
+        <div className="overflow-x-auto rounded-md border">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead className="bg-muted/60 text-xs text-muted-foreground">
+              <tr>
+                <th className="w-56 px-3 py-2 text-left font-medium">能力</th>
+                <th className="px-3 py-2 text-left font-medium">说明</th>
+                <th className="w-36 px-3 py-2 text-left font-medium">
+                  最低套餐
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {FEATURE_ROWS.map((row) => (
+                <tr key={row.key}>
+                  <td className="px-3 py-2 font-medium">{row.label}</td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground">
+                    {row.description}
+                  </td>
+                  <td className="px-3 py-2">
+                    <MatrixSelect
+                      value={matrix.features[row.key]}
+                      options={PLAN_OPTIONS}
+                      disabled={disabled}
+                      onChange={(nextValue) =>
+                        updateFeature(row.key, nextValue as PlanValue)
+                      }
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="space-y-2">
+        <div>
+          <h4 className="text-sm font-semibold">套餐限制</h4>
+          <p className="text-xs text-muted-foreground">
+            管理 Ultra 等套餐的并发、上传大小、月积分和请求数量限制。
+          </p>
+        </div>
+        <div className="overflow-x-auto rounded-md border">
+          <table className="w-full min-w-[980px] text-sm">
+            <thead className="bg-muted/60 text-xs text-muted-foreground">
+              <tr>
+                <th className="w-52 px-3 py-2 text-left font-medium">限制项</th>
+                {PLAN_OPTIONS.map((plan) => (
+                  <th
+                    key={plan.value}
+                    className="w-36 px-3 py-2 text-left font-medium"
+                  >
+                    {plan.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {LIMIT_ROWS.map((row) => (
+                <tr key={row.key}>
+                  <td className="px-3 py-2">
+                    <div className="font-medium">{row.label}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {row.description}
+                    </div>
+                  </td>
+                  {PLAN_OPTIONS.map((plan) => {
+                    const currentValue = matrix.limits[plan.value][row.key];
+                    return (
+                      <td key={plan.value} className="px-3 py-2 align-top">
+                        {row.key === "queuePriority" ? (
+                          <MatrixSelect
+                            value={String(currentValue)}
+                            options={QUEUE_PRIORITY_OPTIONS}
+                            disabled={disabled}
+                            onChange={(nextValue) =>
+                              updateLimit(plan.value, row.key, nextValue)
+                            }
+                          />
+                        ) : (
+                          <Input
+                            type="number"
+                            min="1"
+                            step={row.inputMode === "decimal" ? "0.1" : "1"}
+                            value={String(currentValue)}
+                            disabled={disabled}
+                            className="h-9 min-w-28"
+                            onChange={(event) =>
+                              updateLimit(
+                                plan.value,
+                                row.key,
+                                event.target.value
+                              )
+                            }
+                          />
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="space-y-2">
+        <div>
+          <h4 className="text-sm font-semibold">审核策略</h4>
+          <p className="text-xs text-muted-foreground">
+            配置各套餐默认审核拦截等级和允许选择的最高等级。
+          </p>
+        </div>
+        <div className="overflow-x-auto rounded-md border">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead className="bg-muted/60 text-xs text-muted-foreground">
+              <tr>
+                <th className="w-52 px-3 py-2 text-left font-medium">策略</th>
+                {PLAN_OPTIONS.map((plan) => (
+                  <th
+                    key={plan.value}
+                    className="w-36 px-3 py-2 text-left font-medium"
+                  >
+                    {plan.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {MODERATION_ROWS.map((row) => (
+                <tr key={row.key}>
+                  <td className="px-3 py-2">
+                    <div className="font-medium">{row.label}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {row.description}
+                    </div>
+                  </td>
+                  {PLAN_OPTIONS.map((plan) => (
+                    <td key={plan.value} className="px-3 py-2 align-top">
+                      <MatrixSelect
+                        value={matrix.moderation[plan.value][row.key]}
+                        options={MODERATION_LEVEL_OPTIONS}
+                        disabled={disabled}
+                        onChange={(nextValue) =>
+                          updateModeration(
+                            plan.value,
+                            row.key,
+                            nextValue as ModerationLevelValue
+                          )
+                        }
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <details className="rounded-md border bg-muted/20 p-3">
+        <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+          查看当前 JSON 预览
+        </summary>
+        <Textarea
+          value={preview}
+          rows={12}
+          readOnly
+          className="mt-3 resize-y font-mono text-xs"
+        />
+      </details>
+    </div>
   );
 }
 
@@ -350,7 +977,14 @@ export function SystemSettingsPanel() {
 
               <div className="grid gap-4 lg:grid-cols-2">
                 {categorySettings.map((setting) => (
-                  <Card key={setting.key} className="rounded-lg">
+                  <Card
+                    key={setting.key}
+                    className={
+                      setting.key === "PLAN_CAPABILITY_MATRIX"
+                        ? "rounded-lg lg:col-span-2"
+                        : "rounded-lg"
+                    }
+                  >
                     <CardHeader className="space-y-2">
                       <div className="flex items-start justify-between gap-3">
                         <CardTitle className="text-base">
