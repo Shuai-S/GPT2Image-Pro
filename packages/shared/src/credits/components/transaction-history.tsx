@@ -6,7 +6,6 @@
  * 显示用户的积分交易记录表格
  */
 
-import { SUBSCRIPTION_MONTHLY_CREDITS } from "@repo/shared/config/payment";
 import { ENTERPRISE_RESOURCE_PACKAGE_ID } from "@repo/shared/credits/config";
 import { Badge } from "@repo/ui/components/badge";
 import { Button } from "@repo/ui/components/button";
@@ -88,6 +87,21 @@ function isIncomeType(type: string): boolean {
   ].includes(type);
 }
 
+function getMonthlyCreditsFromMetadata(
+  meta: Record<string, unknown> | null | undefined,
+  amount: number,
+  interval?: string
+) {
+  const value = meta?.monthlyCredits ?? meta?.creditsAmount;
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return value.toLocaleString("en-US");
+  }
+  const inferred = interval === "year" ? amount / 12 : amount;
+  return Number.isFinite(inferred) && inferred > 0
+    ? inferred.toLocaleString("en-US")
+    : "";
+}
+
 /**
  * 交易历史组件
  */
@@ -123,6 +137,7 @@ export function TransactionHistory() {
    */
   const getLocalizedDescription = (tx: {
     type: string;
+    amount: number;
     description: string | null;
     metadata?: Record<string, unknown> | null;
   }): string => {
@@ -134,12 +149,11 @@ export function TransactionHistory() {
         const planType = (meta?.planType as string) ?? "";
         const plan = planType.charAt(0).toUpperCase() + planType.slice(1);
         const interval = meta?.interval as string;
-        const monthlyCredits =
-          planType in SUBSCRIPTION_MONTHLY_CREDITS
-            ? SUBSCRIPTION_MONTHLY_CREDITS[
-                planType as keyof typeof SUBSCRIPTION_MONTHLY_CREDITS
-              ].toLocaleString("en-US")
-            : "";
+        const monthlyCredits = getMonthlyCreditsFromMetadata(
+          meta,
+          tx.amount,
+          interval
+        );
         if (interval === "year") {
           return t("descriptions.yearly_grant", {
             plan,

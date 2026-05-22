@@ -380,6 +380,7 @@ export const grantMonthlySubscriptionCredits = withPublicCreditsAction(
         grantType: "monthly",
         planId: sub?.priceId ?? "unknown",
         creditsAmount,
+        monthlyCredits: creditsAmount,
       },
     });
 

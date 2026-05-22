@@ -1,5 +1,5 @@
-import { SUBSCRIPTION_MONTHLY_CREDITS } from "../config/payment";
 import { getRuntimeSettingNumber } from "../system-settings";
+import { getPlanMonthlyCredits } from "../subscription/services/plan-capabilities";
 import {
   CREDIT_PACKAGES,
   ENTERPRISE_RESOURCE_PACKAGE_DEFAULT_CREDITS,
@@ -22,11 +22,7 @@ export async function getRuntimeCreditPackages(options?: {
   includeHidden?: boolean;
 }) {
   const [starterCredits, starterPrice] = await Promise.all([
-    getRuntimeSettingNumber(
-      "PLAN_STARTER_MONTHLY_CREDITS",
-      SUBSCRIPTION_MONTHLY_CREDITS.starter,
-      { positive: true }
-    ),
+    getPlanMonthlyCredits("starter"),
     getRuntimeSettingNumber(
       "PLAN_STARTER_MONTHLY_AMOUNT",
       STARTER_DEFAULT_PRICE,

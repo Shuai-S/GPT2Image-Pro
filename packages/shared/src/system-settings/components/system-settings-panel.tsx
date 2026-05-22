@@ -409,7 +409,7 @@ export function SystemSettingsPanel() {
                         setting.exampleValue !== undefined &&
                         !setting.configured && (
                           <p className="text-xs text-muted-foreground">
-                            留空表示使用代码默认矩阵，并继续兼容旧上传/月积分配置。占位内容只是示例，填写 JSON 后保存才会启用自定义矩阵。
+                            留空表示使用代码默认矩阵，并继续兼容旧上传/月积分配置。占位内容只是示例，填写 JSON 后保存才会启用自定义矩阵；套餐积分配额在 limits.*.monthlyCredits 中配置。
                           </p>
                         )}
                       {setting.updatedAt && (

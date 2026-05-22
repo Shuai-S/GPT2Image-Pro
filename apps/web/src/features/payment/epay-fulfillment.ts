@@ -413,6 +413,7 @@ async function grantSubscriptionCredits(params: {
       subscriptionId: params.subscriptionId,
       priceId: params.priceId,
       planType: params.planType,
+      monthlyCredits,
       interval: params.isYearly ? "year" : "month",
       periodStart: params.periodStart.toISOString(),
       periodEnd: params.periodEnd.toISOString(),

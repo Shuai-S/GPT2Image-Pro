@@ -567,6 +567,7 @@ async function grantSubscriptionCredits(
         subscriptionId: sub.id,
         priceId,
         planType,
+        monthlyCredits,
         billingReason,
         interval: isYearly ? "year" : "month",
         periodStart: sub.current_period_start_date,

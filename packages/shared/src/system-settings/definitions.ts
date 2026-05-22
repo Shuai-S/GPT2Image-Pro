@@ -48,10 +48,6 @@ export type SettingKey =
   | "NEXT_PUBLIC_EPAY_DEFAULT_PAYMENT_TYPE"
   | "BILLING_YEARLY_ENABLED"
   | "PLAN_CAPABILITY_MATRIX"
-  | "PLAN_STARTER_MONTHLY_CREDITS"
-  | "PLAN_PRO_MONTHLY_CREDITS"
-  | "PLAN_ULTRA_MONTHLY_CREDITS"
-  | "PLAN_ENTERPRISE_MONTHLY_CREDITS"
   | "PLAN_FREE_MAX_FILE_MB"
   | "PLAN_FREE_MAX_UPLOAD_MB"
   | "PLAN_STARTER_MAX_FILE_MB"
@@ -408,42 +404,10 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     key: "PLAN_CAPABILITY_MATRIX",
     label: "套餐能力矩阵",
     description:
-      "JSON 配置。统一控制套餐功能门槛、上传限制、批量数量、并发、队列优先级、月积分和审核等级。留空时使用代码默认矩阵，并兼容下方旧上传/月积分配置。",
+      "JSON 配置。统一控制套餐功能门槛、积分配额、上传限制、批量数量、并发、队列优先级和审核等级。留空时使用代码默认矩阵，并兼容旧上传/月积分配置。",
     category: "plans",
     valueType: "json",
     exampleValue: PLAN_CAPABILITY_MATRIX_EXAMPLE,
-  },
-  {
-    key: "PLAN_STARTER_MONTHLY_CREDITS",
-    label: "Starter 月积分",
-    description: "Starter 套餐每月发放积分。",
-    category: "plans",
-    valueType: "number",
-    defaultValue: 5000,
-  },
-  {
-    key: "PLAN_PRO_MONTHLY_CREDITS",
-    label: "Pro 月积分",
-    description: "Pro 套餐每月发放积分。",
-    category: "plans",
-    valueType: "number",
-    defaultValue: 20000,
-  },
-  {
-    key: "PLAN_ULTRA_MONTHLY_CREDITS",
-    label: "Ultra 月积分",
-    description: "Ultra 套餐每月发放积分。",
-    category: "plans",
-    valueType: "number",
-    defaultValue: 80000,
-  },
-  {
-    key: "PLAN_ENTERPRISE_MONTHLY_CREDITS",
-    label: "Enterprise 月积分",
-    description: "Enterprise 套餐每月发放积分。",
-    category: "plans",
-    valueType: "number",
-    defaultValue: 320000,
   },
   {
     key: "PLAN_FREE_MAX_FILE_MB",
