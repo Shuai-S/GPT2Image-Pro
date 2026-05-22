@@ -1713,6 +1713,9 @@ type UpsertAccountInput = {
   priority: number;
   concurrency: number;
   status?: string;
+  cooldownUntil?: Date | null;
+  lastError?: string | null;
+  lastErrorAt?: Date | null;
   metadata?: Record<string, unknown> | null;
 };
 
@@ -1784,6 +1787,15 @@ export async function upsertImageBackendAccount(input: UpsertAccountInput) {
     priority: input.priority,
     concurrency: input.concurrency,
     status: input.status || "active",
+    ...(input.cooldownUntil !== undefined
+      ? { cooldownUntil: input.cooldownUntil }
+      : {}),
+    ...(input.lastError !== undefined
+      ? { lastError: truncateError(input.lastError) }
+      : {}),
+    ...(input.lastErrorAt !== undefined
+      ? { lastErrorAt: input.lastErrorAt }
+      : {}),
     ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
     ...(refreshToken !== undefined ? { refreshToken } : {}),
     updatedAt: new Date(),
@@ -2449,6 +2461,7 @@ type Sub2ApiAccountRow = {
   priority: number | null;
   concurrency: number | null;
   group_names: string[] | null;
+  row_data: Record<string, unknown> | null;
 };
 
 type Sub2ApiTokenAccount = {
@@ -2465,6 +2478,11 @@ type Sub2ApiTokenAccount = {
   concurrency: number | null;
   planType: string | null;
   groupNames: string[];
+  sourceStatus: string | null;
+  sourceSchedulable: boolean | null;
+  sourceError: string | null;
+  sourceStatusCode: string | null;
+  sourceCooldownUntil: Date | null;
 };
 
 type Sub2ApiPlanFilter = "all" | "free" | "plus" | "pro" | "non_free";
@@ -2507,6 +2525,77 @@ function credentialString(
   return "";
 }
 
+function mergedSub2ApiData(
+  row: Sub2ApiAccountRow,
+  credentials: Record<string, unknown>
+) {
+  return {
+    ...(row.row_data || {}),
+    ...credentials,
+  };
+}
+
+function credentialValue(
+  credentials: Record<string, unknown> | null | undefined,
+  keys: string[]
+) {
+  for (const key of keys) {
+    const value = credentials?.[key];
+    if (value !== undefined && value !== null) return value;
+  }
+  return null;
+}
+
+function credentialDate(
+  credentials: Record<string, unknown> | null | undefined,
+  keys: string[]
+) {
+  for (const key of keys) {
+    const value = credentials?.[key];
+    if (value === undefined || value === null) continue;
+    const normalizedKey = key.toLowerCase();
+    const isRelativeSeconds =
+      normalizedKey.includes("retry") ||
+      normalizedKey.includes("reset_after") ||
+      normalizedKey.includes("restore_after");
+    if (value instanceof Date) return parseDateValue(value);
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return isRelativeSeconds
+        ? new Date(Date.now() + value * 1000)
+        : parseDateValue(String(value));
+    }
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      const numeric = Number(trimmed);
+      if (isRelativeSeconds && Number.isFinite(numeric) && numeric > 0) {
+        return new Date(Date.now() + numeric * 1000);
+      }
+      return parseDateValue(trimmed);
+    }
+  }
+  return null;
+}
+
+function compactSub2ApiErrorParts(parts: Array<unknown>) {
+  const text = parts
+    .map((part) => {
+      if (typeof part === "string" || typeof part === "number") {
+        return String(part).trim();
+      }
+      if (part && typeof part === "object") {
+        try {
+          return JSON.stringify(part).slice(0, 600);
+        } catch {
+          return "";
+        }
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .join(" | ");
+  return truncateError(text || null);
+}
+
 function asStringArray(value: unknown) {
   return Array.isArray(value)
     ? value
@@ -2528,6 +2617,7 @@ function mapSub2ApiAccountRow(
   if (!isSub2ApiOpenAIOAuthRow(row)) return null;
 
   const credentials = row.credentials || {};
+  const sourceData = mergedSub2ApiData(row, credentials);
   const codexAccessToken = credentialString(credentials, [
     "access_token",
     "accessToken",
@@ -2564,7 +2654,51 @@ function mapSub2ApiAccountRow(
     "chatgpt_account_id",
     "chatgptAccountId",
   ]);
-  const planType = credentialString(credentials, ["plan_type", "planType"]);
+  const planType = credentialString(sourceData, ["plan_type", "planType"]);
+  const sourceStatusCode =
+    credentialString(sourceData, [
+      "status_code",
+      "statusCode",
+      "error_status",
+      "errorStatus",
+      "http_status",
+      "httpStatus",
+      "last_status_code",
+      "lastStatusCode",
+    ]) || null;
+  const sourceError = compactSub2ApiErrorParts([
+    sourceStatusCode ? `status_code=${sourceStatusCode}` : null,
+    credentialValue(sourceData, [
+      "last_error",
+      "lastError",
+      "error",
+      "error_message",
+      "errorMessage",
+      "status_message",
+      "statusMessage",
+      "message",
+      "detail",
+      "reason",
+      "disabled_reason",
+      "disabledReason",
+    ]),
+  ]);
+  const sourceCooldownUntil = credentialDate(sourceData, [
+    "cooldown_until",
+    "cooldownUntil",
+    "cooldown_at",
+    "cooldownAt",
+    "rate_limit_reset_at",
+    "rateLimitResetAt",
+    "reset_at",
+    "resetAt",
+    "restore_at",
+    "restoreAt",
+    "retry_after",
+    "retryAfter",
+    "retry_after_seconds",
+    "retryAfterSeconds",
+  ]);
   const sourceId = String(row.id);
   const name = row.name?.trim() || email || `Sub2API 账号 ${sourceId}`;
 
@@ -2582,6 +2716,11 @@ function mapSub2ApiAccountRow(
     concurrency: row.concurrency,
     planType: planType || null,
     groupNames: asStringArray(row.group_names),
+    sourceStatus: row.status?.trim() || null,
+    sourceSchedulable: row.schedulable,
+    sourceError,
+    sourceStatusCode,
+    sourceCooldownUntil,
   };
 }
 
@@ -2598,6 +2737,291 @@ function isSub2ApiMobileRtAccount(account: Sub2ApiTokenAccount) {
         value.includes("iphone")
     )
   );
+}
+
+function isSub2ApiLimitedStatus(status?: string | null) {
+  const normalized = status?.trim().toLowerCase() || "";
+  return (
+    normalized === "limited" ||
+    normalized === "rate_limited" ||
+    normalized === "rate-limited" ||
+    normalized === "quota_exceeded" ||
+    normalized === "quota-exceeded" ||
+    normalized === "cooldown" ||
+    normalized === "cooling" ||
+    normalized === "cooling_down" ||
+    normalized === "cooling-down"
+  );
+}
+
+function isSub2ApiErrorStatus(status?: string | null) {
+  const normalized = status?.trim().toLowerCase() || "";
+  return (
+    normalized === "error" ||
+    normalized === "failed" ||
+    normalized === "invalid" ||
+    normalized === "unauthorized" ||
+    normalized === "auth_error" ||
+    normalized === "auth-error" ||
+    normalized === "deactivated" ||
+    normalized === "deleted" ||
+    normalized === "disabled" ||
+    normalized === "inactive" ||
+    normalized === "banned"
+  );
+}
+
+function sub2ApiStatusCodeNumber(value?: string | null) {
+  const match = value?.match(/\d{3}/)?.[0];
+  return match ? Number(match) : null;
+}
+
+function buildSub2ApiHealthMessage(account: Sub2ApiTokenAccount) {
+  const parts = [
+    account.sourceStatus ? `sub_status=${account.sourceStatus}` : null,
+    account.sourceSchedulable === false ? "sub_schedulable=false" : null,
+    account.sourceStatusCode ? `status_code=${account.sourceStatusCode}` : null,
+    account.sourceError,
+  ];
+  return compactSub2ApiErrorParts(parts);
+}
+
+async function getSub2ApiHealthOverride(account: Sub2ApiTokenAccount): Promise<{
+  status: "active" | "limited" | "error" | "disabled" | null;
+  cooldownUntil?: Date | null;
+  lastError?: string | null;
+  isEnabled?: boolean;
+}> {
+  const message = buildSub2ApiHealthMessage(account);
+  const combined = [
+    account.sourceStatus,
+    account.sourceStatusCode,
+    account.sourceError,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const lowerCombined = combined.toLowerCase();
+  const statusCode = sub2ApiStatusCodeNumber(account.sourceStatusCode);
+
+  if (
+    account.sourceStatus?.trim().toLowerCase() === "disabled" ||
+    account.sourceStatus?.trim().toLowerCase() === "inactive"
+  ) {
+    return {
+      status: "disabled",
+      cooldownUntil: account.sourceCooldownUntil,
+      lastError: message || "Sub2API 标记账号不可调度",
+      isEnabled: false,
+    };
+  }
+
+  if (
+    isSub2ApiLimitedStatus(account.sourceStatus) ||
+    isUsageLimitBackendError(combined) ||
+    statusCode === 429 ||
+    /(?:^|\D)429(?:\D|$)/.test(combined) ||
+    lowerCombined.includes("rate limit")
+  ) {
+    const minutes = await getBackendCooldownMinutes(
+      isUsageLimitBackendError(combined)
+        ? "IMAGE_BACKEND_USAGE_LIMIT_COOLDOWN_MINUTES"
+        : "IMAGE_BACKEND_RATE_LIMIT_COOLDOWN_MINUTES"
+    );
+    return {
+      status: "limited",
+      cooldownUntil: account.sourceCooldownUntil ?? cooldownFromMinutes(minutes),
+      lastError: message || "Sub2API 标记账号限流",
+    };
+  }
+
+  if (
+    isSub2ApiErrorStatus(account.sourceStatus) ||
+    isInvalidBackendCredentialError(combined) ||
+    isUnsupportedModelBackendError(combined) ||
+    statusCode === 401 ||
+    statusCode === 403
+  ) {
+    return {
+      status: "error",
+      cooldownUntil: null,
+      lastError: message || "Sub2API 标记账号错误",
+    };
+  }
+
+  if (
+    statusCode === 500 ||
+    statusCode === 502 ||
+    statusCode === 503 ||
+    statusCode === 504 ||
+    statusCode === 529 ||
+    isOverloadBackendError(combined) ||
+    isRecoverableBackendError(combined)
+  ) {
+    const minutes = await getBackendCooldownMinutes(
+      isOverloadBackendError(combined) || statusCode === 529
+        ? "IMAGE_BACKEND_OVERLOAD_COOLDOWN_MINUTES"
+        : "IMAGE_BACKEND_TEMPORARY_ERROR_COOLDOWN_MINUTES"
+    );
+    return {
+      status: "active",
+      cooldownUntil: account.sourceCooldownUntil ?? cooldownFromMinutes(minutes),
+      lastError: message || "Sub2API 标记账号临时不可用",
+    };
+  }
+
+  if (account.sourceSchedulable === false) {
+    return {
+      status: "disabled",
+      cooldownUntil: account.sourceCooldownUntil,
+      lastError: message || "Sub2API 标记账号不可调度",
+      isEnabled: false,
+    };
+  }
+
+  return {
+    status: null,
+  };
+}
+
+async function getExistingSub2ApiSyncedAccountState(
+  sourceAccountId: string,
+  mode: ImageBackendAccountBackend
+) {
+  const [existing] = await db
+    .select({
+      id: imageBackendAccount.id,
+      status: imageBackendAccount.status,
+      cooldownUntil: imageBackendAccount.cooldownUntil,
+      lastError: imageBackendAccount.lastError,
+      lastErrorAt: imageBackendAccount.lastErrorAt,
+      isEnabled: imageBackendAccount.isEnabled,
+    })
+    .from(imageBackendAccount)
+    .where(
+      and(
+        eq(imageBackendAccount.implementationMode, mode),
+        sql`${imageBackendAccount.metadata}->>'source' = 'sub2api_postgres'`,
+        sql`${imageBackendAccount.metadata}->>'sourceAccountId' = ${sourceAccountId}`
+      )
+    )
+    .limit(1);
+  return existing ?? null;
+}
+
+function shouldPreserveLocalUnavailableState(existing?: {
+  status: string;
+  cooldownUntil: Date | null;
+  isEnabled: boolean;
+} | null) {
+  if (!existing) return false;
+  if (!existing.isEnabled) return true;
+  if (existing.status === "error" || existing.status === "limited") return true;
+  return Boolean(
+    existing.cooldownUntil && existing.cooldownUntil.getTime() > Date.now()
+  );
+}
+
+async function resolveSyncedAccountHealth(
+  account: Sub2ApiTokenAccount,
+  existing?: {
+    status: string;
+    cooldownUntil: Date | null;
+    lastError: string | null;
+    lastErrorAt: Date | null;
+    isEnabled: boolean;
+  } | null
+) {
+  const sourceHealth = await getSub2ApiHealthOverride(account);
+  const preserveLocalUnavailable =
+    !sourceHealth.status && shouldPreserveLocalUnavailableState(existing);
+  const now = new Date();
+  const update = sourceHealth.status
+    ? {
+        status: sourceHealth.status,
+        isEnabled: sourceHealth.isEnabled ?? existing?.isEnabled ?? true,
+        cooldownUntil: sourceHealth.cooldownUntil ?? null,
+        lastError: sourceHealth.lastError ?? null,
+        lastErrorAt: sourceHealth.lastError ? now : null,
+      }
+    : preserveLocalUnavailable
+      ? {
+          status: existing!.status,
+          isEnabled: existing!.isEnabled,
+          cooldownUntil: existing!.cooldownUntil,
+          lastError: existing!.lastError,
+          lastErrorAt: existing!.lastErrorAt,
+        }
+      : {
+          status: "active",
+          isEnabled: true,
+          cooldownUntil: null,
+          lastError: null,
+          lastErrorAt: null,
+        };
+  return { ...update, preserveLocalUnavailable };
+}
+
+function buildSub2ApiAccountMetadata(
+  account: Sub2ApiTokenAccount,
+  mode: ImageBackendAccountBackend,
+  tokenSource: string | null,
+  allowMobileRtImport: boolean | undefined,
+  preserveLocalUnavailable: boolean
+) {
+  return {
+    source: "sub2api_postgres",
+    sourceAccountId: account.sourceId,
+    chatgptAccountId: account.chatgptAccountId,
+    sourceGroups: account.groupNames,
+    planType: account.planType,
+    syncedAt: new Date().toISOString(),
+    sub2apiStatus: account.sourceStatus,
+    sub2apiSchedulable: account.sourceSchedulable,
+    sub2apiStatusCode: account.sourceStatusCode,
+    sub2apiError: account.sourceError,
+    sub2apiCooldownUntil: account.sourceCooldownUntil
+      ? account.sourceCooldownUntil.toISOString()
+      : null,
+    localUnavailablePreserved: preserveLocalUnavailable,
+    tokenSource,
+    sub2apiClientId: account.clientId,
+    sub2apiOauthFamily: account.oauthFamily,
+    sub2apiOauthType: account.oauthType,
+    mobileRtImport: Boolean(allowMobileRtImport && mode === "web"),
+    oauthClientId:
+      mode === "web"
+        ? OPENAI_MOBILE_RT_CLIENT_ID
+        : account.clientId || OPENAI_CODEX_OAUTH_CLIENT_ID,
+    refreshTokenWrittenBack: false,
+  };
+}
+
+async function applySub2ApiHealthToExistingAccount(
+  existingId: string,
+  account: Sub2ApiTokenAccount,
+  mode: ImageBackendAccountBackend,
+  tokenSource: string | null,
+  allowMobileRtImport: boolean | undefined,
+  healthUpdate: Awaited<ReturnType<typeof resolveSyncedAccountHealth>>
+) {
+  await db
+    .update(imageBackendAccount)
+    .set({
+      isEnabled: healthUpdate.isEnabled,
+      status: healthUpdate.status,
+      cooldownUntil: healthUpdate.cooldownUntil,
+      lastError: truncateError(healthUpdate.lastError),
+      lastErrorAt: healthUpdate.lastErrorAt,
+      metadata: buildSub2ApiAccountMetadata(
+        account,
+        mode,
+        tokenSource,
+        allowMobileRtImport,
+        healthUpdate.preserveLocalUnavailable
+      ),
+      updatedAt: new Date(),
+    })
+    .where(eq(imageBackendAccount.id, existingId));
 }
 
 async function getSub2ApiPostgresConnectionString() {
@@ -2648,6 +3072,7 @@ async function listSub2ApiCurrentAccessTokens(
         a.credentials,
         a.priority,
         a.concurrency,
+        to_jsonb(a) - 'credentials' AS row_data,
         COALESCE(
           ARRAY_AGG(g.name ORDER BY ag.priority, g.name)
             FILTER (WHERE g.name IS NOT NULL),
@@ -2660,8 +3085,6 @@ async function listSub2ApiCurrentAccessTokens(
         a.deleted_at IS NULL
         AND LOWER(a.platform) = 'openai'
         AND LOWER(a.type) = 'oauth'
-        AND a.status = 'active'
-        AND COALESCE(a.schedulable, true) = true
         AND (
           a.credentials ? 'access_token'
           OR a.credentials ? 'accessToken'
@@ -2711,8 +3134,6 @@ async function countSub2ApiCurrentAccessTokens(
         a.deleted_at IS NULL
         AND LOWER(a.platform) = 'openai'
         AND LOWER(a.type) = 'oauth'
-        AND a.status = 'active'
-        AND COALESCE(a.schedulable, true) = true
         AND (
           a.credentials ? 'access_token'
           OR a.credentials ? 'accessToken'
@@ -2752,24 +3173,6 @@ function asAutoSub2ApiSyncMetadata(
   return (metadata || {}) as AutoSub2ApiSyncMetadata;
 }
 
-async function findSub2ApiSyncedAccountId(
-  sourceAccountId: string,
-  mode: ImageBackendAccountBackend
-) {
-  const [existing] = await db
-    .select({ id: imageBackendAccount.id })
-    .from(imageBackendAccount)
-    .where(
-      and(
-        eq(imageBackendAccount.implementationMode, mode),
-        sql`${imageBackendAccount.metadata}->>'source' = 'sub2api_postgres'`,
-        sql`${imageBackendAccount.metadata}->>'sourceAccountId' = ${sourceAccountId}`
-      )
-    )
-    .limit(1);
-  return existing?.id;
-}
-
 async function listSub2ApiSourceGroupsFromPool(pool: Pool) {
   const result = await pool.query<Sub2ApiSourceGroupRow>(
     `
@@ -2782,8 +3185,13 @@ async function listSub2ApiSourceGroupsFromPool(pool: Pool) {
             a.deleted_at IS NULL
             AND LOWER(a.platform) = 'openai'
             AND LOWER(a.type) = 'oauth'
-            AND a.status = 'active'
-            AND COALESCE(a.schedulable, true) = true
+            AND (
+              a.credentials ? 'access_token'
+              OR a.credentials ? 'accessToken'
+              OR a.credentials ? 'token'
+              OR a.credentials ? 'refresh_token'
+              OR a.credentials ? 'refreshToken'
+            )
         ) AS account_count
       FROM groups g
       LEFT JOIN account_groups ag ON ag.group_id = g.id
@@ -2980,20 +3388,47 @@ export async function syncImageBackendAccountsFromSub2Api(input: {
     for (const account of accounts) {
       for (const mode of modes) {
         try {
+          const existing = await getExistingSub2ApiSyncedAccountState(
+            account.sourceId,
+            mode
+          );
+          const preTokenHealth = await resolveSyncedAccountHealth(
+            account,
+            existing
+          );
           const { accessToken, tokenSource } =
             await resolveSub2ApiAccessTokenForMode(account, mode, {
               allowMobileRtImport: input.allowMobileRtImport,
             });
           if (!accessToken) {
+            if (
+              existing?.id &&
+              (preTokenHealth.status !== "active" ||
+                preTokenHealth.cooldownUntil ||
+                preTokenHealth.lastError ||
+                preTokenHealth.isEnabled === false)
+            ) {
+              await applySub2ApiHealthToExistingAccount(
+                existing.id,
+                account,
+                mode,
+                tokenSource,
+                input.allowMobileRtImport,
+                preTokenHealth
+              );
+              imported.push(existing.id);
+              syncedByMode[mode]++;
+              continue;
+            }
             skipped[mode]++;
             continue;
           }
-          const existingId = await findSub2ApiSyncedAccountId(
-            account.sourceId,
-            mode
+          const healthUpdate = await resolveSyncedAccountHealth(
+            account,
+            existing
           );
           const id = await upsertImageBackendAccount({
-            id: existingId,
+            id: existing?.id,
             groupId:
               mode === "responses" ? input.responsesGroupId : input.webGroupId,
             name:
@@ -3005,30 +3440,20 @@ export async function syncImageBackendAccountsFromSub2Api(input: {
             implementationMode: mode,
             model: null,
             contentSafetyEnabled: input.contentSafetyEnabled,
-            isEnabled: true,
+            isEnabled: healthUpdate.isEnabled,
             priority: account.priority ?? 50,
             concurrency: Math.max(1, Math.min(100, account.concurrency ?? 1)),
-            status: "active",
-            metadata: {
-              source: "sub2api_postgres",
-              sourceAccountId: account.sourceId,
-              chatgptAccountId: account.chatgptAccountId,
-              sourceGroups: account.groupNames,
-              planType: account.planType,
-              syncedAt: new Date().toISOString(),
+            status: healthUpdate.status,
+            cooldownUntil: healthUpdate.cooldownUntil,
+            lastError: healthUpdate.lastError,
+            lastErrorAt: healthUpdate.lastErrorAt,
+            metadata: buildSub2ApiAccountMetadata(
+              account,
+              mode,
               tokenSource,
-              sub2apiClientId: account.clientId,
-              sub2apiOauthFamily: account.oauthFamily,
-              sub2apiOauthType: account.oauthType,
-              mobileRtImport: Boolean(
-                input.allowMobileRtImport && mode === "web"
-              ),
-              oauthClientId:
-                mode === "web"
-                  ? OPENAI_MOBILE_RT_CLIENT_ID
-                  : account.clientId || OPENAI_CODEX_OAUTH_CLIENT_ID,
-              refreshTokenWrittenBack: false,
-            },
+              input.allowMobileRtImport,
+              healthUpdate.preserveLocalUnavailable
+            ),
           });
           imported.push(id);
           syncedByMode[mode]++;
