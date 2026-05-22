@@ -12,6 +12,11 @@ import { formatCredits } from "@repo/shared/credits/format";
 import type { PlanCapabilitySnapshot } from "@repo/shared/subscription/services/plan-capabilities";
 import { Button } from "@repo/ui/components/button";
 import { Checkbox } from "@repo/ui/components/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@repo/ui/components/dialog";
 import { Input } from "@repo/ui/components/input";
 import {
   Select,
@@ -64,7 +69,6 @@ import {
   DEFAULT_IMAGE_SIZE,
   getImageCreditCost,
   IMAGE_DIMENSION_STEP,
-  IMAGE_RESOLUTION_PRESETS,
   MAX_IMAGE_DIMENSION,
   normalizeImageSize,
   normalizeValidImageSize,
@@ -187,6 +191,72 @@ type ChatConversation = {
   updatedAt: string;
 };
 
+type ImageSizeDialogValue = {
+  auto: boolean;
+  width: number;
+  height: number;
+};
+
+function getNearestSupportedSizeForRatio(
+  base: ImageSizeBase,
+  ratio: { width: number; height: number }
+) {
+  const baseSpec =
+    IMAGE_SIZE_BASES.find((item) => item.value === base) ||
+    IMAGE_SIZE_BASES[0]!;
+  const longEdge = baseSpec.edge;
+  const landscape = ratio.width >= ratio.height;
+  const rawWidth = landscape ? longEdge : (longEdge * ratio.width) / ratio.height;
+  const rawHeight = landscape ? (longEdge * ratio.height) / ratio.width : longEdge;
+  return normalizeValidImageSize({ width: rawWidth, height: rawHeight });
+}
+
+function parseAspectRatioInput(value: string) {
+  const match = value.trim().match(/^(\d{1,3})\s*[:x]\s*(\d{1,3})$/i);
+  if (!match) return null;
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+  if (width <= 0 || height <= 0) return null;
+  return { width, height };
+}
+
+function inferImageSizeDialogState(value: ImageSizeDialogValue) {
+  if (value.auto) {
+    return {
+      mode: "auto" as ImageSizeMode,
+      base: "1k" as ImageSizeBase,
+      ratio: "1:1" as ImageAspectRatio,
+      customRatio: "1:1",
+    };
+  }
+
+  const normalized = normalizeImageSize(value.width, value.height);
+  for (const base of IMAGE_SIZE_BASES) {
+    for (const ratio of IMAGE_ASPECT_RATIOS) {
+      if (getNearestSupportedSizeForRatio(base.value, ratio) === normalized) {
+        return {
+          mode: "ratio" as ImageSizeMode,
+          base: base.value,
+          ratio: ratio.value,
+          customRatio: ratio.value,
+        };
+      }
+    }
+  }
+
+  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+  const divisor = gcd(value.width, value.height) || 1;
+  return {
+    mode: "custom" as ImageSizeMode,
+    base: "1k" as ImageSizeBase,
+    ratio: "1:1" as ImageAspectRatio,
+    customRatio: `${Math.round(value.width / divisor)}:${Math.round(
+      value.height / divisor
+    )}`,
+  };
+}
+
 type ChatStreamState = {
   messageId?: string;
   cardId?: string;
@@ -226,6 +296,9 @@ type MaskPoint = {
 type ImageQuality = "auto" | "low" | "medium" | "high";
 type ImageModeration = "auto" | "low";
 type ImageOutputFormat = "png" | "jpeg" | "webp";
+type ImageSizeMode = "auto" | "ratio" | "custom";
+type ImageSizeBase = "1k" | "2k" | "4k";
+type ImageAspectRatio = "1:1" | "3:2" | "2:3" | "16:9" | "9:16" | "4:3" | "3:4" | "21:9";
 
 type ActiveMode = "text" | "image" | "chat";
 
@@ -240,6 +313,294 @@ const defaultDimensions = parseImageSize(DEFAULT_IMAGE_SIZE) || {
   width: 1024,
   height: 1024,
 };
+
+function SizeRatioIcon({ ratio }: { ratio: { width: number; height: number } }) {
+  const landscape = ratio.width >= ratio.height;
+  const width = landscape ? 18 : 12;
+  const height = landscape ? 10 : 18;
+  if (ratio.width === ratio.height) {
+    return (
+      <span className="h-5 w-5 rounded-[3px] border border-current opacity-60" />
+    );
+  }
+  return (
+    <span
+      className="rounded-[3px] border border-current opacity-60"
+      style={{ width, height }}
+    />
+  );
+}
+
+function ImageSizeDialog({
+  open,
+  onOpenChange,
+  value,
+  onConfirm,
+  title,
+  copy,
+  validationMessage,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  value: ImageSizeDialogValue;
+  onConfirm: (value: ImageSizeDialogValue) => void;
+  title: string;
+  copy: (en: string, zh: string) => string;
+  validationMessage: (message?: string) => string | undefined;
+}) {
+  const initial = inferImageSizeDialogState(value);
+  const [mode, setMode] = useState<ImageSizeMode>(initial.mode);
+  const [base, setBase] = useState<ImageSizeBase>(initial.base);
+  const [ratio, setRatio] = useState<ImageAspectRatio>(initial.ratio);
+  const [customRatio, setCustomRatio] = useState(initial.customRatio);
+  const [customRatioOpen, setCustomRatioOpen] = useState(false);
+  const [customWidth, setCustomWidth] = useState(value.width);
+  const [customHeight, setCustomHeight] = useState(value.height);
+
+  useEffect(() => {
+    if (!open) return;
+    const next = inferImageSizeDialogState(value);
+    setMode(next.mode);
+    setBase(next.base);
+    setRatio(next.ratio);
+    setCustomRatio(next.customRatio);
+    setCustomRatioOpen(false);
+    setCustomWidth(value.width);
+    setCustomHeight(value.height);
+  }, [open, value.auto, value.width, value.height]);
+
+  const selectedRatio =
+    IMAGE_ASPECT_RATIOS.find((item) => item.value === ratio) ||
+    IMAGE_ASPECT_RATIOS[0]!;
+  const customRatioValue = parseAspectRatioInput(customRatio);
+  const activeRatio =
+    mode === "ratio" && customRatioOpen && customRatioValue
+      ? customRatioValue
+      : selectedRatio;
+  const ratioSize =
+    mode === "ratio"
+      ? getNearestSupportedSizeForRatio(base, activeRatio)
+      : getNearestSupportedSizeForRatio(base, selectedRatio);
+  const customSize = normalizeImageSize(customWidth, customHeight);
+  const previewSize =
+    mode === "auto" ? AUTO_IMAGE_SIZE : mode === "custom" ? customSize : ratioSize;
+  const previewCheck = validateImageSize(previewSize);
+  const canConfirm =
+    mode === "auto" ||
+    (mode === "custom"
+      ? previewCheck.valid
+      : previewCheck.valid && (!customRatioOpen || Boolean(customRatioValue)));
+
+  const apply = () => {
+    if (!canConfirm) return;
+    if (mode === "auto") {
+      onConfirm({ auto: true, width: value.width, height: value.height });
+      onOpenChange(false);
+      return;
+    }
+    const size = mode === "custom" ? customSize : ratioSize;
+    const dimensions = parseImageSize(size);
+    if (!dimensions) return;
+    onConfirm({ auto: false, width: dimensions.width, height: dimensions.height });
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[92vh] w-[calc(100vw-1.5rem)] max-w-md gap-0 overflow-y-auto rounded-3xl border-border p-0">
+        <DialogTitle className="sr-only">{title}</DialogTitle>
+        <div className="space-y-6 p-6">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {copy("Current", "当前")}： {value.auto ? "auto" : normalizeImageSize(value.width, value.height)}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-3 rounded-xl bg-muted p-1">
+            {[
+              { value: "auto" as ImageSizeMode, label: copy("Auto", "自动") },
+              { value: "ratio" as ImageSizeMode, label: copy("Ratio", "按比例") },
+              { value: "custom" as ImageSizeMode, label: copy("Custom", "自定义宽高") },
+            ].map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                onClick={() => setMode(item.value)}
+                className={`h-9 rounded-lg text-sm font-medium transition ${
+                  mode === item.value
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+
+          {mode !== "auto" && (
+            <>
+              <section className="space-y-3">
+                <h3 className="text-sm font-medium text-muted-foreground">
+                  {copy("Base resolution", "基准分辨率")}
+                </h3>
+                <div className="grid grid-cols-3 gap-2">
+                  {IMAGE_SIZE_BASES.map((item) => (
+                    <button
+                      key={item.value}
+                      type="button"
+                      onClick={() => setBase(item.value)}
+                      className={`h-10 rounded-xl border text-sm font-medium transition ${
+                        base === item.value
+                          ? "border-primary bg-primary/5 text-primary"
+                          : "border-border bg-background text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              {mode === "ratio" && (
+                <section className="space-y-3">
+                  <h3 className="text-sm font-medium text-muted-foreground">
+                    {copy("Aspect ratio", "图像比例")}
+                  </h3>
+                  <div className="grid grid-cols-4 gap-2">
+                    {IMAGE_ASPECT_RATIOS.map((item) => (
+                      <button
+                        key={item.value}
+                        type="button"
+                        onClick={() => {
+                          setRatio(item.value);
+                          setCustomRatio(item.value);
+                          setCustomRatioOpen(false);
+                        }}
+                        className={`flex h-16 flex-col items-center justify-center gap-1 rounded-xl border text-xs transition ${
+                          ratio === item.value
+                            ? "border-primary bg-primary/5 text-primary"
+                            : "border-border bg-background text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        <SizeRatioIcon ratio={item} />
+                        <span>{item.value}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setCustomRatioOpen(true)}
+                    className="w-full border-primary text-primary hover:bg-primary/5 hover:text-primary"
+                  >
+                    {copy("Custom ratio", "自定义比例")}
+                  </Button>
+                  {customRatioOpen && (
+                    <div className="space-y-2 rounded-xl border border-border bg-background p-3">
+                      <label className="text-xs font-medium text-muted-foreground">
+                        {copy("Custom ratio", "输入自定义比例")}
+                      </label>
+                      <Input
+                        value={customRatio}
+                        onChange={(event) => setCustomRatio(event.target.value)}
+                        placeholder="16:9"
+                      />
+                      {!customRatioValue && (
+                        <p className="text-xs text-destructive">
+                          {copy("Use a ratio like 16:9.", "请使用类似 16:9 的比例。")}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </section>
+              )}
+
+              {mode === "custom" && (
+                <section className="space-y-3">
+                  <h3 className="text-sm font-medium text-muted-foreground">
+                    {copy("Custom size", "输入自定义宽高")}
+                  </h3>
+                  <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-muted-foreground">
+                        {copy("Width", "宽度")}
+                      </label>
+                      <Input
+                        type="number"
+                        min={256}
+                        max={MAX_IMAGE_DIMENSION}
+                        step={IMAGE_DIMENSION_STEP}
+                        value={customWidth}
+                        onChange={(event) =>
+                          setCustomWidth(Number(event.target.value) || 0)
+                        }
+                      />
+                    </div>
+                    <div className="pb-2 text-muted-foreground">x</div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-muted-foreground">
+                        {copy("Height", "高度")}
+                      </label>
+                      <Input
+                        type="number"
+                        min={256}
+                        max={MAX_IMAGE_DIMENSION}
+                        step={IMAGE_DIMENSION_STEP}
+                        value={customHeight}
+                        onChange={(event) =>
+                          setCustomHeight(Number(event.target.value) || 0)
+                        }
+                      />
+                    </div>
+                  </div>
+                </section>
+              )}
+            </>
+          )}
+
+          <div className="rounded-2xl bg-muted/30 p-4">
+            <p className="text-xs font-medium text-muted-foreground">
+              {copy("Will use", "将使用")}
+            </p>
+            <p className="mt-2 text-lg font-semibold text-foreground">
+              {previewSize === AUTO_IMAGE_SIZE ? "auto" : previewSize.replace("x", "×")}
+            </p>
+            {!previewCheck.valid && (
+              <p className="mt-2 text-xs text-destructive">
+                {validationMessage(previewCheck.message)}
+              </p>
+            )}
+            {mode === "ratio" && customRatioOpen && !customRatioValue && (
+              <p className="mt-2 text-xs text-destructive">
+                {copy("Use a ratio like 16:9.", "请使用类似 16:9 的比例。")}
+              </p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => onOpenChange(false)}
+              className="h-10 rounded-xl"
+            >
+              {copy("Cancel", "取消")}
+            </Button>
+            <Button
+              type="button"
+              onClick={apply}
+              disabled={!canConfirm}
+              className="h-10 rounded-xl"
+            >
+              {copy("Confirm", "确定")}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 const shouldOptimizeStoredImage = (imageUrl: string | undefined) =>
   Boolean(imageUrl?.startsWith("/api/storage/"));
@@ -278,6 +639,21 @@ const OUTPUT_FORMAT_OPTIONS: Array<{
   { value: "png", label: "PNG" },
   { value: "jpeg", label: "JPEG" },
   { value: "webp", label: "WebP" },
+];
+const IMAGE_SIZE_BASES: Array<{ value: ImageSizeBase; label: string; edge: number }> = [
+  { value: "1k", label: "1K", edge: 1024 },
+  { value: "2k", label: "2K", edge: 2048 },
+  { value: "4k", label: "4K", edge: 3840 },
+];
+const IMAGE_ASPECT_RATIOS: Array<{ value: ImageAspectRatio; width: number; height: number }> = [
+  { value: "1:1", width: 1, height: 1 },
+  { value: "3:2", width: 3, height: 2 },
+  { value: "2:3", width: 2, height: 3 },
+  { value: "16:9", width: 16, height: 9 },
+  { value: "9:16", width: 9, height: 16 },
+  { value: "4:3", width: 4, height: 3 },
+  { value: "3:4", width: 3, height: 4 },
+  { value: "21:9", width: 21, height: 9 },
 ];
 const DEFAULT_BATCH_OPTIONS = [1, 2, 4, 6, 8, 10] as const;
 const WATERFALL_LOAD_SIZE = 5;
@@ -321,17 +697,6 @@ const CHAT_ACTIVE_CONVERSATION_STORAGE_KEY =
   "gpt2image_active_chat_conversation_v1";
 const CHAT_CONTEXT_MESSAGE_LIMIT = 8;
 const CHAT_CONVERSATION_LIMIT = 30;
-
-const PRESET_LABELS_ZH: Record<string, string> = {
-  "2K Square": "2K 方形",
-  "2K Wide": "2K 宽屏",
-  "4K Tall": "4K 竖屏",
-  "4K Wide": "4K 宽屏",
-  Auto: "自动",
-  Landscape: "横向",
-  Portrait: "纵向",
-  Square: "方形",
-};
 
 interface CreatePageClientProps {
   balance: number;
@@ -676,8 +1041,6 @@ export function CreatePageClient({
     count > 1
       ? copy(` for ${count}`, `，共 ${count} 张`)
       : copy("/image", "/张");
-  const presetLabel = (label: string) =>
-    isZh ? PRESET_LABELS_ZH[label] || label : label;
   const editModelLabel = (label: string) =>
     label === "Default" ? copy("Default", "默认") : label;
   const textModelLabel = (label: string) =>
@@ -947,8 +1310,9 @@ export function CreatePageClient({
   const [useEditFirstImageSize, setUseEditFirstImageSize] = useState(true);
   const [useAutoEditSize, setUseAutoEditSize] = useState(false);
   const [useAutoChatEditSize, setUseAutoChatEditSize] = useState(false);
-  const [chatCustomResolutionOpen, setChatCustomResolutionOpen] =
-    useState(false);
+  const [textSizeDialogOpen, setTextSizeDialogOpen] = useState(false);
+  const [editSizeDialogOpen, setEditSizeDialogOpen] = useState(false);
+  const [chatSizeDialogOpen, setChatSizeDialogOpen] = useState(false);
   const [editWidth, setEditWidth] = useState(defaultDimensions.width);
   const [editHeight, setEditHeight] = useState(defaultDimensions.height);
   const [chatEditWidth, setChatEditWidth] = useState(defaultDimensions.width);
@@ -991,6 +1355,33 @@ export function CreatePageClient({
   const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const isDrawingRef = useRef(false);
   const lastMaskPointRef = useRef<{ x: number; y: number } | null>(null);
+  const textSizeDialogValue = useMemo(
+    () => ({ auto: useAutoSize, width, height }),
+    [height, useAutoSize, width]
+  );
+  const editSizeDialogValue = useMemo(
+    () => ({ auto: useAutoEditSize, width: editWidth, height: editHeight }),
+    [editHeight, editWidth, useAutoEditSize]
+  );
+  const chatSizeDialogValue = useMemo(
+    () =>
+      chatAttachments.length > 0
+        ? {
+            auto: useAutoChatEditSize,
+            width: chatEditWidth,
+            height: chatEditHeight,
+          }
+        : { auto: useAutoSize, width, height },
+    [
+      chatAttachments.length,
+      chatEditHeight,
+      chatEditWidth,
+      height,
+      useAutoChatEditSize,
+      useAutoSize,
+      width,
+    ]
+  );
 
   const manualSize = useMemo(
     () => normalizeImageSize(width, height),
@@ -1084,10 +1475,6 @@ export function CreatePageClient({
   const chatCustomEditSizeCheck = useMemo(
     () => validateImageSize(chatCustomEditSize),
     [chatCustomEditSize]
-  );
-  const chatSizeCheck = useMemo(
-    () => (chatAttachments.length > 0 ? chatCustomEditSizeCheck : sizeCheck),
-    [chatAttachments.length, chatCustomEditSizeCheck, sizeCheck]
   );
   const busy = isGenerating || isEditing || isChatGenerating;
   const firstPreviewUrl = editImages[0]?.previewUrl || null;
@@ -2238,25 +2625,6 @@ export function CreatePageClient({
   const renderChatInput = () => {
     const isEditChat = chatAttachments.length > 0;
     const activeChatSize = isEditChat ? chatCustomEditSize : size;
-    const selectedChatPreset =
-      typeof activeChatSize === "string" &&
-      IMAGE_RESOLUTION_PRESETS.some((preset) => preset.value === activeChatSize)
-        ? activeChatSize
-        : "custom";
-
-    const applyChatPreset = (value: string) => {
-      if (value === "custom") {
-        setChatCustomResolutionOpen(true);
-        return;
-      }
-
-      if (isEditChat) {
-        applyChatEditPreset(value);
-      } else {
-        applyPreset(value);
-      }
-      setChatCustomResolutionOpen(false);
-    };
 
     return (
       <form
@@ -2309,25 +2677,19 @@ export function CreatePageClient({
               disabled: isChatGenerating,
               compact: true,
             })}
-          <Select
-            value={selectedChatPreset}
-            onValueChange={applyChatPreset}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setChatSizeDialogOpen(true)}
             disabled={isChatGenerating}
+            className="h-8 rounded-full px-3 text-xs"
+            title={resolutionHelpText}
           >
-            <SelectTrigger className="h-8 w-[168px]">
-              <SelectValue placeholder={activeChatSize} />
-            </SelectTrigger>
-            <SelectContent>
-              {IMAGE_RESOLUTION_PRESETS.map((preset) => (
-                <SelectItem key={preset.value} value={preset.value}>
-                  {presetLabel(preset.label)} · {preset.detail}
-                </SelectItem>
-              ))}
-              <SelectItem value="custom">
-                {copy("Custom", "自定义")} · {activeChatSize}
-              </SelectItem>
-            </SelectContent>
-          </Select>
+            {copy("Size", "尺寸")} ·{" "}
+            {activeChatSize === AUTO_IMAGE_SIZE
+              ? autoSizeLabel
+              : activeChatSize}
+          </Button>
           {helpMarker(copy("Resolution", "分辨率"), resolutionHelpText)}
           {isEditChat && chatFirstImageOriginalSize && (
             <span className="text-xs text-muted-foreground">
@@ -2352,80 +2714,6 @@ export function CreatePageClient({
         <div className="mb-2">
           {promptOptimizationField("chat-prompt-optimization", isChatGenerating)}
         </div>
-
-        {chatCustomResolutionOpen && (
-          <div className="mb-2 rounded-md border border-border bg-muted/30 p-2">
-            <div className="flex flex-wrap items-end gap-2">
-              <div className="space-y-1">
-                <label
-                  htmlFor="chat-width"
-                  className="text-xs font-medium text-muted-foreground"
-                >
-                  {copy("Width", "宽度")}
-                </label>
-                <Input
-                  id="chat-width"
-                  type="number"
-                  min={256}
-                  max={MAX_IMAGE_DIMENSION}
-                  step={IMAGE_DIMENSION_STEP}
-                  value={isEditChat ? chatEditWidth : width}
-                  onChange={(event) => {
-                    const next = Number(event.target.value) || 0;
-                    if (isEditChat) {
-                      setUseAutoChatEditSize(false);
-                      setChatEditWidth(next);
-                    } else {
-                      setUseAutoSize(false);
-                      setWidth(next);
-                    }
-                  }}
-                  disabled={isChatGenerating}
-                  className="h-8 w-28"
-                />
-              </div>
-              <div className="pb-2 text-muted-foreground">x</div>
-              <div className="space-y-1">
-                <label
-                  htmlFor="chat-height"
-                  className="text-xs font-medium text-muted-foreground"
-                >
-                  {copy("Height", "高度")}
-                </label>
-                <Input
-                  id="chat-height"
-                  type="number"
-                  min={256}
-                  max={MAX_IMAGE_DIMENSION}
-                  step={IMAGE_DIMENSION_STEP}
-                  value={isEditChat ? chatEditHeight : height}
-                  onChange={(event) => {
-                    const next = Number(event.target.value) || 0;
-                    if (isEditChat) {
-                      setUseAutoChatEditSize(false);
-                      setChatEditHeight(next);
-                    } else {
-                      setUseAutoSize(false);
-                      setHeight(next);
-                    }
-                  }}
-                  disabled={isChatGenerating}
-                  className="h-8 w-28"
-                />
-              </div>
-              <div className="pb-2 text-xs text-muted-foreground">
-                {activeChatSize === AUTO_IMAGE_SIZE
-                  ? autoSizeLabel
-                  : activeChatSize}
-              </div>
-            </div>
-            {!chatSizeCheck.valid && (
-              <p className="mt-2 text-xs text-destructive">
-                {validationMessage(chatSizeCheck.message)}
-              </p>
-            )}
-          </div>
-        )}
 
         <div className="flex items-end gap-2 rounded-lg border border-border bg-background p-2">
           <Button
@@ -3127,56 +3415,6 @@ export function CreatePageClient({
     }
   };
 
-  const applyPreset = (presetValue: string) => {
-    const preset = IMAGE_RESOLUTION_PRESETS.find(
-      (item) => item.value === presetValue
-    );
-    if (!preset) return;
-    if (preset.value === AUTO_IMAGE_SIZE) {
-      setUseAutoSize(true);
-      return;
-    }
-    const dimensions = parseImageSize(preset.value);
-    if (!dimensions) return;
-    setUseAutoSize(false);
-    setWidth(dimensions.width);
-    setHeight(dimensions.height);
-  };
-
-  const applyEditPreset = (presetValue: string) => {
-    const preset = IMAGE_RESOLUTION_PRESETS.find(
-      (item) => item.value === presetValue
-    );
-    if (!preset) return;
-    if (preset.value === AUTO_IMAGE_SIZE) {
-      setUseEditFirstImageSize(false);
-      setUseAutoEditSize(true);
-      return;
-    }
-    const dimensions = parseImageSize(preset.value);
-    if (!dimensions) return;
-    setUseEditFirstImageSize(false);
-    setUseAutoEditSize(false);
-    setEditWidth(dimensions.width);
-    setEditHeight(dimensions.height);
-  };
-
-  const applyChatEditPreset = (presetValue: string) => {
-    const preset = IMAGE_RESOLUTION_PRESETS.find(
-      (item) => item.value === presetValue
-    );
-    if (!preset) return;
-    if (preset.value === AUTO_IMAGE_SIZE) {
-      setUseAutoChatEditSize(true);
-      return;
-    }
-    const dimensions = parseImageSize(preset.value);
-    if (!dimensions) return;
-    setUseAutoChatEditSize(false);
-    setChatEditWidth(dimensions.width);
-    setChatEditHeight(dimensions.height);
-  };
-
   const addImages = (files: FileList | File[] | null) => {
     const imageFiles = Array.from(files || []);
     if (!imageFiles.length) return;
@@ -3667,89 +3905,25 @@ export function CreatePageClient({
             </div>
           </div>
 
-          <div>
-            <span className="text-sm font-medium text-foreground">
-              {labelWithHelp(copy("Resolution", "分辨率"), resolutionHelpText)}
-            </span>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {copy(
-                "Width and height must be multiples of 16.",
-                "宽和高必须是 16 的倍数。"
-              )}
-            </p>
-          </div>
-
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-            {IMAGE_RESOLUTION_PRESETS.map((preset) => {
-              const active = preset.value === size;
-              return (
-                <Button
-                  key={preset.value}
-                  type="button"
-                  variant={active ? "default" : "outline"}
-                  disabled={busy}
-                  onClick={() => applyPreset(preset.value)}
-                  className="h-auto min-h-14 flex-col items-start justify-center gap-0.5 px-3 py-2 text-left"
-                >
-                  <span className="text-sm font-medium leading-tight">
-                    {presetLabel(preset.label)}
-                  </span>
-                  <span className="text-[11px] leading-tight opacity-80">
-                    {preset.detail}
-                  </span>
-                </Button>
-              );
-            })}
-          </div>
-
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            <div className="space-y-1.5">
-              <label
-                htmlFor="image-width"
-                className="text-xs font-medium text-muted-foreground"
-              >
-                {copy("Width", "宽度")}
-              </label>
-              <Input
-                id="image-width"
-                type="number"
-                min={256}
-                max={MAX_IMAGE_DIMENSION}
-                step={IMAGE_DIMENSION_STEP}
-                value={width}
-                onChange={(e) => {
-                  setUseAutoSize(false);
-                  setWidth(Number(e.target.value) || 0);
-                }}
+          <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <span className="text-sm font-medium text-foreground">
+                  {labelWithHelp(copy("Resolution", "分辨率"), resolutionHelpText)}
+                </span>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {copy("Current", "当前")}：{useAutoSize ? autoSizeLabel : size}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setTextSizeDialogOpen(true)}
                 disabled={busy}
-                className="w-32"
-              />
-            </div>
-            <div className="pb-2 text-muted-foreground">x</div>
-            <div className="space-y-1.5">
-              <label
-                htmlFor="image-height"
-                className="text-xs font-medium text-muted-foreground"
+                className="shrink-0"
               >
-                {copy("Height", "高度")}
-              </label>
-              <Input
-                id="image-height"
-                type="number"
-                min={256}
-                max={MAX_IMAGE_DIMENSION}
-                step={IMAGE_DIMENSION_STEP}
-                value={height}
-                onChange={(e) => {
-                  setUseAutoSize(false);
-                  setHeight(Number(e.target.value) || 0);
-                }}
-                disabled={busy}
-                className="w-32"
-              />
-            </div>
-            <div className="text-xs text-muted-foreground sm:pb-2">
-              {useAutoSize ? autoSizeLabel : size}
+                {copy("Set size", "设置尺寸")}
+              </Button>
             </div>
           </div>
 
@@ -4569,78 +4743,23 @@ export function CreatePageClient({
 
                   {!useEditFirstImageSize && (
                     <div className="space-y-3 border-t border-border pt-3">
-                      <div className="grid grid-cols-2 gap-2">
-                        {IMAGE_RESOLUTION_PRESETS.map((preset) => {
-                          const active = preset.value === customEditSize;
-                          return (
-                            <Button
-                              key={preset.value}
-                              type="button"
-                              variant={active ? "default" : "outline"}
-                              disabled={isEditing}
-                              onClick={() => applyEditPreset(preset.value)}
-                              className="h-auto min-h-12 flex-col items-start justify-center gap-0.5 px-2 py-2 text-left"
-                            >
-                              <span className="text-xs font-medium leading-tight">
-                                {presetLabel(preset.label)}
-                              </span>
-                              <span className="text-[10px] leading-tight opacity-80">
-                                {preset.detail}
-                              </span>
-                            </Button>
-                          );
-                        })}
-                      </div>
-
-                      <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
-                        <div className="space-y-1.5">
-                          <label
-                            htmlFor="edit-width"
-                            className="text-xs font-medium text-muted-foreground"
-                          >
-                            {copy("Width", "宽度")}
-                          </label>
-                          <Input
-                            id="edit-width"
-                            type="number"
-                            min={256}
-                            max={MAX_IMAGE_DIMENSION}
-                            step={IMAGE_DIMENSION_STEP}
-                            value={editWidth}
-                            onChange={(event) => {
-                              setUseAutoEditSize(false);
-                              setEditWidth(Number(event.target.value) || 0);
-                            }}
-                            disabled={isEditing}
-                          />
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-xs text-muted-foreground">
+                          {copy("Current", "当前")}：
+                          <span className="font-medium text-foreground">
+                            {useAutoEditSize ? autoSizeLabel : customEditSize}
+                          </span>
                         </div>
-                        <div className="pb-2 text-muted-foreground">x</div>
-                        <div className="space-y-1.5">
-                          <label
-                            htmlFor="edit-height"
-                            className="text-xs font-medium text-muted-foreground"
-                          >
-                            {copy("Height", "高度")}
-                          </label>
-                          <Input
-                            id="edit-height"
-                            type="number"
-                            min={256}
-                            max={MAX_IMAGE_DIMENSION}
-                            step={IMAGE_DIMENSION_STEP}
-                            value={editHeight}
-                            onChange={(event) => {
-                              setUseAutoEditSize(false);
-                              setEditHeight(Number(event.target.value) || 0);
-                            }}
-                            disabled={isEditing}
-                          />
-                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setEditSizeDialogOpen(true)}
+                          disabled={isEditing}
+                          size="sm"
+                        >
+                          {copy("Set size", "设置尺寸")}
+                        </Button>
                       </div>
-                      <div className="text-xs text-muted-foreground">
-                        {useAutoEditSize ? autoSizeLabel : customEditSize}
-                      </div>
-
                       {!customEditSizeCheck.valid && (
                         <p className="text-xs text-destructive">
                           {validationMessage(customEditSizeCheck.message)}
@@ -5594,6 +5713,61 @@ export function CreatePageClient({
           }}
         />
       )}
+
+      <ImageSizeDialog
+        open={textSizeDialogOpen}
+        onOpenChange={setTextSizeDialogOpen}
+        title={copy("Set image size", "设置图像尺寸")}
+        value={textSizeDialogValue}
+        copy={copy}
+        validationMessage={validationMessage}
+        onConfirm={(next) => {
+          setUseAutoSize(next.auto);
+          if (!next.auto) {
+            setWidth(next.width);
+            setHeight(next.height);
+          }
+        }}
+      />
+      <ImageSizeDialog
+        open={editSizeDialogOpen}
+        onOpenChange={setEditSizeDialogOpen}
+        title={copy("Set image size", "设置图像尺寸")}
+        value={editSizeDialogValue}
+        copy={copy}
+        validationMessage={validationMessage}
+        onConfirm={(next) => {
+          setUseEditFirstImageSize(false);
+          setUseAutoEditSize(next.auto);
+          if (!next.auto) {
+            setEditWidth(next.width);
+            setEditHeight(next.height);
+          }
+        }}
+      />
+      <ImageSizeDialog
+        open={chatSizeDialogOpen}
+        onOpenChange={setChatSizeDialogOpen}
+        title={copy("Set image size", "设置图像尺寸")}
+        value={chatSizeDialogValue}
+        copy={copy}
+        validationMessage={validationMessage}
+        onConfirm={(next) => {
+          if (chatAttachments.length > 0) {
+            setUseAutoChatEditSize(next.auto);
+            if (!next.auto) {
+              setChatEditWidth(next.width);
+              setChatEditHeight(next.height);
+            }
+            return;
+          }
+          setUseAutoSize(next.auto);
+          if (!next.auto) {
+            setWidth(next.width);
+            setHeight(next.height);
+          }
+        }}
+      />
     </div>
   );
 }
