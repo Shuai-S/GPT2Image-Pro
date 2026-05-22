@@ -59,6 +59,7 @@ import { toast } from "sonner";
 
 import type { ImageBackendGroupBackendType } from "@/features/image-backend-pool/types";
 import {
+  AUTO_IMAGE_SIZE,
   DEFAULT_IMAGE_MODEL,
   DEFAULT_IMAGE_SIZE,
   getImageCreditCost,
@@ -317,6 +318,7 @@ const PRESET_LABELS_ZH: Record<string, string> = {
   "2K Wide": "2K 宽屏",
   "4K Tall": "4K 竖屏",
   "4K Wide": "4K 宽屏",
+  Auto: "自动",
   Landscape: "横向",
   Portrait: "纵向",
   Square: "方形",
@@ -737,8 +739,8 @@ export function CreatePageClient({
     "关闭后是尽量少改动：平台会发送原始提示词，并让 Web 使用 instant；但上游后端仍可能在内部改写或理解提示词。"
   );
   const resolutionHelpText = copy(
-    "Reference images can use their original pixels for preview and masks. The requested output size must still be valid, so non-step reference sizes are rounded to the nearest supported size. Web backend treats resolution as best-effort aspect-ratio guidance and cannot guarantee exact pixels or native 4K. After generation, the actual output size is recorded and credits are settled against the actual size.",
-    "参考图预览和蒙版仍使用原始像素。请求的输出尺寸必须合法，所以非步进参考图尺寸会贴近到支持的尺寸。Web 后端只能把分辨率作为尽量遵循的画幅提示，不能保证精确像素或原生 4K。生成完成后会记录实际输出尺寸，并按实际尺寸修正计费。"
+    "Auto lets the backend decide the output size. Reference images can use their original pixels for preview and masks. The requested output size must still be valid, so non-step reference sizes are rounded to the nearest supported size. Web backend treats resolution as best-effort aspect-ratio guidance and cannot guarantee exact pixels or native 4K. After generation, the actual output size is recorded and credits are settled against the actual size.",
+    "Auto 会让后端决定输出尺寸。参考图预览和蒙版仍使用原始像素。请求的输出尺寸必须合法，所以非步进参考图尺寸会贴近到支持的尺寸。Web 后端只能把分辨率作为尽量遵循的画幅提示，不能保证精确像素或原生 4K。生成完成后会记录实际输出尺寸，并按实际尺寸修正计费。"
   );
   const validationMessage = (message?: string) => {
     if (!message || !isZh) return message;
@@ -806,6 +808,7 @@ export function CreatePageClient({
     height: number;
   } | null>(null);
   const [isChatGenerating, setIsChatGenerating] = useState(false);
+  const [useAutoSize, setUseAutoSize] = useState(false);
   const [width, setWidth] = useState(defaultDimensions.width);
   const [height, setHeight] = useState(defaultDimensions.height);
   const [quality, setQuality] = useState<ImageQuality>("auto");
@@ -919,6 +922,8 @@ export function CreatePageClient({
   const [textModel, setTextModel] = useState("default");
   const [editModel, setEditModel] = useState("default");
   const [useEditFirstImageSize, setUseEditFirstImageSize] = useState(true);
+  const [useAutoEditSize, setUseAutoEditSize] = useState(false);
+  const [useAutoChatEditSize, setUseAutoChatEditSize] = useState(false);
   const [chatCustomResolutionOpen, setChatCustomResolutionOpen] =
     useState(false);
   const [editWidth, setEditWidth] = useState(defaultDimensions.width);
@@ -964,10 +969,11 @@ export function CreatePageClient({
   const isDrawingRef = useRef(false);
   const lastMaskPointRef = useRef<{ x: number; y: number } | null>(null);
 
-  const size = useMemo(
+  const manualSize = useMemo(
     () => normalizeImageSize(width, height),
     [width, height]
   );
+  const size = useAutoSize ? AUTO_IMAGE_SIZE : manualSize;
   const textImageCreditCost = useMemo(() => getImageCreditCost(size), [size]);
   const textBatchCreditCost = textImageCreditCost * batchCount;
   const linePromptItems = useMemo(
@@ -980,14 +986,18 @@ export function CreatePageClient({
   );
   const lineBatchTotalCount = linePromptItems.length * lineBatchRepeatCount;
   const lineBatchCreditCost = textImageCreditCost * lineBatchTotalCount;
-  const customEditSize = useMemo(
+  const manualEditSize = useMemo(
     () => normalizeImageSize(editWidth, editHeight),
     [editWidth, editHeight]
   );
-  const chatCustomEditSize = useMemo(
+  const customEditSize = useAutoEditSize ? AUTO_IMAGE_SIZE : manualEditSize;
+  const manualChatCustomEditSize = useMemo(
     () => normalizeImageSize(chatEditWidth, chatEditHeight),
     [chatEditWidth, chatEditHeight]
   );
+  const chatCustomEditSize = useAutoChatEditSize
+    ? AUTO_IMAGE_SIZE
+    : manualChatCustomEditSize;
   const firstImageOriginalSize = useMemo(
     () =>
       firstImageSize
@@ -1059,7 +1069,11 @@ export function CreatePageClient({
   const busy = isGenerating || isEditing || isChatGenerating;
   const firstPreviewUrl = editImages[0]?.previewUrl || null;
   const chatFirstPreviewUrl = chatAttachments[0]?.previewUrl || null;
-  const editDisplaySize = effectiveEditSize || copy("Reference image", "参考图片");
+  const autoSizeLabel = copy("Auto", "自动");
+  const editDisplaySize =
+    effectiveEditSize === AUTO_IMAGE_SIZE
+      ? autoSizeLabel
+      : effectiveEditSize || copy("Reference image", "参考图片");
   const editReferenceSizeNote =
     useEditFirstImageSize && firstImageOriginalSize && effectiveEditSize
       ? firstImageOriginalSize === effectiveEditSize
@@ -1078,10 +1092,7 @@ export function CreatePageClient({
       : activeMode === "chat" && chatAttachments.length > 0
         ? chatCustomEditSize
         : size;
-  const loadingDimensions = parseImageSize(loadingSize) || {
-    width,
-    height,
-  };
+  const loadingDimensions = parseImageSize(loadingSize) || defaultDimensions;
   const chatSuggestions = isZh ? CHAT_SUGGESTIONS_ZH : CHAT_SUGGESTIONS;
   const promptOptimizationField = (id: string, disabled = false) => (
     <label
@@ -2335,8 +2346,10 @@ export function CreatePageClient({
                   onChange={(event) => {
                     const next = Number(event.target.value) || 0;
                     if (isEditChat) {
+                      setUseAutoChatEditSize(false);
                       setChatEditWidth(next);
                     } else {
+                      setUseAutoSize(false);
                       setWidth(next);
                     }
                   }}
@@ -2362,8 +2375,10 @@ export function CreatePageClient({
                   onChange={(event) => {
                     const next = Number(event.target.value) || 0;
                     if (isEditChat) {
+                      setUseAutoChatEditSize(false);
                       setChatEditHeight(next);
                     } else {
+                      setUseAutoSize(false);
                       setHeight(next);
                     }
                   }}
@@ -2372,7 +2387,9 @@ export function CreatePageClient({
                 />
               </div>
               <div className="pb-2 text-xs text-muted-foreground">
-                {activeChatSize}
+                {activeChatSize === AUTO_IMAGE_SIZE
+                  ? autoSizeLabel
+                  : activeChatSize}
               </div>
             </div>
             {!chatSizeCheck.valid && (
@@ -3080,8 +3097,13 @@ export function CreatePageClient({
       (item) => item.value === presetValue
     );
     if (!preset) return;
+    if (preset.value === AUTO_IMAGE_SIZE) {
+      setUseAutoSize(true);
+      return;
+    }
     const dimensions = parseImageSize(preset.value);
     if (!dimensions) return;
+    setUseAutoSize(false);
     setWidth(dimensions.width);
     setHeight(dimensions.height);
   };
@@ -3091,9 +3113,15 @@ export function CreatePageClient({
       (item) => item.value === presetValue
     );
     if (!preset) return;
+    if (preset.value === AUTO_IMAGE_SIZE) {
+      setUseEditFirstImageSize(false);
+      setUseAutoEditSize(true);
+      return;
+    }
     const dimensions = parseImageSize(preset.value);
     if (!dimensions) return;
     setUseEditFirstImageSize(false);
+    setUseAutoEditSize(false);
     setEditWidth(dimensions.width);
     setEditHeight(dimensions.height);
   };
@@ -3103,8 +3131,13 @@ export function CreatePageClient({
       (item) => item.value === presetValue
     );
     if (!preset) return;
+    if (preset.value === AUTO_IMAGE_SIZE) {
+      setUseAutoChatEditSize(true);
+      return;
+    }
     const dimensions = parseImageSize(preset.value);
     if (!dimensions) return;
+    setUseAutoChatEditSize(false);
     setChatEditWidth(dimensions.width);
     setChatEditHeight(dimensions.height);
   };
@@ -3649,7 +3682,10 @@ export function CreatePageClient({
                 max={MAX_IMAGE_DIMENSION}
                 step={IMAGE_DIMENSION_STEP}
                 value={width}
-                onChange={(e) => setWidth(Number(e.target.value) || 0)}
+                onChange={(e) => {
+                  setUseAutoSize(false);
+                  setWidth(Number(e.target.value) || 0);
+                }}
                 disabled={busy}
                 className="w-32"
               />
@@ -3669,12 +3705,17 @@ export function CreatePageClient({
                 max={MAX_IMAGE_DIMENSION}
                 step={IMAGE_DIMENSION_STEP}
                 value={height}
-                onChange={(e) => setHeight(Number(e.target.value) || 0)}
+                onChange={(e) => {
+                  setUseAutoSize(false);
+                  setHeight(Number(e.target.value) || 0);
+                }}
                 disabled={busy}
                 className="w-32"
               />
             </div>
-            <div className="text-xs text-muted-foreground sm:pb-2">{size}</div>
+            <div className="text-xs text-muted-foreground sm:pb-2">
+              {useAutoSize ? autoSizeLabel : size}
+            </div>
           </div>
 
           {showResponsesOnlyControls && (
@@ -4335,9 +4376,10 @@ export function CreatePageClient({
                     <Checkbox
                       id="edit-use-source-size"
                       checked={useEditFirstImageSize}
-                      onCheckedChange={(checked) =>
-                        setUseEditFirstImageSize(checked === true)
-                      }
+                      onCheckedChange={(checked) => {
+                        setUseEditFirstImageSize(checked === true);
+                        if (checked === true) setUseAutoEditSize(false);
+                      }}
                       disabled={isEditing}
                       className="mt-0.5"
                     />
@@ -4392,9 +4434,10 @@ export function CreatePageClient({
                             max={MAX_IMAGE_DIMENSION}
                             step={IMAGE_DIMENSION_STEP}
                             value={editWidth}
-                            onChange={(event) =>
-                              setEditWidth(Number(event.target.value) || 0)
-                            }
+                            onChange={(event) => {
+                              setUseAutoEditSize(false);
+                              setEditWidth(Number(event.target.value) || 0);
+                            }}
                             disabled={isEditing}
                           />
                         </div>
@@ -4413,12 +4456,16 @@ export function CreatePageClient({
                             max={MAX_IMAGE_DIMENSION}
                             step={IMAGE_DIMENSION_STEP}
                             value={editHeight}
-                            onChange={(event) =>
-                              setEditHeight(Number(event.target.value) || 0)
-                            }
+                            onChange={(event) => {
+                              setUseAutoEditSize(false);
+                              setEditHeight(Number(event.target.value) || 0);
+                            }}
                             disabled={isEditing}
                           />
                         </div>
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {useAutoEditSize ? autoSizeLabel : customEditSize}
                       </div>
 
                       {!customEditSizeCheck.valid && (
@@ -5203,7 +5250,9 @@ export function CreatePageClient({
             }
             className="group relative mx-auto block w-full max-w-2xl overflow-hidden rounded-lg border bg-muted"
             style={{
-              aspectRatio: `${parseImageSize(result.size)?.width || width} / ${parseImageSize(result.size)?.height || height}`,
+              aspectRatio: `${parseImageSize(result.size)?.width || defaultDimensions.width} / ${
+                parseImageSize(result.size)?.height || defaultDimensions.height
+              }`,
             }}
             title={copy("Open image preview", "打开图片预览")}
           >

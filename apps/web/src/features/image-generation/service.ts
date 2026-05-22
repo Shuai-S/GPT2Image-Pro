@@ -26,6 +26,7 @@ import {
   generateImageWithChatGptWeb,
 } from "./chatgpt-web";
 import {
+  AUTO_IMAGE_SIZE,
   DEFAULT_IMAGE_MODEL,
   DEFAULT_IMAGE_SIZE,
   getImageModel,
@@ -1936,7 +1937,7 @@ export async function generateChatImage(
     if (toolModel) {
       tool.model = toolModel;
     }
-    if (size && size !== "auto") {
+    if (size && size !== AUTO_IMAGE_SIZE) {
       tool.size = size;
     }
     const quality = normalizeQuality(params.quality);

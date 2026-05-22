@@ -1,6 +1,7 @@
 export const DEFAULT_IMAGE_MODEL = "gpt-image-2";
 export const LEGACY_IMAGE_MODEL = "gpt-image-1";
 export const IMAGE_MODEL_PREFIX = "gpt-image-";
+export const AUTO_IMAGE_SIZE = "auto";
 export const DEFAULT_IMAGE_SIZE = "1024x1024";
 export const IMAGE_DIMENSION_STEP = 16;
 export const MIN_IMAGE_DIMENSION = 256;
@@ -43,6 +44,7 @@ export function getImageModel(model?: string | null, fallback?: string | null) {
 }
 
 export const IMAGE_RESOLUTION_PRESETS = [
+  { value: AUTO_IMAGE_SIZE, label: "Auto", detail: "Backend decides" },
   { value: "1024x1024", label: "Square", detail: "1024 × 1024" },
   { value: "1536x1024", label: "Landscape", detail: "1536 × 1024" },
   { value: "1024x1536", label: "Portrait", detail: "1024 × 1536" },
@@ -195,8 +197,12 @@ export function isValidImageDimension(value: number) {
 export function validateImageSize(
   size: string
 ):
-  | { valid: true; dimensions: ImageDimensions }
+  | { valid: true; dimensions: ImageDimensions | null; auto: boolean }
   | { valid: false; message: string } {
+  if (size.trim().toLowerCase() === AUTO_IMAGE_SIZE) {
+    return { valid: true, dimensions: null, auto: true };
+  }
+
   const dimensions = parseImageSize(size);
   if (!dimensions) {
     return { valid: false, message: "Use WIDTHxHEIGHT format." };
@@ -219,5 +225,5 @@ export function validateImageSize(
     };
   }
 
-  return { valid: true, dimensions };
+  return { valid: true, dimensions, auto: false };
 }

@@ -1,4 +1,5 @@
 import {
+  AUTO_IMAGE_SIZE,
   DEFAULT_IMAGE_MODEL,
   DEFAULT_IMAGE_SIZE,
   getImageModel,
@@ -128,7 +129,7 @@ export function buildResponsesImageGenerationRequest(
     model: getToolModel(config, params.model),
   };
 
-  if (size && size !== "auto") tool.size = size;
+  if (size && size !== AUTO_IMAGE_SIZE) tool.size = size;
   const quality = normalizeQuality(params.quality);
   if (quality) tool.quality = quality;
   const moderation = normalizeModeration(params.moderation);
@@ -168,7 +169,7 @@ export function buildResponsesImageEditRequest(
     model: getToolModel(config, params.model),
   };
 
-  if (size && size !== "auto") {
+  if (size && size !== AUTO_IMAGE_SIZE) {
     tool.size = size;
   }
   const quality = normalizeQuality(params.quality);
