@@ -1,6 +1,6 @@
 "use client";
 
-import { Database, Download, Loader2, Save, Trash2 } from "lucide-react";
+import { Database, Download, Loader2, Plus, Save, Trash2 } from "lucide-react";
 import { useAction } from "next-safe-action/hooks";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -60,6 +60,11 @@ const PLAN_OPTIONS = [
   { value: "pro", label: "Pro" },
   { value: "ultra", label: "Ultra" },
   { value: "enterprise", label: "Enterprise" },
+] as const;
+
+const PLAN_REQUIREMENT_OPTIONS = [
+  { value: "none", label: "不限制" },
+  ...PLAN_OPTIONS,
 ] as const;
 
 const QUEUE_PRIORITY_OPTIONS = [
@@ -238,6 +243,7 @@ const MODERATION_ROWS = [
 ] as const;
 
 type PlanValue = (typeof PLAN_OPTIONS)[number]["value"];
+type PlanRequirementValue = (typeof PLAN_REQUIREMENT_OPTIONS)[number]["value"];
 type QueuePriorityValue = (typeof QUEUE_PRIORITY_OPTIONS)[number]["value"];
 type ModerationLevelValue = (typeof MODERATION_LEVEL_OPTIONS)[number]["value"];
 type FeatureKey = (typeof FEATURE_ROWS)[number]["key"];
@@ -249,6 +255,26 @@ type CapabilityMatrixDraft = {
   features: Record<FeatureKey, PlanValue>;
   limits: Record<PlanValue, Record<LimitKey, string | number>>;
   moderation: Record<PlanValue, Record<ModerationKey, ModerationLevelValue>>;
+};
+
+type CreditPackageDraft = {
+  id: string;
+  name: string;
+  description: string;
+  credits: number;
+  price: number;
+  popular: boolean;
+  visible: boolean;
+  requiresPlan: PlanRequirementValue;
+  allowQuantity: boolean;
+  maxQuantity: number;
+  creemProductId: string;
+  pricesByPlan: Record<PlanValue, number>;
+  creemProductIdsByPlan: Record<PlanValue, string>;
+};
+
+type CreditPackageMatrixDraft = {
+  packages: CreditPackageDraft[];
 };
 
 function formatJsonExample(value: unknown) {
@@ -284,6 +310,15 @@ function asPlan(value: unknown, fallback: PlanValue): PlanValue {
     : fallback;
 }
 
+function asPlanRequirement(
+  value: unknown,
+  fallback: PlanRequirementValue
+): PlanRequirementValue {
+  return PLAN_REQUIREMENT_OPTIONS.some((option) => option.value === value)
+    ? (value as PlanRequirementValue)
+    : fallback;
+}
+
 function asQueuePriority(
   value: unknown,
   fallback: QueuePriorityValue
@@ -305,6 +340,45 @@ function asModerationLevel(
 function numberValue(value: unknown, fallback: number) {
   const numeric = typeof value === "number" ? value : Number(value);
   return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;
+}
+
+function stringValue(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+
+function booleanValue(value: unknown, fallback: boolean) {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function normalizePlanNumberMap(
+  value: unknown,
+  fallbackValue: unknown,
+  fallbackNumber: number
+) {
+  const raw = isRecord(value) ? value : {};
+  const fallback = isRecord(fallbackValue) ? fallbackValue : {};
+
+  return Object.fromEntries(
+    PLAN_OPTIONS.map((plan) => [
+      plan.value,
+      numberValue(
+        raw[plan.value],
+        numberValue(fallback[plan.value], fallbackNumber)
+      ),
+    ])
+  ) as Record<PlanValue, number>;
+}
+
+function normalizePlanStringMap(value: unknown, fallbackValue: unknown) {
+  const raw = isRecord(value) ? value : {};
+  const fallback = isRecord(fallbackValue) ? fallbackValue : {};
+
+  return Object.fromEntries(
+    PLAN_OPTIONS.map((plan) => [
+      plan.value,
+      stringValue(raw[plan.value], stringValue(fallback[plan.value])),
+    ])
+  ) as Record<PlanValue, string>;
 }
 
 function normalizeCapabilityMatrixDraft(
@@ -394,6 +468,136 @@ function normalizeCapabilityMatrixDraft(
   };
 }
 
+function getRawCreditPackages(value: unknown) {
+  if (Array.isArray(value)) return value;
+  if (isRecord(value) && Array.isArray(value.packages)) return value.packages;
+  return [];
+}
+
+function normalizeCreditPackageMatrixDraft(
+  rawValue: DraftValue,
+  fallbackValue: unknown
+): CreditPackageMatrixDraft {
+  const parsedRaw = parseJsonDraft(rawValue);
+  const rawPackages = getRawCreditPackages(parsedRaw);
+  const fallbackPackages = getRawCreditPackages(fallbackValue);
+  const hasRawPackages =
+    Array.isArray(parsedRaw) ||
+    (isRecord(parsedRaw) && Array.isArray(parsedRaw.packages));
+  const fallbackById = new Map(
+    fallbackPackages
+      .filter(isRecord)
+      .map((pkg) => [stringValue(pkg.id), pkg] as const)
+      .filter(([id]) => Boolean(id))
+  );
+  const sourcePackages = hasRawPackages ? rawPackages : fallbackPackages;
+
+  return {
+    packages: sourcePackages
+      .map((rawPackage, index) => {
+        if (!isRecord(rawPackage)) return null;
+        const fallback = fallbackById.get(stringValue(rawPackage.id)) ?? {};
+        const id = stringValue(rawPackage.id, stringValue(fallback.id)).trim();
+        if (!id) return null;
+        const price = numberValue(
+          rawPackage.price,
+          numberValue(fallback.price, 1)
+        );
+        const fallbackRequiresPlan = asPlanRequirement(
+          fallback.requiresPlan,
+          "none"
+        );
+        const requiresPlan = asPlanRequirement(
+          rawPackage.requiresPlan,
+          fallbackRequiresPlan
+        );
+
+        return {
+          id,
+          name: stringValue(rawPackage.name, stringValue(fallback.name, id)),
+          description: stringValue(
+            rawPackage.description,
+            stringValue(fallback.description)
+          ),
+          credits: numberValue(
+            rawPackage.credits,
+            numberValue(fallback.credits, 1)
+          ),
+          price,
+          popular: booleanValue(rawPackage.popular, Boolean(fallback.popular)),
+          visible: booleanValue(
+            rawPackage.visible,
+            fallback.visible === undefined ? true : Boolean(fallback.visible)
+          ),
+          requiresPlan,
+          allowQuantity: booleanValue(
+            rawPackage.allowQuantity,
+            Boolean(fallback.allowQuantity)
+          ),
+          maxQuantity: numberValue(
+            rawPackage.maxQuantity,
+            numberValue(fallback.maxQuantity, 1)
+          ),
+          creemProductId: stringValue(
+            rawPackage.creemProductId,
+            stringValue(fallback.creemProductId)
+          ),
+          pricesByPlan: normalizePlanNumberMap(
+            rawPackage.pricesByPlan,
+            fallback.pricesByPlan,
+            price
+          ),
+          creemProductIdsByPlan: normalizePlanStringMap(
+            rawPackage.creemProductIdsByPlan,
+            fallback.creemProductIdsByPlan
+          ),
+          sortIndex: index,
+        };
+      })
+      .filter((pkg): pkg is CreditPackageDraft & { sortIndex: number } =>
+        Boolean(pkg)
+      )
+      .sort((a, b) => a.sortIndex - b.sortIndex)
+      .map(({ sortIndex: _sortIndex, ...pkg }) => pkg),
+  };
+}
+
+function compactCreditPackageMatrixDraft(matrix: CreditPackageMatrixDraft) {
+  return {
+    packages: matrix.packages.map((pkg) => {
+      const pricesByPlan = Object.fromEntries(
+        PLAN_OPTIONS.map((plan) => [plan.value, pkg.pricesByPlan[plan.value]])
+      );
+      const creemProductIdsByPlan = Object.fromEntries(
+        PLAN_OPTIONS.map((plan) => [
+          plan.value,
+          pkg.creemProductIdsByPlan[plan.value].trim(),
+        ]).filter(([, value]) => Boolean(value))
+      );
+
+      return {
+        id: pkg.id.trim(),
+        name: pkg.name.trim() || pkg.id.trim(),
+        description: pkg.description,
+        credits: Number(pkg.credits) || 1,
+        price: Number(pkg.price) || 1,
+        popular: pkg.popular,
+        visible: pkg.visible,
+        ...(pkg.requiresPlan !== "none" ? { requiresPlan: pkg.requiresPlan } : {}),
+        allowQuantity: pkg.allowQuantity,
+        maxQuantity: Number(pkg.maxQuantity) || 1,
+        ...(pkg.creemProductId.trim()
+          ? { creemProductId: pkg.creemProductId.trim() }
+          : {}),
+        pricesByPlan,
+        ...(Object.keys(creemProductIdsByPlan).length > 0
+          ? { creemProductIdsByPlan }
+          : {}),
+      };
+    }),
+  };
+}
+
 function getJsonSettingHint(key: string) {
   if (key === "PLAN_CAPABILITY_MATRIX") {
     return "留空表示使用代码默认矩阵，并继续兼容旧上传/月积分配置。后台矩阵保存后会写入 JSON；功能门槛按最低套餐生效，高级套餐自动包含低级套餐能力。";
@@ -449,6 +653,17 @@ function SettingInput({
   if (setting.key === "PLAN_CAPABILITY_MATRIX") {
     return (
       <PlanCapabilityMatrixInput
+        value={value}
+        fallbackValue={setting.exampleValue}
+        disabled={disabled}
+        onChange={onChange}
+      />
+    );
+  }
+
+  if (setting.key === "CREDIT_PACKAGE_MATRIX") {
+    return (
+      <CreditPackageMatrixInput
         value={value}
         fallbackValue={setting.exampleValue}
         disabled={disabled}
@@ -802,6 +1017,370 @@ function PlanCapabilityMatrixInput({
   );
 }
 
+function CreditPackageMatrixInput({
+  value,
+  fallbackValue,
+  disabled,
+  onChange,
+}: {
+  value: DraftValue;
+  fallbackValue: unknown;
+  disabled: boolean;
+  onChange: (value: DraftValue) => void;
+}) {
+  const matrix = useMemo(
+    () => normalizeCreditPackageMatrixDraft(value, fallbackValue),
+    [value, fallbackValue]
+  );
+  const compactMatrix = useMemo(
+    () => compactCreditPackageMatrixDraft(matrix),
+    [matrix]
+  );
+  const preview = useMemo(
+    () => JSON.stringify(compactMatrix, null, 2),
+    [compactMatrix]
+  );
+
+  const updateMatrix = (next: CreditPackageMatrixDraft) => {
+    onChange(JSON.stringify(compactCreditPackageMatrixDraft(next), null, 2));
+  };
+
+  const updatePackage = (
+    index: number,
+    patch: Partial<CreditPackageDraft>
+  ) => {
+    updateMatrix({
+      packages: matrix.packages.map((pkg, currentIndex) =>
+        currentIndex === index ? { ...pkg, ...patch } : pkg
+      ),
+    });
+  };
+
+  const updatePlanPrice = (index: number, plan: PlanValue, price: string) => {
+    const pkg = matrix.packages[index];
+    if (!pkg) return;
+    updatePackage(index, {
+      pricesByPlan: {
+        ...pkg.pricesByPlan,
+        [plan]: Number(price),
+      },
+    });
+  };
+
+  const updatePlanCreemProductId = (
+    index: number,
+    plan: PlanValue,
+    productId: string
+  ) => {
+    const pkg = matrix.packages[index];
+    if (!pkg) return;
+    updatePackage(index, {
+      creemProductIdsByPlan: {
+        ...pkg.creemProductIdsByPlan,
+        [plan]: productId,
+      },
+    });
+  };
+
+  const addPackage = () => {
+    const nextIndex = matrix.packages.length + 1;
+    const id = `custom_${nextIndex}`;
+    updateMatrix({
+      packages: [
+        ...matrix.packages,
+        {
+          id,
+          name: `Custom ${nextIndex}`,
+          description: "",
+          credits: 1000,
+          price: 10,
+          popular: false,
+          visible: true,
+          requiresPlan: "none",
+          allowQuantity: false,
+          maxQuantity: 1,
+          creemProductId: "",
+          pricesByPlan: Object.fromEntries(
+            PLAN_OPTIONS.map((plan) => [plan.value, 10])
+          ) as Record<PlanValue, number>,
+          creemProductIdsByPlan: Object.fromEntries(
+            PLAN_OPTIONS.map((plan) => [plan.value, ""])
+          ) as Record<PlanValue, string>,
+        },
+      ],
+    });
+  };
+
+  const removePackage = (index: number) => {
+    updateMatrix({
+      packages: matrix.packages.filter(
+        (_, currentIndex) => currentIndex !== index
+      ),
+    });
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+        管理一次性购买积分包。Epay 使用站内价格；Creem 如需按套餐定价，需要在对应套餐列填写预建产品 ID。
+      </div>
+
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          onClick={addPackage}
+        >
+          <Plus className="mr-2 h-4 w-4" />
+          新增积分包
+        </Button>
+      </div>
+
+      {matrix.packages.map((pkg, index) => (
+        <section
+          key={`${pkg.id}-${index}`}
+          className="space-y-3 rounded-md border p-3"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h4 className="text-sm font-semibold">{pkg.name || pkg.id}</h4>
+              <p className="text-xs text-muted-foreground">
+                ID: {pkg.id || "未填写"}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              disabled={disabled}
+              title="删除积分包"
+              onClick={() => removePackage(index)}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="space-y-1.5">
+              <Label>包 ID</Label>
+              <Input
+                value={pkg.id}
+                disabled={disabled}
+                onChange={(event) =>
+                  updatePackage(index, { id: event.target.value })
+                }
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>显示名称</Label>
+              <Input
+                value={pkg.name}
+                disabled={disabled}
+                onChange={(event) =>
+                  updatePackage(index, { name: event.target.value })
+                }
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>积分数</Label>
+              <Input
+                type="number"
+                min="1"
+                step="1"
+                value={String(pkg.credits)}
+                disabled={disabled}
+                onChange={(event) =>
+                  updatePackage(index, { credits: Number(event.target.value) })
+                }
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>兜底价格</Label>
+              <Input
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={String(pkg.price)}
+                disabled={disabled}
+                onChange={(event) =>
+                  updatePackage(index, { price: Number(event.target.value) })
+                }
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>最低可购买套餐</Label>
+              <MatrixSelect
+                value={pkg.requiresPlan}
+                options={PLAN_REQUIREMENT_OPTIONS}
+                disabled={disabled}
+                onChange={(nextValue) =>
+                  updatePackage(index, {
+                    requiresPlan: nextValue as PlanRequirementValue,
+                  })
+                }
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>最大购买数量</Label>
+              <Input
+                type="number"
+                min="1"
+                step="1"
+                value={String(pkg.maxQuantity)}
+                disabled={disabled || !pkg.allowQuantity}
+                onChange={(event) =>
+                  updatePackage(index, {
+                    maxQuantity: Number(event.target.value),
+                  })
+                }
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Creem 兜底产品 ID</Label>
+              <Input
+                value={pkg.creemProductId}
+                disabled={disabled}
+                placeholder={`credits_${pkg.id || "package"}`}
+                onChange={(event) =>
+                  updatePackage(index, { creemProductId: event.target.value })
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>开关</Label>
+              <div className="flex flex-wrap gap-4 rounded-md border px-3 py-2">
+                <label className="flex items-center gap-2 text-sm">
+                  <Switch
+                    checked={pkg.visible}
+                    disabled={disabled}
+                    onCheckedChange={(checked) =>
+                      updatePackage(index, { visible: checked })
+                    }
+                  />
+                  显示
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <Switch
+                    checked={pkg.popular}
+                    disabled={disabled}
+                    onCheckedChange={(checked) =>
+                      updatePackage(index, { popular: checked })
+                    }
+                  />
+                  推荐
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <Switch
+                    checked={pkg.allowQuantity}
+                    disabled={disabled}
+                    onCheckedChange={(checked) =>
+                      updatePackage(index, {
+                        allowQuantity: checked,
+                        maxQuantity: checked ? pkg.maxQuantity : 1,
+                      })
+                    }
+                  />
+                  允许数量购买
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>说明</Label>
+            <Textarea
+              value={pkg.description}
+              rows={2}
+              disabled={disabled}
+              className="resize-y"
+              onChange={(event) =>
+                updatePackage(index, { description: event.target.value })
+              }
+            />
+          </div>
+
+          <div className="overflow-x-auto rounded-md border">
+            <table className="w-full min-w-[820px] text-sm">
+              <thead className="bg-muted/60 text-xs text-muted-foreground">
+                <tr>
+                  <th className="w-40 px-3 py-2 text-left font-medium">套餐</th>
+                  {PLAN_OPTIONS.map((plan) => (
+                    <th
+                      key={plan.value}
+                      className="w-40 px-3 py-2 text-left font-medium"
+                    >
+                      {plan.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                <tr>
+                  <td className="px-3 py-2 font-medium">价格</td>
+                  {PLAN_OPTIONS.map((plan) => (
+                    <td key={plan.value} className="px-3 py-2">
+                      <Input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={String(pkg.pricesByPlan[plan.value])}
+                        disabled={disabled}
+                        className="h-9 min-w-28"
+                        onChange={(event) =>
+                          updatePlanPrice(index, plan.value, event.target.value)
+                        }
+                      />
+                    </td>
+                  ))}
+                </tr>
+                <tr>
+                  <td className="px-3 py-2">
+                    <div className="font-medium">Creem 产品 ID</div>
+                    <div className="text-xs text-muted-foreground">
+                      Epay 可留空
+                    </div>
+                  </td>
+                  {PLAN_OPTIONS.map((plan) => (
+                    <td key={plan.value} className="px-3 py-2">
+                      <Input
+                        value={pkg.creemProductIdsByPlan[plan.value]}
+                        disabled={disabled}
+                        className="h-9 min-w-36"
+                        placeholder="可选"
+                        onChange={(event) =>
+                          updatePlanCreemProductId(
+                            index,
+                            plan.value,
+                            event.target.value
+                          )
+                        }
+                      />
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ))}
+
+      <details className="rounded-md border bg-muted/20 p-3">
+        <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+          查看当前 JSON 预览
+        </summary>
+        <Textarea
+          value={preview}
+          rows={12}
+          readOnly
+          className="mt-3 resize-y font-mono text-xs"
+        />
+      </details>
+    </div>
+  );
+}
+
 export function SystemSettingsPanel() {
   const [settings, setSettings] = useState<SettingSnapshotItem[]>([]);
   const [drafts, setDrafts] = useState<Record<string, DraftValue>>({});
@@ -1006,7 +1585,8 @@ export function SystemSettingsPanel() {
                   <Card
                     key={setting.key}
                     className={
-                      setting.key === "PLAN_CAPABILITY_MATRIX"
+                      setting.key === "PLAN_CAPABILITY_MATRIX" ||
+                      setting.key === "CREDIT_PACKAGE_MATRIX"
                         ? "rounded-lg lg:col-span-2"
                         : "rounded-lg"
                     }

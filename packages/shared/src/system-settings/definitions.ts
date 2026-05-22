@@ -1166,7 +1166,7 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     key: "CREDIT_PACKAGE_MATRIX",
     label: "按量积分包配置",
     description:
-      "JSON 配置。统一控制一次性积分包的积分数、显示状态、最低可购买套餐、是否允许数量购买，以及不同套餐对应价格。Epay 会直接按站内价格收款；Creem 按套餐定价时需要在 creemProductIdsByPlan 中配置对应预建产品 ID。",
+      "表格配置一次性积分包的积分数、显示状态、最低可购买套餐、数量购买、各套餐价格和 Creem 产品 ID。保存后仍写入同一 JSON 配置；Epay 会直接按站内价格收款，Creem 按套餐定价时需要配置对应预建产品 ID。",
     category: "credits",
     valueType: "json",
     exampleValue: CREDIT_PACKAGE_MATRIX_EXAMPLE,
