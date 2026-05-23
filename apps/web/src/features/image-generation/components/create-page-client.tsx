@@ -116,6 +116,7 @@ type ImageApiResult = {
   responseText?: string;
   responseThinking?: string;
   responseAgent?: string;
+  agentEvents?: AgentRunEvent[];
   webConversation?: ChatGptWebConversationState;
   creditsConsumed?: number;
   results?: ImageApiResult[];
@@ -125,6 +126,27 @@ type GenerationRequestError = Error & {
   creditsConsumed?: number;
 };
 
+type AgentRunEvent = {
+  id?: string;
+  kind:
+    | "message"
+    | "reasoning"
+    | "web_search"
+    | "code_interpreter"
+    | "image_generation"
+    | "image_partial"
+    | "tool";
+  status?: "started" | "running" | "completed" | "failed";
+  title: string;
+  detail?: string;
+  imageBase64?: string;
+  imageUrl?: string;
+  index?: number;
+  partialImageIndex?: number;
+  timestamp?: string;
+  toolType?: string;
+};
+
 type ImageStreamEvent =
   | {
       type: "partial_image";
@@ -132,6 +154,7 @@ type ImageStreamEvent =
       partial_image_index?: number;
       b64_json?: string;
       url?: string;
+      final?: boolean;
     }
   | {
       type: "text_delta";
@@ -147,6 +170,11 @@ type ImageStreamEvent =
       type: "agent_delta";
       index?: number;
       delta: string;
+    }
+  | {
+      type: "agent_event";
+      index?: number;
+      event: AgentRunEvent;
     }
   | ({ type: "completed" } & ImageApiResult)
   | ({ type: "error"; error: string } & ImageApiResult)
@@ -179,6 +207,7 @@ type ChatVariant = {
   responseText?: string;
   responseThinking?: string;
   responseAgent?: string;
+  agentEvents?: AgentRunEvent[];
   webConversation?: ChatGptWebConversationState;
   creditsConsumed?: number;
   createdAt?: string;
@@ -198,6 +227,7 @@ type ChatResultInput = Pick<
   | "responseText"
   | "responseThinking"
   | "responseAgent"
+  | "agentEvents"
   | "webConversation"
   | "creditsConsumed"
 >;
@@ -309,6 +339,7 @@ type ChatStreamState = {
   text: string;
   thinking: string;
   agent: string;
+  agentEvents: AgentRunEvent[];
   imageUrl?: string;
 };
 
@@ -910,6 +941,56 @@ function imageStreamEventToPreviewUrl(event: ImageStreamEvent) {
   return event.url || null;
 }
 
+function agentEventToImageUrl(event: AgentRunEvent) {
+  if (event.imageUrl) return event.imageUrl;
+  if (event.imageBase64) return `data:image/png;base64,${event.imageBase64}`;
+  return undefined;
+}
+
+function normalizeAgentEvent(event: AgentRunEvent): AgentRunEvent {
+  return {
+    ...event,
+    imageUrl: agentEventToImageUrl(event),
+    imageBase64: undefined,
+    timestamp: event.timestamp || new Date().toISOString(),
+  };
+}
+
+function appendAgentRunEvent(
+  events: AgentRunEvent[],
+  incoming: AgentRunEvent
+) {
+  const nextEvent = normalizeAgentEvent(incoming);
+  const matchIndex = events.findIndex((event) => {
+    if (nextEvent.id && event.id === nextEvent.id) return true;
+    return (
+      nextEvent.kind === "image_partial" &&
+      event.kind === "image_partial" &&
+      nextEvent.partialImageIndex !== undefined &&
+      event.partialImageIndex === nextEvent.partialImageIndex &&
+      (event.index === undefined ||
+        nextEvent.index === undefined ||
+        event.index === nextEvent.index)
+    );
+  });
+
+  if (matchIndex < 0) return [...events, nextEvent];
+
+  return events.map((event, index) =>
+    index === matchIndex ? { ...event, ...nextEvent } : event
+  );
+}
+
+function sanitizeAgentEventsForStorage(events: AgentRunEvent[] | undefined) {
+  return (events || []).map((event) => {
+    const normalized = normalizeAgentEvent(event);
+    if (normalized.imageUrl?.startsWith("data:image/")) {
+      return { ...normalized, imageUrl: undefined };
+    }
+    return normalized;
+  });
+}
+
 function createLocalId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -1001,6 +1082,18 @@ function sanitizeChatMessages(value: unknown): ChatMessage[] {
               prompt: value.prompt || messageText,
               model: value.model || DEFAULT_IMAGE_MODEL,
               size: value.size || DEFAULT_IMAGE_SIZE,
+              agentEvents: Array.isArray(value.agentEvents)
+                ? value.agentEvents
+                    .filter(
+                      (event): event is AgentRunEvent =>
+                        Boolean(
+                          event &&
+                            typeof event === "object" &&
+                            typeof event.title === "string"
+                        )
+                    )
+                    .map(normalizeAgentEvent)
+                : undefined,
               webConversation,
             },
           ];
@@ -1032,6 +1125,10 @@ function sanitizePersistedChatMessages(messages: ChatMessage[]): ChatMessage[] {
     attachments: message.attachments?.filter(
       (attachment) => !attachment.previewUrl?.startsWith("blob:")
     ),
+    variants: message.variants?.map((variant) => ({
+      ...variant,
+      agentEvents: sanitizeAgentEventsForStorage(variant.agentEvents),
+    })),
   }));
 }
 
@@ -2192,6 +2289,22 @@ export function CreatePageClient({
       return error;
     };
 
+    const buildStreamState = (next?: {
+      text?: string;
+      thinking?: string;
+      agent?: string;
+      agentEvents?: AgentRunEvent[];
+      imageUrl?: string;
+    }): Omit<ChatStreamState, "mode"> => ({
+      messageId: streamMessageId,
+      cardId: streamCardId,
+      text: next?.text ?? "",
+      thinking: next?.thinking ?? "",
+      agent: next?.agent ?? "",
+      agentEvents: next?.agentEvents ?? [],
+      imageUrl: next?.imageUrl,
+    });
+
     const contentType = response.headers.get("content-type") || "";
     if (!contentType.includes("text/event-stream")) {
       const data = await readImageApiJsonResponse(response);
@@ -2216,6 +2329,7 @@ export function CreatePageClient({
     let text = "";
     let thinking = "";
     let agent = "";
+    let agentEvents: AgentRunEvent[] = [];
     let previewUrl: string | undefined;
 
     const processBlock = (block: string) => {
@@ -2238,12 +2352,13 @@ export function CreatePageClient({
       if (event.type === "text_delta") {
         text += event.delta;
         updateChatStream({
-          messageId: streamMessageId,
-          cardId: streamCardId,
-          text,
-          thinking,
-          agent,
-          imageUrl: previewUrl,
+          ...buildStreamState({
+            text,
+            thinking,
+            agent,
+            agentEvents,
+            imageUrl: previewUrl,
+          }),
         });
         if (streamCardId) {
           setBatchCards((prev) =>
@@ -2261,12 +2376,13 @@ export function CreatePageClient({
       if (event.type === "thinking_delta") {
         thinking += event.delta;
         updateChatStream({
-          messageId: streamMessageId,
-          cardId: streamCardId,
-          text,
-          thinking,
-          agent,
-          imageUrl: previewUrl,
+          ...buildStreamState({
+            text,
+            thinking,
+            agent,
+            agentEvents,
+            imageUrl: previewUrl,
+          }),
         });
         if (streamCardId) {
           setBatchCards((prev) =>
@@ -2284,12 +2400,13 @@ export function CreatePageClient({
       if (event.type === "agent_delta") {
         agent += event.delta;
         updateChatStream({
-          messageId: streamMessageId,
-          cardId: streamCardId,
-          text,
-          thinking,
-          agent,
-          imageUrl: previewUrl,
+          ...buildStreamState({
+            text,
+            thinking,
+            agent,
+            agentEvents,
+            imageUrl: previewUrl,
+          }),
         });
         if (streamCardId) {
           setBatchCards((prev) =>
@@ -2304,18 +2421,49 @@ export function CreatePageClient({
         return;
       }
 
+      if (event.type === "agent_event") {
+        agentEvents = appendAgentRunEvent(agentEvents, event.event);
+        const eventImageUrl = agentEventToImageUrl(event.event);
+        if (eventImageUrl) {
+          previewUrl = eventImageUrl;
+          setStreamingPreviewUrl(eventImageUrl);
+        }
+        updateChatStream({
+          ...buildStreamState({
+            text,
+            thinking,
+            agent,
+            agentEvents,
+            imageUrl: previewUrl,
+          }),
+        });
+        return;
+      }
+
       if (event.type === "partial_image") {
         const nextPreviewUrl = imageStreamEventToPreviewUrl(event);
         if (nextPreviewUrl) {
           previewUrl = nextPreviewUrl;
+          if (!event.final) {
+            agentEvents = appendAgentRunEvent(agentEvents, {
+              kind: "image_partial",
+              status: "running",
+              title: copy("Intermediate image", "中间图已生成"),
+              imageUrl: nextPreviewUrl,
+              index: event.index,
+              partialImageIndex: event.partial_image_index,
+              timestamp: new Date().toISOString(),
+            });
+          }
           setStreamingPreviewUrl(nextPreviewUrl);
           updateChatStream({
-            messageId: streamMessageId,
-            cardId: streamCardId,
-            text,
-            thinking,
-            agent,
-            imageUrl: nextPreviewUrl,
+            ...buildStreamState({
+              text,
+              thinking,
+              agent,
+              agentEvents,
+              imageUrl: nextPreviewUrl,
+            }),
           });
           if (streamCardId) {
             setBatchCards((prev) =>
@@ -2370,6 +2518,7 @@ export function CreatePageClient({
       responseText: completed.responseText || text || undefined,
       responseThinking: completed.responseThinking || thinking || undefined,
       responseAgent: agent || completed.responseAgent || undefined,
+      agentEvents: completed.agentEvents || agentEvents,
       webConversation: completed.webConversation,
     };
   };
@@ -2629,6 +2778,7 @@ export function CreatePageClient({
       responseText: data.responseText,
       responseThinking: data.responseThinking,
       responseAgent: data.responseAgent,
+      agentEvents: data.agentEvents,
       webConversation: data.webConversation,
       creditsConsumed: data.creditsConsumed,
       createdAt: new Date().toISOString(),
@@ -2655,6 +2805,7 @@ export function CreatePageClient({
         responseText: isLast ? data.responseText : undefined,
         responseThinking: isLast ? data.responseThinking : undefined,
         responseAgent: isLast ? data.responseAgent : undefined,
+        agentEvents: isLast ? data.agentEvents : undefined,
         webConversation: isLast ? data.webConversation : undefined,
         creditsConsumed: isLast ? data.creditsConsumed : 0,
       };
@@ -2968,6 +3119,7 @@ export function CreatePageClient({
       text: "",
       thinking: "",
       agent: "",
+      agentEvents: [],
     });
 
     try {
@@ -3096,12 +3248,96 @@ export function CreatePageClient({
     );
   };
 
+  const agentEventLabel = (event: AgentRunEvent) => {
+    if (event.kind === "web_search") return copy("Search", "联网");
+    if (event.kind === "code_interpreter") return copy("Code", "代码");
+    if (event.kind === "image_generation") return copy("Image", "生图");
+    if (event.kind === "image_partial") return copy("Draft", "中间图");
+    if (event.kind === "reasoning") return copy("Thinking", "思考");
+    if (event.kind === "message") return copy("Message", "消息");
+    return copy("Tool", "工具");
+  };
+
+  const agentEventStatusLabel = (event: AgentRunEvent) => {
+    if (event.status === "completed") return copy("done", "完成");
+    if (event.status === "failed") return copy("failed", "失败");
+    if (event.status === "running") return copy("running", "运行中");
+    return copy("started", "开始");
+  };
+
+  const renderAgentTimeline = (
+    events?: AgentRunEvent[],
+    fallbackAgent?: string,
+    open = false
+  ) => {
+    if (!showAgentProcessHint) return null;
+    const normalizedEvents = (events || []).reduce<AgentRunEvent[]>(
+      (items, event) => appendAgentRunEvent(items, event),
+      []
+    );
+    if (normalizedEvents.length === 0) {
+      return renderAgentBlock(fallbackAgent, open);
+    }
+    return (
+      <details
+        className="mb-3 rounded-md border border-border bg-background/70 p-2"
+        open={open}
+      >
+        <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+          {copy("Agent steps", "Agent 步骤")}
+        </summary>
+        <div className="mt-3 space-y-3">
+          {normalizedEvents.map((event, index) => (
+            <div
+              key={`${event.id || event.kind}-${event.partialImageIndex ?? ""}-${index}`}
+              className="border-l border-border pl-3"
+            >
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="rounded border border-border bg-muted px-1.5 py-0.5 font-medium text-foreground">
+                  {agentEventLabel(event)}
+                </span>
+                <span className="text-muted-foreground">
+                  {agentEventStatusLabel(event)}
+                </span>
+              </div>
+              <p className="mt-1 whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-foreground">
+                {event.title}
+              </p>
+              {event.detail && (
+                <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
+                  {event.detail}
+                </p>
+              )}
+              {event.imageUrl && (
+                <div className="mt-2 max-w-[220px] overflow-hidden rounded-md border bg-muted">
+                  <Image
+                    src={event.imageUrl}
+                    alt={event.title}
+                    width={220}
+                    height={220}
+                    className="h-auto w-full object-contain"
+                    unoptimized={!shouldOptimizeStoredImage(event.imageUrl)}
+                  />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+        {fallbackAgent && (
+          <p className="mt-3 whitespace-pre-wrap break-words border-t border-border pt-2 text-xs leading-relaxed text-muted-foreground">
+            {fallbackAgent}
+          </p>
+        )}
+      </details>
+    );
+  };
+
   const renderChatStreamBubble = (messageId?: string) => {
     if (!chatStream || chatStream.messageId !== messageId) return null;
     return (
       <div className="rounded-lg border border-border bg-muted/35 px-3 py-3 text-sm text-foreground">
         {renderThinkingBlock(chatStream.thinking, true)}
-        {renderAgentBlock(chatStream.agent, true)}
+        {renderAgentTimeline(chatStream.agentEvents, chatStream.agent, true)}
         {chatStream.text && (
           <p className="whitespace-pre-wrap break-words leading-relaxed">
             {chatStream.text}
@@ -5768,9 +6004,14 @@ export function CreatePageClient({
                             ) : activeVariant ? (
                               <div>
                                 {renderThinkingBlock(
-                                  activeVariant.responseThinking
+                                  activeVariant.responseThinking,
+                                  message.mode === "agent"
                                 )}
-                                {renderAgentBlock(activeVariant.responseAgent)}
+                                {renderAgentTimeline(
+                                  activeVariant.agentEvents,
+                                  activeVariant.responseAgent,
+                                  message.mode === "agent"
+                                )}
                                 {activeVariant.responseText && (
                                   <p
                                     className={`whitespace-pre-wrap break-words leading-relaxed ${

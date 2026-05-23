@@ -53,6 +53,7 @@ import type {
   EditImageParams,
   GenerateImageParams,
   GenerateImageResult,
+  AgentRunEvent,
   ImageGenerationCallbacks,
   ImageInputFile,
   ImageModeration,
@@ -90,6 +91,7 @@ type ImageResponsePayload = {
   type?: string;
   data?: ImageOutput[];
   b64_json?: string;
+  partial_image_b64?: string;
   url?: string;
   revised_prompt?: string;
   index?: number;
@@ -1232,12 +1234,13 @@ function extractImageFromPayload(
 function extractPartialImage(
   payload: ImageResponsePayload
 ): PartialImageResult | null {
-  if (!payload.b64_json && !payload.url) {
+  const imageBase64 = payload.b64_json || payload.partial_image_b64;
+  if (!imageBase64 && !payload.url) {
     return null;
   }
 
   const result: PartialImageResult = {};
-  if (payload.b64_json) result.imageBase64 = payload.b64_json;
+  if (imageBase64) result.imageBase64 = imageBase64;
   if (payload.url) result.imageUrl = payload.url;
   if (typeof payload.index === "number") result.index = payload.index;
   if (typeof payload.partial_image_index === "number") {
@@ -1254,6 +1257,7 @@ function parseResponsesOutput(
   let responseText: string | undefined;
   let responseThinking: string | undefined;
   let responseAgent: string | undefined;
+  const agentEvents: AgentRunEvent[] = [];
   let imageOutputCount = 0;
   const imageOutputs: NonNullable<GenerateImageResult["imageOutputs"]> = [];
 
@@ -1297,6 +1301,8 @@ function parseResponsesOutput(
       responseAgent = responseAgent
         ? `${responseAgent}\n${agentLine}`
         : agentLine;
+      const event = toAgentRunEvent(item, { done: true });
+      if (event) agentEvents.push(event);
     }
   }
 
@@ -1310,6 +1316,7 @@ function parseResponsesOutput(
     responseText,
     responseThinking,
     responseAgent,
+    agentEvents: agentEvents.length ? agentEvents : undefined,
   };
 }
 
@@ -1391,6 +1398,113 @@ function describeResponsesToolItem(
   return null;
 }
 
+function getToolEventKind(item: ResponsesOutputItem): AgentRunEvent["kind"] {
+  if (item.type === "web_search_call") return "web_search";
+  if (item.type === "code_interpreter_call") return "code_interpreter";
+  if (item.type === "image_generation_call") return "image_generation";
+  return "tool";
+}
+
+function getToolEventTitle(
+  item: ResponsesOutputItem,
+  options: { done?: boolean; partial?: boolean } = {}
+) {
+  if (options.partial) return "中间图已生成";
+  if (item.type === "web_search_call") {
+    return options.done ? "联网搜索完成" : "联网搜索";
+  }
+  if (item.type === "code_interpreter_call") {
+    return options.done ? "代码/文件分析完成" : "代码/文件分析";
+  }
+  if (item.type === "image_generation_call") {
+    return options.done ? "图片生成完成" : "图片生成";
+  }
+  if (item.type === "function_call") {
+    return item.name
+      ? `${options.done ? "工具调用完成" : "调用工具"}: ${item.name}`
+      : options.done
+        ? "工具调用完成"
+        : "调用工具";
+  }
+  return options.done ? "工具完成" : "运行工具";
+}
+
+function getToolEventDetail(item: ResponsesOutputItem) {
+  if (item.type === "web_search_call") {
+    return compactToolText(item.query) || describeWebSearchAction(item.action);
+  }
+  if (item.type === "function_call") {
+    return compactToolText(item.arguments);
+  }
+  return (
+    compactToolText(item.query) ||
+    compactToolText(item.name) ||
+    compactToolJson(item.action) ||
+    item.status
+  );
+}
+
+function toAgentRunEvent(
+  item: ResponsesOutputItem | undefined,
+  options: { done?: boolean } = {}
+): AgentRunEvent | null {
+  if (!item?.type) return null;
+  if (item.type === "message" || item.type === "reasoning") return null;
+  return {
+    id: item.id || item.call_id,
+    kind: getToolEventKind(item),
+    status: options.done ? "completed" : "started",
+    title: getToolEventTitle(item, options),
+    detail: getToolEventDetail(item),
+    timestamp: new Date().toISOString(),
+    toolType: item.type,
+  };
+}
+
+function getAgentEventKey(event: AgentRunEvent) {
+  if (event.id) return `id:${event.id}`;
+  return [
+    event.kind,
+    event.toolType || "",
+    event.status || "",
+    event.partialImageIndex ?? "",
+    event.index ?? "",
+    event.title,
+  ].join("|");
+}
+
+function mergeAgentEvents(
+  ...groups: Array<AgentRunEvent[] | undefined>
+): AgentRunEvent[] | undefined {
+  const merged: AgentRunEvent[] = [];
+  const seen = new Set<string>();
+  for (const events of groups) {
+    for (const event of events || []) {
+      const key = getAgentEventKey(event);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(event);
+    }
+  }
+  return merged.length ? merged : undefined;
+}
+
+async function emitAgentEvent(
+  callbacks: ImageGenerationCallbacks | undefined,
+  event: AgentRunEvent
+) {
+  await callbacks?.onAgentEvent?.(event);
+}
+
+async function recordAgentEvent(
+  state: EventStreamParseState,
+  callbacks: ImageGenerationCallbacks | undefined,
+  event: AgentRunEvent
+) {
+  state.agentEvents = [...(state.agentEvents || []), event];
+  await emitAgentEvent(callbacks, event);
+}
+
 function shouldReportResponsesToolItem(
   eventName: string,
   item: ResponsesOutputItem | undefined
@@ -1404,6 +1518,16 @@ function shouldReportResponsesToolItem(
     return true;
   }
   return item.type.endsWith("_call");
+}
+
+function isResponsesPartialImageEvent(
+  eventName: string,
+  payload: Record<string, unknown>
+) {
+  return (
+    eventName.includes("partial_image") ||
+    (typeof payload.type === "string" && payload.type.includes("partial_image"))
+  );
 }
 
 function extractResponseCompletedPayload(
@@ -1453,6 +1577,10 @@ async function processResponsesEventPayload(
         await callbacks?.onAgentDelta?.(`${line}\n`);
         state.responseAgent = `${state.responseAgent || ""}${line}\n`;
       }
+      const event = toAgentRunEvent(item, { done: true });
+      if (event) {
+        await recordAgentEvent(state, callbacks, event);
+      }
     }
     if (item?.type === "image_generation_call" && item.result) {
       const imageOutputCount =
@@ -1465,7 +1593,18 @@ async function processResponsesEventPayload(
       const partialImage = {
         imageBase64: item.result,
         partialImageIndex: imageOutput.index,
+        final: true,
       };
+      await recordAgentEvent(state, callbacks, {
+        id: item.id,
+        kind: "image_generation",
+        status: "completed",
+        title: "最终图片已生成",
+        index: imageOutput.index,
+        partialImageIndex: imageOutput.index,
+        timestamp: new Date().toISOString(),
+        toolType: item.type,
+      });
       await callbacks?.onPartialImage?.(partialImage);
       state.fallbackResult = {
         ...(state.fallbackResult || {}),
@@ -1491,6 +1630,30 @@ async function processResponsesEventPayload(
         await callbacks?.onAgentDelta?.(`${line}\n`);
         state.responseAgent = `${state.responseAgent || ""}${line}\n`;
       }
+      const event = toAgentRunEvent(item);
+      if (event) {
+        await recordAgentEvent(state, callbacks, event);
+      }
+    }
+    return null;
+  }
+
+  if (isResponsesPartialImageEvent(eventName, payload)) {
+    const partialImage = extractPartialImage(payload as ImageResponsePayload);
+    if (partialImage) {
+      await recordAgentEvent(state, callbacks, {
+        kind: "image_partial",
+        status: "running",
+        title: "中间图已生成",
+        imageBase64: partialImage.imageBase64,
+        imageUrl: partialImage.imageUrl,
+        index: partialImage.index,
+        partialImageIndex: partialImage.partialImageIndex,
+        timestamp: new Date().toISOString(),
+        toolType:
+          typeof payload.type === "string" ? payload.type : eventName || undefined,
+      });
+      await callbacks?.onPartialImage?.(partialImage);
     }
     return null;
   }
@@ -1537,6 +1700,7 @@ async function processResponsesEventPayload(
           state.fallbackResult?.imageOutputCount || 0
         ),
         responseAgent: state.responseAgent || result.responseAgent,
+        agentEvents: mergeAgentEvents(result.agentEvents, state.agentEvents),
       };
     }
   }
@@ -1686,6 +1850,7 @@ type EventStreamParseState = {
   completedResult: GenerateImageResult | null;
   fallbackResult: GenerateImageResult | null;
   responseAgent?: string;
+  agentEvents?: AgentRunEvent[];
 };
 
 async function processEventPayload(
@@ -1770,6 +1935,7 @@ function finishEventStream(state: EventStreamParseState): GenerateImageResult {
     return {
       ...result,
       responseAgent: result.responseAgent || state.responseAgent,
+      agentEvents: mergeAgentEvents(result.agentEvents, state.agentEvents),
     };
   }
 
@@ -2249,6 +2415,7 @@ export async function generateChatImage(
       type: "image_generation";
       action: "auto";
       model?: string;
+      partial_images?: number;
       size?: string;
       quality?: ImageQuality;
       moderation?: ImageModeration;
@@ -2257,6 +2424,7 @@ export async function generateChatImage(
     } = {
       type: "image_generation",
       action: "auto",
+      partial_images: 2,
     };
 
     const toolModel = getImageModel(params.imageModel) || DEFAULT_IMAGE_MODEL;

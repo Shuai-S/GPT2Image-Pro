@@ -33,6 +33,7 @@ type ResponsesImageRequest = {
     type: "image_generation";
     action: "generate" | "edit";
     model: string;
+    partial_images?: number;
     size?: string;
     quality?: ImageQuality;
     moderation?: ImageModeration;
@@ -134,6 +135,7 @@ export function buildResponsesImageGenerationRequest(
     type: "image_generation",
     action: "generate",
     model: getToolModel(config, params.model),
+    partial_images: 2,
   };
 
   if (size && size !== AUTO_IMAGE_SIZE) tool.size = size;
@@ -180,6 +182,7 @@ export function buildResponsesImageEditRequest(
     type: "image_generation",
     action: "edit",
     model: getToolModel(config, params.model),
+    partial_images: 2,
   };
 
   if (size && size !== AUTO_IMAGE_SIZE) {

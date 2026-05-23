@@ -1,3 +1,5 @@
+import type { AgentRunEvent } from "./types";
+
 export type ImageStreamEvent =
   | {
       type: "partial_image";
@@ -5,6 +7,7 @@ export type ImageStreamEvent =
       partial_image_index?: number;
       b64_json?: string;
       url?: string;
+      final?: boolean;
     }
   | {
       type: "text_delta";
@@ -22,6 +25,11 @@ export type ImageStreamEvent =
       delta: string;
     }
   | {
+      type: "agent_event";
+      index?: number;
+      event: AgentRunEvent;
+    }
+  | {
       type: "completed";
       generationId?: string;
       imageUrl?: string;
@@ -31,6 +39,7 @@ export type ImageStreamEvent =
       responseText?: string;
       responseThinking?: string;
       responseAgent?: string;
+      agentEvents?: AgentRunEvent[];
       webConversation?: {
         conversationId: string;
         parentMessageId: string;

@@ -693,6 +693,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
                     partial_image_index: image.partialImageIndex,
                     b64_json: image.imageBase64,
                     url: image.imageUrl,
+                    final: image.final,
                   });
                 },
                 onTextDelta: async (delta) => {
@@ -703,6 +704,9 @@ export const POST = withApiLogging(async (request: NextRequest) => {
                 },
                 onAgentDelta: async (delta) => {
                   await emit({ type: "agent_delta", index, delta });
+                },
+                onAgentEvent: async (event) => {
+                  await emit({ type: "agent_event", index, event });
                 },
               }),
               onResult: async (result) => {

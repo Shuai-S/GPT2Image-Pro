@@ -28,6 +28,7 @@ export interface GenerateImageResult {
   responseText?: string;
   responseThinking?: string;
   responseAgent?: string;
+  agentEvents?: AgentRunEvent[];
   webConversation?: ChatGptWebConversationState;
   error?: string;
   upstreamResetAt?: string;
@@ -49,6 +50,36 @@ export interface PartialImageResult {
   imageUrl?: string;
   index?: number;
   partialImageIndex?: number;
+  final?: boolean;
+}
+
+export type AgentRunEventKind =
+  | "message"
+  | "reasoning"
+  | "web_search"
+  | "code_interpreter"
+  | "image_generation"
+  | "image_partial"
+  | "tool";
+
+export type AgentRunEventStatus =
+  | "started"
+  | "running"
+  | "completed"
+  | "failed";
+
+export interface AgentRunEvent {
+  id?: string;
+  kind: AgentRunEventKind;
+  status?: AgentRunEventStatus;
+  title: string;
+  detail?: string;
+  imageBase64?: string;
+  imageUrl?: string;
+  index?: number;
+  partialImageIndex?: number;
+  timestamp?: string;
+  toolType?: string;
 }
 
 export interface ImageGenerationCallbacks {
@@ -56,6 +87,7 @@ export interface ImageGenerationCallbacks {
   onTextDelta?: (delta: string) => Promise<void> | void;
   onThinkingDelta?: (delta: string) => Promise<void> | void;
   onAgentDelta?: (delta: string) => Promise<void> | void;
+  onAgentEvent?: (event: AgentRunEvent) => Promise<void> | void;
 }
 
 export type ImageQuality = "auto" | "low" | "medium" | "high";

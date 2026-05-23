@@ -103,6 +103,7 @@ export type ImageGenerationOperationResult = {
   responseText?: string;
   responseThinking?: string;
   responseAgent?: string;
+  agentEvents?: GenerateImageResult["agentEvents"];
   webConversation?: GenerateImageResult["webConversation"];
   creditsConsumed?: number;
 };
@@ -1358,6 +1359,7 @@ async function runQueuedImageGenerationForUser({
       responseText: result.responseText,
       responseThinking: result.responseThinking,
       responseAgent: result.responseAgent,
+      agentEvents: result.agentEvents,
       webConversation: result.webConversation,
       creditsConsumed: finalChargedCredits,
     };
@@ -1575,6 +1577,7 @@ async function runQueuedImageGenerationForUser({
     responseText: result.responseText,
     responseThinking: result.responseThinking,
     responseAgent: result.responseAgent,
+    agentEvents: result.agentEvents,
     webConversation: result.webConversation,
     creditsConsumed: chargedCredits,
   };
