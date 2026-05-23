@@ -58,7 +58,7 @@ export function ImageCard({
             alt={prompt}
             fill
             sizes="(max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw"
-            className="object-cover transition-transform duration-300 group-hover:scale-[1.02]"
+            className="object-contain transition-transform duration-300 group-hover:scale-[1.02]"
             unoptimized={!imageUrl.startsWith("/api/storage/")}
           />
         ) : (

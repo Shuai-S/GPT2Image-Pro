@@ -6,6 +6,14 @@ vi.mock("@repo/shared/system-settings", () => ({
 }));
 
 describe("ChatGPT Web image choices", () => {
+  it("extracts too many requests from Web JSON error payloads", () => {
+    expect(
+      __testing__.extractWebErrorPayloadMessage(
+        JSON.stringify({ detail: "Too many requests" })
+      )
+    ).toBe("Too many requests");
+  });
+
   it("extracts sibling image candidates after a request message", () => {
     const conversation = {
       current_node: "choice_b",

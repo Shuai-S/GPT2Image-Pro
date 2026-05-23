@@ -149,7 +149,7 @@ export function HistoryClient({
                       alt={item.prompt}
                       fill
                       sizes="64px"
-                      className="object-cover"
+                      className="object-contain"
                       unoptimized={!item.imageUrl.startsWith("/api/storage/")}
                     />
                   ) : (

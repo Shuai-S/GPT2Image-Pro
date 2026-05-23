@@ -444,6 +444,118 @@ type BatchCard = {
   saved?: boolean;
 };
 
+type WaterfallStats = {
+  sent: number;
+  success: number;
+  failed: number;
+};
+
+type StoredWaterfallState = {
+  prompt: string;
+  size: string;
+  cards: BatchCard[];
+  creditsConsumed: number;
+  stats: WaterfallStats;
+  stopped: boolean;
+  updatedAt: string;
+};
+
+function countWaterfallCards(cards: BatchCard[]): WaterfallStats {
+  return cards.reduce<WaterfallStats>(
+    (stats, card) => {
+      stats.sent += 1;
+      if (card.state === "image" || card.state === "text") {
+        stats.success += 1;
+      } else if (card.state === "error") {
+        stats.failed += 1;
+      }
+      return stats;
+    },
+    { sent: 0, success: 0, failed: 0 }
+  );
+}
+
+function clampWaterfallStats(
+  stats: Partial<WaterfallStats> | undefined,
+  cards: BatchCard[]
+): WaterfallStats {
+  const cardStats = countWaterfallCards(cards);
+  const sent = Math.max(cardStats.sent, Number(stats?.sent) || 0);
+  const success = Math.min(
+    sent,
+    Math.max(cardStats.success, Number(stats?.success) || 0)
+  );
+  const failed = Math.min(
+    sent - success,
+    Math.max(cardStats.failed, Number(stats?.failed) || 0)
+  );
+  return { sent, success, failed };
+}
+
+function sanitizeStoredWaterfallCards(
+  cards: unknown,
+  interruptedMessage: string
+): BatchCard[] {
+  if (!Array.isArray(cards)) return [];
+  return cards.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    const id = typeof record.id === "string" ? record.id : createLocalId();
+    const state =
+      record.state === "image" ||
+      record.state === "text" ||
+      record.state === "error"
+        ? record.state
+        : "error";
+    const prompt = typeof record.prompt === "string" ? record.prompt : "";
+    const cardSize =
+      typeof record.size === "string" ? record.size : DEFAULT_IMAGE_SIZE;
+    return [
+      {
+        id,
+        state,
+        aspectRatio:
+          typeof record.aspectRatio === "string"
+            ? record.aspectRatio
+            : WATERFALL_ASPECT_RATIOS[0],
+        prompt,
+        size: cardSize,
+        streamText:
+          typeof record.streamText === "string"
+            ? record.streamText
+            : undefined,
+        streamThinking:
+          typeof record.streamThinking === "string"
+            ? record.streamThinking
+            : undefined,
+        streamAgent:
+          typeof record.streamAgent === "string"
+            ? record.streamAgent
+            : undefined,
+        imageUrl:
+          typeof record.imageUrl === "string" ? record.imageUrl : undefined,
+        generationId:
+          typeof record.generationId === "string"
+            ? record.generationId
+            : undefined,
+        text: typeof record.text === "string" ? record.text : undefined,
+        error:
+          typeof record.error === "string"
+            ? record.error
+            : state === "error"
+              ? interruptedMessage
+              : undefined,
+        model: typeof record.model === "string" ? record.model : undefined,
+        creditsConsumed:
+          typeof record.creditsConsumed === "number"
+            ? record.creditsConsumed
+            : undefined,
+        saved: record.saved === true,
+      },
+    ] satisfies BatchCard[];
+  });
+}
+
 type MaskPoint = {
   x: number;
   y: number;
@@ -962,6 +1074,7 @@ const CHAT_STORAGE_KEY = "gpt2image_chat_messages_v1";
 const CHAT_CONVERSATIONS_STORAGE_KEY = "gpt2image_chat_conversations_v1";
 const CHAT_ACTIVE_CONVERSATION_STORAGE_KEY =
   "gpt2image_active_chat_conversation_v1";
+const WATERFALL_STORAGE_KEY = "gpt2image_waterfall_state_v1";
 const CHAT_CONTEXT_MESSAGE_LIMIT = 8;
 const CHAT_CONVERSATION_LIMIT = 30;
 const PROMPT_IMAGE_REFERENCE_PATTERN = /@(?:第)?\d+轮图\d+|@图\d+/;
@@ -1824,7 +1937,13 @@ export function CreatePageClient({
   const [batchPrompt, setBatchPrompt] = useState("");
   const [isBatchActive, setIsBatchActive] = useState(false);
   const [isBatchLoadingMore, setIsBatchLoadingMore] = useState(false);
+  const [isBatchStopped, setIsBatchStopped] = useState(false);
   const [waterfallCreditsConsumed, setWaterfallCreditsConsumed] = useState(0);
+  const [waterfallStats, setWaterfallStats] = useState<WaterfallStats>({
+    sent: 0,
+    success: 0,
+    failed: 0,
+  });
   const [chatModel, setChatModel] = useState<ChatModel>(GPT54_CHAT_MODEL);
   const [chatThinking, setChatThinking] = useState<ChatThinkingLevel>("low");
   const [imageGptModel, setImageGptModel] = useState<ChatModel | "default">(
@@ -2023,6 +2142,11 @@ export function CreatePageClient({
   const batchPromptRef = useRef("");
   const batchSizeRef = useRef(DEFAULT_IMAGE_SIZE);
   const batchLoadingMoreRef = useRef(false);
+  const batchStoppedRef = useRef(false);
+  const batchAbortControllersRef = useRef<Map<string, AbortController>>(
+    new Map()
+  );
+  const didRestoreWaterfallRef = useRef(false);
   const triggerBatchGenerationRef = useRef<
     ((options?: { retryCardId?: string }) => Promise<void>) | null
   >(null);
@@ -2212,6 +2336,14 @@ export function CreatePageClient({
   const formattedBatchSingleCreditCost = formatCredits(batchSingleCreditCost);
   const formattedWaterfallCreditsConsumed = formatCredits(
     waterfallCreditsConsumed
+  );
+  const waterfallInFlight = Math.max(
+    0,
+    waterfallStats.sent - waterfallStats.success - waterfallStats.failed
+  );
+  const waterfallStatusText = copy(
+    `Sent ${waterfallStats.sent} · Success ${waterfallStats.success} · Failed ${waterfallStats.failed} · Running ${waterfallInFlight}`,
+    `已发送 ${waterfallStats.sent} · 成功 ${waterfallStats.success} · 失败 ${waterfallStats.failed} · 进行中 ${waterfallInFlight}`
   );
   const activeConversationMode = getConversationMode(activeMode);
   const visibleChatMessages = chatMessages.filter((message) =>
@@ -2526,7 +2658,7 @@ export function CreatePageClient({
                       alt={option.label}
                       fill
                       sizes="36px"
-                      className="object-cover"
+                      className="object-contain"
                       unoptimized={
                         !shouldOptimizeStoredImage(option.previewUrl)
                       }
@@ -2771,6 +2903,7 @@ export function CreatePageClient({
     streamMessageId,
     streamCardId,
     agentMode = activeMode === "agent",
+    signal,
   }: {
     prompt: string;
     attachments?: ChatAttachment[];
@@ -2779,6 +2912,7 @@ export function CreatePageClient({
     streamMessageId?: string;
     streamCardId?: string;
     agentMode?: boolean;
+    signal?: AbortSignal;
   }) => {
     const streamMode: "chat" | "agent" | undefined =
       streamCardId && !streamMessageId
@@ -2843,6 +2977,7 @@ export function CreatePageClient({
 
     const response = await fetch("/api/images/chat", {
       method: "POST",
+      signal,
       headers: {
         Accept: "text/event-stream",
       },
@@ -3092,6 +3227,87 @@ export function CreatePageClient({
       responsesPreviousResponse: completed.responsesPreviousResponse,
     };
   };
+
+  useEffect(() => {
+    if (didRestoreWaterfallRef.current) return;
+    didRestoreWaterfallRef.current = true;
+    try {
+      const raw = window.localStorage.getItem(WATERFALL_STORAGE_KEY);
+      if (!raw) return;
+      const interruptedMessage = isZh
+        ? "页面刷新前未完成"
+        : "Interrupted by page refresh";
+      const parsed = JSON.parse(raw) as Partial<StoredWaterfallState>;
+      const cards = sanitizeStoredWaterfallCards(
+        parsed.cards,
+        interruptedMessage
+      );
+      if (!cards.length) return;
+      const prompt = typeof parsed.prompt === "string" ? parsed.prompt : "";
+      const restoredSize =
+        typeof parsed.size === "string" ? parsed.size : batchFallbackSize;
+      const stats = clampWaterfallStats(parsed.stats, cards);
+      batchPromptRef.current = prompt;
+      batchSizeRef.current = restoredSize;
+      batchStoppedRef.current = parsed.stopped !== false;
+      setBatchPrompt(prompt);
+      setBatchCards(cards);
+      setWaterfallCreditsConsumed(
+        typeof parsed.creditsConsumed === "number"
+          ? parsed.creditsConsumed
+          : 0
+      );
+      setWaterfallStats(stats);
+      setIsBatchStopped(parsed.stopped !== false);
+      setIsBatchActive(true);
+      setActiveMode("waterfall");
+    } catch {
+      window.localStorage.removeItem(WATERFALL_STORAGE_KEY);
+    }
+  }, [batchFallbackSize, isZh]);
+
+  useEffect(() => {
+    if (!didRestoreWaterfallRef.current) return;
+    try {
+      if (!isBatchActive || batchCards.length === 0) {
+        window.localStorage.removeItem(WATERFALL_STORAGE_KEY);
+        return;
+      }
+      const interruptedMessage = isZh
+        ? "页面刷新前未完成"
+        : "Interrupted by page refresh";
+      const storedCards = batchCards.map((card) =>
+        card.state === "loading"
+          ? {
+              ...card,
+              state: "error" as const,
+              error: interruptedMessage,
+            }
+          : card
+      );
+      const payload: StoredWaterfallState = {
+        prompt: batchPromptRef.current || batchPrompt,
+        size: batchSizeRef.current || batchFallbackSize,
+        cards: storedCards,
+        creditsConsumed: waterfallCreditsConsumed,
+        stats: clampWaterfallStats(waterfallStats, storedCards),
+        stopped: batchStoppedRef.current || isBatchStopped,
+        updatedAt: new Date().toISOString(),
+      };
+      window.localStorage.setItem(WATERFALL_STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+      /* ignore local storage quota errors */
+    }
+  }, [
+    batchCards,
+    batchPrompt,
+    isBatchActive,
+    isBatchStopped,
+    batchFallbackSize,
+    waterfallCreditsConsumed,
+    waterfallStats,
+    isZh,
+  ]);
 
   useEffect(() => {
     try {
@@ -4406,6 +4622,7 @@ export function CreatePageClient({
   };
 
   const triggerBatchGeneration = async (options?: { retryCardId?: string }) => {
+    if (batchStoppedRef.current && !options?.retryCardId) return;
     const currentPrompt = (batchPromptRef.current || batchPrompt).trim();
     if (!currentPrompt) return;
     if (hasPromptImageReference(currentPrompt)) {
@@ -4440,6 +4657,7 @@ export function CreatePageClient({
     const available = WATERFALL_MAX_CONCURRENT - batchActiveRequestsRef.current;
     const loadSize = Math.min(requestCount, Math.max(available, 0));
     if (loadSize <= 0) return;
+    if (batchStoppedRef.current && !options?.retryCardId) return;
 
     const creditsPerRequest = getImageCreditCost(
       fallbackSize,
@@ -4469,6 +4687,10 @@ export function CreatePageClient({
 
     if (cards.length > 0) {
       setBatchCards((prev) => [...prev, ...cards]);
+      setWaterfallStats((prev) => ({
+        ...prev,
+        sent: prev.sent + cards.length,
+      }));
     } else if (options?.retryCardId) {
       setBatchCards((prev) =>
         prev.map((card) =>
@@ -4484,9 +4706,16 @@ export function CreatePageClient({
             : card
         )
       );
+      setWaterfallStats((prev) => ({
+        sent: prev.sent + 1,
+        success: prev.success,
+        failed: Math.max(0, prev.failed - 1),
+      }));
     }
 
     const runCard = async (cardId: string) => {
+      const controller = new AbortController();
+      batchAbortControllersRef.current.set(cardId, controller);
       batchActiveRequestsRef.current += 1;
       try {
         const data = await runChatRequest({
@@ -4496,6 +4725,7 @@ export function CreatePageClient({
           historyMessages: [],
           streamCardId: cardId,
           agentMode: false,
+          signal: controller.signal,
         });
         const variants = addSuccessfulChatResults(
           data,
@@ -4504,6 +4734,10 @@ export function CreatePageClient({
         );
         const variant = variants[variants.length - 1];
         syncWaterfallCredits(data.creditsConsumed);
+        setWaterfallStats((prev) => ({
+          ...prev,
+          success: prev.success + 1,
+        }));
         setBatchCards((prev) =>
           prev.map((card) =>
             card.id === cardId
@@ -4524,12 +4758,30 @@ export function CreatePageClient({
           )
         );
       } catch (error) {
+        if (controller.signal.aborted) {
+          setBatchCards((prev) =>
+            prev.map((card) =>
+              card.id === cardId && card.state === "loading"
+                ? {
+                    ...card,
+                    state: "error",
+                    error: copy("Stopped", "已停止"),
+                  }
+                : card
+            )
+          );
+          return;
+        }
         const creditsConsumed =
           error instanceof Error
             ? (error as GenerationRequestError).creditsConsumed
             : undefined;
         syncChargedCredits(creditsConsumed);
         syncWaterfallCredits(creditsConsumed);
+        setWaterfallStats((prev) => ({
+          ...prev,
+          failed: prev.failed + 1,
+        }));
         setBatchCards((prev) =>
           prev.map((card) =>
             card.id === cardId
@@ -4546,11 +4798,19 @@ export function CreatePageClient({
           )
         );
       } finally {
-        batchActiveRequestsRef.current -= 1;
+        batchActiveRequestsRef.current = Math.max(
+          0,
+          batchActiveRequestsRef.current - 1
+        );
+        batchAbortControllersRef.current.delete(cardId);
       }
     };
 
     if (options?.retryCardId) {
+      if (batchStoppedRef.current) {
+        batchStoppedRef.current = false;
+        setIsBatchStopped(false);
+      }
       void runCard(options.retryCardId);
       return;
     }
@@ -4571,12 +4831,67 @@ export function CreatePageClient({
     batchPromptRef.current = currentPrompt;
     batchSizeRef.current = getBatchFallbackSize();
     batchActiveRequestsRef.current = 0;
+    for (const controller of batchAbortControllersRef.current.values()) {
+      controller.abort();
+    }
+    batchAbortControllersRef.current.clear();
+    batchLoadingMoreRef.current = false;
+    batchStoppedRef.current = false;
+    setBatchCards([]);
+    setWaterfallCreditsConsumed(0);
+    setWaterfallStats({ sent: 0, success: 0, failed: 0 });
+    setIsBatchLoadingMore(false);
+    setIsBatchStopped(false);
+    setIsBatchActive(true);
+    await triggerBatchGeneration();
+  };
+
+  const handleStopWaterfall = () => {
+    batchStoppedRef.current = true;
+    batchLoadingMoreRef.current = false;
+    const abortingCount = batchAbortControllersRef.current.size;
+    for (const controller of batchAbortControllersRef.current.values()) {
+      controller.abort();
+    }
+    batchAbortControllersRef.current.clear();
+    batchActiveRequestsRef.current = 0;
+    if (abortingCount > 0) {
+      setWaterfallStats((prev) => ({
+        ...prev,
+        failed: prev.failed + abortingCount,
+      }));
+    }
+    setBatchCards((prev) =>
+      prev.map((card) =>
+        card.state === "loading"
+          ? { ...card, state: "error", error: copy("Stopped", "已停止") }
+          : card
+      )
+    );
+    setIsBatchStopped(true);
+    setIsBatchLoadingMore(false);
+    toast.info(copy("Waterfall stopped", "瀑布流已停止"));
+  };
+
+  const handleClearWaterfall = () => {
+    batchStoppedRef.current = false;
+    for (const controller of batchAbortControllersRef.current.values()) {
+      controller.abort();
+    }
+    batchAbortControllersRef.current.clear();
+    batchActiveRequestsRef.current = 0;
     batchLoadingMoreRef.current = false;
     setBatchCards([]);
     setWaterfallCreditsConsumed(0);
+    setWaterfallStats({ sent: 0, success: 0, failed: 0 });
     setIsBatchLoadingMore(false);
-    setIsBatchActive(true);
-    await triggerBatchGeneration();
+    setIsBatchStopped(false);
+    setIsBatchActive(false);
+    try {
+      window.localStorage.removeItem(WATERFALL_STORAGE_KEY);
+    } catch {
+      /* ignore local storage errors */
+    }
   };
 
   useEffect(() => {
@@ -4592,6 +4907,7 @@ export function CreatePageClient({
       (entries) => {
         if (!entries[0]?.isIntersecting) return;
         if (!batchPromptRef.current || batchLoadingMoreRef.current) return;
+        if (batchStoppedRef.current) return;
         if (batchActiveRequestsRef.current >= WATERFALL_MAX_CONCURRENT) return;
         const triggerGeneration = triggerBatchGenerationRef.current;
         if (!triggerGeneration) return;
@@ -7109,7 +7425,7 @@ export function CreatePageClient({
                                           alt={variant.prompt}
                                           fill
                                           sizes="40px"
-                                          className="object-cover"
+                                          className="object-contain"
                                           unoptimized={
                                             !shouldOptimizeStoredImage(
                                               variant.imageUrl
@@ -7356,6 +7672,53 @@ export function CreatePageClient({
                 ref={batchScrollRef}
                 className="max-h-[760px] overflow-y-auto p-3"
               >
+                <div className="sticky top-0 z-10 mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-background/95 px-3 py-2 text-xs shadow-sm backdrop-blur">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-foreground">
+                      {batchPromptRef.current || batchPrompt}
+                    </p>
+                    <p className="text-muted-foreground">
+                      {waterfallStatusText}
+                      {isBatchStopped ? ` · ${copy("Stopped", "已停止")}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {isBatchStopped ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          batchStoppedRef.current = false;
+                          setIsBatchStopped(false);
+                          void triggerBatchGeneration();
+                        }}
+                      >
+                        <ChevronDown className="h-4 w-4" />
+                        {copy("Continue", "继续生成")}
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleStopWaterfall}
+                      >
+                        <X className="h-4 w-4" />
+                        {copy("Stop", "停止")}
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleClearWaterfall}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      {copy("Clear", "清空")}
+                    </Button>
+                  </div>
+                </div>
                 <div className="columns-1 gap-3 sm:columns-2 lg:columns-3">
                   {batchCards.map((card) => (
                     <div
@@ -7395,7 +7758,7 @@ export function CreatePageClient({
                             alt={card.prompt}
                             width={640}
                             height={640}
-                            className="h-auto w-full object-cover"
+                            className="h-auto w-full object-contain"
                             unoptimized={
                               !shouldOptimizeStoredImage(card.imageUrl)
                             }
@@ -7498,6 +7861,11 @@ export function CreatePageClient({
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
                       {copy("Generating...", "生成中...")}
+                    </>
+                  ) : isBatchStopped ? (
+                    <>
+                      <X className="h-4 w-4" />
+                      {copy("Stopped", "已停止")}
                     </>
                   ) : (
                     <>
@@ -7671,7 +8039,7 @@ export function CreatePageClient({
                       alt={g.prompt}
                       fill
                       sizes="80px"
-                      className="object-cover transition-transform group-hover:scale-105"
+                      className="object-contain transition-transform group-hover:scale-105"
                       unoptimized={!shouldOptimizeStoredImage(g.imageUrl)}
                     />
                   ) : (

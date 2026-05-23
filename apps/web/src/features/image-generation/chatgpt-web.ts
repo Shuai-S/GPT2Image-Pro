@@ -192,10 +192,41 @@ function decodeBody(bodyBase64: string | undefined) {
 
 async function webErrorMessage(response: Response, context: string) {
   const text = await response.text().catch(() => "");
-  const trimmed = text.replace(/\s+/g, " ").trim();
+  const extracted = extractWebErrorPayloadMessage(text);
+  const trimmed = (extracted || text).replace(/\s+/g, " ").trim();
   return `${context} failed: HTTP ${response.status}${
     trimmed ? ` ${trimmed.slice(0, 500)}` : ""
   }`;
+}
+
+function extractWebErrorPayloadMessage(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed) return "";
+  try {
+    const payload = JSON.parse(trimmed) as unknown;
+    const message = webErrorPayloadMessage(payload);
+    if (message) return message;
+  } catch {
+    /* fall back to raw text */
+  }
+  return "";
+}
+
+function webErrorPayloadMessage(payload: unknown): string {
+  if (typeof payload === "string") return payload.trim();
+  if (!payload || typeof payload !== "object") return "";
+  const record = payload as Record<string, unknown>;
+  for (const key of ["detail", "message", "error_description", "code"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  const error = record.error;
+  if (typeof error === "string" && error.trim()) return error.trim();
+  if (error && typeof error === "object") {
+    const nested = webErrorPayloadMessage(error);
+    if (nested) return nested;
+  }
+  return "";
 }
 
 function headersToObject(headers: HeadersInit | undefined) {
@@ -1430,18 +1461,7 @@ function extractWebStreamError(text: string) {
     } catch {
       payload = null;
     }
-    const message =
-      typeof payload?.message === "string"
-        ? payload.message
-        : typeof payload?.error === "string"
-          ? payload.error
-          : payload?.error &&
-              typeof payload.error === "object" &&
-              "message" in payload.error &&
-              typeof (payload.error as { message?: unknown }).message ===
-                "string"
-            ? (payload.error as { message: string }).message
-            : "";
+    const message = payload ? webErrorPayloadMessage(payload) : "";
     const code =
       typeof payload?.code === "string"
         ? payload.code
@@ -1483,7 +1503,9 @@ async function getConversationText(
     signal,
     headers: getHeaders(config, path, { Accept: "application/json" }),
   });
-  if (!response.ok) return "";
+  if (!response.ok) {
+    throw new Error(await webErrorMessage(response, "ChatGPT Web conversation"));
+  }
   return JSON.stringify(await response.json());
 }
 
@@ -1563,7 +1585,9 @@ async function getDownloadUrl(
     signal,
     headers: getHeaders(config, path, { Accept: "application/json" }),
   });
-  if (!response.ok) return "";
+  if (!response.ok) {
+    throw new Error(await webErrorMessage(response, "ChatGPT Web image lookup"));
+  }
   const data = (await response.json()) as {
     download_url?: string;
     url?: string;
@@ -1956,6 +1980,7 @@ export async function selectChatGptWebImageCandidate(params: {
 }
 
 export const __testing__ = {
+  extractWebErrorPayloadMessage,
   imageCandidatesAfterMessage,
   imageSelectionAfterMessage,
   conversationNodesAfterMessage,
