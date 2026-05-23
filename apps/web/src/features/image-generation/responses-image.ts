@@ -8,6 +8,7 @@ import {
   DEFAULT_IMAGE_SIZE,
   getImageModel,
 } from "./resolution";
+import { resolvePromptImageReferences } from "./responses-native-state";
 import type {
   ApiConfig,
   EditImageParams,
@@ -27,6 +28,7 @@ type ResponsesImageRequest = {
     content: Array<
       | { type: "input_text"; text: string }
       | { type: "input_image"; image_url: string }
+      | { type: "input_image"; file_id: string }
     >;
   }>;
   tools: Array<{
@@ -64,6 +66,35 @@ function getDataUrl(image: ImageInputFile) {
     return image.url;
   }
   return `data:${image.type || "image/png"};base64,${image.data.toString("base64")}`;
+}
+
+function getInputImageContent(image: ImageInputFile) {
+  if (image.imageFileId?.trim()) {
+    return { type: "input_image" as const, file_id: image.imageFileId.trim() };
+  }
+  return { type: "input_image" as const, image_url: getDataUrl(image) };
+}
+
+function referenceTag(refId: string, prompt?: string) {
+  const safePrompt = prompt
+    ?.slice(0, 500)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return safePrompt
+    ? `<ref id="${refId}" prompt="${safePrompt}" />`
+    : `<ref id="${refId}" />`;
+}
+
+function getEditImageContent(images: ImageInputFile[]) {
+  return images.flatMap((image, index) => [
+    getInputImageContent(image),
+    {
+      type: "input_text" as const,
+      text: referenceTag(`edit-reference-${index + 1}`, image.name),
+    },
+  ]);
 }
 
 function getResponsesModel(config: ApiConfig, model?: string) {
@@ -176,7 +207,10 @@ export function buildResponsesImageEditRequest(
   config: ApiConfig,
   params: EditImageParams
 ): ResponsesImageRequest {
-  const prompt = getPrompt(params);
+  const prompt = resolvePromptImageReferences({
+    prompt: getPrompt(params),
+    images: params.images,
+  }).prompt.replace(/current-reference-/g, "edit-reference-");
   const size = params.size || DEFAULT_IMAGE_SIZE;
   const tool: ResponsesImageRequest["tools"][number] = {
     type: "image_generation",
@@ -212,10 +246,7 @@ export function buildResponsesImageEditRequest(
         role: "user",
         content: [
           { type: "input_text", text: prompt },
-          ...params.images.map((image) => ({
-            type: "input_image" as const,
-            image_url: getDataUrl(image),
-          })),
+          ...getEditImageContent(params.images),
         ],
       },
     ],

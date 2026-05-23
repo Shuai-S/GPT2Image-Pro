@@ -126,6 +126,7 @@ export type ImageGenerationOperationResult = {
   agentRoundCount?: GenerateImageResult["agentRoundCount"];
   webConversation?: GenerateImageResult["webConversation"];
   backendMember?: GenerateImageResult["backendMember"];
+  responsesPreviousResponse?: GenerateImageResult["responsesPreviousResponse"];
   creditsConsumed?: number;
 };
 
@@ -1194,6 +1195,7 @@ async function runQueuedImageGenerationForUser({
                 prompt: input.prompt,
                 apiPrompt,
                 fileContext: input.fileContext,
+                files: input.files,
                 promptOptimization,
                 signal: AbortSignal.timeout(
                   IMAGE_GENERATION_PENDING_TIMEOUT_MS
@@ -1387,6 +1389,7 @@ async function runQueuedImageGenerationForUser({
       agentRoundCount: result.agentRoundCount,
       webConversation: result.webConversation,
       backendMember: result.backendMember,
+      responsesPreviousResponse: result.responsesPreviousResponse,
       creditsConsumed: finalChargedCredits,
     };
   }
@@ -1651,6 +1654,7 @@ async function runQueuedImageGenerationForUser({
     agentRoundCount: result.agentRoundCount,
     webConversation: result.webConversation,
     backendMember: result.backendMember,
+    responsesPreviousResponse: result.responsesPreviousResponse,
     creditsConsumed: chargedCredits,
   };
 }

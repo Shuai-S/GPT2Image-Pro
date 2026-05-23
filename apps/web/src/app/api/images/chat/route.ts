@@ -37,6 +37,7 @@ import type {
   ImageModeration,
   ImageOutputFormat,
   ImageQuality,
+  ResponsesInputFile,
   ThinkingLevel,
 } from "@/features/image-generation/types";
 
@@ -55,6 +56,7 @@ const VALID_THINKING = new Set<ThinkingLevel>([
   "xhigh",
 ]);
 const MAX_CHAT_FILE_CONTEXT_CHARS = 24_000;
+const PDF_MIME_TYPES = new Set(["application/pdf"]);
 const CHAT_FILE_ACCEPT_EXTENSIONS = new Set([
   ".txt",
   ".md",
@@ -89,8 +91,10 @@ const CHAT_FILE_ACCEPT_EXTENSIONS = new Set([
   ".toml",
   ".ini",
   ".env",
+  ".pdf",
 ]);
 const CHAT_FILE_ACCEPT_TYPES = new Set([
+  "application/pdf",
   "application/json",
   "application/jsonl",
   "application/ld+json",
@@ -236,8 +240,13 @@ function isReadableChatFile(file: File) {
   return CHAT_FILE_ACCEPT_EXTENSIONS.has(getFileExtension(file.name || ""));
 }
 
+function isPdfChatFile(file: File) {
+  const type = (file.type || "").toLowerCase();
+  return PDF_MIME_TYPES.has(type) || getFileExtension(file.name || "") === ".pdf";
+}
+
 function sanitizeFileText(value: string) {
-  return value.replace(/\u0000/g, "").replace(/\r\n/g, "\n");
+  return value.split("\0").join("").replace(/\r\n/g, "\n");
 }
 
 async function buildFileContext(files: File[], maxChars: number) {
@@ -263,6 +272,18 @@ async function buildFileContext(files: File[], maxChars: number) {
 
   if (!parts.length) return "";
   return `Attached local files are included below. Use them as request context; do not assume access to server filesystem paths.${parts.join("")}`;
+}
+
+async function filesToResponsesInputFiles(
+  files: File[]
+): Promise<ResponsesInputFile[]> {
+  return await Promise.all(
+    files.map(async (file) => ({
+      data: Buffer.from(await file.arrayBuffer()),
+      name: file.name || "attachment",
+      type: file.type || "application/octet-stream",
+    }))
+  );
 }
 
 function getHistory(
@@ -308,6 +329,10 @@ function getHistory(
               imageUrl:
                 typeof item.imageUrl === "string"
                   ? item.imageUrl.slice(0, 4000)
+                  : undefined,
+              imageFileId:
+                typeof item.imageFileId === "string"
+                  ? item.imageFileId.slice(0, 4000)
                   : undefined,
               size: typeof item.size === "string" ? item.size : undefined,
               timestamp:
@@ -367,6 +392,58 @@ function getHistory(
                           : undefined,
                     }
                   : undefined,
+              responsesPreviousResponse:
+                item.responsesPreviousResponse &&
+                typeof item.responsesPreviousResponse === "object" &&
+                typeof (item.responsesPreviousResponse as Record<string, unknown>)
+                  .responseId === "string" &&
+                (item.responsesPreviousResponse as Record<string, unknown>)
+                  .backendMember &&
+                typeof (item.responsesPreviousResponse as Record<string, unknown>)
+                  .backendMember === "object"
+                  ? (() => {
+                      const native = item.responsesPreviousResponse as Record<
+                        string,
+                        unknown
+                      >;
+                      const nativeBackend = native.backendMember as Record<
+                        string,
+                        unknown
+                      >;
+                      if (
+                        (nativeBackend.type !== "api" &&
+                          nativeBackend.type !== "account") ||
+                        typeof nativeBackend.id !== "string"
+                      ) {
+                        return undefined;
+                      }
+                      return {
+                        responseId: native.responseId as string,
+                        backendMember: {
+                          type: nativeBackend.type as "api" | "account",
+                          id: nativeBackend.id as string,
+                          groupId:
+                            typeof nativeBackend.groupId === "string"
+                              ? (nativeBackend.groupId as string)
+                              : nativeBackend.groupId === null
+                                ? null
+                                : undefined,
+                          accountBackend:
+                            nativeBackend.accountBackend === "web" ||
+                            nativeBackend.accountBackend === "responses"
+                              ? (nativeBackend.accountBackend as
+                                  | "web"
+                                  | "responses")
+                              : undefined,
+                        },
+                        store: true as const,
+                        createdAt:
+                          typeof native.createdAt === "string"
+                            ? (native.createdAt as string)
+                            : undefined,
+                      };
+                    })()
+                  : undefined,
             };
           })
       : undefined;
@@ -416,8 +493,11 @@ function trimHistoryMessageText(
   return {
     ...message,
     text: trimmedText,
-    variants: undefined,
-    activeVariant: undefined,
+    variants: message.variants?.map((variant, index) => ({
+      ...variant,
+      text: index === (message.activeVariant || 0) ? trimmedText : variant.text,
+    })),
+    activeVariant: message.activeVariant,
   };
 }
 
@@ -546,11 +626,12 @@ export const POST = withApiLogging(async (request: NextRequest) => {
   }
 
   let fileContext = "";
+  let responseInputFiles: ResponsesInputFile[] = [];
   try {
     for (const file of attachmentFiles) {
       if (!isReadableChatFile(file)) {
         return errorResponse(
-          "Attachments must be text, code, JSON, CSV, Markdown, XML, YAML, or log files."
+          "Attachments must be text, code, JSON, CSV, Markdown, XML, YAML, PDF, or log files."
         );
       }
       if (file.size <= 0) {
@@ -571,10 +652,13 @@ export const POST = withApiLogging(async (request: NextRequest) => {
         413
       );
     }
+    const pdfFiles = attachmentFiles.filter(isPdfChatFile);
+    const textFiles = attachmentFiles.filter((file) => !isPdfChatFile(file));
     fileContext = await buildFileContext(
-      attachmentFiles,
+      textFiles,
       Math.max(0, planLimits.maxChatContextChars - prompt.length)
     );
+    responseInputFiles = await filesToResponsesInputFiles(pdfFiles);
   } catch (error) {
     return errorResponse(
       error instanceof Error ? error.message : "Failed to read attachments."
@@ -691,6 +775,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
           prompt,
           apiPrompt,
           fileContext,
+          files: responseInputFiles,
           promptOptimization,
           images: await buildImages(),
           history,

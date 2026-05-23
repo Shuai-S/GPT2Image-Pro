@@ -97,6 +97,8 @@ export type SettingKey =
   | "PLATFORM_RESPONSES_MODEL"
   | "PLATFORM_CHAT_MODEL"
   | "IMAGE_AGENT_MAX_ROUNDS"
+  | "IMAGE_AGENT_FORCE_MAX_ROUNDS"
+  | "IMAGE_RESPONSES_PREVIOUS_RESPONSE_ENABLED"
   | "CHATGPT_WEB_PROXY_URL"
   | "CHATGPT_WEB_PROXY_SECRET"
   | "CHATGPT_WEB_ACCOUNT_REFRESH_STALE_MINUTES"
@@ -845,6 +847,24 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     category: "models",
     valueType: "number",
     defaultValue: 3,
+  },
+  {
+    key: "IMAGE_AGENT_FORCE_MAX_ROUNDS",
+    label: "Agent 强制跑满迭代轮数",
+    description:
+      "默认关闭，由模型 continue_generation 工具和本站自检逻辑决定是否继续。开启后，只要本轮未失败且未达到最大轮数，就继续执行下一轮。",
+    category: "models",
+    valueType: "boolean",
+    defaultValue: false,
+  },
+  {
+    key: "IMAGE_RESPONSES_PREVIOUS_RESPONSE_ENABLED",
+    label: "Responses previous_response_id 续接",
+    description:
+      "关闭时沿用本站手动历史重建。开启后，内部 Chat/Agent 的 Codex/Responses 会保存 response；命中同一后端账号时用 previous_response_id 续接，失败则回退手动历史。",
+    category: "models",
+    valueType: "boolean",
+    defaultValue: false,
   },
   {
     key: "CHATGPT_WEB_PROXY_URL",

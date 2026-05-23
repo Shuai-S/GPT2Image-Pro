@@ -32,6 +32,7 @@ export interface GenerateImageResult {
   agentRoundCount?: number;
   webConversation?: ChatGptWebConversationState;
   backendMember?: StickyBackendMemberState;
+  responsesPreviousResponse?: ResponsesPreviousResponseState;
   error?: string;
   upstreamResetAt?: string;
   retryAfterSeconds?: number;
@@ -103,6 +104,15 @@ export interface ImageInputFile {
   name: string;
   type: string;
   url?: string;
+  imageFileId?: string;
+}
+
+export interface ResponsesInputFile {
+  data: Buffer;
+  name: string;
+  type: string;
+  url?: string;
+  fileId?: string;
 }
 
 export type ThinkingLevel =
@@ -137,6 +147,7 @@ export interface ChatImageParams {
   prompt: string;
   apiPrompt?: string;
   fileContext?: string;
+  files?: ResponsesInputFile[];
   promptOptimization?: boolean;
   signal?: AbortSignal;
   moderationBlockRiskLevel?: ModerationBlockRiskLevel;
@@ -172,13 +183,22 @@ export interface StickyBackendMemberState {
   accountBackend?: "web" | "responses";
 }
 
+export interface ResponsesPreviousResponseState {
+  responseId: string;
+  backendMember: StickyBackendMemberState;
+  store: true;
+  createdAt?: string;
+}
+
 export interface ChatHistoryVariant {
   text?: string;
   imageUrl?: string;
+  imageFileId?: string;
   size?: string;
   timestamp?: string;
   webConversation?: ChatGptWebConversationState;
   backendMember?: StickyBackendMemberState;
+  responsesPreviousResponse?: ResponsesPreviousResponseState;
 }
 
 export interface ChatHistoryMessage {

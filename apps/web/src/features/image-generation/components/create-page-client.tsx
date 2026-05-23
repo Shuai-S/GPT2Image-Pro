@@ -121,6 +121,7 @@ type ImageApiResult = {
   agentRoundCount?: number;
   webConversation?: ChatGptWebConversationState;
   backendMember?: StickyBackendMemberState;
+  responsesPreviousResponse?: ResponsesPreviousResponseState;
   creditsConsumed?: number;
   results?: ImageApiResult[];
 };
@@ -203,6 +204,7 @@ type ChatAttachmentPreview = {
 type ChatVariant = {
   generationId?: string;
   imageUrl?: string;
+  imageFileId?: string;
   prompt: string;
   model: string;
   size: string;
@@ -214,6 +216,7 @@ type ChatVariant = {
   agentRoundCount?: number;
   webConversation?: ChatGptWebConversationState;
   backendMember?: StickyBackendMemberState;
+  responsesPreviousResponse?: ResponsesPreviousResponseState;
   creditsConsumed?: number;
   createdAt?: string;
 };
@@ -236,6 +239,7 @@ type ChatResultInput = Pick<
   | "agentRoundCount"
   | "webConversation"
   | "backendMember"
+  | "responsesPreviousResponse"
   | "creditsConsumed"
 > & {
   outputRole?: "final" | "agent_draft";
@@ -252,6 +256,13 @@ type StickyBackendMemberState = {
   id: string;
   groupId?: string | null;
   accountBackend?: "web" | "responses";
+};
+
+type ResponsesPreviousResponseState = {
+  responseId: string;
+  backendMember: StickyBackendMemberState;
+  store: true;
+  createdAt?: string;
 };
 
 type ChatMessage = {
@@ -803,7 +814,7 @@ const DEFAULT_MAX_EDIT_REQUEST_BYTES = 75 * 1024 * 1024;
 const CHAT_TEXT_ONLY_CREDITS = 1;
 const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp";
 const CHAT_FILE_ACCEPT =
-  ".txt,.md,.markdown,.csv,.json,.jsonl,.yaml,.yml,.log,.xml,.html,.htm,.css,.js,.jsx,.ts,.tsx,.mjs,.cjs,.py,.java,.go,.rs,.c,.cc,.cpp,.h,.hpp,.sql,.sh,.toml,.ini,.env,text/*,application/json,application/xml";
+  ".txt,.md,.markdown,.csv,.json,.jsonl,.yaml,.yml,.log,.xml,.html,.htm,.css,.js,.jsx,.ts,.tsx,.mjs,.cjs,.py,.java,.go,.rs,.c,.cc,.cpp,.h,.hpp,.sql,.sh,.toml,.ini,.env,.pdf,text/*,application/json,application/xml,application/pdf";
 const CHAT_ATTACHMENT_ACCEPT = `${IMAGE_ACCEPT},${CHAT_FILE_ACCEPT}`;
 const TEXT_MODEL_OPTIONS = [
   { value: "default", label: "Default" },
@@ -924,6 +935,7 @@ function isImageFile(file: File) {
 function isReadableChatFile(file: File) {
   const type = file.type.toLowerCase();
   if (type.startsWith("text/")) return true;
+  if (type === "application/pdf") return true;
   if (
     [
       "application/json",
@@ -936,7 +948,7 @@ function isReadableChatFile(file: File) {
   ) {
     return true;
   }
-  return /\.(txt|md|markdown|csv|json|jsonl|ya?ml|log|xml|html?|css|jsx?|tsx?|mjs|cjs|py|java|go|rs|c|cc|cpp|h|hpp|sql|sh|toml|ini|env)$/i.test(
+  return /\.(txt|md|markdown|csv|json|jsonl|ya?ml|log|xml|html?|css|jsx?|tsx?|mjs|cjs|py|java|go|rs|c|cc|cpp|h|hpp|sql|sh|toml|ini|env|pdf)$/i.test(
     file.name
   );
 }
@@ -1117,6 +1129,46 @@ function sanitizeChatMessages(value: unknown): ChatMessage[] {
                       : undefined,
                 }
               : undefined;
+          const responsesBackendMember =
+            value.responsesPreviousResponse?.backendMember &&
+            typeof value.responsesPreviousResponse.backendMember === "object" &&
+            (value.responsesPreviousResponse.backendMember.type === "api" ||
+              value.responsesPreviousResponse.backendMember.type === "account") &&
+            typeof value.responsesPreviousResponse.backendMember.id === "string"
+              ? {
+                  type: value.responsesPreviousResponse.backendMember.type,
+                  id: value.responsesPreviousResponse.backendMember.id,
+                  groupId:
+                    typeof value.responsesPreviousResponse.backendMember.groupId ===
+                    "string"
+                      ? value.responsesPreviousResponse.backendMember.groupId
+                      : value.responsesPreviousResponse.backendMember.groupId === null
+                        ? null
+                        : undefined,
+                  accountBackend:
+                    value.responsesPreviousResponse.backendMember.accountBackend ===
+                      "web" ||
+                    value.responsesPreviousResponse.backendMember.accountBackend ===
+                      "responses"
+                      ? value.responsesPreviousResponse.backendMember.accountBackend
+                      : undefined,
+                }
+              : undefined;
+          const responsesPreviousResponse =
+            value.responsesPreviousResponse &&
+            typeof value.responsesPreviousResponse === "object" &&
+            typeof value.responsesPreviousResponse.responseId === "string" &&
+            responsesBackendMember
+              ? {
+                  responseId: value.responsesPreviousResponse.responseId,
+                  backendMember: responsesBackendMember,
+                  store: true as const,
+                  createdAt:
+                    typeof value.responsesPreviousResponse.createdAt === "string"
+                      ? value.responsesPreviousResponse.createdAt
+                      : undefined,
+                }
+              : undefined;
           return [
             {
               ...value,
@@ -1137,6 +1189,7 @@ function sanitizeChatMessages(value: unknown): ChatMessage[] {
                 : undefined,
               webConversation,
               backendMember,
+              responsesPreviousResponse,
             },
           ];
         })
@@ -1306,10 +1359,12 @@ function toChatHistory(messages: ChatMessage[]) {
             ? `Generated an image at ${variant.size}: ${variant.imageUrl}`
             : undefined),
         imageUrl: variant.imageUrl,
+        imageFileId: variant.imageFileId,
         size: variant.size,
         timestamp: variant.createdAt,
         webConversation: variant.webConversation,
         backendMember: variant.backendMember,
+        responsesPreviousResponse: variant.responsesPreviousResponse,
       })),
       activeVariant: message.activeVariant || 0,
       error: message.error,
@@ -2564,6 +2619,7 @@ export function CreatePageClient({
       agentEvents: completed.agentEvents || agentEvents,
       agentRoundCount: completed.agentRoundCount,
       webConversation: completed.webConversation,
+      responsesPreviousResponse: completed.responsesPreviousResponse,
     };
   };
 
@@ -2827,6 +2883,7 @@ export function CreatePageClient({
       agentRoundCount: data.agentRoundCount,
       webConversation: data.webConversation,
       backendMember: data.backendMember,
+      responsesPreviousResponse: data.responsesPreviousResponse,
       creditsConsumed: data.creditsConsumed,
       createdAt: new Date().toISOString(),
     };
@@ -2856,6 +2913,7 @@ export function CreatePageClient({
         agentRoundCount: isLast ? data.agentRoundCount : undefined,
         webConversation: isLast ? data.webConversation : undefined,
         backendMember: isLast ? data.backendMember : undefined,
+        responsesPreviousResponse: isLast ? data.responsesPreviousResponse : undefined,
         creditsConsumed: isLast ? data.creditsConsumed : 0,
         outputRole: output.outputRole || (isLast ? "final" : "agent_draft"),
       };
@@ -2974,8 +3032,8 @@ export function CreatePageClient({
       if (!isImage && !isReadableChatFile(file)) {
         toast.error(copy("Unsupported file type", "不支持的文件类型"), {
           description: copy(
-            "Use PNG/JPEG/WebP images, or text/code files.",
-            "请使用 PNG/JPEG/WebP 图片，或文本/代码文件。"
+            "Use PNG/JPEG/WebP images, PDF, or text/code files.",
+            "请使用 PNG/JPEG/WebP 图片、PDF，或文本/代码文件。"
           ),
         });
         continue;

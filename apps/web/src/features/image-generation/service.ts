@@ -11,6 +11,7 @@ import { logError, logWarn } from "@repo/shared/logger";
 import { canUsePlanCapability } from "@repo/shared/subscription/services/plan-capabilities";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import {
+  getRuntimeSettingBoolean,
   getRuntimeSettingNumber,
   getRuntimeSettingString,
 } from "@repo/shared/system-settings";
@@ -49,9 +50,25 @@ import {
   buildResponsesImageEditRequest,
   buildResponsesImageGenerationRequest,
 } from "./responses-image";
+import {
+  normalizeResponsesImageRequestBody,
+  type ResponsesStreamRequestBody,
+} from "./responses-request-normalizer";
+import {
+  buildAgentContinuationInput,
+  buildContinueGenerationFunctionCallItems,
+  buildCurrentResponsesContent,
+  buildResponsesInput,
+  buildPreviousResponseFallbackRequestBody,
+  getContinueGenerationFunctionCalls,
+  isPreviousResponseStateError,
+  resolveResponsesNativeState,
+  resolvePromptImageReferences,
+  shouldEnableResponsesPreviousResponse,
+  type ResponsesRequestInputItem,
+} from "./responses-native-state";
 import type {
   ApiConfig,
-  ChatHistoryMessage,
   ChatImageParams,
   EditImageParams,
   GenerateImageParams,
@@ -59,7 +76,6 @@ import type {
   AgentRunEvent,
   AgentRunEventStatus,
   ImageGenerationCallbacks,
-  ImageInputFile,
   ImageModeration,
   ImageOutputFormat,
   ImageQuality,
@@ -85,6 +101,25 @@ const ORIGINAL_PROMPT_RESPONSES_IMAGE_INSTRUCTIONS =
   "You are a multimodal assistant. Use web_search when current or external information is needed, and use code_interpreter when calculation or file analysis helps. When calling image_generation, use the user's original image prompt exactly as written. Do not rewrite, expand, translate, polish, or optimize the latest user prompt before image generation. For image tasks, do not stop after research or a plan; either call image_generation or clearly ask for missing required input.";
 const AGENT_CONTINUE_INSTRUCTIONS =
   "Continue the same Agent run. Review the previous assistant notes, tool outputs, and generated draft images in this conversation. If the user asked for image creation or iterative refinement and the task is not complete, continue autonomously: call image_generation for the next concrete version, or stop only when no further useful iteration is needed. Keep visible progress notes brief.";
+const AGENT_CONTINUE_TOOL = {
+  type: "function",
+  name: "continue_generation",
+  description:
+    "Request another Agent loop round after producing a prerequisite image or after research/planning when more concrete generation work remains. Do not call this when the task is complete.",
+  parameters: {
+    type: "object",
+    properties: {
+      reason: {
+        type: "string",
+        description:
+          "Brief reason why another round is needed and what should happen next.",
+      },
+    },
+    required: ["reason"],
+    additionalProperties: false,
+  },
+  strict: true,
+} as const;
 const DEFAULT_AGENT_IMAGE_ROUNDS = 3;
 
 type ImageOutput = {
@@ -137,16 +172,6 @@ type ResponsesPayload = {
   message?: string;
 };
 
-type ResponsesRequestContent =
-  | { type: "input_text"; text: string }
-  | { type: "input_image"; image_url: string }
-  | { type: "output_text"; text: string };
-
-type ResponsesRequestMessage = {
-  role: "user" | "assistant";
-  content: ResponsesRequestContent[];
-};
-
 type ResponsesResultWithOutput = GenerateImageResult & {
   responseId?: string;
   outputItems?: ResponsesOutputItem[];
@@ -155,11 +180,6 @@ type ResponsesResultWithOutput = GenerateImageResult & {
 type ReasoningConfig = {
   effort: ThinkingLevel;
   summary?: "concise";
-};
-
-type ResponsesStreamRequestBody = Record<string, unknown> & {
-  stream?: boolean;
-  tools?: unknown[];
 };
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -643,97 +663,6 @@ function stripTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
 }
 
-function isImageGenerationTool(value: unknown) {
-  return isPlainRecord(value) && value.type === "image_generation";
-}
-
-function isWebSearchTool(value: unknown) {
-  return isPlainRecord(value) && value.type === "web_search";
-}
-
-function isCodeInterpreterTool(value: unknown) {
-  return isPlainRecord(value) && value.type === "code_interpreter";
-}
-
-function normalizeResponsesImageTool(
-  value: unknown,
-  fallback: Record<string, unknown>
-) {
-  const tool = isPlainRecord(value) ? { ...value } : {};
-  for (const [key, fallbackValue] of Object.entries(fallback)) {
-    if (tool[key] === undefined && fallbackValue !== undefined) {
-      tool[key] = fallbackValue;
-    }
-  }
-  tool.type = "image_generation";
-  return tool;
-}
-
-function normalizeResponsesImageRequestBody(
-  rawBody: Record<string, unknown>,
-  options: {
-    fallbackTool: Record<string, unknown>;
-    additionalTools?: Record<string, unknown>[];
-    instructions: string;
-    stream: boolean;
-    defaultToolChoice?: unknown;
-  }
-): ResponsesStreamRequestBody {
-  const body: Record<string, unknown> = {
-    ...rawBody,
-    store: false,
-    instructions:
-      typeof rawBody.instructions === "string" && rawBody.instructions
-        ? rawBody.instructions
-        : options.instructions,
-    ...(options.stream ? { stream: true } : {}),
-  };
-  if (
-    body.tool_choice === undefined &&
-    options.defaultToolChoice !== undefined
-  ) {
-    body.tool_choice = options.defaultToolChoice;
-  }
-
-  const tools = Array.isArray(rawBody.tools) ? rawBody.tools : [];
-  const imageToolIndex = tools.findIndex(isImageGenerationTool);
-  if (imageToolIndex >= 0) {
-    body.tools = tools.map((item, index) =>
-      index === imageToolIndex
-        ? normalizeResponsesImageTool(item, options.fallbackTool)
-        : item
-    );
-  } else {
-    body.tools = [
-      ...tools,
-      normalizeResponsesImageTool(undefined, options.fallbackTool),
-    ];
-  }
-  for (const additionalTool of options.additionalTools || []) {
-    if (
-      additionalTool.type === "web_search" &&
-      (body.tools as unknown[]).some(isWebSearchTool)
-    ) {
-      continue;
-    }
-    if (
-      additionalTool.type === "code_interpreter" &&
-      (body.tools as unknown[]).some(isCodeInterpreterTool)
-    ) {
-      continue;
-    }
-    (body.tools as unknown[]).push(additionalTool);
-  }
-
-  delete body.size;
-  delete body.quality;
-  delete body.moderation;
-  delete body.output_format;
-  delete body.output_compression;
-
-  return body as ResponsesStreamRequestBody;
-}
-
 function isPoolAccountBackend(
   config: ApiConfig,
   accountBackend: "web" | "responses"
@@ -874,6 +803,65 @@ function attachStickyBackendMember(
     ...result,
     backendMember,
   };
+}
+
+function attachResponsesPreviousResponseState(
+  config: ApiConfig,
+  result: ResponsesResultWithOutput,
+  enabled: boolean
+): ResponsesResultWithOutput {
+  if (!enabled || result.error || !result.responseId) return result;
+  const backendMember = getStickyBackendMember(config);
+  if (!backendMember || backendMember.accountBackend !== "responses") {
+    return result;
+  }
+  return {
+    ...result,
+    responsesPreviousResponse: {
+      responseId: result.responseId,
+      backendMember,
+      store: true,
+      createdAt: new Date().toISOString(),
+    },
+  };
+}
+
+async function fetchResponsesWithPreviousResponseFallback(
+  config: ApiConfig,
+  requestBody: ResponsesStreamRequestBody,
+  fallbackInput: ResponsesRequestInputItem[],
+  options: {
+    signal?: AbortSignal;
+    stream: boolean;
+    previousResponseUsed: boolean;
+  },
+  callbacks?: ImageGenerationCallbacks
+) {
+  const result = await fetchResponses(
+    config,
+    requestBody,
+    {
+      signal: options.signal,
+      stream: options.stream,
+    },
+    callbacks
+  );
+  if (
+    !options.previousResponseUsed ||
+    !result.error ||
+    !isPreviousResponseStateError(result.error)
+  ) {
+    return result;
+  }
+  return await fetchResponses(
+    config,
+    buildPreviousResponseFallbackRequestBody(requestBody, fallbackInput),
+    {
+      signal: options.signal,
+      stream: options.stream,
+    },
+    callbacks
+  );
 }
 
 async function retryPoolBackendResult(
@@ -1069,7 +1057,10 @@ function stripToolTypes(
           !(
             isPlainRecord(tool) &&
             typeof tool.type === "string" &&
-            blockedTypes.has(tool.type)
+            (blockedTypes.has(tool.type) ||
+              (tool.type === "function" &&
+                typeof tool.name === "string" &&
+                blockedTypes.has(tool.name)))
           )
       )
     : body.tools;
@@ -1120,7 +1111,7 @@ async function fetchAgentRoundResponses(params: {
         params.config,
         stripToolTypes(
           params.requestBody,
-          new Set(["web_search", "code_interpreter"])
+          new Set(["web_search", "code_interpreter", "function"])
         ),
         {
           signal: params.signal,
@@ -1148,6 +1139,9 @@ function getUnsupportedToolTypes(result: GenerateImageResult) {
   const types = new Set<string>();
   if (message.includes("web_search")) types.add("web_search");
   if (message.includes("code_interpreter")) types.add("code_interpreter");
+  if (message.includes("function") || message.includes("continue_generation")) {
+    types.add("function");
+  }
   return types;
 }
 
@@ -1175,6 +1169,10 @@ async function getAgentMaxRounds() {
   );
 }
 
+async function getAgentForceMaxRounds() {
+  return await getRuntimeSettingBoolean("IMAGE_AGENT_FORCE_MAX_ROUNDS", false);
+}
+
 async function fetchResponses(
   config: ApiConfig,
   requestBody: ResponsesStreamRequestBody,
@@ -1198,169 +1196,6 @@ async function fetchResponses(
   );
 
   return await parseResponsesResponse(response, callbacks);
-}
-
-function getDataUrl(image: ImageInputFile) {
-  if (image.url?.startsWith("http://") || image.url?.startsWith("https://")) {
-    return image.url;
-  }
-  return `data:${image.type || "image/png"};base64,${image.data.toString("base64")}`;
-}
-
-function imageBase64ToDataUrl(base64: string, outputFormat?: ImageOutputFormat) {
-  const mime =
-    outputFormat === "jpeg"
-      ? "image/jpeg"
-      : outputFormat === "webp"
-        ? "image/webp"
-        : "image/png";
-  return `data:${mime};base64,${base64}`;
-}
-
-function isUsableInputImageUrl(url: string) {
-  return (
-    url.startsWith("data:image/") ||
-    url.startsWith("http://") ||
-    url.startsWith("https://")
-  );
-}
-
-function historyVariantText(message: ChatHistoryMessage) {
-  const variants = message.variants || [];
-  const variant = variants[message.activeVariant || 0] || variants[0];
-  const imageNote = variant?.imageUrl
-    ? `\nGenerated image: ${variant.imageUrl}`
-    : "";
-  return `${variant?.text || message.text || ""}${imageNote}`;
-}
-
-function getHistoryVariantImageUrl(message: ChatHistoryMessage) {
-  const variants = message.variants || [];
-  const variant = variants[message.activeVariant || 0] || variants[0];
-  return variant?.imageUrl;
-}
-
-function buildResponsesInput(
-  prompt: string,
-  images: ImageInputFile[] | undefined,
-  history: ChatHistoryMessage[] | undefined
-): ResponsesRequestMessage[] {
-  const input: ResponsesRequestMessage[] = [];
-
-  for (const message of history || []) {
-    if (message.error) continue;
-
-    if (message.role === "user") {
-      const content: ResponsesRequestContent[] = [
-        { type: "input_text", text: message.text || "" },
-      ];
-      for (const imageUrl of message.imageUrls || []) {
-        if (isUsableInputImageUrl(imageUrl)) {
-          content.push({ type: "input_image", image_url: imageUrl });
-        }
-      }
-      input.push({ role: "user", content });
-      continue;
-    }
-
-    const text = historyVariantText(message).trim();
-    if (text) {
-      input.push({
-        role: "assistant",
-        content: [{ type: "output_text", text }],
-      });
-    }
-    const imageUrl = getHistoryVariantImageUrl(message);
-    if (imageUrl && isUsableInputImageUrl(imageUrl)) {
-      input.push({
-        role: "user",
-        content: [
-          {
-            type: "input_text",
-            text: "Reference image from the previous assistant output.",
-          },
-          { type: "input_image", image_url: imageUrl },
-        ],
-      });
-    }
-  }
-
-  const currentContent: ResponsesRequestContent[] = [
-    { type: "input_text", text: prompt },
-    ...(images || []).map((image) => ({
-      type: "input_image" as const,
-      image_url: getDataUrl(image),
-    })),
-  ];
-  input.push({ role: "user", content: currentContent });
-
-  return input;
-}
-
-function buildAgentContinuationInput(params: {
-  baseInput: ResponsesRequestMessage[];
-  previousResult: ResponsesResultWithOutput;
-  currentRound: number;
-  maxRounds: number;
-  outputFormat?: ImageOutputFormat;
-}) {
-  const input: ResponsesRequestMessage[] = [...params.baseInput];
-  const previousContext = [
-    params.previousResult.responseThinking?.trim()
-      ? `Previous reasoning summary:\n${params.previousResult.responseThinking.trim()}`
-      : "",
-    params.previousResult.responseAgent?.trim()
-      ? `Previous tool log:\n${params.previousResult.responseAgent.trim()}`
-      : "",
-    params.previousResult.responseText?.trim()
-      ? `Previous assistant note:\n${params.previousResult.responseText.trim()}`
-      : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-  if (previousContext) {
-    input.push({
-      role: "assistant",
-      content: [{ type: "output_text", text: previousContext }],
-    });
-  }
-
-  const previousImages = (params.previousResult.imageOutputs || []).filter(
-    (item) => item.imageBase64 || item.imageUrl
-  );
-  for (const [index, image] of previousImages.entries()) {
-    const imageUrl =
-      image.imageUrl ||
-      (image.imageBase64
-        ? imageBase64ToDataUrl(image.imageBase64, params.outputFormat)
-        : undefined);
-    if (!imageUrl) continue;
-    input.push({
-      role: "user",
-      content: [
-        {
-          type: "input_text",
-          text: `Draft image from Agent round ${params.currentRound}, version ${
-            index + 1
-          }. Use it as visual reference for critique and possible refinement.`,
-        },
-        { type: "input_image", image_url: imageUrl },
-      ],
-    });
-  }
-
-  const statusLines = [
-    `Agent round ${params.currentRound} of ${params.maxRounds} finished.`,
-    previousImages.length
-      ? `It produced ${previousImages.length} draft image(s). Inspect the draft and either generate an improved next version or stop if the task is complete.`
-      : "It produced no image. If the user requested an image and no required input is missing, execute image_generation now.",
-    "When continuing, make the next action concrete. Do not repeat the same research summary.",
-  ];
-  input.push({
-    role: "user",
-    content: [{ type: "input_text", text: statusLines.join("\n") }],
-  });
-  return input;
 }
 
 function getEffectivePrompt(params: {
@@ -1798,12 +1633,21 @@ function getStreamDeltaItem(
   const delta = isPlainRecord(payload.delta)
     ? (payload.delta as ResponsesOutputItem)
     : undefined;
-  if (!previous && !delta?.type) return undefined;
+  const argumentsDelta =
+    typeof payload.delta === "string" ? payload.delta : undefined;
+  if (!previous && !delta?.type && argumentsDelta === undefined) {
+    return undefined;
+  }
   const deltaItem: ResponsesOutputItem = {
     ...(delta || {}),
     id: previous?.id || delta?.id,
     call_id: previous?.call_id || delta?.call_id,
     type: previous?.type || delta?.type,
+    name:
+      previous?.name ||
+      delta?.name ||
+      (typeof payload.name === "string" ? payload.name : undefined),
+    arguments: argumentsDelta,
   };
   return updateStreamItem(state, deltaItem);
 }
@@ -1991,6 +1835,7 @@ function getStreamToolItem(
     call_id: itemId,
     type: fallbackType,
     status: typeof payload.status === "string" ? payload.status : undefined,
+    name: typeof payload.name === "string" ? payload.name : undefined,
   });
 }
 
@@ -2764,9 +2609,22 @@ export async function editImage(
   }
 
   const model = getModel(config, params.model);
+  const editPromptRefs = resolvePromptImageReferences({
+    prompt: getEffectivePrompt(params),
+    images: params.images,
+  });
+  const effectiveEditPrompt = editPromptRefs.prompt.replace(
+    /current-reference-/g,
+    "edit-reference-"
+  );
+  const paramsWithResolvedPrompt: EditImageParams = {
+    ...params,
+    prompt: effectiveEditPrompt,
+    apiPrompt: effectiveEditPrompt,
+  };
   if (isPoolAccountBackend(config, "web")) {
     return editImageWithChatGptWeb(config, {
-      ...params,
+      ...paramsWithResolvedPrompt,
       model,
       gptModel: params.gptModel,
     });
@@ -2777,7 +2635,7 @@ export async function editImage(
         await postResponsesImageRequestWithToolChoiceFallback(
           config,
           buildResponsesImageEditRequest(config, {
-            ...params,
+            ...paramsWithResolvedPrompt,
             model,
             gptModel:
               params.gptModel ||
@@ -2805,7 +2663,7 @@ export async function editImage(
   }
 
   try {
-    const prompt = getEffectivePrompt(params);
+    const prompt = effectiveEditPrompt;
     const formData = new FormData();
     appendImageParams(formData, config, {
       prompt,
@@ -2897,6 +2755,7 @@ export async function generateChatImage(
       moderation: params.moderation,
       outputFormat: params.outputFormat,
       outputCompression: params.outputCompression,
+      files: params.files,
     };
     if (params.images?.length) {
       return editImageWithChatGptWeb(config, {
@@ -2907,9 +2766,55 @@ export async function generateChatImage(
     return generateImageWithChatGptWeb(config, webParams);
   }
   try {
-    const prompt = getEffectivePrompt(params);
+    const promptRefs = resolvePromptImageReferences({
+      prompt: getEffectivePrompt(params),
+      images: params.images,
+      history: params.history,
+    });
+    const prompt = promptRefs.prompt;
     const size = params.size || DEFAULT_IMAGE_SIZE;
-    const input = buildResponsesInput(prompt, params.images, params.history);
+    const currentBackendMember = getStickyBackendMember(config);
+    const responsesPreviousResponseEnabled =
+      shouldEnableResponsesPreviousResponse({
+        settingEnabled: await getRuntimeSettingBoolean(
+          "IMAGE_RESPONSES_PREVIOUS_RESPONSE_ENABLED",
+          false
+        ),
+        rawResponsesBody: params.rawResponsesBody,
+        currentBackendMember,
+      });
+    const {
+      previousState: previousResponsesState,
+      canUsePreviousResponseId,
+    } = resolveResponsesNativeState({
+      enabled: responsesPreviousResponseEnabled,
+      currentBackendMember,
+      history: params.history,
+    });
+    const manualHistoryInput = buildResponsesInput(
+      prompt,
+      params.images,
+      params.files,
+      params.history,
+      {
+        extraCurrentImageReferences: promptRefs.historyImageReferences,
+      }
+    );
+    const input = canUsePreviousResponseId
+      ? [
+          {
+            role: "user" as const,
+            content: buildCurrentResponsesContent(
+              prompt,
+              params.images,
+              params.files,
+              {
+                extraImageReferences: promptRefs.historyImageReferences,
+              }
+            ),
+          },
+        ]
+      : manualHistoryInput;
     const instructions =
       params.promptOptimization === false
         ? params.agentMode
@@ -2964,6 +2869,7 @@ export async function generateChatImage(
       ? [
           { type: "web_search" },
           { type: "code_interpreter", container: { type: "auto" } },
+          AGENT_CONTINUE_TOOL,
         ]
       : [];
     const requestBody: ResponsesStreamRequestBody =
@@ -2979,7 +2885,10 @@ export async function generateChatImage(
             input,
             tools: [tool, ...defaultAdditionalTools],
             instructions,
-            store: false,
+            store: responsesPreviousResponseEnabled,
+            ...(canUsePreviousResponseId
+              ? { previous_response_id: previousResponsesState?.responseId }
+              : {}),
             ...(reasoning ? { reasoning } : {}),
             ...(stream ? { stream: true } : {}),
           };
@@ -2987,13 +2896,20 @@ export async function generateChatImage(
     let result: ResponsesResultWithOutput | undefined;
     if (params.agentMode && !params.rawResponsesBody) {
       const maxRounds = await getAgentMaxRounds();
+      const forceMaxRounds = await getAgentForceMaxRounds();
       const roundResults: ResponsesResultWithOutput[] = [];
       let nextInput = input;
+      const agentPreviousResponseEnabled = responsesPreviousResponseEnabled;
+      let agentPreviousResponseId = canUsePreviousResponseId
+        ? previousResponsesState?.responseId
+        : undefined;
 
       for (let round = 1; round <= maxRounds; round += 1) {
         const roundRequestBody: ResponsesStreamRequestBody = {
           ...requestBody,
           input: nextInput,
+          store: agentPreviousResponseEnabled,
+          previous_response_id: agentPreviousResponseId,
           instructions:
             round === 1
               ? requestBody.instructions
@@ -3010,14 +2926,36 @@ export async function generateChatImage(
           timestamp: new Date().toISOString(),
         });
 
-        const roundResult = await fetchAgentRoundResponses({
+        let roundResult = await fetchAgentRoundResponses({
           config,
           requestBody: roundRequestBody,
           signal: params.signal,
           stream,
           callbacks,
         });
+        if (
+          round === 1 &&
+          canUsePreviousResponseId &&
+          roundResult.error &&
+          isPreviousResponseStateError(roundResult.error)
+        ) {
+          agentPreviousResponseId = undefined;
+          roundResult = await fetchAgentRoundResponses({
+            config,
+            requestBody: {
+              ...roundRequestBody,
+              input: manualHistoryInput,
+              previous_response_id: undefined,
+            },
+            signal: params.signal,
+            stream,
+            callbacks,
+          });
+        }
         roundResults.push(roundResult);
+        if (agentPreviousResponseEnabled && roundResult.responseId) {
+          agentPreviousResponseId = roundResult.responseId;
+        }
 
         if (roundResult.error) {
           if (roundResults.slice(0, -1).some(hasAgentImage)) {
@@ -3050,18 +2988,60 @@ export async function generateChatImage(
           break;
         }
 
+        const continueCalls = getContinueGenerationFunctionCalls(
+          roundResult.outputItems
+        );
+        const continueFunctionCallItems =
+          buildContinueGenerationFunctionCallItems({
+            outputItems: roundResult.outputItems,
+            includeFunctionCallInputs: !agentPreviousResponseEnabled,
+          });
+        const continueReason = continueCalls
+          .map((call) => call.reason)
+          .find((reason): reason is string => Boolean(reason));
+        if (continueCalls.length > 0) {
+          await emitAgentProgress(callbacks, {
+            kind: "tool",
+            status: "completed",
+            title: "Agent 请求继续",
+            detail: continueReason,
+            timestamp: new Date().toISOString(),
+            toolType: "continue_generation",
+          });
+        }
+        const shouldForceContinue = forceMaxRounds && round < maxRounds;
+        if (shouldForceContinue && continueCalls.length === 0) {
+          await emitAgentProgress(callbacks, {
+            kind: "message",
+            status: "running",
+            title: "Agent 强制继续",
+            detail: `系统已开启强制迭代，将继续执行第 ${round + 1} 轮`,
+            timestamp: new Date().toISOString(),
+          });
+        }
+
         if (hasAgentImage(roundResult)) {
+          if (continueCalls.length === 0 && !shouldForceContinue) {
+            result = mergeGenerateImageResults(roundResults);
+            break;
+          }
           nextInput = buildAgentContinuationInput({
-            baseInput: input,
+            baseInput: agentPreviousResponseEnabled ? [] : input,
             previousResult: mergeGenerateImageResults(roundResults),
             currentRound: round,
             maxRounds,
             outputFormat,
+            includeImageEntities: !agentPreviousResponseEnabled,
+            functionCallItems: continueFunctionCallItems,
           });
           continue;
         }
 
-        if (roundResults.some(hasAgentImage)) {
+        if (
+          roundResults.some(hasAgentImage) &&
+          continueCalls.length === 0 &&
+          !shouldForceContinue
+        ) {
           result = mergeGenerateImageResults(roundResults);
           break;
         }
@@ -3075,11 +3055,13 @@ export async function generateChatImage(
         }
 
         nextInput = buildAgentContinuationInput({
-          baseInput: input,
+          baseInput: agentPreviousResponseEnabled ? [] : input,
           previousResult: mergeGenerateImageResults(roundResults),
           currentRound: round,
           maxRounds,
           outputFormat,
+          includeImageEntities: !agentPreviousResponseEnabled,
+          functionCallItems: continueFunctionCallItems,
         });
       }
 
@@ -3087,12 +3069,14 @@ export async function generateChatImage(
         result = mergeGenerateImageResults(roundResults);
       }
     } else {
-      result = await fetchResponses(
+      result = await fetchResponsesWithPreviousResponseFallback(
         config,
         requestBody,
+        manualHistoryInput,
         {
           signal: params.signal,
           stream,
+          previousResponseUsed: canUsePreviousResponseId,
         },
         callbacks
       );
@@ -3115,7 +3099,13 @@ export async function generateChatImage(
       }
     }
 
-    return applyPromptOptimizationResultVisibility(result);
+    return applyPromptOptimizationResultVisibility(
+      attachResponsesPreviousResponseState(
+        config,
+        result,
+        responsesPreviousResponseEnabled
+      )
+    );
   } catch (error) {
     logImageRequestError(error, {
       operation: "chat",

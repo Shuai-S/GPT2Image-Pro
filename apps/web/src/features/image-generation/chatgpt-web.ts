@@ -14,6 +14,7 @@ import type {
   GenerateImageParams,
   GenerateImageResult,
   ImageInputFile,
+  ResponsesInputFile,
   ThinkingLevel,
 } from "./types";
 
@@ -34,13 +35,14 @@ type ChatRequirements = {
   soToken?: string;
 };
 
-type UploadedImage = {
+type UploadedAttachment = {
   file_id: string;
   file_name: string;
   file_size: number;
   mime_type: string;
-  width: number;
-  height: number;
+  content_type: "image_asset_pointer" | "file_asset_pointer";
+  width?: number;
+  height?: number;
 };
 
 type WebSession = {
@@ -75,6 +77,7 @@ type WebProxyResponsePayload = {
 
 type WebImageParams = (GenerateImageParams | EditImageParams) & {
   history?: ChatHistoryMessage[];
+  files?: ResponsesInputFile[];
 };
 
 function throwIfAborted(signal?: AbortSignal) {
@@ -649,14 +652,17 @@ function imageDimensions(buffer: Buffer) {
   return { width: 1024, height: 1024 };
 }
 
-async function uploadImage(
+async function uploadAttachment(
   config: ApiConfig,
-  image: ImageInputFile,
-  index: number
+  file: ImageInputFile | ResponsesInputFile,
+  index: number,
+  options?: { image?: boolean }
 ) {
-  const dimensions = imageDimensions(image.data);
+  const isImage = Boolean(options?.image);
+  const dimensions = isImage ? imageDimensions(file.data) : null;
   const path = "/backend-api/files";
-  const fileName = image.name || `image_${index}.png`;
+  const fileName =
+    file.name || (isImage ? `image_${index}.png` : `file_${index}`);
   const createResponse = await fetchChatGptWeb(config, path, path, {
     method: "POST",
     signal: config.signal,
@@ -666,10 +672,14 @@ async function uploadImage(
     }),
     body: JSON.stringify({
       file_name: fileName,
-      file_size: image.data.length,
+      file_size: file.data.length,
       use_case: "multimodal",
-      width: dimensions.width,
-      height: dimensions.height,
+      ...(dimensions
+        ? {
+            width: dimensions.width,
+            height: dimensions.height,
+          }
+        : {}),
     }),
   });
   if (!createResponse.ok) {
@@ -685,14 +695,14 @@ async function uploadImage(
     method: "PUT",
     signal: config.signal,
     headers: {
-      "Content-Type": image.type || "image/png",
+      "Content-Type": file.type || "application/octet-stream",
       "x-ms-blob-type": "BlockBlob",
       "x-ms-version": "2020-04-08",
       Origin: CHATGPT_BASE_URL,
       Referer: `${CHATGPT_BASE_URL}/`,
       "User-Agent": USER_AGENT,
     },
-    body: new Uint8Array(image.data),
+    body: new Uint8Array(file.data),
   });
   if (!uploadResponse.ok) {
     throw new Error(
@@ -722,11 +732,16 @@ async function uploadImage(
   return {
     file_id: uploadMeta.file_id,
     file_name: fileName,
-    file_size: image.data.length,
-    mime_type: image.type || "image/png",
-    width: dimensions.width,
-    height: dimensions.height,
-  } satisfies UploadedImage;
+    file_size: file.data.length,
+    mime_type: file.type || "application/octet-stream",
+    content_type: isImage ? "image_asset_pointer" : "file_asset_pointer",
+    ...(dimensions
+      ? {
+          width: dimensions.width,
+          height: dimensions.height,
+        }
+      : {}),
+  } satisfies UploadedAttachment;
 }
 
 const DEFAULT_WEB_GPT_MODEL_SLUG = "gpt-5-3";
@@ -828,15 +843,21 @@ async function prepareImageConversation(
 
 function buildMessage(
   prompt: string,
-  references: UploadedImage[],
+  references: UploadedAttachment[],
   messageId: string
 ) {
   const parts = references.map((item) => ({
-    content_type: "image_asset_pointer",
+    content_type: item.content_type,
     asset_pointer: `file-service://${item.file_id}`,
-    width: item.width,
-    height: item.height,
+    ...(item.width && item.height
+      ? {
+          width: item.width,
+          height: item.height,
+        }
+      : {}),
     size_bytes: item.file_size,
+    name: item.file_name,
+    mime_type: item.mime_type,
   })) as Array<Record<string, unknown> | string>;
   parts.push(prompt);
   return {
@@ -856,8 +877,12 @@ function buildMessage(
               mimeType: item.mime_type,
               name: item.file_name,
               size: item.file_size,
-              width: item.width,
-              height: item.height,
+              ...(item.width && item.height
+                ? {
+                    width: item.width,
+                    height: item.height,
+                  }
+                : {}),
             })),
           }
         : {}),
@@ -877,7 +902,7 @@ async function startImageGeneration(
     continuation?: WebContinuationState | null;
     requestMessageId: string;
   },
-  references: UploadedImage[]
+  references: UploadedAttachment[]
 ) {
   const path = "/backend-api/f/conversation";
   const response = await fetchChatGptWeb(config, path, path, {
@@ -1367,12 +1392,30 @@ async function runWebImage(
     const references = [
       ...(await Promise.all(
         images.map((image, index) =>
-          uploadImage(configWithSignal, image, index + 1)
+          uploadAttachment(configWithSignal, image, index + 1, {
+            image: true,
+          })
         )
       )),
       ...(historyImage
-        ? [await uploadImage(configWithSignal, historyImage, images.length + 1)]
+        ? [
+            await uploadAttachment(
+              configWithSignal,
+              historyImage,
+              images.length + 1,
+              { image: true }
+            ),
+          ]
         : []),
+      ...(await Promise.all(
+        (params.files || []).map((file, index) =>
+          uploadAttachment(
+            configWithSignal,
+            file,
+            images.length + (historyImage ? 1 : 0) + index + 1
+          )
+        )
+      )),
     ];
     const requirements = await getChatRequirements(configWithSignal);
     const conduitToken = await prepareImageConversation(
