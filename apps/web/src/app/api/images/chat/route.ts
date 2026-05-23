@@ -110,6 +110,8 @@ function getPreferredBackendMemberId(history: ChatHistoryMessage[]) {
     if (!message || message.role !== "assistant" || message.error) continue;
     const variants = message.variants || [];
     const variant = variants[message.activeVariant || 0] || variants[0];
+    const backendMemberId = variant?.backendMember?.id;
+    if (backendMemberId) return backendMemberId;
     const accountId = variant?.webConversation?.accountId;
     if (accountId) return accountId;
   }
@@ -329,6 +331,39 @@ function getHistory(
                           .accountId === "string"
                           ? ((item.webConversation as Record<string, unknown>)
                               .accountId as string)
+                          : undefined,
+                    }
+                  : undefined,
+              backendMember:
+                item.backendMember &&
+                typeof item.backendMember === "object" &&
+                ((item.backendMember as Record<string, unknown>).type ===
+                  "api" ||
+                  (item.backendMember as Record<string, unknown>).type ===
+                    "account") &&
+                typeof (item.backendMember as Record<string, unknown>).id ===
+                  "string"
+                  ? {
+                      type: (item.backendMember as Record<string, unknown>)
+                        .type as "api" | "account",
+                      id: (item.backendMember as Record<string, unknown>)
+                        .id as string,
+                      groupId:
+                        typeof (item.backendMember as Record<string, unknown>)
+                          .groupId === "string"
+                          ? ((item.backendMember as Record<string, unknown>)
+                              .groupId as string)
+                          : (item.backendMember as Record<string, unknown>)
+                                .groupId === null
+                            ? null
+                            : undefined,
+                      accountBackend:
+                        (item.backendMember as Record<string, unknown>)
+                          .accountBackend === "web" ||
+                        (item.backendMember as Record<string, unknown>)
+                          .accountBackend === "responses"
+                          ? ((item.backendMember as Record<string, unknown>)
+                              .accountBackend as "web" | "responses")
                           : undefined,
                     }
                   : undefined,

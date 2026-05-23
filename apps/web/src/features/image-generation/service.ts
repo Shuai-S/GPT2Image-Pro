@@ -847,6 +847,35 @@ function poolBackendMemberKey(config: ApiConfig) {
   }`;
 }
 
+function getStickyBackendMember(config: ApiConfig) {
+  const backend = config.backend;
+  if (
+    !backend?.id ||
+    (backend.type !== "pool-api" && backend.type !== "pool-account")
+  ) {
+    return undefined;
+  }
+  return {
+    type: backend.type === "pool-api" ? ("api" as const) : ("account" as const),
+    id: backend.id,
+    groupId: backend.groupId,
+    accountBackend: backend.accountBackend,
+  };
+}
+
+function attachStickyBackendMember(
+  config: ApiConfig,
+  result: GenerateImageResult
+): GenerateImageResult {
+  if (result.error) return result;
+  const backendMember = getStickyBackendMember(config);
+  if (!backendMember) return result;
+  return {
+    ...result,
+    backendMember,
+  };
+}
+
 async function retryPoolBackendResult(
   config: ApiConfig,
   run: (candidate: ApiConfig) => Promise<GenerateImageResult>,
@@ -901,7 +930,7 @@ async function retryPoolBackendResult(
       !result.error ||
       !(shouldRetry || isImageBackendSwitchableError(result.error))
     ) {
-      return result;
+      return attachStickyBackendMember(candidate, result);
     }
 
     const memberKey = poolBackendMemberKey(candidate);
@@ -997,7 +1026,11 @@ async function retryPoolBackendResult(
     candidate = next.config;
   }
 
-  return lastResult || run(withoutPoolBackendReport(config));
+  if (lastResult) return lastResult;
+  return attachStickyBackendMember(
+    config,
+    await run(withoutPoolBackendReport(config))
+  );
 }
 
 function withoutPoolBackendReport(config: ApiConfig): ApiConfig {

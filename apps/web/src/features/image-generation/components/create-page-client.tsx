@@ -120,6 +120,7 @@ type ImageApiResult = {
   agentEvents?: AgentRunEvent[];
   agentRoundCount?: number;
   webConversation?: ChatGptWebConversationState;
+  backendMember?: StickyBackendMemberState;
   creditsConsumed?: number;
   results?: ImageApiResult[];
 };
@@ -212,6 +213,7 @@ type ChatVariant = {
   agentEvents?: AgentRunEvent[];
   agentRoundCount?: number;
   webConversation?: ChatGptWebConversationState;
+  backendMember?: StickyBackendMemberState;
   creditsConsumed?: number;
   createdAt?: string;
 };
@@ -233,6 +235,7 @@ type ChatResultInput = Pick<
   | "agentEvents"
   | "agentRoundCount"
   | "webConversation"
+  | "backendMember"
   | "creditsConsumed"
 > & {
   outputRole?: "final" | "agent_draft";
@@ -242,6 +245,13 @@ type ChatGptWebConversationState = {
   conversationId: string;
   parentMessageId: string;
   accountId?: string;
+};
+
+type StickyBackendMemberState = {
+  type: "api" | "account";
+  id: string;
+  groupId?: string | null;
+  accountBackend?: "web" | "responses";
 };
 
 type ChatMessage = {
@@ -1085,6 +1095,28 @@ function sanitizeChatMessages(value: unknown): ChatMessage[] {
                       : undefined,
                 }
               : undefined;
+          const backendMember =
+            value.backendMember &&
+            typeof value.backendMember === "object" &&
+            (value.backendMember.type === "api" ||
+              value.backendMember.type === "account") &&
+            typeof value.backendMember.id === "string"
+              ? {
+                  type: value.backendMember.type,
+                  id: value.backendMember.id,
+                  groupId:
+                    typeof value.backendMember.groupId === "string"
+                      ? value.backendMember.groupId
+                      : value.backendMember.groupId === null
+                        ? null
+                        : undefined,
+                  accountBackend:
+                    value.backendMember.accountBackend === "web" ||
+                    value.backendMember.accountBackend === "responses"
+                      ? value.backendMember.accountBackend
+                      : undefined,
+                }
+              : undefined;
           return [
             {
               ...value,
@@ -1104,6 +1136,7 @@ function sanitizeChatMessages(value: unknown): ChatMessage[] {
                     .map(normalizeAgentEvent)
                 : undefined,
               webConversation,
+              backendMember,
             },
           ];
         })
@@ -1276,6 +1309,7 @@ function toChatHistory(messages: ChatMessage[]) {
         size: variant.size,
         timestamp: variant.createdAt,
         webConversation: variant.webConversation,
+        backendMember: variant.backendMember,
       })),
       activeVariant: message.activeVariant || 0,
       error: message.error,
@@ -2792,6 +2826,7 @@ export function CreatePageClient({
       agentEvents: data.agentEvents,
       agentRoundCount: data.agentRoundCount,
       webConversation: data.webConversation,
+      backendMember: data.backendMember,
       creditsConsumed: data.creditsConsumed,
       createdAt: new Date().toISOString(),
     };
@@ -2820,6 +2855,7 @@ export function CreatePageClient({
         agentEvents: isLast ? data.agentEvents : undefined,
         agentRoundCount: isLast ? data.agentRoundCount : undefined,
         webConversation: isLast ? data.webConversation : undefined,
+        backendMember: isLast ? data.backendMember : undefined,
         creditsConsumed: isLast ? data.creditsConsumed : 0,
         outputRole: output.outputRole || (isLast ? "final" : "agent_draft"),
       };

@@ -125,6 +125,7 @@ export type ImageGenerationOperationResult = {
   agentEvents?: GenerateImageResult["agentEvents"];
   agentRoundCount?: GenerateImageResult["agentRoundCount"];
   webConversation?: GenerateImageResult["webConversation"];
+  backendMember?: GenerateImageResult["backendMember"];
   creditsConsumed?: number;
 };
 
@@ -1385,6 +1386,7 @@ async function runQueuedImageGenerationForUser({
       agentEvents: result.agentEvents,
       agentRoundCount: result.agentRoundCount,
       webConversation: result.webConversation,
+      backendMember: result.backendMember,
       creditsConsumed: finalChargedCredits,
     };
   }
@@ -1648,6 +1650,7 @@ async function runQueuedImageGenerationForUser({
     agentEvents: result.agentEvents,
     agentRoundCount: result.agentRoundCount,
     webConversation: result.webConversation,
+    backendMember: result.backendMember,
     creditsConsumed: chargedCredits,
   };
 }

@@ -46,6 +46,12 @@ export type ImageStreamEvent =
         parentMessageId: string;
         accountId?: string;
       };
+      backendMember?: {
+        type: "api" | "account";
+        id: string;
+        groupId?: string | null;
+        accountBackend?: "web" | "responses";
+      };
       imageOutputs?: Array<{
         generationId?: string;
         imageUrl?: string;

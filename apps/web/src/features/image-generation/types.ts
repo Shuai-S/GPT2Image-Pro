@@ -31,6 +31,7 @@ export interface GenerateImageResult {
   agentEvents?: AgentRunEvent[];
   agentRoundCount?: number;
   webConversation?: ChatGptWebConversationState;
+  backendMember?: StickyBackendMemberState;
   error?: string;
   upstreamResetAt?: string;
   retryAfterSeconds?: number;
@@ -164,12 +165,20 @@ export interface ChatGptWebConversationState {
   accountId?: string;
 }
 
+export interface StickyBackendMemberState {
+  type: "api" | "account";
+  id: string;
+  groupId?: string | null;
+  accountBackend?: "web" | "responses";
+}
+
 export interface ChatHistoryVariant {
   text?: string;
   imageUrl?: string;
   size?: string;
   timestamp?: string;
   webConversation?: ChatGptWebConversationState;
+  backendMember?: StickyBackendMemberState;
 }
 
 export interface ChatHistoryMessage {
