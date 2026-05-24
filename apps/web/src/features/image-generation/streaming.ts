@@ -97,7 +97,8 @@ export function createImageStreamResponse(
   ) => Promise<ImageStreamEvent | null | undefined>
 ) {
   const encoder = new TextEncoder();
-  const keepAliveMs = 15_000;
+  const keepAliveMs = 5_000;
+  const flushPadding = `: ${" ".repeat(2048)}\n\n`;
   let keepAlive: ReturnType<typeof setInterval> | undefined;
   let cancelled = false;
 
@@ -116,15 +117,17 @@ export function createImageStreamResponse(
         };
 
         keepAlive = setInterval(() => {
-          write(": ping\n\n");
+          write(`: ping ${Date.now()}\n\n${flushPadding}`);
         }, keepAliveMs);
 
         const emit = async (event: ImageStreamEvent) => {
-          write(`data: ${JSON.stringify(event)}\n\n: flush\n\n`);
+          write(
+            `data: ${JSON.stringify(event)}\n\n: flush ${Date.now()}\n\n${flushPadding}`
+          );
         };
 
         try {
-          write(": open\n\n");
+          write(`: open ${Date.now()}\n\n${flushPadding}`);
           const finalEvent = await run(emit);
           if (finalEvent) {
             await emit(finalEvent);
@@ -160,6 +163,8 @@ export function createImageStreamResponse(
       headers: {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache, no-transform",
+        "CDN-Cache-Control": "no-store",
+        "Cloudflare-CDN-Cache-Control": "no-store",
         "X-Accel-Buffering": "no",
         Connection: "keep-alive",
       },

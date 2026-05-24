@@ -58,6 +58,7 @@ import {
   buildResponsesImageEditRequest,
   buildResponsesImageGenerationRequest,
 } from "./responses-image";
+import { extractResponsesImageCallBase64 } from "./responses-output";
 import {
   normalizeResponsesImageRequestBody,
   type ResponsesStreamRequestBody,
@@ -140,7 +141,14 @@ type ResponsesOutputItem = {
   call_id?: string;
   query?: string;
   results?: unknown;
-  result?: string;
+  result?:
+    | string
+    | {
+        b64_json?: unknown;
+        base64?: unknown;
+        image?: unknown;
+        data?: unknown;
+      };
   revised_prompt?: string;
   content?: Array<{
     type?: string;
@@ -688,9 +696,12 @@ async function postResponsesImageRequest(
     {
       method: "POST",
       signal: params.signal,
+      cache: "no-store",
       headers: getHeaders(config, {
         "Content-Type": "application/json",
         Accept: "text/event-stream",
+        "Accept-Encoding": "identity",
+        "Cache-Control": "no-cache",
       }),
       body: JSON.stringify(requestBody),
     }
@@ -1220,10 +1231,16 @@ async function fetchResponses(
     {
       method: "POST",
       signal: options.signal,
+      cache: options.stream ? "no-store" : "default",
       headers: getHeaders(config, {
         "Content-Type": "application/json",
         Accept: options.stream ? "text/event-stream" : "application/json",
-        ...(options.stream ? { "Accept-Encoding": "identity" } : {}),
+        ...(options.stream
+          ? {
+              "Accept-Encoding": "identity",
+              "Cache-Control": "no-cache",
+            }
+          : {}),
       }),
       body: JSON.stringify(requestBody),
     }
@@ -1400,12 +1417,13 @@ function parseResponsesOutput(
       }
     }
 
-    if (item.type === "image_generation_call" && item.result) {
-      imageBase64 = item.result;
+    const itemImageBase64 = extractResponsesImageCallBase64(item);
+    if (item.type === "image_generation_call" && itemImageBase64) {
+      imageBase64 = itemImageBase64;
       imageOutputCount += 1;
       if (item.revised_prompt) revisedPrompt = item.revised_prompt;
       imageOutputs.push({
-        imageBase64: item.result,
+        imageBase64: itemImageBase64,
         upstreamRevisedPrompt: item.revised_prompt,
         index: imageOutputCount - 1,
       });
@@ -1608,6 +1626,18 @@ function getAgentEventKey(event: AgentRunEvent) {
 
 function getResponseItemId(item: ResponsesOutputItem | undefined) {
   return item?.id || item?.call_id || item?.item_id || item?.output_item_id;
+}
+
+function getToolEventSignature(item: ResponsesOutputItem | undefined) {
+  if (!item?.type) return "";
+  return [
+    item.type,
+    compactToolText(item.query),
+    compactToolText(item.name),
+    compactToolText(item.arguments),
+    compactToolJson(item.action),
+    item.status,
+  ].join("|");
 }
 
 function inferToolStatusFromEventName(eventName: string): AgentRunEventStatus {
@@ -1952,6 +1982,11 @@ function createAgentRoundRequestTracker(
     await emitStatus("completed", "已收到上游流式响应，正在继续处理");
   };
 
+  const noteStillWaiting = async (detail: string) => {
+    if (settled) return;
+    await emitStatus("running", detail);
+  };
+
   const finish = async (params: { error?: string }) => {
     stopTimer();
     if (params.error) {
@@ -1987,7 +2022,15 @@ function createAgentRoundRequestTracker(
         await callbacks.onAgentDelta?.(delta);
       },
       onAgentEvent: async (event) => {
-        if (event.toolType !== "responses_stream_event") {
+        if (event.toolType === "responses_stream_event") {
+          await noteStillWaiting(
+            event.detail
+              ? `已收到上游事件：${event.detail}`
+              : "已收到上游流式事件，等待可展示的工具结果"
+          );
+        } else if (event.toolType === "agent_tool_compat") {
+          await noteStillWaiting("已调整工具配置，正在重试上游请求");
+        } else if (event.toolType !== "agent_round_request") {
           await markReceived();
         }
         await callbacks.onAgentEvent?.(event);
@@ -2109,9 +2152,10 @@ async function reportResponsesToolEvent(
   const itemId = getResponseItemId(item);
   if (itemId) {
     state.emittedToolEvents = state.emittedToolEvents || {};
-    const previousStatus = state.emittedToolEvents[itemId];
-    if (previousStatus === status) return;
-    state.emittedToolEvents[itemId] = status;
+    const signature = `${status}:${getToolEventSignature(item)}`;
+    const previousSignature = state.emittedToolEvents[itemId];
+    if (previousSignature === signature) return;
+    state.emittedToolEvents[itemId] = signature;
   }
 
   const done = status === "completed";
@@ -2166,6 +2210,7 @@ async function surfaceRawResponsesStreamEvent(
   state: EventStreamParseState,
   callbacks?: ImageGenerationCallbacks
 ) {
+  if (!state.debugRawStreamEvents) return;
   if (!callbacks || !shouldSurfaceRawResponsesStreamEvent(eventName)) return;
   state.emittedRawStreamEvents = state.emittedRawStreamEvents || {};
   const previous = state.emittedRawStreamEvents[eventName];
@@ -2231,17 +2276,18 @@ async function processResponsesEventPayload(
       payload.item as ResponsesOutputItem | undefined
     );
     await reportResponsesToolEvent(state, callbacks, item, "completed");
-    if (item?.type === "image_generation_call" && item.result) {
+    const itemImageBase64 = extractResponsesImageCallBase64(item);
+    if (item?.type === "image_generation_call" && itemImageBase64) {
       const imageOutputCount =
         (state.fallbackResult?.imageOutputCount || 0) + 1;
       const imageOutput = {
-        imageBase64: item.result,
+        imageBase64: itemImageBase64,
         upstreamRevisedPrompt: item.revised_prompt,
         index: imageOutputCount - 1,
         outputRole: "agent_draft" as const,
       };
       const partialImage = {
-        imageBase64: item.result,
+        imageBase64: itemImageBase64,
         partialImageIndex: imageOutput.index,
         final: true,
       };
@@ -2258,7 +2304,7 @@ async function processResponsesEventPayload(
       await callbacks?.onPartialImage?.(partialImage);
       state.fallbackResult = {
         ...(state.fallbackResult || {}),
-        imageBase64: item.result,
+        imageBase64: itemImageBase64,
         imageOutputs: [
           ...(state.fallbackResult?.imageOutputs || []),
           imageOutput,
@@ -2440,6 +2486,8 @@ async function parseResponsesEventStreamResponse(
   const state: EventStreamParseState = {
     completedResult: null,
     fallbackResult: null,
+    debugRawStreamEvents:
+      Boolean(callbacks) && process.env.IMAGE_AGENT_DEBUG_STREAM_EVENTS === "true",
   };
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -2478,6 +2526,8 @@ async function parseResponsesEventStreamText(
   const state: EventStreamParseState = {
     completedResult: null,
     fallbackResult: null,
+    debugRawStreamEvents:
+      Boolean(callbacks) && process.env.IMAGE_AGENT_DEBUG_STREAM_EVENTS === "true",
   };
 
   for (const block of text.replace(/\r\n/g, "\n").split("\n\n")) {
@@ -2542,8 +2592,9 @@ type EventStreamParseState = {
   responseAgent?: string;
   agentEvents?: AgentRunEvent[];
   streamItems?: Record<string, ResponsesOutputItem>;
-  emittedToolEvents?: Record<string, AgentRunEventStatus>;
+  emittedToolEvents?: Record<string, string>;
   emittedRawStreamEvents?: Record<string, true>;
+  debugRawStreamEvents?: boolean;
 };
 
 async function processEventPayload(

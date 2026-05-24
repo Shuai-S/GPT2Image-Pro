@@ -64,6 +64,14 @@ import { toast } from "sonner";
 
 import type { ImageBackendGroupBackendType } from "@/features/image-backend-pool/types";
 import {
+  agentEventToImageUrl,
+  appendAgentRunEvent,
+  buildAgentRoundCards,
+  createOptimisticAgentRoundEvents,
+  normalizeAgentEvent,
+  type AgentTaskCard,
+} from "../agent-round-cards";
+import {
   AUTO_IMAGE_SIZE,
   DEFAULT_IMAGE_MODEL,
   DEFAULT_IMAGE_SIZE,
@@ -318,30 +326,6 @@ type MentionState = {
   query: string;
 };
 
-type AgentTaskCard = {
-  key: string;
-  kind: AgentRunEvent["kind"];
-  title: string;
-  detail?: string;
-  status?: AgentRunEvent["status"];
-  startedAt?: string;
-  updatedAt?: string;
-  toolType?: string;
-  imageUrl?: string;
-  events: AgentRunEvent[];
-};
-
-type AgentRoundCard = {
-  key: string;
-  title: string;
-  detail?: string;
-  status?: AgentRunEvent["status"];
-  startedAt?: string;
-  updatedAt?: string;
-  tasks: AgentTaskCard[];
-  notes: AgentRunEvent[];
-};
-
 type ImageSizeDialogValue = {
   auto: boolean;
   width: number;
@@ -426,6 +410,23 @@ type ChatStreamState = {
   agentEvents: AgentRunEvent[];
   imageUrl?: string;
 };
+
+function createInitialChatStreamState(params: {
+  messageId?: string;
+  cardId?: string;
+  mode?: "chat" | "agent";
+  agentMode: boolean;
+}): ChatStreamState {
+  return {
+    messageId: params.messageId,
+    cardId: params.cardId,
+    mode: params.mode,
+    text: "",
+    thinking: "",
+    agent: "",
+    agentEvents: params.agentMode ? createOptimisticAgentRoundEvents(1) : [],
+  };
+}
 
 type ChatModel = (typeof RESPONSES_IMAGE_MODELS)[number];
 type ChatThinkingLevel = "none" | "low" | "medium" | "high" | "xhigh";
@@ -1149,175 +1150,6 @@ function imageStreamEventToPreviewUrl(event: ImageStreamEvent) {
   if (event.type !== "partial_image") return null;
   if (event.b64_json) return `data:image/png;base64,${event.b64_json}`;
   return event.url || null;
-}
-
-function agentEventToImageUrl(event: AgentRunEvent) {
-  if (event.imageUrl) return event.imageUrl;
-  if (event.imageBase64) return `data:image/png;base64,${event.imageBase64}`;
-  return undefined;
-}
-
-function normalizeAgentEvent(event: AgentRunEvent): AgentRunEvent {
-  return {
-    ...event,
-    imageUrl: agentEventToImageUrl(event),
-    imageBase64: undefined,
-    timestamp: event.timestamp || new Date().toISOString(),
-  };
-}
-
-function appendAgentRunEvent(events: AgentRunEvent[], incoming: AgentRunEvent) {
-  const nextEvent = normalizeAgentEvent(incoming);
-  const matchIndex = events.findIndex((event) => {
-    if (nextEvent.kind === "image_partial" || event.kind === "image_partial") {
-      return (
-        nextEvent.kind === "image_partial" &&
-        event.kind === "image_partial" &&
-        nextEvent.partialImageIndex !== undefined &&
-        event.partialImageIndex === nextEvent.partialImageIndex &&
-        (event.index === undefined ||
-          nextEvent.index === undefined ||
-          event.index === nextEvent.index)
-      );
-    }
-    if (nextEvent.id && event.id === nextEvent.id) return true;
-    return false;
-  });
-
-  if (matchIndex < 0) return [...events, nextEvent];
-
-  return events.map((event, index) =>
-    index === matchIndex ? { ...event, ...nextEvent } : event
-  );
-}
-
-function getAgentTaskKey(event: AgentRunEvent) {
-  if (event.id) return `id:${event.id}`;
-  if (event.kind === "image_partial") {
-    return [
-      "image_partial",
-      event.index ?? "",
-      event.partialImageIndex ?? "",
-      event.toolType || "",
-    ].join(":");
-  }
-  return [
-    event.kind,
-    event.toolType || "",
-    event.title,
-    event.index ?? "",
-    event.partialImageIndex ?? "",
-  ].join(":");
-}
-
-function isAgentRoundStartEvent(event: AgentRunEvent) {
-  return (
-    event.kind === "message" && /Agent 第\s*\d+\s*轮开始/.test(event.title)
-  );
-}
-
-function isAgentRoundEndEvent(event: AgentRunEvent) {
-  return (
-    event.kind === "message" &&
-    /Agent 第\s*\d+\s*轮(?:完成|停止)/.test(event.title)
-  );
-}
-
-function isAgentTaskEvent(event: AgentRunEvent) {
-  return (
-    event.kind === "web_search" ||
-    event.kind === "code_interpreter" ||
-    event.kind === "image_generation" ||
-    event.kind === "image_partial" ||
-    event.kind === "tool"
-  );
-}
-
-function buildAgentRoundCards(events: AgentRunEvent[] | undefined) {
-  const normalizedEvents = (events || []).reduce<AgentRunEvent[]>(
-    (items, event) => appendAgentRunEvent(items, event),
-    []
-  );
-  const rounds: AgentRoundCard[] = [];
-  let currentRound: AgentRoundCard | undefined;
-
-  const ensureRound = () => {
-    if (currentRound) return currentRound;
-    currentRound = {
-      key: "round-implicit",
-      title: "Agent run",
-      tasks: [],
-      notes: [],
-    };
-    rounds.push(currentRound);
-    return currentRound;
-  };
-
-  for (const event of normalizedEvents) {
-    if (isAgentRoundStartEvent(event)) {
-      currentRound = {
-        key: event.id || `round-${rounds.length + 1}`,
-        title: event.title,
-        detail: event.detail,
-        status: event.status || "running",
-        startedAt: event.timestamp,
-        updatedAt: event.timestamp,
-        tasks: [],
-        notes: [],
-      };
-      rounds.push(currentRound);
-      continue;
-    }
-
-    const round = ensureRound();
-    round.updatedAt = event.timestamp || round.updatedAt;
-
-    if (isAgentRoundEndEvent(event)) {
-      round.status = event.status || "completed";
-      round.detail = event.detail || round.detail;
-      round.updatedAt = event.timestamp || round.updatedAt;
-      round.notes.push(event);
-      continue;
-    }
-
-    if (!isAgentTaskEvent(event)) {
-      round.notes.push(event);
-      continue;
-    }
-
-    const key = getAgentTaskKey(event);
-    const existingIndex = round.tasks.findIndex((task) => task.key === key);
-    const imageUrl = agentEventToImageUrl(event);
-    if (existingIndex >= 0) {
-      const task = round.tasks[existingIndex]!;
-      round.tasks[existingIndex] = {
-        ...task,
-        title: event.title || task.title,
-        detail: event.detail || task.detail,
-        status: event.status || task.status,
-        updatedAt: event.timestamp || task.updatedAt,
-        toolType: event.toolType || task.toolType,
-        imageUrl: imageUrl || task.imageUrl,
-        events: appendAgentRunEvent(task.events, event),
-      };
-      continue;
-    }
-
-    round.tasks.push({
-      key,
-      kind: event.kind,
-      title: event.title,
-      detail: event.detail,
-      status: event.status,
-      startedAt: event.timestamp,
-      updatedAt: event.timestamp,
-      toolType: event.toolType,
-      imageUrl,
-      events: [normalizeAgentEvent(event)],
-    });
-  }
-
-  return rounds;
 }
 
 function sanitizeAgentEventsForStorage(events: AgentRunEvent[] | undefined) {
@@ -3197,7 +3029,9 @@ export function CreatePageClient({
     let text = "";
     let thinking = "";
     let agent = "";
-    let agentEvents: AgentRunEvent[] = [];
+    let agentEvents: AgentRunEvent[] = agentMode
+      ? createOptimisticAgentRoundEvents(1)
+      : [];
     let previewUrl: string | undefined;
 
     const processBlock = async (block: string) => {
@@ -4285,14 +4119,12 @@ export function CreatePageClient({
 
     setRetryingChatMessageId(assistantId);
     setIsChatGenerating(true);
-    setChatStream({
+    setChatStream(createInitialChatStreamState({
       messageId: assistantId,
       mode: assistantMessage.mode === "agent" ? "agent" : "chat",
-      text: "",
-      thinking: "",
-      agent: "",
-      agentEvents: [],
-    });
+      agentMode:
+        assistantMessage.mode === "agent" || userMessage.mode === "agent",
+    }));
 
     try {
       const data = await runChatRequest({
@@ -4484,38 +4316,48 @@ export function CreatePageClient({
         task.status
       )}`}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground">
-              {agentTaskIcon(task.kind)}
+      {(() => {
+        const firstEvent = task.events[0] || {
+          kind: task.kind,
+          title: task.title,
+          status: task.status,
+          toolType: task.toolType,
+        };
+        return (
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground">
+                  {agentTaskIcon(task.kind)}
+                </span>
+                <span className="text-xs font-semibold text-foreground">
+                  {agentEventLabel({ ...firstEvent, kind: task.kind })}
+                </span>
+                {task.toolType && (
+                  <span className="rounded border border-border bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                    {task.toolType}
+                  </span>
+                )}
+              </div>
+              <p className="mt-2 whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-foreground">
+                {task.title}
+              </p>
+              {task.detail && (
+                <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
+                  {task.detail}
+                </p>
+              )}
+            </div>
+            <span
+              className={`shrink-0 rounded border px-1.5 py-0.5 text-[11px] font-medium ${agentTaskStatusClass(
+                task.status
+              )}`}
+            >
+              {agentTaskStatusLabel(task.status)}
             </span>
-            <span className="text-xs font-semibold text-foreground">
-              {agentEventLabel({ ...task.events[0]!, kind: task.kind })}
-            </span>
-            {task.toolType && (
-              <span className="rounded border border-border bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                {task.toolType}
-              </span>
-            )}
           </div>
-          <p className="mt-2 whitespace-pre-wrap break-words text-xs font-medium leading-relaxed text-foreground">
-            {task.title}
-          </p>
-          {task.detail && (
-            <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
-              {task.detail}
-            </p>
-          )}
-        </div>
-        <span
-          className={`shrink-0 rounded border px-1.5 py-0.5 text-[11px] font-medium ${agentTaskStatusClass(
-            task.status
-          )}`}
-        >
-          {agentTaskStatusLabel(task.status)}
-        </span>
-      </div>
+        );
+      })()}
       {task.imageUrl && (
         <div className="mt-2 max-w-[240px] overflow-hidden rounded-md border bg-muted">
           <Image
@@ -5362,6 +5204,11 @@ export function CreatePageClient({
     setChatPrompt("");
     clearStreamingPreview();
     setIsChatGenerating(true);
+    setChatStream(createInitialChatStreamState({
+      messageId: assistantMessageId,
+      mode: conversationMode,
+      agentMode: conversationMode === "agent",
+    }));
     scrollChatToBottom();
 
     try {

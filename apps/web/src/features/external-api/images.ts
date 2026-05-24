@@ -134,7 +134,8 @@ export function createExternalImageStreamResponse(
   run: (emit: (event: ExternalImageStreamEvent) => Promise<void>) => Promise<void>
 ) {
   const encoder = new TextEncoder();
-  const keepAliveMs = 15_000;
+  const keepAliveMs = 5_000;
+  const flushPadding = `: ${" ".repeat(2048)}\n\n`;
   let keepAlive: ReturnType<typeof setInterval> | undefined;
   let cancelled = false;
 
@@ -153,18 +154,18 @@ export function createExternalImageStreamResponse(
         };
 
         keepAlive = setInterval(() => {
-          write(": ping\n\n");
+          write(`: ping ${Date.now()}\n\n${flushPadding}`);
         }, keepAliveMs);
 
         const emit = async ({ event, data }: ExternalImageStreamEvent) => {
           if (event) write(`event: ${event}\n`);
           write(
-            `data: ${typeof data === "string" ? data : JSON.stringify(data)}\n\n`
+            `data: ${typeof data === "string" ? data : JSON.stringify(data)}\n\n: flush ${Date.now()}\n\n${flushPadding}`
           );
         };
 
         try {
-          write(": open\n\n");
+          write(`: open ${Date.now()}\n\n${flushPadding}`);
           await run(emit);
           await emit({ data: "[DONE]" });
         } catch (error) {
@@ -199,6 +200,9 @@ export function createExternalImageStreamResponse(
       headers: {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache, no-transform",
+        "CDN-Cache-Control": "no-store",
+        "Cloudflare-CDN-Cache-Control": "no-store",
+        "X-Accel-Buffering": "no",
         Connection: "keep-alive",
       },
     }

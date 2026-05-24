@@ -922,10 +922,10 @@ data: {"type":"response.completed","response":{"id":"resp_...","object":"respons
             "该接口不是通用 Chat Completions；/v1/chat/completions 当前仍不支持。",
             "input_image 只支持 image_url/data URL；file_id/file 输入当前不会作为参考图使用。",
             "显式传 tools 但不包含 image_generation 会返回错误，避免模型只产出文本而不生图。",
-            "页面 Chat 模式只提供普通多模态对话/生图语义；Agent 模式默认提供 image_generation、web_search 和 continue_generation，不强制 tool_choice，模型按任务自行选择工具。不支持的工具会自动移除后重试。",
+            "页面 Chat 模式只提供普通多模态对话/生图语义；Agent 模式默认提供 image_generation、web_search 和线性续跑工具 continue_generation，不强制 tool_choice，模型按任务自行选择工具。",
             "页面 Chat/Agent 支持上传文本/代码类本地文件作为上下文读取；不会读取用户在提示词中写入的服务器本地路径。",
             "页面 Chat 每次请求先扣 1 积分；页面 Agent 会在一次用户请求内自动执行多轮，每轮扣 1 积分，生成的图片再按实际尺寸和输出数量追加计费。",
-            "Agent 会把上一轮文字、工具结果和已生成图片喂回下一轮，让模型自行判断是否继续改版；最大轮数由系统设置 IMAGE_AGENT_MAX_ROUNDS 控制，默认 3。",
+            "Agent 会把上一轮文字、工具结果和已生成图片喂回下一轮，让模型自行判断是否继续改版；最大轮数由系统设置 IMAGE_AGENT_MAX_ROUNDS 控制，默认 3。当前没有接入 generate_image_batch 这类并发批量工具，以免打散 Responses 粘性会话。",
             "Agent 多轮产生的 image_generation_call 会作为自动迭代版本展示，最后一张作为默认选中版本。",
           ],
         },
@@ -954,7 +954,7 @@ data: {"type":"response.completed","response":{"id":"resp_...","object":"respons
         "GPT 模型传给 Responses 顶层 model。",
         "图片模型传给 image_generation 工具 model。",
         "size、quality、moderation、参考图、mask 会组装进 Responses 工具请求。",
-        "页面 Chat 模式只提供普通多模态对话/生图语义；页面 Agent 模式默认提供 image_generation、web_search、continue_generation，不强制 tool_choice，并会多轮续跑，让模型像 Codex 一样按需联网、读取已上传文本文件上下文、生成草图和迭代改版。",
+        "页面 Chat 模式只提供普通多模态对话/生图语义；页面 Agent 模式默认提供 image_generation、web_search、continue_generation，不强制 tool_choice，并会线性多轮续跑，让模型像 Codex 一样按需联网、读取已上传文本文件上下文、生成草图和迭代改版。",
         "Chat/Agent 上传的本地文本/代码文件会作为请求上下文读取；不会开放服务器文件系统路径读取。",
         "支持外部 /v1/responses；也可承接 /v1/images/generations 和 /v1/images/edits 的内部转换。",
         "关闭提示词优化时，会通过指令引导模型不要修改提示词；这是尽力约束，不能保证上游一定完全照做。",
@@ -1919,10 +1919,10 @@ data: {"type":"response.completed","response":{"id":"resp_...","object":"respons
             "This is not Chat Completions. /v1/chat/completions is still unsupported.",
             "input_image supports image_url/data URLs. file_id/file inputs are not used as references today.",
             "If tools is provided without image_generation, GPT2IMAGE returns an error to avoid text-only responses.",
-            "Page Chat mode uses normal multimodal chat/image semantics. Agent mode provides image_generation, web_search, and continue_generation by default without forcing tool_choice, and can continue across automatic rounds. Unsupported tools are removed and retried.",
+            "Page Chat mode uses normal multimodal chat/image semantics. Agent mode provides image_generation, web_search, and the linear continuation tool continue_generation by default without forcing tool_choice.",
             "Page Chat/Agent can read uploaded local text/code files as request context. Prompted server filesystem paths are not read.",
             "Page Chat charges 1 credit per request. Page Agent can run multiple automatic rounds inside one user request; each Agent round costs 1 credit, and completed images are additionally charged by actual output size and output count.",
-            "Agent feeds the previous round's text, tool outputs, and generated draft images into the next round so the model can decide whether to refine again. The cap is IMAGE_AGENT_MAX_ROUNDS, default 3.",
+            "Agent feeds the previous round's text, tool outputs, and generated draft images into the next round so the model can decide whether to refine again. The cap is IMAGE_AGENT_MAX_ROUNDS, default 3. Concurrent batch tools such as generate_image_batch are not wired into runtime yet because they need a native Responses state design first.",
             "Multiple Agent image_generation_call outputs are shown as automatic iteration variants, with the last image selected by default.",
           ],
         },
@@ -1952,7 +1952,7 @@ data: {"type":"response.completed","response":{"id":"resp_...","object":"respons
         "GPT model is sent as the top-level Responses model.",
         "Image model is sent as the image_generation tool model.",
         "size, quality, moderation, reference images, and mask are assembled into the Responses tool request.",
-        "Page Chat mode uses normal multimodal chat/image semantics. Page Agent mode provides image_generation, web_search, and continue_generation by default without forcing tool_choice, and can continue across automatic rounds so the model can search, read uploaded text-file context, generate drafts, and refine like Codex.",
+        "Page Chat mode uses normal multimodal chat/image semantics. Page Agent mode provides image_generation, web_search, and continue_generation by default without forcing tool_choice, and can continue across linear automatic rounds so the model can search, read uploaded text-file context, generate drafts, and refine like Codex.",
         "Uploaded local text/code files in Chat/Agent are read as request context. Server filesystem paths written in prompts are not read.",
         "Supports external /v1/responses and can also handle converted /v1/images/generations and /v1/images/edits requests.",
         "When prompt optimization is off, GPT2IMAGE instructs the model not to modify the prompt; this is best effort and upstream may still deviate.",
@@ -2050,12 +2050,14 @@ function ListBlock({
 
 function renderEmphasis(text: string) {
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
-  return parts.map((part, index) => {
+  let emphasisIndex = 0;
+  return parts.map((part) => {
     if (part.startsWith("**") && part.endsWith("**")) {
+      emphasisIndex += 1;
       return (
         <strong
           className="font-semibold text-foreground"
-          key={`${part}-${index}`}
+          key={`emphasis-${emphasisIndex}-${part}`}
         >
           {part.slice(2, -2)}
         </strong>

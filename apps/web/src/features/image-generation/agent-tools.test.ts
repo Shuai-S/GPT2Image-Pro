@@ -29,4 +29,16 @@ describe("Agent default tools", () => {
       "code_interpreter"
     );
   });
+
+  it("keeps Agent flow linear and avoids runtime batch-tool assumptions", () => {
+    expect(DEFAULT_RESPONSES_IMAGE_INSTRUCTIONS).toContain(
+      "provide a brief visible progress note"
+    );
+    expect(DEFAULT_RESPONSES_IMAGE_INSTRUCTIONS).toContain(
+      "do not call unavailable custom batch tools"
+    );
+    expect(DEFAULT_RESPONSES_IMAGE_INSTRUCTIONS).not.toContain(
+      "generate_image_batch"
+    );
+  });
 });

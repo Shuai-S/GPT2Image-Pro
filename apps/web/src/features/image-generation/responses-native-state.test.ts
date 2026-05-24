@@ -19,6 +19,7 @@ import {
   withResponsesImageReferenceInstructions,
 } from "./responses-native-state";
 import { normalizeResponsesImageRequestBody } from "./responses-request-normalizer";
+import { extractResponsesImageCallBase64 } from "./responses-output";
 import type {
   ApiConfig,
   ChatHistoryMessage,
@@ -165,6 +166,35 @@ describe("Responses native state request planning", () => {
     expect(request.previous_response_id).toBeUndefined();
     expect(request.input).toBe(fallbackInput);
     expect(request.store).toBe(true);
+  });
+});
+
+describe("Responses image output compatibility", () => {
+  it("extracts image_generation_call result object base64 fields", () => {
+    expect(
+      extractResponsesImageCallBase64({
+        type: "image_generation_call",
+        result: { base64: "ZmlsZQ==" },
+      })
+    ).toBe("ZmlsZQ==");
+    expect(
+      extractResponsesImageCallBase64({
+        type: "image_generation_call",
+        result: { b64_json: "aW1hZ2U=" },
+      })
+    ).toBe("aW1hZ2U=");
+    expect(
+      extractResponsesImageCallBase64({
+        type: "image_generation_call",
+        result: { image: "cGl4ZWw=" },
+      })
+    ).toBe("cGl4ZWw=");
+    expect(
+      extractResponsesImageCallBase64({
+        type: "image_generation_call",
+        result: { data: "ZGF0YQ==" },
+      })
+    ).toBe("ZGF0YQ==");
   });
 });
 
