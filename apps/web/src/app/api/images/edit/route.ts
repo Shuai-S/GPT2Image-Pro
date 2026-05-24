@@ -84,6 +84,34 @@ function getOptionalBoolean(formData: FormData, ...keys: string[]) {
   return undefined;
 }
 
+function getGenerationIds(formData: FormData, count: number) {
+  const directValues = formData
+    .getAll("generationIds")
+    .concat(formData.getAll("generation_ids"))
+    .filter((value): value is string => typeof value === "string")
+    .flatMap((value) => {
+      const trimmed = value.trim();
+      if (!trimmed) return [];
+      if (!trimmed.startsWith("[")) return [trimmed];
+      try {
+        const parsed = JSON.parse(trimmed);
+        return Array.isArray(parsed)
+          ? parsed.filter((item): item is string => typeof item === "string")
+          : [];
+      } catch {
+        return [trimmed];
+      }
+    })
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  if (directValues.length !== count) return undefined;
+  if (directValues.some((value) => value.length > 128)) {
+    throw new Error("generationIds contains an ID that is too long.");
+  }
+  return directValues;
+}
+
 function hasPromptImageReference(text: string | undefined) {
   return Boolean(text && PROMPT_IMAGE_REFERENCE_PATTERN.test(text));
 }
@@ -207,6 +235,14 @@ export const POST = withApiLogging(async (request: NextRequest) => {
       error instanceof Error ? error.message : "Invalid count."
     );
   }
+  let requestedGenerationIds: string[] | undefined;
+  try {
+    requestedGenerationIds = getGenerationIds(formData, count);
+  } catch (error) {
+    return errorResponse(
+      error instanceof Error ? error.message : "Invalid generationIds."
+    );
+  }
 
   const model = getText(formData, "model") || undefined;
   const gptModel =
@@ -309,9 +345,10 @@ export const POST = withApiLogging(async (request: NextRequest) => {
             await runBatchImageGeneration({
               count,
               generationIds:
-                count === 1 && requestedGenerationId
+                requestedGenerationIds ||
+                (count === 1 && requestedGenerationId
                   ? [requestedGenerationId]
-                  : undefined,
+                  : undefined),
               run: runEdit,
               callbacks: (index) => ({
                 onPartialImage: async (image) => {
@@ -357,9 +394,10 @@ export const POST = withApiLogging(async (request: NextRequest) => {
       const results = await runBatchImageGeneration({
         count,
         generationIds:
-          count === 1 && requestedGenerationId
+          requestedGenerationIds ||
+          (count === 1 && requestedGenerationId
             ? [requestedGenerationId]
-            : undefined,
+            : undefined),
         run: runEdit,
       });
 
