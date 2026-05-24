@@ -293,11 +293,13 @@ type ResponsesPreviousResponseState = {
   createdAt?: string;
 };
 
+type ConversationMode = "chat" | "agent";
+
 type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   text: string;
-  mode?: "chat" | "agent";
+  mode?: ConversationMode;
   attachments?: ChatAttachmentPreview[];
   variants?: ChatVariant[];
   activeVariant?: number;
@@ -307,6 +309,7 @@ type ChatMessage = {
 
 type ChatConversation = {
   id: string;
+  mode: ConversationMode;
   title: string;
   messages: ChatMessage[];
   createdAt: string;
@@ -1117,6 +1120,9 @@ const CHAT_STORAGE_KEY = "gpt2image_chat_messages_v1";
 const CHAT_CONVERSATIONS_STORAGE_KEY = "gpt2image_chat_conversations_v1";
 const CHAT_ACTIVE_CONVERSATION_STORAGE_KEY =
   "gpt2image_active_chat_conversation_v1";
+const CHAT_ACTIVE_AGENT_CONVERSATION_STORAGE_KEY =
+  "gpt2image_active_agent_conversation_v1";
+const CREATE_ACTIVE_MODE_STORAGE_KEY = "gpt2image_create_active_mode_v1";
 const WATERFALL_STORAGE_KEY = "gpt2image_waterfall_state_v1";
 const VISUAL_PENDING_STORAGE_KEY = "gpt2image_visual_pending_v1";
 const VISUAL_PENDING_TTL_MS = 60 * 60 * 1000;
@@ -1124,6 +1130,22 @@ const CHAT_PENDING_TTL_MS = 60 * 60 * 1000;
 const CHAT_CONTEXT_MESSAGE_LIMIT = 8;
 const CHAT_CONVERSATION_LIMIT = 30;
 const PROMPT_IMAGE_REFERENCE_PATTERN = /@(?:第)?\d+轮图\d+|@图\d+/;
+
+function readStoredCreateActiveMode(): ActiveMode {
+  if (typeof window === "undefined") return "text";
+  try {
+    const value = window.localStorage.getItem(CREATE_ACTIVE_MODE_STORAGE_KEY);
+    return value === "text" ||
+      value === "image" ||
+      value === "chat" ||
+      value === "agent" ||
+      value === "waterfall"
+      ? value
+      : "text";
+  } catch {
+    return "text";
+  }
+}
 
 interface CreatePageClientProps {
   balance: number;
@@ -1558,16 +1580,34 @@ function sanitizePersistedChatMessages(messages: ChatMessage[]): ChatMessage[] {
 function createChatConversation(
   messages: ChatMessage[],
   title: string,
-  id = createLocalId()
+  id = createLocalId(),
+  mode: ConversationMode = inferChatConversationMode(messages)
 ): ChatConversation {
   const now = new Date().toISOString();
   return {
     id,
+    mode,
     title,
     messages,
     createdAt: now,
     updatedAt: now,
   };
+}
+
+function inferChatConversationMode(messages: ChatMessage[]): ConversationMode {
+  return messages.some((message) => message.mode === "agent")
+    ? "agent"
+    : "chat";
+}
+
+function chatActiveConversationStorageKey(mode: ConversationMode) {
+  return mode === "agent"
+    ? CHAT_ACTIVE_AGENT_CONVERSATION_STORAGE_KEY
+    : CHAT_ACTIVE_CONVERSATION_STORAGE_KEY;
+}
+
+function activeModeToConversationMode(mode: ActiveMode): ConversationMode {
+  return mode === "agent" ? "agent" : "chat";
 }
 
 function sanitizeChatConversations(value: unknown): ChatConversation[] {
@@ -1578,18 +1618,46 @@ function sanitizeChatConversations(value: unknown): ChatConversation[] {
     const messages = sanitizeChatMessages(item.messages);
     if (messages.length === 0) return [];
     const now = new Date().toISOString();
-    return [
+    const baseId = typeof item.id === "string" ? item.id : createLocalId();
+    const storedMode: ConversationMode | null =
+      item.mode === "agent" ? "agent" : item.mode === "chat" ? "chat" : null;
+    const storedTitle =
+      typeof item.title === "string" && item.title.trim()
+        ? item.title
+        : "Untitled chat";
+    const createdAt = typeof item.createdAt === "string" ? item.createdAt : now;
+    const updatedAt = typeof item.updatedAt === "string" ? item.updatedAt : now;
+    const modeBuckets: Array<{
+      mode: ConversationMode;
+      messages: ChatMessage[];
+    }> = [
       {
-        id: typeof item.id === "string" ? item.id : createLocalId(),
-        title:
-          typeof item.title === "string" && item.title.trim()
-            ? item.title
-            : "Untitled chat",
-        messages,
-        createdAt: typeof item.createdAt === "string" ? item.createdAt : now,
-        updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : now,
+        mode: "chat",
+        messages: messages.filter((message) => message.mode !== "agent"),
+      },
+      {
+        mode: "agent",
+        messages: messages.filter((message) => message.mode === "agent"),
       },
     ];
+    const byMode = modeBuckets.filter((entry) => entry.messages.length > 0);
+
+    const entries: Array<{ mode: ConversationMode; messages: ChatMessage[] }> =
+      byMode.length > 1
+        ? byMode
+        : [{ mode: storedMode || inferChatConversationMode(messages), messages }];
+
+    return entries.map((entry) => ({
+      id:
+        entries.length > 1 && storedMode !== entry.mode
+          ? `${baseId}:${entry.mode}`
+          : baseId,
+      mode: entry.mode,
+      title: getChatConversationTitle(entry.messages, storedTitle),
+      messages: entry.messages,
+      createdAt,
+      updatedAt,
+    }));
   });
 }
 
@@ -1601,6 +1669,7 @@ function isConversationSnapshotOf(
   candidate: ChatConversation,
   target: ChatConversation
 ) {
+  if (candidate.mode !== target.mode) return false;
   if (candidate.id === target.id) return true;
   if (candidate.messages.length > target.messages.length) return false;
   return candidate.messages.every(
@@ -1816,11 +1885,11 @@ export function CreatePageClient({
   const showAgentProcessHint = !isWebOnlyBackend;
   const isConversationMode = (mode: ActiveMode) =>
     mode === "chat" || mode === "agent" || mode === "waterfall";
-  const getConversationMode = (mode: ActiveMode): "chat" | "agent" =>
-    mode === "agent" ? "agent" : "chat";
+  const getConversationMode = (mode: ActiveMode): ConversationMode =>
+    activeModeToConversationMode(mode);
   const isMessageInConversationMode = (
     message: ChatMessage,
-    mode: "chat" | "agent"
+    mode: ConversationMode
   ) => (mode === "agent" ? message.mode === "agent" : message.mode !== "agent");
   const imageCountLabel = (count: number) =>
     copy(`${count} image${count > 1 ? "s" : ""}`, `${count} 张图片`);
@@ -1953,7 +2022,9 @@ export function CreatePageClient({
     uploadLimits.maxFileSizeBytes || DEFAULT_MAX_IMAGE_BYTES;
   const maxEditRequestBytes =
     uploadLimits.maxUploadBytes || DEFAULT_MAX_EDIT_REQUEST_BYTES;
-  const [activeMode, setActiveMode] = useState<ActiveMode>("text");
+  const [activeMode, setActiveMode] = useState<ActiveMode>(() =>
+    readStoredCreateActiveMode()
+  );
   const [prompt, setPrompt] = useState("");
   const [textMode, setTextMode] = useState<TextGenerationMode>("single");
   const [linePrompts, setLinePrompts] = useState("");
@@ -2186,6 +2257,8 @@ export function CreatePageClient({
   const chatMessagesRef = useRef<HTMLDivElement | null>(null);
   const chatConversationsRef = useRef<ChatConversation[]>([]);
   const didLoadChatRef = useRef(false);
+  const chatMessagesConversationIdRef = useRef<string | null>(null);
+  const chatMessagesModeRef = useRef<ConversationMode | null>(null);
   const didApplyReferenceParamRef = useRef(false);
   const didRestoreVisualPendingRef = useRef(false);
   const restoredChatGenerationIdsRef = useRef<Set<string>>(new Set());
@@ -2396,6 +2469,20 @@ export function CreatePageClient({
     `已发送 ${waterfallStats.sent} · 成功 ${waterfallStats.success} · 失败 ${waterfallStats.failed} · 进行中 ${waterfallInFlight}`
   );
   const activeConversationMode = getConversationMode(activeMode);
+  const currentModeConversations = useMemo(
+    () =>
+      chatConversations.filter(
+        (conversation) => conversation.mode === activeConversationMode
+      ),
+    [activeConversationMode, chatConversations]
+  );
+  const activeConversationExists = useMemo(
+    () =>
+      currentModeConversations.some(
+        (conversation) => conversation.id === chatConversationId
+      ),
+    [chatConversationId, currentModeConversations]
+  );
   const visibleChatMessages = chatMessages.filter((message) =>
     isMessageInConversationMode(message, activeConversationMode)
   );
@@ -2813,6 +2900,19 @@ export function CreatePageClient({
     setStreamingPreviewUrl(null);
   };
 
+  const activateChatConversation = (
+    conversation: ChatConversation | null | undefined,
+    fallbackMode: ConversationMode = activeConversationMode
+  ) => {
+    const nextId = conversation?.id || createLocalId();
+    const nextMode = conversation?.mode || fallbackMode;
+    chatMessagesConversationIdRef.current = nextId;
+    chatMessagesModeRef.current = nextMode;
+    setChatConversationId(nextId);
+    setChatMessages(conversation?.messages || []);
+    window.localStorage.setItem(chatActiveConversationStorageKey(nextMode), nextId);
+  };
+
   const setVisualStreamingPreview = (
     mode: VisualOutputMode,
     imageUrl: string | null
@@ -2825,6 +2925,8 @@ export function CreatePageClient({
   };
 
   const resetChatConversation = () => {
+    chatMessagesConversationIdRef.current = chatConversationId;
+    chatMessagesModeRef.current = activeConversationMode;
     setChatMessages([]);
     setChatStream(null);
     setRetryingChatMessageId(null);
@@ -2836,8 +2938,13 @@ export function CreatePageClient({
     if (isChatGenerating) return;
     resetChatConversation();
     const nextId = createLocalId();
+    chatMessagesConversationIdRef.current = nextId;
+    chatMessagesModeRef.current = activeConversationMode;
     setChatConversationId(nextId);
-    window.localStorage.setItem(CHAT_ACTIVE_CONVERSATION_STORAGE_KEY, nextId);
+    window.localStorage.setItem(
+      chatActiveConversationStorageKey(activeConversationMode),
+      nextId
+    );
     setChatPrompt("");
     clearChatAttachments();
     toast.success(copy("New chat started", "已新建对话"));
@@ -2856,20 +2963,20 @@ export function CreatePageClient({
     );
     resetChatConversation();
     const nextId = createLocalId();
+    chatMessagesConversationIdRef.current = nextId;
+    chatMessagesModeRef.current = activeConversationMode;
     setChatConversationId(nextId);
-    window.localStorage.setItem(CHAT_ACTIVE_CONVERSATION_STORAGE_KEY, nextId);
+    window.localStorage.setItem(
+      chatActiveConversationStorageKey(activeConversationMode),
+      nextId
+    );
     setChatPrompt("");
     toast.success(copy("Chat history cleared", "对话记录已清理"));
   };
 
   const handleOpenChatConversation = (conversation: ChatConversation) => {
     if (isChatGenerating) return;
-    setChatConversationId(conversation.id);
-    window.localStorage.setItem(
-      CHAT_ACTIVE_CONVERSATION_STORAGE_KEY,
-      conversation.id
-    );
-    setChatMessages(conversation.messages);
+    activateChatConversation(conversation, conversation.mode);
     setChatStream(null);
     setRetryingChatMessageId(null);
     clearStreamingPreview();
@@ -2877,6 +2984,56 @@ export function CreatePageClient({
     clearChatAttachments();
     scrollChatToBottom();
   };
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CREATE_ACTIVE_MODE_STORAGE_KEY, activeMode);
+    } catch {
+      /* ignore local storage quota errors */
+    }
+
+    if (!didLoadChatRef.current || !isConversationMode(activeMode)) return;
+    if (isChatGenerating || chatStream?.generationId) return;
+    if (
+      activeConversationExists &&
+      chatMessagesModeRef.current === activeConversationMode
+    ) {
+      return;
+    }
+
+    const storedId = window.localStorage.getItem(
+      chatActiveConversationStorageKey(activeConversationMode)
+    );
+    const conversation =
+      currentModeConversations.find((item) => item.id === storedId) ||
+      currentModeConversations[0];
+    if (conversation) {
+      activateChatConversation(conversation, activeConversationMode);
+    } else {
+      const nextId =
+        chatMessagesModeRef.current === activeConversationMode
+          ? chatConversationId
+          : createLocalId();
+      chatMessagesConversationIdRef.current = nextId;
+      chatMessagesModeRef.current = activeConversationMode;
+      setChatConversationId(nextId);
+      setChatMessages([]);
+      window.localStorage.setItem(
+        chatActiveConversationStorageKey(activeConversationMode),
+        nextId
+      );
+    }
+    setChatStream(null);
+    setRetryingChatMessageId(null);
+    clearStreamingPreview();
+  }, [
+    activeConversationExists,
+    activeConversationMode,
+    activeMode,
+    chatStream?.generationId,
+    currentModeConversations,
+    isChatGenerating,
+  ]);
 
   const scrollChatToBottom = () => {
     requestAnimationFrame(() => {
@@ -3502,33 +3659,51 @@ export function CreatePageClient({
               new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
           )
           .slice(0, CHAT_CONVERSATION_LIMIT);
+        const storedConversationMode = activeModeToConversationMode(
+          readStoredCreateActiveMode()
+        );
         const activeConversationId = window.localStorage.getItem(
-          CHAT_ACTIVE_CONVERSATION_STORAGE_KEY
+          chatActiveConversationStorageKey(storedConversationMode)
         );
         const activeConversation =
           sortedConversations.find(
-            (conversation) => conversation.id === activeConversationId
-          ) || sortedConversations[0];
+            (conversation) =>
+              conversation.mode === storedConversationMode &&
+              conversation.id === activeConversationId
+          ) ||
+          sortedConversations.find(
+            (conversation) => conversation.mode === storedConversationMode
+          ) ||
+          sortedConversations[0];
         chatConversationsRef.current = sortedConversations;
         setChatConversations(sortedConversations);
+        chatMessagesConversationIdRef.current =
+          activeConversation?.id || null;
+        chatMessagesModeRef.current = activeConversation?.mode || null;
         setChatConversationId(activeConversation?.id || createLocalId());
         setChatMessages(activeConversation?.messages || []);
         if (activeConversation) {
           window.localStorage.setItem(
-            CHAT_ACTIVE_CONVERSATION_STORAGE_KEY,
+            chatActiveConversationStorageKey(activeConversation.mode),
             activeConversation.id
           );
         }
       }
       window.localStorage.setItem(
         CHAT_CONVERSATIONS_STORAGE_KEY,
-        JSON.stringify(nextConversations.slice(0, CHAT_CONVERSATION_LIMIT))
+        JSON.stringify(
+          compactChatConversations(nextConversations).slice(
+            0,
+            CHAT_CONVERSATION_LIMIT
+          )
+        )
       );
       window.localStorage.removeItem(CHAT_STORAGE_KEY);
     } catch {
       window.localStorage.removeItem(CHAT_STORAGE_KEY);
       window.localStorage.removeItem(CHAT_CONVERSATIONS_STORAGE_KEY);
       window.localStorage.removeItem(CHAT_ACTIVE_CONVERSATION_STORAGE_KEY);
+      window.localStorage.removeItem(CHAT_ACTIVE_AGENT_CONVERSATION_STORAGE_KEY);
     } finally {
       didLoadChatRef.current = true;
     }
@@ -3537,13 +3712,27 @@ export function CreatePageClient({
   useEffect(() => {
     if (!didLoadChatRef.current) return;
     try {
+      if (
+        chatMessages.length > 0 &&
+        chatMessagesConversationIdRef.current &&
+        (chatMessagesConversationIdRef.current !== chatConversationId ||
+          (chatMessagesModeRef.current &&
+            chatMessagesModeRef.current !== inferChatConversationMode(chatMessages)))
+      ) {
+        return;
+      }
       if (chatMessages.length === 0) {
         window.localStorage.removeItem(CHAT_STORAGE_KEY);
         return;
       }
       const persistedMessages = sanitizePersistedChatMessages(chatMessages);
+      const conversationMode = inferChatConversationMode(persistedMessages);
+      chatMessagesConversationIdRef.current = chatConversationId;
+      chatMessagesModeRef.current = conversationMode;
       const title = getChatConversationTitle(
-        persistedMessages,
+        persistedMessages.filter((message) =>
+          isMessageInConversationMode(message, conversationMode)
+        ),
         isZh ? "未命名对话" : "Untitled chat"
       );
       const now = new Date().toISOString();
@@ -3553,6 +3742,7 @@ export function CreatePageClient({
       );
       const current: ChatConversation = {
         id: chatConversationId,
+        mode: existing?.mode || conversationMode,
         title,
         messages: persistedMessages,
         createdAt: existing?.createdAt || now,
@@ -3571,7 +3761,7 @@ export function CreatePageClient({
         JSON.stringify(nextConversations)
       );
       window.localStorage.setItem(
-        CHAT_ACTIVE_CONVERSATION_STORAGE_KEY,
+        chatActiveConversationStorageKey(current.mode),
         chatConversationId
       );
       window.localStorage.removeItem(CHAT_STORAGE_KEY);
@@ -4061,8 +4251,18 @@ export function CreatePageClient({
     const target = targets[0];
     if (!target) return;
     restoredChatGenerationIdsRef.current.add(target.generationId);
+    if (target.conversationId !== chatConversationId) {
+      const conversation = chatConversations.find(
+        (item) => item.id === target.conversationId
+      );
+      if (conversation) {
+        activateChatConversation(conversation, target.mode);
+      }
+    } else {
+      chatMessagesModeRef.current = target.mode;
+    }
     void restorePendingChatGeneration(target);
-  }, [chatConversations, chatMessages, chatStream?.generationId]);
+  }, [chatConversationId, chatConversations, chatMessages, chatStream?.generationId]);
 
   const addSuccessfulResults = (
     data: ImageApiResult,
@@ -7892,16 +8092,22 @@ export function CreatePageClient({
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <Select
-                  value={chatConversationId}
+                  value={
+                    activeConversationExists
+                      ? chatConversationId
+                      : currentModeConversations[0]?.id || chatConversationId
+                  }
                   onValueChange={(value) => {
-                    const conversation = chatConversations.find(
+                    const conversation = currentModeConversations.find(
                       (item) => item.id === value
                     );
                     if (conversation) {
                       handleOpenChatConversation(conversation);
                     }
                   }}
-                  disabled={isChatGenerating || chatConversations.length === 0}
+                  disabled={
+                    isChatGenerating || currentModeConversations.length === 0
+                  }
                 >
                   <SelectTrigger className="h-9 w-[180px] sm:w-[220px]">
                     <SelectValue
@@ -7909,7 +8115,7 @@ export function CreatePageClient({
                     />
                   </SelectTrigger>
                   <SelectContent>
-                    {chatConversations.map((conversation) => (
+                    {currentModeConversations.map((conversation) => (
                       <SelectItem key={conversation.id} value={conversation.id}>
                         {conversation.title}
                       </SelectItem>
