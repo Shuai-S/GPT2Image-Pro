@@ -2425,16 +2425,13 @@ export function CreatePageClient({
         "Agent mode requires Codex/Responses backend. Web backend keeps the original ChatGPT Web route and does not expose Agent tools.",
         "Agent 模式需要 Codex/Responses 后端。Web 后端保持原 ChatGPT Web 路线，不提供 Agent 工具。"
       )
-    : chatMixWebFirstActive
-      ? copy(
-          "Agent mode is disabled while 1K Mixed routing would go to Web first. Turn off Web-first routing or choose a Codex/Responses group.",
-          "1K Mixed 路由会优先导向 Web 时，Agent 不可用。请关闭 Web-first 路由，或选择 Codex/Responses 分组。"
-        )
-      : undefined;
+    : undefined;
   const effectiveAgentAllowed = agentAllowed && !agentBackendUnavailableReason;
   const currentModeMixWebFirstActive =
     activeMode === "image"
       ? editMixWebFirstActive
+      : activeMode === "agent"
+        ? false
       : isConversationMode(activeMode)
         ? chatMixWebFirstActive
         : textMixWebFirstActive;
@@ -3124,7 +3121,7 @@ export function CreatePageClient({
     if (promptOptimizationAllowed) {
       formData.append("prompt_optimization", String(promptOptimization));
     }
-    if (hasPromptImageReference(prompt)) {
+    if (agentMode || hasPromptImageReference(prompt)) {
       formData.append("requires_responses_backend", "true");
     } else if (chatMixWebFirstActive) {
       formData.append("mix_web_first", "true");

@@ -30,6 +30,13 @@ import type {
   ImageBackendRequestKind,
 } from "@/features/image-backend-pool/types";
 import {
+  DEFAULT_AGENT_IMAGE_ROUNDS,
+  DEFAULT_RESPONSES_IMAGE_INSTRUCTIONS,
+  ORIGINAL_PROMPT_RESPONSES_IMAGE_INSTRUCTIONS,
+  AGENT_CONTINUE_INSTRUCTIONS,
+  createDefaultAgentAdditionalTools,
+} from "./agent-tools";
+import {
   editImageWithChatGptWeb,
   generateImageWithChatGptWeb,
 } from "./chatgpt-web";
@@ -99,32 +106,6 @@ const DEFAULT_CHAT_RESPONSES_IMAGE_INSTRUCTIONS =
   "You are a multimodal chat assistant. Use image_generation when the user asks for an image, edit, or visual output. Keep replies concise and preserve the conversation context.";
 const ORIGINAL_PROMPT_CHAT_RESPONSES_IMAGE_INSTRUCTIONS =
   "You are a multimodal chat assistant. When calling image_generation, use the user's original image prompt exactly as written. Do not rewrite, expand, translate, polish, or optimize the latest user prompt before image generation.";
-const DEFAULT_RESPONSES_IMAGE_INSTRUCTIONS =
-  "You are a multimodal assistant. Use web_search when current or external information is needed, use code_interpreter when calculation or file analysis helps, and use image_generation when the user asks for an image, edit, or visual output. For image tasks, do not stop after research or a plan; either call image_generation or clearly ask for missing required input.";
-const ORIGINAL_PROMPT_RESPONSES_IMAGE_INSTRUCTIONS =
-  "You are a multimodal assistant. Use web_search when current or external information is needed, and use code_interpreter when calculation or file analysis helps. When calling image_generation, use the user's original image prompt exactly as written. Do not rewrite, expand, translate, polish, or optimize the latest user prompt before image generation. For image tasks, do not stop after research or a plan; either call image_generation or clearly ask for missing required input.";
-const AGENT_CONTINUE_INSTRUCTIONS =
-  "Continue the same Agent run. Review the previous assistant notes, tool outputs, and generated draft images in this conversation. If the user asked for image creation or iterative refinement and the task is not complete, continue autonomously: call image_generation for the next concrete version, or stop only when no further useful iteration is needed. Keep visible progress notes brief.";
-const AGENT_CONTINUE_TOOL = {
-  type: "function",
-  name: "continue_generation",
-  description:
-    "Request another Agent loop round after producing a prerequisite image or after research/planning when more concrete generation work remains. Do not call this when the task is complete.",
-  parameters: {
-    type: "object",
-    properties: {
-      reason: {
-        type: "string",
-        description:
-          "Brief reason why another round is needed and what should happen next.",
-      },
-    },
-    required: ["reason"],
-    additionalProperties: false,
-  },
-  strict: true,
-} as const;
-const DEFAULT_AGENT_IMAGE_ROUNDS = 3;
 
 type ImageOutput = {
   b64_json?: string;
@@ -1889,6 +1870,26 @@ async function emitAgentDecision(
   });
 }
 
+async function emitAgentRoundRequestStatus(
+  callbacks: ImageGenerationCallbacks | undefined,
+  params: {
+    round: number;
+    status: AgentRunEventStatus;
+    title?: string;
+    detail?: string;
+  }
+) {
+  await emitAgentProgress(callbacks, {
+    id: `agent-round-${params.round}-upstream`,
+    kind: "tool",
+    status: params.status,
+    title: params.title || "等待 Codex/Responses 上游响应",
+    detail: params.detail,
+    timestamp: new Date().toISOString(),
+    toolType: "agent_round_request",
+  });
+}
+
 async function recordAgentEvent(
   state: EventStreamParseState,
   callbacks: ImageGenerationCallbacks | undefined,
@@ -3070,11 +3071,7 @@ export async function generateChatImage(
 
     const stream = Boolean(params.stream || config.useStream);
     const defaultAdditionalTools = params.agentMode
-      ? [
-          { type: "web_search" },
-          { type: "code_interpreter", container: { type: "auto" } },
-          AGENT_CONTINUE_TOOL,
-        ]
+      ? createDefaultAgentAdditionalTools()
       : [];
     const requestBody: ResponsesStreamRequestBody =
       params.rawResponsesBody && isPlainRecord(params.rawResponsesBody)
@@ -3133,66 +3130,86 @@ export async function generateChatImage(
           timestamp: new Date().toISOString(),
         });
 
-        let roundResult = await fetchAgentRoundResponses({
-          config,
-          requestBody: roundRequestBody,
-          signal: params.signal,
-          stream,
-          callbacks,
+        await emitAgentRoundRequestStatus(callbacks, {
+          round,
+          status: "running",
+          detail: "已发送请求，等待模型返回工具调用、文本或图片",
         });
-        if (
-          round === 1 &&
-          canUsePreviousResponseId &&
-          roundResult.error &&
-          isPreviousResponseStateError(roundResult.error)
-        ) {
-          agentPreviousResponseId = undefined;
+        let roundResult: ResponsesResultWithOutput;
+        try {
           roundResult = await fetchAgentRoundResponses({
             config,
-            requestBody: {
-              ...roundRequestBody,
-              input: manualHistoryInput,
-              previous_response_id: undefined,
-            },
+            requestBody: roundRequestBody,
             signal: params.signal,
             stream,
             callbacks,
           });
+          if (
+            round === 1 &&
+            canUsePreviousResponseId &&
+            roundResult.error &&
+            isPreviousResponseStateError(roundResult.error)
+          ) {
+            agentPreviousResponseId = undefined;
+            roundResult = await fetchAgentRoundResponses({
+              config,
+              requestBody: {
+                ...roundRequestBody,
+                input: manualHistoryInput,
+                previous_response_id: undefined,
+              },
+              signal: params.signal,
+              stream,
+              callbacks,
+            });
+          }
+          if (
+            round > 1 &&
+            agentPreviousResponseEnabled &&
+            roundResult.error &&
+            shouldRetryAgentRoundWithManualHistory(roundResult.error)
+          ) {
+            await emitAgentDecision(callbacks, {
+              status: "completed",
+              title: "Agent 上下文重试",
+              detail:
+                "上游原生会话状态返回异常，已改用手动历史和上一版图片重试当前轮",
+            });
+            agentPreviousResponseId = undefined;
+            roundResult = await fetchAgentRoundResponses({
+              config,
+              requestBody: {
+                ...roundRequestBody,
+                input: buildAgentContinuationInput({
+                  baseInput: input,
+                  previousResult: mergeGenerateImageResults(roundResults),
+                  currentRound: round - 1,
+                  maxRounds,
+                  outputFormat,
+                  historyRoundIndex: responseImageRoundIndex,
+                  includeImageEntities: true,
+                }),
+                previous_response_id: undefined,
+                store: false,
+              },
+              signal: params.signal,
+              stream,
+              callbacks,
+            });
+          }
+        } catch (error) {
+          roundResult = {
+            error:
+              error instanceof Error ? error.message : "Unknown error occurred",
+          };
         }
-        if (
-          round > 1 &&
-          agentPreviousResponseEnabled &&
-          roundResult.error &&
-          shouldRetryAgentRoundWithManualHistory(roundResult.error)
-        ) {
-          await emitAgentDecision(callbacks, {
-            status: "completed",
-            title: "Agent 上下文重试",
-            detail:
-              "上游原生会话状态返回异常，已改用手动历史和上一版图片重试当前轮",
-          });
-          agentPreviousResponseId = undefined;
-          roundResult = await fetchAgentRoundResponses({
-            config,
-            requestBody: {
-              ...roundRequestBody,
-              input: buildAgentContinuationInput({
-                baseInput: input,
-                previousResult: mergeGenerateImageResults(roundResults),
-                currentRound: round - 1,
-                maxRounds,
-                outputFormat,
-                historyRoundIndex: responseImageRoundIndex,
-                includeImageEntities: true,
-              }),
-              previous_response_id: undefined,
-              store: false,
-            },
-            signal: params.signal,
-            stream,
-            callbacks,
-          });
-        }
+        await emitAgentRoundRequestStatus(callbacks, {
+          round,
+          status: roundResult.error ? "failed" : "completed",
+          detail: roundResult.error
+            ? roundResult.error
+            : "上游响应已返回，正在整理本轮结果",
+        });
         roundResults.push(roundResult);
         if (agentPreviousResponseEnabled && roundResult.responseId) {
           agentPreviousResponseId = roundResult.responseId;
@@ -3335,6 +3352,23 @@ export async function generateChatImage(
       if (!result) {
         result = mergeGenerateImageResults(roundResults);
       }
+      const completedRounds =
+        result.agentRoundCount ||
+        roundResults.filter((item) => !item.error).length;
+      const finalAgentEvent: AgentRunEvent = {
+        kind: "message",
+        status: result.error ? "failed" : "completed",
+        title: result.error ? "Agent 执行失败" : "Agent 执行完成",
+        detail: result.error
+          ? result.error
+          : `已完成 ${completedRounds || roundResults.length} 轮 Agent 执行`,
+        timestamp: new Date().toISOString(),
+      };
+      await emitAgentProgress(callbacks, finalAgentEvent);
+      result = {
+        ...result,
+        agentEvents: mergeAgentEvents(result.agentEvents, [finalAgentEvent]),
+      };
     } else {
       result = await fetchResponsesWithPreviousResponseFallback(
         config,
