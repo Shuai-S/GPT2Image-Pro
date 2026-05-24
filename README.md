@@ -270,6 +270,8 @@ TODO：
 
 ## 部署
 
+`https://gpt2image.superapi.buzz` 当前线上实例使用 systemd release + Nginx 静态 alias + 3308 upstream，详细操作见 [Superapi 生图站部署 Runbook](docs/deploy-superapi.md)。通用部署说明如下。
+
 ### 1. 服务器依赖
 
 建议 Ubuntu/Debian：

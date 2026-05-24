@@ -416,6 +416,21 @@ type ChatStreamState = {
   size?: string;
 };
 
+type ChatPendingRestoreTarget = {
+  conversationId: string;
+  assistantMessageId: string;
+  mode: "chat" | "agent";
+  generationId: string;
+  prompt: string;
+  model: string;
+  size: string;
+  responseText?: string;
+  responseThinking?: string;
+  responseAgent?: string;
+  agentEvents?: AgentRunEvent[];
+  imageUrl?: string;
+};
+
 function createInitialChatStreamState(params: {
   messageId?: string;
   cardId?: string;
@@ -1105,6 +1120,7 @@ const CHAT_ACTIVE_CONVERSATION_STORAGE_KEY =
 const WATERFALL_STORAGE_KEY = "gpt2image_waterfall_state_v1";
 const VISUAL_PENDING_STORAGE_KEY = "gpt2image_visual_pending_v1";
 const VISUAL_PENDING_TTL_MS = 60 * 60 * 1000;
+const CHAT_PENDING_TTL_MS = 60 * 60 * 1000;
 const CHAT_CONTEXT_MESSAGE_LIMIT = 8;
 const CHAT_CONVERSATION_LIMIT = 30;
 const PROMPT_IMAGE_REFERENCE_PATTERN = /@(?:第)?\d+轮图\d+|@图\d+/;
@@ -1664,6 +1680,44 @@ function replaceChatVariantByGenerationId(
   ];
 }
 
+function findPendingChatRestoreTargets(
+  conversations: ChatConversation[]
+): ChatPendingRestoreTarget[] {
+  const now = Date.now();
+  const targets: ChatPendingRestoreTarget[] = [];
+  for (const conversation of conversations) {
+    for (const message of conversation.messages) {
+      if (message.role !== "assistant") continue;
+      const mode = message.mode === "agent" ? "agent" : ("chat" as const);
+      for (const variant of getChatVariants(message)) {
+        if (!variant.pending || !variant.generationId) continue;
+        const createdAt = variant.createdAt || message.createdAt;
+        if (
+          createdAt &&
+          now - new Date(createdAt).getTime() > CHAT_PENDING_TTL_MS
+        ) {
+          continue;
+        }
+        targets.push({
+          conversationId: conversation.id,
+          assistantMessageId: message.id,
+          mode,
+          generationId: variant.generationId,
+          prompt: variant.prompt || message.text,
+          model: variant.model,
+          size: variant.size,
+          responseText: variant.responseText,
+          responseThinking: variant.responseThinking,
+          responseAgent: variant.responseAgent,
+          agentEvents: variant.agentEvents,
+          imageUrl: variant.imageUrl,
+        });
+      }
+    }
+  }
+  return targets;
+}
+
 function getMessageImageUrls(message: ChatMessage) {
   const urls: string[] = [];
   for (const attachment of message.attachments || []) {
@@ -2134,6 +2188,7 @@ export function CreatePageClient({
   const didLoadChatRef = useRef(false);
   const didApplyReferenceParamRef = useRef(false);
   const didRestoreVisualPendingRef = useRef(false);
+  const restoredChatGenerationIdsRef = useRef<Set<string>>(new Set());
   const batchLoadTriggerRef = useRef<HTMLDivElement | null>(null);
   const batchScrollRef = useRef<HTMLDivElement | null>(null);
   const batchActiveRequestsRef = useRef(0);
@@ -3806,6 +3861,208 @@ export function CreatePageClient({
     }
     return variants;
   };
+
+  const updatePendingChatVariant = (
+    target: ChatPendingRestoreTarget,
+    patch: Partial<ChatVariant> & { error?: string; text?: string }
+  ) => {
+    const nextVariantPatch: Partial<ChatVariant> = {
+      generationId: target.generationId,
+      prompt: target.prompt,
+      model: target.model,
+      size: target.size,
+      imageUrl: patch.imageUrl,
+      responseText: patch.responseText,
+      responseThinking: patch.responseThinking,
+      responseAgent: patch.responseAgent,
+      agentEvents: patch.agentEvents,
+      pending: patch.pending,
+    };
+    setChatMessages((prev) =>
+      prev.map((message) => {
+        if (message.id !== target.assistantMessageId) return message;
+        const variants = getChatVariants(message);
+        const currentVariant =
+          variants.find(
+            (variant) => variant.generationId === target.generationId
+          ) || getActiveChatVariant(message);
+        const nextVariant = mergeChatVariant(
+          currentVariant || undefined,
+          nextVariantPatch
+        );
+        return {
+          ...message,
+          error: patch.error,
+          text:
+            patch.text ||
+            patch.responseText ||
+            (patch.imageUrl
+              ? copy("Generating image...", "正在生成图片...")
+              : message.text),
+          variants: replaceChatVariantByGenerationId(
+            variants.length ? variants : [nextVariant],
+            target.generationId,
+            [nextVariant]
+          ),
+        };
+      })
+    );
+  };
+
+  const restorePendingChatGeneration = async (
+    target: ChatPendingRestoreTarget
+  ) => {
+    setActiveMode(target.mode);
+    setIsChatGenerating(true);
+    setChatStream({
+      messageId: target.assistantMessageId,
+      mode: target.mode,
+      text: target.responseText || "",
+      thinking: target.responseThinking || "",
+      agent: target.responseAgent || "",
+      agentEvents:
+        target.agentEvents ||
+        (target.mode === "agent" ? createOptimisticAgentRoundEvents(1) : []),
+      imageUrl: target.imageUrl,
+      generationId: target.generationId,
+      prompt: target.prompt,
+      model: target.model,
+      size: target.size,
+    });
+
+    const sleep = (ms: number) =>
+      new Promise((resolve) => setTimeout(resolve, ms));
+    const startedAt = Date.now();
+    try {
+      while (Date.now() - startedAt < CHAT_PENDING_TTL_MS) {
+        const response = await fetch(
+          `/api/images/status/${target.generationId}`,
+          { cache: "no-store" }
+        );
+        if (!response.ok) {
+          throw new Error(`Status API error: ${response.status}`);
+        }
+        const data = (await response.json()) as ImageApiResult;
+        const nextAgentEvents = data.agentEvents?.length
+          ? data.agentEvents
+          : target.agentEvents;
+        const nextStream: ChatStreamState = {
+          messageId: target.assistantMessageId,
+          mode: target.mode,
+          text: data.responseText || target.responseText || "",
+          thinking: data.responseThinking || target.responseThinking || "",
+          agent: data.responseAgent || target.responseAgent || "",
+          agentEvents:
+            nextAgentEvents ||
+            (target.mode === "agent" ? createOptimisticAgentRoundEvents(1) : []),
+          imageUrl: data.imageUrl || target.imageUrl,
+          generationId: target.generationId,
+          prompt: target.prompt,
+          model: data.model || target.model,
+          size: data.size || target.size,
+        };
+        setChatStream(nextStream);
+        updatePendingChatVariant(target, {
+          imageUrl: nextStream.imageUrl,
+          responseText: nextStream.text || undefined,
+          responseThinking: nextStream.thinking || undefined,
+          responseAgent: nextStream.agent || undefined,
+          agentEvents: nextStream.agentEvents,
+          pending: true,
+        });
+
+        if (data.status === "completed") {
+          const variants = addSuccessfulChatResults(
+            data,
+            data.prompt || target.prompt,
+            data.size || target.size,
+            { syncCredits: false }
+          );
+          const finalVariant = variants[variants.length - 1];
+          setChatMessages((prev) =>
+            prev.map((message) => {
+              if (message.id !== target.assistantMessageId) return message;
+              const existingVariants = getChatVariants(message);
+              const replacedIndex = existingVariants.findIndex(
+                (variant) => variant.generationId === target.generationId
+              );
+              const nextVariants = replaceChatVariantByGenerationId(
+                existingVariants,
+                target.generationId,
+                variants.length
+                  ? variants.map((variant) => ({ ...variant, pending: false }))
+                  : [
+                      mergeChatVariant(undefined, {
+                        generationId: target.generationId,
+                        prompt: target.prompt,
+                        model: data.model || target.model,
+                        size: data.size || target.size,
+                        responseText: data.responseText,
+                        responseThinking: data.responseThinking,
+                        responseAgent: data.responseAgent,
+                        agentEvents: data.agentEvents,
+                        imageUrl: data.imageUrl,
+                        pending: false,
+                      }),
+                    ]
+              );
+              return {
+                ...message,
+                error: undefined,
+                text:
+                  finalVariant?.responseText ||
+                  (finalVariant?.imageUrl || data.imageUrl
+                    ? copy("Image generated", "图片已生成")
+                    : copy("Response generated", "回复已生成")),
+                variants: nextVariants,
+                activeVariant:
+                  replacedIndex >= 0
+                    ? replacedIndex + Math.max(variants.length, 1) - 1
+                    : nextVariants.length - 1,
+              };
+            })
+          );
+          break;
+        }
+
+        if (data.status === "failed") {
+          updatePendingChatVariant(target, {
+            pending: false,
+            error: data.error || copy("Generation failed", "生成失败"),
+            text: copy("Generation failed", "生成失败"),
+          });
+          break;
+        }
+
+        await sleep(2500);
+      }
+    } catch {
+      /* Keep the pending variant so a later revisit can poll again. */
+    } finally {
+      setIsChatGenerating(false);
+      setChatStream(null);
+      clearStreamingPreview();
+    }
+  };
+
+  useEffect(() => {
+    if (!didLoadChatRef.current) return;
+    if (chatStream?.generationId) return;
+    const targets = findPendingChatRestoreTargets(chatConversations).filter(
+      (target) => {
+        if (restoredChatGenerationIdsRef.current.has(target.generationId)) {
+          return false;
+        }
+        return chatMessages.some(
+          (message) => message.id === target.assistantMessageId
+        );
+      }
+    );
+    const target = targets[0];
+    if (!target) return;
+    restoredChatGenerationIdsRef.current.add(target.generationId);
+    void restorePendingChatGeneration(target);
+  }, [chatConversations, chatMessages, chatStream?.generationId]);
 
   const addSuccessfulResults = (
     data: ImageApiResult,
