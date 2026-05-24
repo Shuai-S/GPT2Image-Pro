@@ -1983,11 +1983,12 @@ function createAgentRoundRequestTracker(
         await callbacks.onThinkingDelta?.(delta);
       },
       onAgentDelta: async (delta) => {
-        await markReceived();
         await callbacks.onAgentDelta?.(delta);
       },
       onAgentEvent: async (event) => {
-        await markReceived();
+        if (event.toolType !== "responses_stream_event") {
+          await markReceived();
+        }
         await callbacks.onAgentEvent?.(event);
       },
       onStatusUpdate: callbacks.onStatusUpdate,
@@ -2135,6 +2136,44 @@ function isResponsesPartialImageEvent(
   );
 }
 
+function shouldSurfaceRawResponsesStreamEvent(eventName: string) {
+  if (!eventName) return false;
+  if (eventName === "response.completed" || eventName === "response.failed") {
+    return true;
+  }
+  return (
+    eventName.includes("web_search_call") ||
+    eventName.includes("image_generation_call") ||
+    eventName.includes("code_interpreter_call") ||
+    eventName.includes("function_call") ||
+    eventName.includes("output_item") ||
+    eventName.includes("output_text") ||
+    eventName.includes("reasoning")
+  );
+}
+
+async function surfaceRawResponsesStreamEvent(
+  eventName: string,
+  state: EventStreamParseState,
+  callbacks?: ImageGenerationCallbacks
+) {
+  if (!callbacks || !shouldSurfaceRawResponsesStreamEvent(eventName)) return;
+  state.emittedRawStreamEvents = state.emittedRawStreamEvents || {};
+  const previous = state.emittedRawStreamEvents[eventName];
+  if (previous) return;
+  state.emittedRawStreamEvents[eventName] = true;
+  await callbacks.onAgentDelta?.(`上游事件: ${eventName}\n`);
+  await emitAgentEvent(callbacks, {
+    id: `raw-upstream-${eventName}`,
+    kind: "tool",
+    status: inferToolStatusFromEventName(eventName),
+    title: "收到上游流式事件",
+    detail: eventName,
+    timestamp: new Date().toISOString(),
+    toolType: "responses_stream_event",
+  });
+}
+
 function extractResponseCompletedPayload(
   payload: ResponsesPayload | { response?: ResponsesPayload }
 ) {
@@ -2161,6 +2200,7 @@ async function processResponsesEventPayload(
   }
   const streamEventName =
     eventName || (typeof payload.type === "string" ? payload.type : "");
+  await surfaceRawResponsesStreamEvent(streamEventName, state, callbacks);
 
   if (
     streamEventName === "response.failed" ||
@@ -2494,6 +2534,7 @@ type EventStreamParseState = {
   agentEvents?: AgentRunEvent[];
   streamItems?: Record<string, ResponsesOutputItem>;
   emittedToolEvents?: Record<string, AgentRunEventStatus>;
+  emittedRawStreamEvents?: Record<string, true>;
 };
 
 async function processEventPayload(
