@@ -32,4 +32,28 @@ describe("image stream response", () => {
     expect(firstChunk).toContain(": open");
     expect(firstChunk.length).toBeGreaterThan(1024);
   });
+
+  it("keeps the route work running after the client closes the stream", async () => {
+    let releaseRun: (() => void) | undefined;
+    const runReleased = new Promise<void>((resolve) => {
+      releaseRun = resolve;
+    });
+    let completed = false;
+
+    const response = createImageStreamResponse(async (emit) => {
+      await emit({ type: "text_delta", delta: "started" });
+      await runReleased;
+      completed = true;
+      return { type: "completed", generationId: "gen_1" };
+    });
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("missing response body");
+
+    await reader.read();
+    await reader.cancel();
+    releaseRun?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(completed).toBe(true);
+  });
 });

@@ -100,15 +100,13 @@ export function createImageStreamResponse(
   const keepAliveMs = 5_000;
   const flushPadding = `: ${" ".repeat(2048)}\n\n`;
   let keepAlive: ReturnType<typeof setInterval> | undefined;
-  let cancelled = false;
+  let closed = false;
 
   return new Response(
     new ReadableStream({
       async start(controller) {
-        let closed = false;
-
         const write = (chunk: string) => {
-          if (closed || cancelled) return;
+          if (closed) return;
           try {
             controller.enqueue(encoder.encode(chunk));
           } catch {
@@ -143,16 +141,17 @@ export function createImageStreamResponse(
             keepAlive = undefined;
           }
           await emit({ type: "done" });
-          if (!(closed || cancelled)) {
+          if (!closed) {
             closed = true;
             controller.close();
           }
         }
       },
       cancel() {
-        // The browser closed the EventSource/fetch stream; the route can stop
-        // trying to enqueue keep-alive bytes.
-        cancelled = true;
+        // The browser closed the fetch stream. Stop writing bytes, but let the
+        // route's async work continue so pending generations can finish and be
+        // restored from the status API after navigation.
+        closed = true;
         if (keepAlive) {
           clearInterval(keepAlive);
           keepAlive = undefined;
