@@ -52,7 +52,7 @@ export async function forgetPassword(
 ) {
   const baseURL = window.location.origin;
 
-  const response = await fetch(`${baseURL}/api/auth/forget-password`, {
+  const response = await fetch(`${baseURL}/api/auth/request-password-reset`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

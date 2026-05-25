@@ -29,6 +29,26 @@ export function ForgotPasswordForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  const startResendCooldown = () => {
+    setResendCooldown(60);
+    const timer = setInterval(() => {
+      setResendCooldown((current) => {
+        if (current <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return current - 1;
+      });
+    }, 1000);
+  };
+
+  const sendResetLink = async () => {
+    const normalizedEmail = email.trim();
+    await forgetPassword(normalizedEmail, `/${locale}/reset-password`);
+    setEmail(normalizedEmail);
+  };
 
   /**
    * 处理表单提交
@@ -45,14 +65,35 @@ export function ForgotPasswordForm() {
       setIsLoading(true);
       setError(null);
 
-      await forgetPassword(email, "/reset-password");
+      await sendResetLink();
 
       setIsSuccess(true);
+      startResendCooldown();
     } catch {
       setError(
         copy(
           "Failed to send reset link. Please try again.",
           "重置链接发送失败，请稍后重试。"
+        )
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    if (resendCooldown > 0 || isLoading) return;
+
+    try {
+      setIsLoading(true);
+      setError(null);
+      await sendResetLink();
+      startResendCooldown();
+    } catch {
+      setError(
+        copy(
+          "Failed to resend reset link. Please try again.",
+          "重置链接重发失败，请稍后重试。"
         )
       );
     } finally {
@@ -78,8 +119,29 @@ export function ForgotPasswordForm() {
           </p>
         </div>
 
-        {/* 返回登录 */}
-        <div className="text-center">
+        <AuthErrorAlert message={error} />
+
+        <div className="space-y-3 text-center">
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={handleResend}
+            disabled={isLoading || resendCooldown > 0}
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                {copy("Sending...", "发送中...")}
+              </>
+            ) : resendCooldown > 0 ? (
+              copy(
+                `Resend in ${resendCooldown}s`,
+                `${resendCooldown}秒后可重新发送`
+              )
+            ) : (
+              copy("Resend reset link", "重新发送重置链接")
+            )}
+          </Button>
           <Link
             href={`/${locale}/sign-in`}
             className="text-sm text-muted-foreground hover:text-foreground"

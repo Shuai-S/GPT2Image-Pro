@@ -27,6 +27,8 @@ const API_RATE_LIMITS: Array<{ pattern: RegExp; type: RateLimitType }> = [
   { pattern: /^\/api\/auth\/sign-in/, type: "auth" },
   { pattern: /^\/api\/auth\/sign-up/, type: "auth" },
   { pattern: /^\/api\/auth\/registration-verification/, type: "auth" },
+  { pattern: /^\/api\/auth\/request-password-reset/, type: "auth" },
+  { pattern: /^\/api\/auth\/forget-password/, type: "auth" },
   { pattern: /^\/api\/auth\/forgot-password/, type: "auth" },
   { pattern: /^\/api\/auth\/reset-password/, type: "auth" },
   // 上传相关
