@@ -1803,40 +1803,54 @@ function replaceChatVariantByGenerationId(
   ];
 }
 
-function findPendingChatRestoreTargets(
-  conversations: ChatConversation[]
+function findPendingChatRestoreTargetsInMessages(
+  conversationId: string,
+  messages: ChatMessage[]
 ): ChatPendingRestoreTarget[] {
   const now = Date.now();
   const targets: ChatPendingRestoreTarget[] = [];
-  for (const conversation of conversations) {
-    for (const message of conversation.messages) {
-      if (message.role !== "assistant") continue;
-      const mode = message.mode === "agent" ? "agent" : ("chat" as const);
-      for (const variant of getChatVariants(message)) {
-        if (!variant.pending || !variant.generationId) continue;
-        const createdAt = variant.createdAt || message.createdAt;
-        if (
-          createdAt &&
-          now - new Date(createdAt).getTime() > CHAT_PENDING_TTL_MS
-        ) {
-          continue;
-        }
-        targets.push({
-          conversationId: conversation.id,
-          assistantMessageId: message.id,
-          mode,
-          generationId: variant.generationId,
-          prompt: variant.prompt || message.text,
-          model: variant.model,
-          size: variant.size,
-          responseText: variant.responseText,
-          responseThinking: variant.responseThinking,
-          responseAgent: variant.responseAgent,
-          agentEvents: variant.agentEvents,
-          imageUrl: variant.imageUrl,
-        });
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    const mode = message.mode === "agent" ? "agent" : ("chat" as const);
+    for (const variant of getChatVariants(message)) {
+      if (!variant.pending || !variant.generationId) continue;
+      const createdAt = variant.createdAt || message.createdAt;
+      if (
+        createdAt &&
+        now - new Date(createdAt).getTime() > CHAT_PENDING_TTL_MS
+      ) {
+        continue;
       }
+      targets.push({
+        conversationId,
+        assistantMessageId: message.id,
+        mode,
+        generationId: variant.generationId,
+        prompt: variant.prompt || message.text,
+        model: variant.model,
+        size: variant.size,
+        responseText: variant.responseText,
+        responseThinking: variant.responseThinking,
+        responseAgent: variant.responseAgent,
+        agentEvents: variant.agentEvents,
+        imageUrl: variant.imageUrl,
+      });
     }
+  }
+  return targets;
+}
+
+function findPendingChatRestoreTargets(
+  conversations: ChatConversation[]
+): ChatPendingRestoreTarget[] {
+  const targets: ChatPendingRestoreTarget[] = [];
+  for (const conversation of conversations) {
+    targets.push(
+      ...findPendingChatRestoreTargetsInMessages(
+        conversation.id,
+        conversation.messages
+      )
+    );
   }
   return targets;
 }
@@ -4271,6 +4285,19 @@ export function CreatePageClient({
             data.size || target.size,
             { syncCredits: false }
           );
+          if (variants.length === 0) {
+            updatePendingChatVariant(target, {
+              pending: false,
+              error:
+                data.error ||
+                copy(
+                  "Generation completed without output",
+                  "生成已完成但没有返回输出"
+                ),
+              text: copy("Generation failed", "生成失败"),
+            });
+            break;
+          }
           const finalVariant = variants[variants.length - 1];
           setChatMessages((prev) =>
             prev.map((message) => {
@@ -4345,19 +4372,41 @@ export function CreatePageClient({
 
   useEffect(() => {
     if (!didLoadChatRef.current) return;
-    const targets = findPendingChatRestoreTargets(chatConversations).filter(
-      (target) => {
-        if (
-          activeChatRequestGenerationIdsRef.current.has(target.generationId) ||
-          restoringChatGenerationIdsRef.current.has(target.generationId)
-        ) {
-          return false;
-        }
+    const currentTargets = findPendingChatRestoreTargetsInMessages(
+      chatConversationId,
+      chatMessages
+    );
+    const targetByKey = new Map<string, ChatPendingRestoreTarget>();
+    for (const target of [
+      ...currentTargets,
+      ...findPendingChatRestoreTargets(chatConversations),
+    ]) {
+      const key = `${target.conversationId}:${target.generationId}`;
+      if (!targetByKey.has(key)) targetByKey.set(key, target);
+    }
+    const targets = Array.from(targetByKey.values()).filter((target) => {
+      if (restoringChatGenerationIdsRef.current.has(target.generationId)) {
+        return false;
+      }
+      if (
+        activeChatRequestGenerationIdsRef.current.has(target.generationId) &&
+        chatStream?.generationId === target.generationId
+      ) {
+        return false;
+      }
+      if (target.conversationId === chatConversationId) {
         return chatMessages.some(
           (message) => message.id === target.assistantMessageId
         );
       }
-    );
+      return chatConversations.some(
+        (conversation) =>
+          conversation.id === target.conversationId &&
+          conversation.messages.some(
+            (message) => message.id === target.assistantMessageId
+          )
+      );
+    });
     const target = targets[0];
     if (!target) return;
     if (target.conversationId !== chatConversationId) {
@@ -4366,6 +4415,7 @@ export function CreatePageClient({
       );
       if (conversation) {
         activateChatConversation(conversation, target.mode);
+        return;
       }
     } else {
       chatMessagesModeRef.current = target.mode;
@@ -8359,6 +8409,8 @@ export function CreatePageClient({
                       );
                       const isStreamingMessage =
                         chatStream?.messageId === message.id;
+                      const activeVariantPending =
+                        activeVariant?.pending === true;
 
                       return (
                         <div
@@ -8517,8 +8569,18 @@ export function CreatePageClient({
                                       </div>
                                     </div>
                                   )}
+                                  {activeVariantPending && (
+                                    <div className="mt-3 flex items-center gap-2 text-muted-foreground">
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                      {copy(
+                                        "Generation is still running. Reconnecting to status...",
+                                        "仍在生成中，正在恢复状态..."
+                                      )}
+                                    </div>
+                                  )}
                                   {!activeVariant.responseText &&
-                                    !activeVariant.imageUrl && (
+                                    !activeVariant.imageUrl &&
+                                    !activeVariantPending && (
                                       <p className="text-muted-foreground">
                                         {copy(
                                           "Response generated",
