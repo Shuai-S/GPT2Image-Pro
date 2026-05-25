@@ -11,6 +11,17 @@ import { ticket, user } from "@repo/database/schema";
 import { getUserRoleById } from "@repo/shared/auth/role-server";
 import { isAdminRole } from "@repo/shared/auth/roles";
 import { getServerSession } from "@repo/shared/auth/server";
+import { formatDateInTimeZone } from "@repo/shared/time-zone";
+import { getAppTimeZone } from "@repo/shared/time-zone/server";
+
+const userUnreadTicketSql =
+  sql<boolean>`${ticket.lastAdminActivityAt} > ${ticket.userLastSeenAt}`.mapWith(
+    Boolean
+  );
+const adminUnreadTicketSql =
+  sql<boolean>`${ticket.lastUserActivityAt} is not null and (${ticket.adminLastSeenAt} is null or ${ticket.lastUserActivityAt} > ${ticket.adminLastSeenAt})`.mapWith(
+    Boolean
+  );
 
 /**
  * 用户工单列表页面
@@ -25,9 +36,13 @@ export default async function SupportPage() {
     redirect(`/${locale}/sign-in`);
   }
 
-  const t = await getTranslations("Support");
-  const role = await getUserRoleById(session.user.id);
+  const [t, role, timeZone] = await Promise.all([
+    getTranslations("Support"),
+    getUserRoleById(session.user.id),
+    getAppTimeZone(),
+  ]);
   const isAdmin = isAdminRole(role);
+  const unreadSql = isAdmin ? adminUnreadTicketSql : userUnreadTicketSql;
 
   const tickets = isAdmin
     ? await db
@@ -44,9 +59,7 @@ export default async function SupportPage() {
             name: user.name,
             email: user.email,
           },
-          unread: sql<boolean>`${ticket.lastAdminActivityAt} > ${ticket.userLastSeenAt}`.mapWith(
-            Boolean
-          ),
+          unread: unreadSql,
         })
         .from(ticket)
         .leftJoin(user, eq(ticket.userId, user.id))
@@ -65,9 +78,7 @@ export default async function SupportPage() {
             name: user.name,
             email: user.email,
           },
-          unread: sql<boolean>`${ticket.lastAdminActivityAt} > ${ticket.userLastSeenAt}`.mapWith(
-            Boolean
-          ),
+          unread: unreadSql,
         })
         .from(ticket)
         .leftJoin(user, eq(ticket.userId, user.id))
@@ -123,8 +134,6 @@ export default async function SupportPage() {
     return t(`categories.${category}` as Parameters<typeof t>[0]);
   };
 
-  const dateLocale = locale === "zh" ? "zh-CN" : "en-US";
-
   return (
     <div className="space-y-6">
       {/* 页面标题 */}
@@ -169,11 +178,11 @@ export default async function SupportPage() {
                   <div className="flex items-start justify-between">
                     <div className="space-y-1">
                       <CardTitle className="flex items-center gap-2 text-base">
-                        {!isAdmin && tkt.unread && (
+                        {tkt.unread && (
                           <span className="h-2 w-2 rounded-full bg-red-500" />
                         )}
                         <span>{tkt.subject}</span>
-                        {!isAdmin && tkt.unread && (
+                        {tkt.unread && (
                           <Badge className="bg-red-500 text-white" variant="secondary">
                             新动态
                           </Badge>
@@ -181,7 +190,16 @@ export default async function SupportPage() {
                       </CardTitle>
                       <p className="text-sm text-muted-foreground">
                         {getCategoryLabel(tkt.category)} ·{" "}
-                        {new Date(tkt.createdAt).toLocaleDateString(dateLocale)}
+                        {formatDateInTimeZone(
+                          tkt.createdAt,
+                          locale,
+                          {
+                            year: "numeric",
+                            month: "2-digit",
+                            day: "2-digit",
+                          },
+                          timeZone
+                        )}
                         {isAdmin && tkt.user?.email
                           ? ` · ${tkt.user.name || t("unknownUser")} (${tkt.user.email})`
                           : ""}

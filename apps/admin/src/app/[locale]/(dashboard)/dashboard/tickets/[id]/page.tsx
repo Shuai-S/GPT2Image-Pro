@@ -9,6 +9,8 @@ import { Button } from "@repo/ui/components/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@repo/ui/components/card";
 import { db } from "@repo/database";
 import { ticket, ticketMessage, user } from "@repo/database/schema";
+import { formatDateInTimeZone } from "@repo/shared/time-zone";
+import { getAppTimeZone } from "@repo/shared/time-zone/server";
 import { AdminTicketReplyForm } from "@repo/shared/support/components/admin-ticket-reply-form";
 import { AdminTicketStatusSelect } from "@repo/shared/support/components/admin-ticket-status-select";
 import {
@@ -33,7 +35,10 @@ export default async function AdminTicketDetailPage({
   params,
 }: AdminTicketDetailPageProps) {
   const { id } = await params;
-  const t = await getTranslations("Admin.tickets.detail");
+  const [t, timeZone] = await Promise.all([
+    getTranslations("Admin.tickets.detail"),
+    getAppTimeZone(),
+  ]);
 
   // 获取工单信息（包含用户信息）
   const ticketResult = await db
@@ -58,6 +63,13 @@ export default async function AdminTicketDetailPage({
 
   const ticketData = result.ticket;
   const ticketUser = result.user;
+  const now = new Date();
+
+  await db
+    .update(ticket)
+    .set({ adminLastSeenAt: now })
+    .where(eq(ticket.id, id));
+  ticketData.adminLastSeenAt = now;
 
   // 获取消息列表
   const messages = await db
@@ -153,7 +165,16 @@ export default async function AdminTicketDetailPage({
           </h2>
           <p className="text-muted-foreground">
             {getCategoryLabel(ticketData.category)} · {t("createdAt")}{" "}
-            {new Date(ticketData.createdAt).toLocaleDateString()}
+            {formatDateInTimeZone(
+              ticketData.createdAt,
+              "zh",
+              {
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit",
+              },
+              timeZone
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -246,7 +267,18 @@ export default async function AdminTicketDetailPage({
                     </Badge>
                   )}
                   <span className="text-xs text-muted-foreground">
-                    {new Date(msg.createdAt).toLocaleString()}
+                    {formatDateInTimeZone(
+                      msg.createdAt,
+                      "zh",
+                      {
+                        year: "numeric",
+                        month: "2-digit",
+                        day: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      },
+                      timeZone
+                    )}
                   </span>
                 </div>
                 <p className="text-sm whitespace-pre-wrap">{msg.content}</p>

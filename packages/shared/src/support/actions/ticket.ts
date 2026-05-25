@@ -5,6 +5,8 @@ import { revalidatePath } from "next/cache";
 
 import { db } from "@repo/database";
 import { ticket, ticketMessage, user } from "@repo/database/schema";
+import { getUserRoleById } from "../../auth/role-server";
+import { isAdminRole } from "../../auth/roles";
 import { sendTicketAdminNotification } from "../notifications";
 import {
   addTicketMessageSchema,
@@ -24,6 +26,14 @@ const unreadTicketSql = sql<boolean>`${ticket.lastAdminActivityAt} > ${ticket.us
 const unreadTicketCountSql = sql<number>`count(*) filter (where ${ticket.lastAdminActivityAt} > ${ticket.userLastSeenAt})`.mapWith(
   Number
 );
+const adminUnreadTicketSql =
+  sql<boolean>`${ticket.lastUserActivityAt} is not null and (${ticket.adminLastSeenAt} is null or ${ticket.lastUserActivityAt} > ${ticket.adminLastSeenAt})`.mapWith(
+    Boolean
+  );
+const adminUnreadTicketCountSql =
+  sql<number>`count(*) filter (where ${ticket.lastUserActivityAt} is not null and (${ticket.adminLastSeenAt} is null or ${ticket.lastUserActivityAt} > ${ticket.adminLastSeenAt}))`.mapWith(
+    Number
+  );
 
 // ============================================
 // 用户端 Actions
@@ -51,6 +61,7 @@ export const createTicketAction = withTicketAction("createTicket")
       priority: data.priority,
       status: "open",
       userLastSeenAt: now,
+      lastUserActivityAt: now,
       updatedAt: now,
     });
 
@@ -196,7 +207,7 @@ export const addTicketMessageAction = withTicketAction("addTicketMessage")
     // 更新工单时间
     await db
       .update(ticket)
-      .set({ updatedAt: now })
+      .set({ lastUserActivityAt: now, updatedAt: now })
       .where(eq(ticket.id, data.ticketId));
 
     await sendTicketAdminNotification({
@@ -238,7 +249,10 @@ export const getAllTicketsAction = withAdminTicketAction(
       status: ticket.status,
       userLastSeenAt: ticket.userLastSeenAt,
       lastAdminActivityAt: ticket.lastAdminActivityAt,
+      adminLastSeenAt: ticket.adminLastSeenAt,
+      lastUserActivityAt: ticket.lastUserActivityAt,
       unread: unreadTicketSql,
+      adminUnread: adminUnreadTicketSql,
       createdAt: ticket.createdAt,
       updatedAt: ticket.updatedAt,
       user: {
@@ -256,11 +270,37 @@ export const getAllTicketsAction = withAdminTicketAction(
 });
 
 /**
+ * 获取管理员未读工单用户动态数量
+ */
+export const getAdminUnreadTicketCountAction = withAdminTicketAction(
+  "getAdminUnreadTicketCount"
+).action(async () => {
+  const rows = await db
+    .select({
+      count: adminUnreadTicketCountSql,
+    })
+    .from(ticket);
+
+  return { count: rows[0]?.count ?? 0 };
+});
+
+/**
  * 获取当前用户未读工单动态数量
  */
 export const getMyUnreadTicketCountAction = withTicketAction(
   "getMyUnreadTicketCount"
 ).action(async ({ ctx }) => {
+  const role = await getUserRoleById(ctx.userId);
+  if (isAdminRole(role)) {
+    const rows = await db
+      .select({
+        count: adminUnreadTicketCountSql,
+      })
+      .from(ticket);
+
+    return { count: rows[0]?.count ?? 0 };
+  }
+
   const rows = await db
     .select({
       count: unreadTicketCountSql,
@@ -301,6 +341,12 @@ export const getAdminTicketDetailAction = withAdminTicketAction(
     if (!result) {
       throw new Error("工单不存在");
     }
+    const now = new Date();
+
+    await db
+      .update(ticket)
+      .set({ adminLastSeenAt: now })
+      .where(eq(ticket.id, ticketId));
 
     // 获取消息列表
     const messages = await db
@@ -321,7 +367,7 @@ export const getAdminTicketDetailAction = withAdminTicketAction(
       .orderBy(ticketMessage.createdAt);
 
     return {
-      ticket: result.ticket,
+      ticket: { ...result.ticket, adminLastSeenAt: now },
       ticketUser: result.user,
       messages,
     };
@@ -363,13 +409,18 @@ export const adminReplyTicketAction = withAdminTicketAction("replyTicket")
         .set({
           status: "in_progress",
           lastAdminActivityAt: now,
+          adminLastSeenAt: now,
           updatedAt: now,
         })
         .where(eq(ticket.id, data.ticketId));
     } else {
       await db
         .update(ticket)
-        .set({ lastAdminActivityAt: now, updatedAt: now })
+        .set({
+          lastAdminActivityAt: now,
+          adminLastSeenAt: now,
+          updatedAt: now,
+        })
         .where(eq(ticket.id, data.ticketId));
     }
 
@@ -409,6 +460,7 @@ export const updateTicketStatusAction = withAdminTicketAction(
       .set({
         status: data.status,
         lastAdminActivityAt: now,
+        adminLastSeenAt: now,
         updatedAt: now,
       })
       .where(eq(ticket.id, data.ticketId));

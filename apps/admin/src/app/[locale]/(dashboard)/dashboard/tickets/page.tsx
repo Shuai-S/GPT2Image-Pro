@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { getTranslations } from "next-intl/server";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@repo/ui/components/avatar";
@@ -6,6 +6,8 @@ import { Badge } from "@repo/ui/components/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@repo/ui/components/card";
 import { db } from "@repo/database";
 import { ticket, user } from "@repo/database/schema";
+import { formatDateInTimeZone } from "@repo/shared/time-zone";
+import { getAppTimeZone } from "@repo/shared/time-zone/server";
 import {
   ticketCategories,
   ticketPriorities,
@@ -13,13 +15,21 @@ import {
 } from "@repo/shared/support/schemas";
 import { Link } from "@/i18n/routing";
 
+const adminUnreadTicketSql =
+  sql<boolean>`${ticket.lastUserActivityAt} is not null and (${ticket.adminLastSeenAt} is null or ${ticket.lastUserActivityAt} > ${ticket.adminLastSeenAt})`.mapWith(
+    Boolean
+  );
+
 /**
  * 管理员 - 工单管理列表页面
  *
  * 展示所有用户提交的工单
  */
 export default async function AdminTicketsPage() {
-  const t = await getTranslations("Admin");
+  const [t, timeZone] = await Promise.all([
+    getTranslations("Admin"),
+    getAppTimeZone(),
+  ]);
 
   // 获取所有工单（包含用户信息）
   const tickets = await db
@@ -29,6 +39,7 @@ export default async function AdminTicketsPage() {
       category: ticket.category,
       priority: ticket.priority,
       status: ticket.status,
+      unread: adminUnreadTicketSql,
       createdAt: ticket.createdAt,
       updatedAt: ticket.updatedAt,
       user: {
@@ -198,9 +209,17 @@ export default async function AdminTicketsPage() {
                       <td className="px-4 py-3">
                         <Link
                           href={`/dashboard/tickets/${t_ticket.id}`}
-                          className="font-medium hover:underline"
+                          className="inline-flex items-center gap-2 font-medium hover:underline"
                         >
+                          {t_ticket.unread && (
+                            <span className="h-2 w-2 rounded-full bg-red-500" />
+                          )}
                           {t_ticket.subject}
+                          {t_ticket.unread && (
+                            <Badge className="bg-red-500 text-white" variant="secondary">
+                              新动态
+                            </Badge>
+                          )}
                         </Link>
                       </td>
                       <td className="px-4 py-3">
@@ -240,8 +259,15 @@ export default async function AdminTicketsPage() {
                         {getStatusBadge(t_ticket.status)}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">
-                        {new Date(t_ticket.createdAt).toLocaleDateString(
-                          "zh-CN"
+                        {formatDateInTimeZone(
+                          t_ticket.createdAt,
+                          "zh",
+                          {
+                            year: "numeric",
+                            month: "2-digit",
+                            day: "2-digit",
+                          },
+                          timeZone
                         )}
                       </td>
                     </tr>

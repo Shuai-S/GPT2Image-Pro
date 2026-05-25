@@ -20,6 +20,8 @@ import {
 import { getServerSession } from "@repo/shared/auth/server";
 import { getUserRoleById } from "@repo/shared/auth/role-server";
 import { isAdminRole } from "@repo/shared/auth/roles";
+import { formatDateInTimeZone } from "@repo/shared/time-zone";
+import { getAppTimeZone } from "@repo/shared/time-zone/server";
 
 interface TicketDetailPageProps {
   params: Promise<{
@@ -43,7 +45,10 @@ export default async function TicketDetailPage({
   if (!session?.user) {
     redirect(`/${locale}/sign-in`);
   }
-  const role = await getUserRoleById(session.user.id);
+  const [role, timeZone] = await Promise.all([
+    getUserRoleById(session.user.id),
+    getAppTimeZone(),
+  ]);
   const isAdmin = isAdminRole(role);
 
   // 获取工单信息
@@ -85,11 +90,19 @@ export default async function TicketDetailPage({
   const ticketUser = ticketRecord.user;
 
   if (!isAdmin) {
+    const now = new Date();
     await db
       .update(ticket)
-      .set({ userLastSeenAt: new Date() })
+      .set({ userLastSeenAt: now })
       .where(and(eq(ticket.id, id), eq(ticket.userId, session.user.id)));
-    ticketData.userLastSeenAt = new Date();
+    ticketData.userLastSeenAt = now;
+  } else {
+    const now = new Date();
+    await db
+      .update(ticket)
+      .set({ adminLastSeenAt: now })
+      .where(eq(ticket.id, id));
+    ticketData.adminLastSeenAt = now;
   }
 
   // 获取消息列表
@@ -191,7 +204,16 @@ export default async function TicketDetailPage({
           </h2>
           <p className="text-muted-foreground">
             {getCategoryLabel(ticketData.category)} · 创建于{" "}
-            {new Date(ticketData.createdAt).toLocaleDateString("zh-CN")}
+            {formatDateInTimeZone(
+              ticketData.createdAt,
+              locale,
+              {
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit",
+              },
+              timeZone
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -282,7 +304,18 @@ export default async function TicketDetailPage({
                     </Badge>
                   )}
                   <span className="text-xs text-muted-foreground">
-                    {new Date(msg.createdAt).toLocaleString("zh-CN")}
+                    {formatDateInTimeZone(
+                      msg.createdAt,
+                      locale,
+                      {
+                        year: "numeric",
+                        month: "2-digit",
+                        day: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      },
+                      timeZone
+                    )}
                   </span>
                 </div>
                 <p className="text-sm whitespace-pre-wrap">{msg.content}</p>

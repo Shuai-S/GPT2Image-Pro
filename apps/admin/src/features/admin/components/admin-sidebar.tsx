@@ -71,7 +71,11 @@ const adminSidebarNav = [
  * - 所有 href 从 /admin 改为 /dashboard
  * - 删除 "Back to Dashboard" 链接（管理站没有用户端可返回）
  */
-export function AdminSidebar() {
+export function AdminSidebar({
+  initialUnreadTicketCount = 0,
+}: {
+  initialUnreadTicketCount?: number;
+}) {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -84,6 +88,7 @@ export function AdminSidebar() {
 
   // Popover 开关状态
   const [open, setOpen] = useState(false);
+  const unreadTicketCount = Math.max(0, Number(initialUnreadTicketCount));
 
   /**
    * 获取用户名首字母作为头像回退
@@ -138,6 +143,8 @@ export function AdminSidebar() {
               {group.items.map((item) => {
                 const isActive = pathname === item.href;
                 const Icon = item.icon;
+                const showTicketUnread =
+                  item.href === "/dashboard/tickets" && unreadTicketCount > 0;
                 return (
                   <Link
                     key={item.href}
@@ -149,8 +156,20 @@ export function AdminSidebar() {
                         : "text-muted-foreground hover:bg-accent hover:text-foreground"
                     )}
                   >
-                    {Icon && <Icon className="h-4 w-4" />}
-                    {item.title}
+                    {Icon && (
+                      <span className="relative inline-flex shrink-0">
+                        <Icon className="h-4 w-4" />
+                        {showTicketUnread && (
+                          <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-red-500 ring-2 ring-background" />
+                        )}
+                      </span>
+                    )}
+                    <span className="flex-1">{item.title}</span>
+                    {showTicketUnread && (
+                      <span className="min-w-5 rounded-full bg-red-500 px-1.5 py-0.5 text-center text-[10px] font-semibold leading-none text-white">
+                        {unreadTicketCount > 99 ? "99+" : unreadTicketCount}
+                      </span>
+                    )}
                   </Link>
                 );
               })}

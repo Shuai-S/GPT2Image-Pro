@@ -91,10 +91,10 @@ export function DashboardSidebar() {
   }, [user, fetchPlan]);
 
   useEffect(() => {
-    if (user && !isAdmin) {
+    if (user) {
       fetchUnreadTickets();
     }
-  }, [user, isAdmin, fetchUnreadTickets]);
+  }, [user, pathname, fetchUnreadTickets]);
 
   /**
    * 导航项标题映射到翻译键
@@ -253,7 +253,6 @@ export function DashboardSidebar() {
                   const Icon = item.icon;
                   const translatedTitle = getNavTitle(item.title);
                   const showSupportUnread =
-                    !isAdmin &&
                     item.href === "/dashboard/support" &&
                     unreadTicketCount > 0;
                   return (
