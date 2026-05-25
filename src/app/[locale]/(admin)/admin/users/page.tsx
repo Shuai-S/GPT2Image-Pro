@@ -34,7 +34,7 @@ interface UserWithDetails {
   name: string;
   email: string;
   image: string | null;
-  role: "user" | "admin";
+  role: "user" | "observer_admin" | "admin" | "super_admin";
   banned: boolean;
   bannedReason: string | null;
   emailVerified: boolean;
@@ -262,7 +262,9 @@ export default function AdminUsersPage() {
 
   // 统计数据
   const totalUsers = users.length;
-  const adminCount = users.filter((u) => u.role === "admin").length;
+  const adminCount = users.filter((u) =>
+    ["observer_admin", "admin", "super_admin"].includes(u.role)
+  ).length;
   const bannedCount = users.filter((u) => u.banned).length;
   const activeSubscriptions = users.filter(
     (u) => u.subscription?.status === "active"

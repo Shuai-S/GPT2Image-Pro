@@ -127,6 +127,20 @@
       "when": 1779379200000,
       "tag": "0017_ticket_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1779696000000,
+      "tag": "0018_admin_roles",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1779696060000,
+      "tag": "0019_promote_legacy_admin",
+      "breakpoints": true
     }
   ]
 }

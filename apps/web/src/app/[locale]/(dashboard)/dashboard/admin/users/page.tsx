@@ -1,6 +1,11 @@
 import { redirect } from "next/navigation";
 import { getLocale } from "next-intl/server";
 
+import { getUserRoleById } from "@repo/shared/auth/role-server";
+import {
+  canAccessAdminArea,
+  canManageUserPermissions,
+} from "@repo/shared/auth/roles";
 import { getServerSession } from "@repo/shared/auth/server";
 import { AdminUsersManagement } from "@repo/shared/support/components";
 
@@ -11,9 +16,12 @@ export default async function DashboardAdminUsersPage() {
     redirect(`/${locale}/sign-in`);
   }
 
-  if ((session.user as { role?: string }).role !== "admin") {
+  const role = await getUserRoleById(session.user.id);
+  if (!canAccessAdminArea(role)) {
     redirect(`/${locale}/dashboard`);
   }
 
-  return <AdminUsersManagement />;
+  return (
+    <AdminUsersManagement canManageRoles={canManageUserPermissions(role)} />
+  );
 }

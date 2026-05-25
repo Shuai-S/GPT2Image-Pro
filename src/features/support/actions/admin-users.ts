@@ -6,19 +6,23 @@ import { z } from "zod";
 
 import { db } from "@/db";
 import { creditsBalance, subscription, user } from "@/db/schema";
-import { adminAction } from "@/lib/safe-action";
+import { adminAction, superAdminAction } from "@/lib/safe-action";
 import { grantCredits } from "@/features/credits/core";
 import { CREDITS_EXPIRY_DAYS } from "@/features/credits/config";
 
 const withAdminUsersAction = (name: string) =>
   adminAction.metadata({ action: `support.adminUsers.${name}` });
+const withSuperAdminUsersAction = (name: string) =>
+  superAdminAction.metadata({ action: `support.adminUsers.${name}` });
+
+const adminLikeRoles = ["observer_admin", "admin", "super_admin"] as const;
 
 /**
  * 更新用户角色 Schema
  */
 const updateUserRoleSchema = z.object({
   userId: z.string().min(1, "用户ID不能为空"),
-  role: z.enum(["user", "admin"]),
+  role: z.enum(["user", "observer_admin", "admin", "super_admin"]),
 });
 
 /**
@@ -121,7 +125,7 @@ export const getAllUsersAction = withAdminUsersAction("getAllUsers")
 /**
  * 更新用户角色 (管理员)
  */
-export const updateUserRoleAction = withAdminUsersAction("updateUserRole")
+export const updateUserRoleAction = withSuperAdminUsersAction("updateUserRole")
   .schema(updateUserRoleSchema)
   .action(async ({ parsedInput: data, ctx }) => {
     // 防止管理员更改自己的角色
@@ -150,7 +154,7 @@ export const updateUserRoleAction = withAdminUsersAction("updateUserRole")
     revalidatePath("/admin/users");
 
     return {
-      message: `用户角色已更新为 ${data.role === "admin" ? "管理员" : "普通用户"}`,
+      message: `用户角色已更新为 ${data.role}`,
     };
   });
 
@@ -180,7 +184,7 @@ export const banUserAction = withAdminUsersAction("banUser")
     const targetUser = userResult[0]!;
 
     // 不能封禁其他管理员
-    if (targetUser.role === "admin" && data.banned) {
+    if (adminLikeRoles.includes(targetUser.role as (typeof adminLikeRoles)[number]) && data.banned) {
       throw new Error("不能封禁管理员账户");
     }
 

@@ -9,6 +9,8 @@
     "./auth/email-domain": "./src/auth/email-domain.ts",
     "./auth/server": "./src/auth/server.ts",
     "./auth/admin": "./src/auth/admin.ts",
+    "./auth/roles": "./src/auth/roles.ts",
+    "./auth/role-server": "./src/auth/role-server.ts",
     "./auth/registration-verification": "./src/auth/registration-verification.ts",
     "./safe-action": "./src/safe-action.ts",
     "./logger": "./src/logger/index.ts",

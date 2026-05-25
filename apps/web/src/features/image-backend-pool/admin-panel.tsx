@@ -580,7 +580,11 @@ function sub2ApiPlanFilterLabel(value: Sub2ApiPlanFilter) {
   return "全部套餐";
 }
 
-export function ImageBackendPoolAdminPanel() {
+export function ImageBackendPoolAdminPanel({
+  readOnly = false,
+}: {
+  readOnly?: boolean;
+}) {
   const [groups, setGroups] = useState<Group[]>([]);
   const [sub2ApiSourceGroups, setSub2ApiSourceGroups] = useState<
     Sub2ApiSourceGroup[]
@@ -1536,9 +1540,11 @@ export function ImageBackendPoolAdminPanel() {
 
   useEffect(() => {
     loadPool();
-    loadSub2ApiSyncStatus();
-    loadSub2ApiSyncTasks();
-  }, [loadPool, loadSub2ApiSyncStatus, loadSub2ApiSyncTasks]);
+    if (!readOnly) {
+      loadSub2ApiSyncStatus();
+      loadSub2ApiSyncTasks();
+    }
+  }, [loadPool, loadSub2ApiSyncStatus, loadSub2ApiSyncTasks, readOnly]);
 
   useEffect(() => {
     if (sub2ApiConfigured) {
@@ -1562,9 +1568,9 @@ export function ImageBackendPoolAdminPanel() {
         <div>
           <h2 className="text-2xl font-bold tracking-tight">生图后端池</h2>
           <p className="text-sm text-muted-foreground">
-            管理自有账号池和系统后端 API。API 直连不转协议；Web
-            账号仅支持图片生成/编辑；Responses 账号支持 /responses，并可承接
-            images 到 responses 的转换。
+            {readOnly
+              ? "只读查看自有账号池和系统后端 API。观察管理员不能新增、编辑、删除、同步或刷新账号。"
+              : "管理自有账号池和系统后端 API。API 直连不转协议；Web 账号仅支持图片生成/编辑；Responses 账号支持 /responses，并可承接 images 到 responses 的转换。"}
           </p>
         </div>
         <Button variant="outline" onClick={reload} disabled={isLoading}>
@@ -1577,18 +1583,22 @@ export function ImageBackendPoolAdminPanel() {
         </Button>
       </div>
 
-      <Tabs defaultValue="groups" className="w-full">
+      <Tabs defaultValue={readOnly ? "accounts" : "groups"} className="w-full">
         <TabsList className="h-auto flex-wrap justify-start bg-transparent p-0">
           <TabsTrigger value="groups">分组</TabsTrigger>
           <TabsTrigger value="accounts">账号池</TabsTrigger>
           <TabsTrigger value="apis">API 后端</TabsTrigger>
-          <TabsTrigger value="import">同步 Sub2API</TabsTrigger>
+          {!readOnly && <TabsTrigger value="import">同步 Sub2API</TabsTrigger>}
         </TabsList>
 
         <TabsContent
           value="groups"
-          className="mt-6 grid gap-4 lg:grid-cols-[360px_1fr]"
+          className={cn(
+            "mt-6 grid gap-4",
+            readOnly ? "lg:grid-cols-1" : "lg:grid-cols-[360px_1fr]"
+          )}
         >
+          {!readOnly && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">
@@ -1836,6 +1846,7 @@ export function ImageBackendPoolAdminPanel() {
               )}
             </CardContent>
           </Card>
+          )}
 
           <div className="grid gap-3">
             {groups.map((group) => (
@@ -1883,23 +1894,27 @@ export function ImageBackendPoolAdminPanel() {
                     )}
                   </div>
                   <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => editGroup(group)}
-                    >
-                      <Pencil className="mr-2 h-4 w-4" />
-                      编辑
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={isDeletingGroup}
-                      onClick={() => deleteGroup({ id: group.id })}
-                    >
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      删除
-                    </Button>
+                    {!readOnly && (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => editGroup(group)}
+                        >
+                          <Pencil className="mr-2 h-4 w-4" />
+                          编辑
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={isDeletingGroup}
+                          onClick={() => deleteGroup({ id: group.id })}
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          删除
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -1909,8 +1924,12 @@ export function ImageBackendPoolAdminPanel() {
 
         <TabsContent
           value="accounts"
-          className="mt-6 grid gap-4 lg:grid-cols-[360px_1fr]"
+          className={cn(
+            "mt-6 grid gap-4",
+            readOnly ? "lg:grid-cols-1" : "lg:grid-cols-[360px_1fr]"
+          )}
         >
+          {!readOnly && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">
@@ -2095,6 +2114,7 @@ export function ImageBackendPoolAdminPanel() {
               )}
             </CardContent>
           </Card>
+          )}
 
           <div className="grid gap-3">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7">
@@ -2135,36 +2155,42 @@ export function ImageBackendPoolAdminPanel() {
                 </div>
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <Label className="flex items-center gap-2 text-sm">
-                    <Checkbox
-                      checked={allAccountsSelected}
-                      onCheckedChange={(checked) =>
-                        toggleAllAccounts(Boolean(checked))
-                      }
-                    />
-                    已选 {selectedAccountCount} 个账号
-                    {selectedAccountCount > 0 && (
+                      {!readOnly && (
+                        <Checkbox
+                          checked={allAccountsSelected}
+                          onCheckedChange={(checked) =>
+                            toggleAllAccounts(Boolean(checked))
+                          }
+                        />
+                      )}
+                    {readOnly
+                      ? `账号 ${filteredAccounts.length} / ${accounts.length} 个`
+                      : `已选 ${selectedAccountCount} 个账号`}
+                    {!readOnly && selectedAccountCount > 0 && (
                       <span className="text-muted-foreground">
                         Sub2API {selectedSub2ApiAccountCount} · 手工/本站{" "}
                         {selectedManualAccountCount}
                       </span>
                     )}
                   </Label>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setIsManualImportOpen(true)}
-                    >
-                      导入 RT
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setIsWebAtImportOpen(true)}
-                    >
-                      导入 Web AT
-                    </Button>
-                  </div>
+                  {!readOnly && (
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setIsManualImportOpen(true)}
+                      >
+                        导入 RT
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setIsWebAtImportOpen(true)}
+                      >
+                        导入 Web AT
+                      </Button>
+                    </div>
+                  )}
                 </div>
                 <div className="grid gap-3 md:grid-cols-[minmax(220px,1.5fr)_1fr_1fr_1fr_auto]">
                   <div className="relative">
@@ -2266,6 +2292,7 @@ export function ImageBackendPoolAdminPanel() {
                     {filteredAccounts.length} / 全部 {accounts.length} 个
                   </span>
                   <div className="flex flex-wrap items-center gap-2">
+                    {!readOnly && (
                     <Button
                       type="button"
                       variant="outline"
@@ -2288,6 +2315,8 @@ export function ImageBackendPoolAdminPanel() {
                       )}
                       刷新选中额度
                     </Button>
+                    )}
+                    {!readOnly && (
                     <Button
                       type="button"
                       variant="outline"
@@ -2310,6 +2339,8 @@ export function ImageBackendPoolAdminPanel() {
                       )}
                       刷新当前筛选 Web
                     </Button>
+                    )}
+                    {!readOnly && (
                     <Button
                       type="button"
                       variant="outline"
@@ -2327,6 +2358,8 @@ export function ImageBackendPoolAdminPanel() {
                       )}
                       移除错误账号
                     </Button>
+                    )}
+                    {!readOnly && (
                     <Button
                       type="button"
                       variant="outline"
@@ -2343,6 +2376,8 @@ export function ImageBackendPoolAdminPanel() {
                       )}
                       重置为可用
                     </Button>
+                    )}
+                    {!readOnly && (
                     <Button
                       type="button"
                       variant="outline"
@@ -2352,6 +2387,7 @@ export function ImageBackendPoolAdminPanel() {
                     >
                       清空选择
                     </Button>
+                    )}
                     <Button
                       type="button"
                       variant="outline"
@@ -2383,6 +2419,7 @@ export function ImageBackendPoolAdminPanel() {
                   image_gen 的 remaining/reset_after；同时读取 /backend-api/me
                   和 accounts/check 获取邮箱、套餐与默认模型。
                 </p>
+                {!readOnly && (
                 <div className="grid gap-3 md:grid-cols-[1fr_auto]">
                   <div className="grid gap-3 md:grid-cols-2">
                     <Label className="flex min-h-10 items-center gap-2 rounded-md border px-3 text-sm">
@@ -2561,6 +2598,7 @@ export function ImageBackendPoolAdminPanel() {
                     执行
                   </Button>
                 </div>
+                )}
                 {bulkAccountForm.setMode && selectedSub2ApiAccountCount > 0 && (
                   <p className="text-xs text-destructive">
                     Sub2API 来源账号不能在本站批量切换
@@ -2575,12 +2613,14 @@ export function ImageBackendPoolAdminPanel() {
                 <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <Checkbox
-                        checked={selectedAccountIdSet.has(account.id)}
-                        onCheckedChange={(checked) =>
-                          toggleAccountSelection(account.id, Boolean(checked))
-                        }
-                      />
+                      {!readOnly && (
+                        <Checkbox
+                          checked={selectedAccountIdSet.has(account.id)}
+                          onCheckedChange={(checked) =>
+                            toggleAccountSelection(account.id, Boolean(checked))
+                          }
+                        />
+                      )}
                       <Server className="h-4 w-4 text-muted-foreground" />
                       <span className="font-medium">{account.name}</span>
                       <Badge variant="outline">
@@ -2643,7 +2683,7 @@ export function ImageBackendPoolAdminPanel() {
                     )}
                   </div>
                   <div className="flex gap-2">
-                    {account.implementationMode === "web" && (
+                    {!readOnly && account.implementationMode === "web" && (
                       <Button
                         variant="outline"
                         size="sm"
@@ -2658,25 +2698,29 @@ export function ImageBackendPoolAdminPanel() {
                         刷新额度
                       </Button>
                     )}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => editAccount(account)}
-                    >
-                      <Pencil className="mr-2 h-4 w-4" />
-                      编辑
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={isDeletingMember}
-                      onClick={() =>
-                        deleteMember({ type: "account", id: account.id })
-                      }
-                    >
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      删除
-                    </Button>
+                    {!readOnly && (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => editAccount(account)}
+                        >
+                          <Pencil className="mr-2 h-4 w-4" />
+                          编辑
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={isDeletingMember}
+                          onClick={() =>
+                            deleteMember({ type: "account", id: account.id })
+                          }
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          删除
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -2686,8 +2730,12 @@ export function ImageBackendPoolAdminPanel() {
 
         <TabsContent
           value="apis"
-          className="mt-6 grid gap-4 lg:grid-cols-[360px_1fr]"
+          className={cn(
+            "mt-6 grid gap-4",
+            readOnly ? "lg:grid-cols-1" : "lg:grid-cols-[360px_1fr]"
+          )}
         >
+          {!readOnly && (
           <Card>
             <CardHeader>
               <CardTitle className="text-base">
@@ -2838,6 +2886,7 @@ export function ImageBackendPoolAdminPanel() {
               )}
             </CardContent>
           </Card>
+          )}
 
           <div className="grid gap-3">
             {apis.map((api) => (
@@ -2880,23 +2929,29 @@ export function ImageBackendPoolAdminPanel() {
                     )}
                   </div>
                   <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => editApi(api)}
-                    >
-                      <Pencil className="mr-2 h-4 w-4" />
-                      编辑
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={isDeletingMember}
-                      onClick={() => deleteMember({ type: "api", id: api.id })}
-                    >
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      删除
-                    </Button>
+                    {!readOnly && (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => editApi(api)}
+                        >
+                          <Pencil className="mr-2 h-4 w-4" />
+                          编辑
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={isDeletingMember}
+                          onClick={() =>
+                            deleteMember({ type: "api", id: api.id })
+                          }
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          删除
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -2904,6 +2959,7 @@ export function ImageBackendPoolAdminPanel() {
           </div>
         </TabsContent>
 
+        {!readOnly && (
         <TabsContent value="import" className="mt-6">
           <Card>
             <CardHeader>
@@ -3273,8 +3329,10 @@ export function ImageBackendPoolAdminPanel() {
             </CardContent>
           </Card>
         </TabsContent>
+        )}
       </Tabs>
 
+      {!readOnly && (
       <Dialog open={isManualImportOpen} onOpenChange={setIsManualImportOpen}>
         <DialogContent className="flex max-h-[88vh] w-[calc(100vw-2rem)] max-w-3xl flex-col overflow-hidden p-0">
           <DialogHeader>
@@ -3519,7 +3577,9 @@ export function ImageBackendPoolAdminPanel() {
           </div>
         </DialogContent>
       </Dialog>
+      )}
 
+      {!readOnly && (
       <Dialog open={isWebAtImportOpen} onOpenChange={setIsWebAtImportOpen}>
         <DialogContent className="flex max-h-[88vh] w-[calc(100vw-2rem)] max-w-3xl flex-col overflow-hidden p-0">
           <DialogHeader>
@@ -3674,6 +3734,7 @@ export function ImageBackendPoolAdminPanel() {
           </div>
         </DialogContent>
       </Dialog>
+      )}
     </div>
   );
 }

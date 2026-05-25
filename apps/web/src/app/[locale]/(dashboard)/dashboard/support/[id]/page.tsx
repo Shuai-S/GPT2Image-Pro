@@ -18,6 +18,8 @@ import {
   ticketStatuses,
 } from "@repo/shared/support/schemas";
 import { getServerSession } from "@repo/shared/auth/server";
+import { getUserRoleById } from "@repo/shared/auth/role-server";
+import { isAdminRole } from "@repo/shared/auth/roles";
 
 interface TicketDetailPageProps {
   params: Promise<{
@@ -41,7 +43,8 @@ export default async function TicketDetailPage({
   if (!session?.user) {
     redirect(`/${locale}/sign-in`);
   }
-  const isAdmin = (session.user as { role?: string }).role === "admin";
+  const role = await getUserRoleById(session.user.id);
+  const isAdmin = isAdminRole(role);
 
   // 获取工单信息
   const ticketResult = isAdmin

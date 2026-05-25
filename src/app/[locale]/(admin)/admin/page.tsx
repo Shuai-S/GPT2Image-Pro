@@ -1,4 +1,4 @@
-import { count, eq, gte, sum } from "drizzle-orm";
+import { count, eq, gte, inArray, sum } from "drizzle-orm";
 import {
   Coins,
   CreditCard,
@@ -73,7 +73,10 @@ export default async function AdminDashboardPage() {
     db
       .select({ count: count() })
       .from(user),
-    db.select({ count: count() }).from(user).where(eq(user.role, "admin")),
+    db
+      .select({ count: count() })
+      .from(user)
+      .where(inArray(user.role, ["observer_admin", "admin", "super_admin"])),
     db.select({ count: count() }).from(user).where(eq(user.banned, true)),
     db
       .select({ count: count() })

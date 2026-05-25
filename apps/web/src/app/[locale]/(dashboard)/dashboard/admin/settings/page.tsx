@@ -1,6 +1,11 @@
 import { redirect } from "next/navigation";
 import { getLocale } from "next-intl/server";
 
+import { getUserRoleById } from "@repo/shared/auth/role-server";
+import {
+  canAccessAdminArea,
+  canViewImageBackendPool,
+} from "@repo/shared/auth/roles";
 import { getServerSession } from "@repo/shared/auth/server";
 import { SystemSettingsPanel } from "@repo/shared/system-settings/components";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs";
@@ -13,8 +18,13 @@ export default async function DashboardAdminSettingsPage() {
     redirect(`/${locale}/sign-in`);
   }
 
-  if ((session.user as { role?: string }).role !== "admin") {
+  const role = await getUserRoleById(session.user.id);
+  if (!canViewImageBackendPool(role)) {
     redirect(`/${locale}/dashboard`);
+  }
+
+  if (!canAccessAdminArea(role)) {
+    return <ImageBackendPoolAdminPanel readOnly />;
   }
 
   return (

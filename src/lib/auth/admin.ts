@@ -29,7 +29,7 @@ export async function checkAdmin() {
   }
 
   // 检查用户是否是管理员
-  if (session.user.role !== "admin") {
+  if (session.user.role !== "admin" && session.user.role !== "super_admin") {
     redirect("/");
   }
 
@@ -50,5 +50,5 @@ export async function isAdmin(): Promise<boolean> {
     return false;
   }
 
-  return session.user.role === "admin";
+  return session.user.role === "admin" || session.user.role === "super_admin";
 }

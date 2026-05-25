@@ -3,6 +3,12 @@ import { createSafeActionClient } from "next-safe-action";
 import { z } from "zod";
 
 import { auth } from "./auth/index";
+import { getUserRoleById } from "./auth/role-server";
+import {
+  canAccessAdminArea,
+  canManageUserPermissions,
+  canViewImageBackendPool,
+} from "./auth/roles";
 import { logError, logger } from "./logger/index";
 import { captureError } from "./monitoring/index";
 
@@ -121,17 +127,49 @@ export const protectedAction = actionClient.use(async ({ next }) => {
  * 在 protectedAction 基础上增加角色验证
  */
 export const adminAction = protectedAction.use(async ({ next, ctx }) => {
-  // 检查用户是否为管理员
-  // 类型断言: role 字段在 Better Auth additionalFields 中定义
-  const userWithRole = ctx.user as { role?: string };
-  if (userWithRole.role !== "admin") {
+  const role = await getUserRoleById(ctx.userId);
+  if (!canAccessAdminArea(role)) {
     throw new Error("此操作需要管理员权限");
   }
 
   return next({
     ctx: {
       ...ctx,
+      role,
       isAdmin: true,
     },
   });
 });
+
+export const superAdminAction = protectedAction.use(async ({ next, ctx }) => {
+  const role = await getUserRoleById(ctx.userId);
+  if (!canManageUserPermissions(role)) {
+    throw new Error("此操作需要超管权限");
+  }
+
+  return next({
+    ctx: {
+      ...ctx,
+      role,
+      isAdmin: true,
+      isSuperAdmin: true,
+    },
+  });
+});
+
+export const imageBackendPoolViewerAction = protectedAction.use(
+  async ({ next, ctx }) => {
+    const role = await getUserRoleById(ctx.userId);
+    if (!canViewImageBackendPool(role)) {
+      throw new Error("此操作需要生图后端池查看权限");
+    }
+
+    return next({
+      ctx: {
+        ...ctx,
+        role,
+        canViewImageBackendPool: true,
+      },
+    });
+  }
+);

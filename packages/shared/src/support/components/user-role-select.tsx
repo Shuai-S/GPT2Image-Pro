@@ -12,13 +12,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@repo/ui/components/select";
+import {
+  APP_USER_ROLES,
+  getUserRoleLabel,
+  type AppUserRole,
+} from "../../auth/roles";
 import { updateUserRoleAction } from "../actions/admin-users";
 
 interface UserRoleSelectProps {
   /** 用户 ID */
   userId: string;
   /** 当前角色 */
-  currentRole: "user" | "admin";
+  currentRole: AppUserRole;
 }
 
 /**
@@ -42,12 +47,12 @@ export function UserRoleSelect({ userId, currentRole }: UserRoleSelectProps) {
     try {
       const result = await updateUserRoleAction({
         userId,
-        role: newRole as "user" | "admin",
+        role: newRole as AppUserRole,
       });
 
       if (result?.data) {
         toast.success(result.data.message);
-        setRole(newRole as "user" | "admin");
+        setRole(newRole as AppUserRole);
         router.refresh();
       } else if (result?.serverError) {
         toast.error(result.serverError);
@@ -62,12 +67,18 @@ export function UserRoleSelect({ userId, currentRole }: UserRoleSelectProps) {
 
   // 显示当前角色的徽章样式
   const getRoleBadge = (r: string) => {
-    if (r === "admin") {
+    if (r === "super_admin") {
       return (
         <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300">
-          管理员
+          超管
         </Badge>
       );
+    }
+    if (r === "admin") {
+      return <Badge variant="secondary">管理员</Badge>;
+    }
+    if (r === "observer_admin") {
+      return <Badge variant="outline">观察管理员</Badge>;
     }
     return (
       <Badge
@@ -94,19 +105,11 @@ export function UserRoleSelect({ userId, currentRole }: UserRoleSelectProps) {
         <SelectValue>{getRoleBadge(role)}</SelectValue>
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value="user">
-          <Badge
-            variant="secondary"
-            className="bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300"
-          >
-            普通用户
-          </Badge>
-        </SelectItem>
-        <SelectItem value="admin">
-          <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300">
-            管理员
-          </Badge>
-        </SelectItem>
+        {APP_USER_ROLES.map((item) => (
+          <SelectItem key={item} value={item}>
+            {getRoleBadge(item) || getUserRoleLabel(item)}
+          </SelectItem>
+        ))}
       </SelectContent>
     </Select>
   );

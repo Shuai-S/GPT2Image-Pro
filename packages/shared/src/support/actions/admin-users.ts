@@ -25,6 +25,11 @@ import {
   user,
 } from "@repo/database/schema";
 import {
+  ADMIN_MANAGEMENT_ROLES,
+  APP_USER_ROLES,
+  getUserRoleLabel,
+} from "../../auth/roles";
+import {
   getPlanFromPriceId,
   type SubscriptionPlan,
 } from "../../config/subscription-plan";
@@ -36,12 +41,14 @@ import {
   unfreezeCreditsAccount,
 } from "../../credits/core";
 import { expireStalePendingGenerations } from "../../generation-maintenance";
-import { adminAction } from "../../safe-action";
+import { adminAction, superAdminAction } from "../../safe-action";
 import { getUserPlan } from "../../subscription/services/user-plan";
 import { getRuntimeSettingNumber } from "../../system-settings";
 
 const withAdminUsersAction = (name: string) =>
   adminAction.metadata({ action: `support.adminUsers.${name}` });
+const withSuperAdminUsersAction = (name: string) =>
+  superAdminAction.metadata({ action: `support.adminUsers.${name}` });
 
 const userStatusSchema = z.enum(["all", "active", "banned", "unverified"]);
 const subscriptionStatusSchema = z.enum([
@@ -85,7 +92,7 @@ const reasonSchema = z
   .max(300, "原因最多300字符");
 
 const updateUserRoleSchema = userIdSchema.extend({
-  role: z.enum(["user", "admin"]),
+  role: z.enum(APP_USER_ROLES),
   reason: z.string().trim().max(300).optional(),
 });
 
@@ -333,7 +340,13 @@ export const getAllUsersAction = withAdminUsersAction("getAllUsers")
       (where ? countQuery.where(where) : countQuery),
       Promise.all([
         db.select({ count: count() }).from(user),
-        db.select({ count: count() }).from(user).where(eq(user.role, "admin")),
+        db
+          .select({ count: count() })
+          .from(user)
+          .where(inArray(user.role, [
+            "observer_admin",
+            ...ADMIN_MANAGEMENT_ROLES,
+          ])),
         db.select({ count: count() }).from(user).where(eq(user.banned, true)),
         db
           .select({ count: count() })
@@ -560,7 +573,7 @@ export const getUserDetailAction = withAdminUsersAction("getUserDetail")
     };
   });
 
-export const updateUserRoleAction = withAdminUsersAction("updateUserRole")
+export const updateUserRoleAction = withSuperAdminUsersAction("updateUserRole")
   .schema(updateUserRoleSchema)
   .action(async ({ parsedInput: data, ctx }) => {
     const targetUser = await getUserBasicOrThrow(data.userId);
@@ -583,7 +596,7 @@ export const updateUserRoleAction = withAdminUsersAction("updateUserRole")
     });
 
     revalidatePath("/dashboard/users");
-    return { message: `用户角色已更新为 ${data.role}` };
+    return { message: `用户角色已更新为 ${getUserRoleLabel(data.role)}` };
   });
 
 export const banUserAction = withAdminUsersAction("banUser")

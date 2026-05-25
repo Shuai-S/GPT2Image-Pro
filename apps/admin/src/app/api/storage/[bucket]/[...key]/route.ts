@@ -3,6 +3,8 @@ import path, { resolve, sep } from "node:path";
 import { type NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { auth } from "@repo/shared/auth";
+import { getUserRoleById } from "@repo/shared/auth/role-server";
+import { isAdminRole } from "@repo/shared/auth/roles";
 
 const BASE_DIR = process.env.LOCAL_STORAGE_PATH || "./storage";
 
@@ -25,7 +27,11 @@ export async function GET(
 ) {
   // Auth check: admin middleware skips /api/ routes, so we must verify here
   const session = await auth.api.getSession({ headers: await headers() });
-  if (!session || session.user.role !== "admin") {
+  if (!session?.user?.id) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  const role = await getUserRoleById(session.user.id);
+  if (!isAdminRole(role)) {
     return new Response("Unauthorized", { status: 401 });
   }
 

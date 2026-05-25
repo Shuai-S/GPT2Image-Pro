@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
 
+import { getUserRoleById } from "./role-server";
+import { canAccessAdminArea } from "./roles";
 import { getServerSession } from "./server";
 
 /**
@@ -28,8 +30,9 @@ export async function checkAdmin() {
     redirect("/sign-in");
   }
 
-  // 检查用户是否是管理员
-  if (session.user.role !== "admin") {
+  // 检查用户是否是管理员或超管
+  const role = await getUserRoleById(session.user.id);
+  if (!canAccessAdminArea(role)) {
     redirect("/");
   }
 
@@ -50,5 +53,6 @@ export async function isAdmin(): Promise<boolean> {
     return false;
   }
 
-  return session.user.role === "admin";
+  const role = await getUserRoleById(session.user.id);
+  return canAccessAdminArea(role);
 }

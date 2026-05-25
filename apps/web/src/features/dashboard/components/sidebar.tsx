@@ -1,6 +1,13 @@
 "use client";
 
-import { ChevronsUpDown, LogOut, Shield, Settings, Users } from "lucide-react";
+import {
+  ChevronsUpDown,
+  LogOut,
+  Server,
+  Shield,
+  Settings,
+  Users,
+} from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -19,6 +26,10 @@ import { Separator } from "@repo/ui/components/separator";
 import { Sheet, SheetContent, SheetTitle } from "@repo/ui/components/sheet";
 import { dashboardConfig } from "@repo/shared/config";
 import { CreditBalanceBadge } from "@repo/shared/credits/components";
+import {
+  isAdminRole,
+  isObserverAdminRole,
+} from "@repo/shared/auth/roles";
 import { useSidebar } from "@/features/dashboard/context";
 import { ModeToggle } from "@repo/shared/components";
 import { getMyPlanAction } from "@repo/shared/subscription/actions/get-user-plan";
@@ -53,7 +64,8 @@ export function DashboardSidebar() {
   // 获取当前用户会话
   const { data: session } = useCurrentSession();
   const user = session?.user;
-  const isAdmin = user?.role === "admin";
+  const isAdmin = isAdminRole(user?.role);
+  const isObserverAdmin = isObserverAdminRole(user?.role);
 
   // Popover 开关状态
   const [open, setOpen] = useState(false);
@@ -97,6 +109,7 @@ export function DashboardSidebar() {
       "Billing & Usage": t("nav.billing"),
       Settings: t("nav.settings"),
       "System Settings": t("nav.systemSettings"),
+      "Image Backend Pool": t("nav.imageBackendPool"),
       Support: t("nav.support"),
       "New Ticket": t("nav.newTicket"),
       "User Management": t("nav.userManagement"),
@@ -194,20 +207,31 @@ export function DashboardSidebar() {
                 </p>
               )}
               <div className="space-y-0.5">
-                {[...group.items, ...(isAdmin
-                  ? [
-                      {
-                        title: "User Management",
-                        href: "/dashboard/admin/users",
-                        icon: Users,
-                      },
-                      {
-                        title: "System Settings",
-                        href: "/dashboard/admin/settings",
-                        icon: Shield,
-                      },
-                    ]
-                  : [])].map((item) => {
+                {[
+                  ...group.items,
+                  ...(isAdmin
+                    ? [
+                        {
+                          title: "User Management",
+                          href: "/dashboard/admin/users",
+                          icon: Users,
+                        },
+                        {
+                          title: "System Settings",
+                          href: "/dashboard/admin/settings",
+                          icon: Shield,
+                        },
+                      ]
+                    : isObserverAdmin
+                      ? [
+                          {
+                            title: "Image Backend Pool",
+                            href: "/dashboard/admin/settings",
+                            icon: Server,
+                          },
+                        ]
+                      : []),
+                ].map((item) => {
                   // 去掉 locale 前缀后比较路径
                   const normalizedPath = pathname.replace(/^\/[a-z]{2}\//, "/");
                   const isActive =

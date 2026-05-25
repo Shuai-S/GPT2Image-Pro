@@ -115,7 +115,7 @@ export const adminAction = protectedAction.use(async ({ next, ctx }) => {
 	// 检查用户是否为管理员
 	// 类型断言: role 字段在 Better Auth additionalFields 中定义
 	const userWithRole = ctx.user as { role?: string };
-	if (userWithRole.role !== "admin") {
+	if (userWithRole.role !== "admin" && userWithRole.role !== "super_admin") {
 		throw new Error("此操作需要管理员权限");
 	}
 
@@ -123,6 +123,21 @@ export const adminAction = protectedAction.use(async ({ next, ctx }) => {
 		ctx: {
 			...ctx,
 			isAdmin: true,
+		},
+	});
+});
+
+export const superAdminAction = protectedAction.use(async ({ next, ctx }) => {
+	const userWithRole = ctx.user as { role?: string };
+	if (userWithRole.role !== "super_admin") {
+		throw new Error("此操作需要超管权限");
+	}
+
+	return next({
+		ctx: {
+			...ctx,
+			isAdmin: true,
+			isSuperAdmin: true,
 		},
 	});
 });

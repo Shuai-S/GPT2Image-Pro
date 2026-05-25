@@ -22,7 +22,12 @@ import {
 /**
  * 用户角色枚举
  */
-export const userRoleEnum = pgEnum("user_role", ["user", "admin"]);
+export const userRoleEnum = pgEnum("user_role", [
+  "user",
+  "observer_admin",
+  "admin",
+  "super_admin",
+]);
 
 // ============================================
 // 用户表 (User)
@@ -35,7 +40,7 @@ export const userRoleEnum = pgEnum("user_role", ["user", "admin"]);
  * @field email - 用户邮箱 (唯一)
  * @field emailVerified - 邮箱是否已验证
  * @field image - 用户头像 URL
- * @field role - 用户角色 (user/admin)
+ * @field role - 用户角色 (user/observer_admin/admin/super_admin)
  * @field banned - 是否被封禁
  * @field bannedReason - 封禁原因
  * @field moderationBlockRiskLevel - 用户默认审核拦截级别

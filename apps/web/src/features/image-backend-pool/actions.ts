@@ -2,7 +2,11 @@
 
 import { z } from "zod";
 
-import { adminAction, protectedAction } from "@repo/shared/safe-action";
+import {
+  adminAction,
+  imageBackendPoolViewerAction,
+  protectedAction,
+} from "@repo/shared/safe-action";
 import {
   isSubscriptionPlan,
   type SubscriptionPlan,
@@ -75,6 +79,9 @@ const subscriptionPlanSchema = z
 const withImageBackendPoolAdminAction = (name: string) =>
   adminAction.metadata({ action: `imageBackendPool.${name}` });
 
+const withImageBackendPoolViewerAction = (name: string) =>
+  imageBackendPoolViewerAction.metadata({ action: `imageBackendPool.${name}` });
+
 export const getSelectableImageBackendGroupsAction = protectedAction
   .metadata({ action: "imageBackendPool.selectableGroups" })
   .action(async ({ ctx }) => {
@@ -103,7 +110,7 @@ export const setUserImageBackendPreferenceAction = protectedAction
     return { success: true };
   });
 
-export const getAdminImageBackendPoolAction = withImageBackendPoolAdminAction(
+export const getAdminImageBackendPoolAction = withImageBackendPoolViewerAction(
   "list"
 ).action(async () => {
   const pool = await listAdminImageBackendPool();

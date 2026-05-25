@@ -3,13 +3,15 @@
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
+import type { AppUserRole } from "@repo/shared/auth/roles";
+
 type CurrentSession = {
   user?: {
     id: string;
     name: string;
     email: string;
     image?: string | null;
-    role?: "user" | "admin";
+    role?: AppUserRole;
   };
 } | null;
 

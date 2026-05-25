@@ -8,6 +8,8 @@ import { Button } from "@repo/ui/components/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@repo/ui/components/card";
 import { db } from "@repo/database";
 import { ticket, user } from "@repo/database/schema";
+import { getUserRoleById } from "@repo/shared/auth/role-server";
+import { isAdminRole } from "@repo/shared/auth/roles";
 import { getServerSession } from "@repo/shared/auth/server";
 
 /**
@@ -24,7 +26,8 @@ export default async function SupportPage() {
   }
 
   const t = await getTranslations("Support");
-  const isAdmin = (session.user as { role?: string }).role === "admin";
+  const role = await getUserRoleById(session.user.id);
+  const isAdmin = isAdminRole(role);
 
   const tickets = isAdmin
     ? await db

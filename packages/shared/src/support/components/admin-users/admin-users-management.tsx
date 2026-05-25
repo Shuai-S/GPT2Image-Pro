@@ -73,6 +73,11 @@ import {
   TabsTrigger,
 } from "@repo/ui/components/tabs";
 import { Textarea } from "@repo/ui/components/textarea";
+import {
+  APP_USER_ROLES,
+  getUserRoleLabel,
+  type AppUserRole,
+} from "../../../auth/roles";
 
 type UserStatusFilter = "all" | "active" | "banned" | "unverified";
 type SubscriptionStatusFilter =
@@ -90,7 +95,7 @@ type UserRow = {
   name: string;
   email: string;
   image: string | null;
-  role: "user" | "admin";
+  role: AppUserRole;
   banned: boolean;
   bannedReason: string | null;
   emailVerified: boolean;
@@ -116,7 +121,7 @@ type UserDetail = {
     name: string;
     email: string;
     image: string | null;
-    role: "user" | "admin";
+    role: AppUserRole;
     banned: boolean;
     bannedReason: string | null;
     emailVerified: boolean;
@@ -200,6 +205,9 @@ const PLAN_OPTIONS: Array<{ value: PlanFilter; label: string }> = [
   { value: "enterprise", label: "Enterprise" },
 ];
 
+const ROLE_OPTIONS: Array<{ value: AppUserRole; label: string }> =
+  APP_USER_ROLES.map((role) => ({ value: role, label: getUserRoleLabel(role) }));
+
 function formatDateTime(value?: Date | string | null) {
   if (!value) {
     return "-";
@@ -280,7 +288,24 @@ function generationStatusBadge(status: string) {
   return <Badge variant="secondary">处理中</Badge>;
 }
 
-export function AdminUsersManagement() {
+function userRoleBadge(role: AppUserRole) {
+  if (role === "super_admin") {
+    return <Badge className="bg-red-100 text-red-700">超管</Badge>;
+  }
+  if (role === "admin") {
+    return <Badge variant="secondary">管理员</Badge>;
+  }
+  if (role === "observer_admin") {
+    return <Badge variant="outline">观察管理员</Badge>;
+  }
+  return null;
+}
+
+export function AdminUsersManagement({
+  canManageRoles = false,
+}: {
+  canManageRoles?: boolean;
+}) {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [stats, setStats] = useState({
     totalUsers: 0,
@@ -331,7 +356,7 @@ export function AdminUsersManagement() {
   const [isSettingKeyStatus, setIsSettingKeyStatus] = useState(false);
 
   const [roleDialogOpen, setRoleDialogOpen] = useState(false);
-  const [targetRole, setTargetRole] = useState<"user" | "admin">("user");
+  const [targetRole, setTargetRole] = useState<AppUserRole>("user");
   const [roleReason, setRoleReason] = useState("");
   const [isSettingRole, setIsSettingRole] = useState(false);
 
@@ -437,9 +462,9 @@ export function AdminUsersManagement() {
     setKeyDialogOpen(true);
   };
 
-  const openRoleDialog = (userRow: UserRow, nextRole: "user" | "admin") => {
+  const openRoleDialog = (userRow: UserRow) => {
     setSelectedUser(userRow);
-    setTargetRole(nextRole);
+    setTargetRole(userRow.role);
     setRoleReason("");
     setRoleDialogOpen(true);
   };
@@ -577,6 +602,14 @@ export function AdminUsersManagement() {
 
   const handleRoleChange = async () => {
     if (!selectedUser) {
+      return;
+    }
+    if (!canManageRoles) {
+      toast.error("只有超管可以修改用户角色");
+      return;
+    }
+    if (targetRole === selectedUser.role) {
+      setRoleDialogOpen(false);
       return;
     }
     if (!roleReason.trim()) {
@@ -840,9 +873,7 @@ export function AdminUsersManagement() {
                                 <span className="truncate font-medium">
                                   {item.name}
                                 </span>
-                                {item.role === "admin" ? (
-                                  <Badge variant="secondary">Admin</Badge>
-                                ) : null}
+                                {userRoleBadge(item.role)}
                               </div>
                               <p className="truncate text-xs text-muted-foreground">
                                 {item.email}
@@ -941,19 +972,14 @@ export function AdminUsersManagement() {
                                   )}
                                   {item.banned ? "解除封禁" : "封禁用户"}
                                 </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onClick={() =>
-                                    openRoleDialog(
-                                      item,
-                                      item.role === "admin" ? "user" : "admin"
-                                    )
-                                  }
-                                >
-                                  <Shield className="h-4 w-4" />
-                                  {item.role === "admin"
-                                    ? "降为普通用户"
-                                    : "设为管理员"}
-                                </DropdownMenuItem>
+                                {canManageRoles && (
+                                  <DropdownMenuItem
+                                    onClick={() => openRoleDialog(item)}
+                                  >
+                                    <Shield className="h-4 w-4" />
+                                    修改角色
+                                  </DropdownMenuItem>
+                                )}
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
                                   onClick={() =>
@@ -1088,7 +1114,7 @@ export function AdminUsersManagement() {
                           ["用户 ID", detail.user.id],
                           ["邮箱", detail.user.email],
                           ["邮箱验证", detail.user.emailVerified ? "已验证" : "未验证"],
-                          ["角色", detail.user.role],
+                          ["角色", getUserRoleLabel(detail.user.role)],
                           ["注册时间", formatDateTime(detail.user.createdAt)],
                           ["更新时间", formatDateTime(detail.user.updatedAt)],
                         ]}
@@ -1489,13 +1515,29 @@ export function AdminUsersManagement() {
       <Dialog open={roleDialogOpen} onOpenChange={setRoleDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>
-              {targetRole === "admin" ? "设为管理员" : "降为普通用户"}
-            </DialogTitle>
+            <DialogTitle>修改用户角色</DialogTitle>
             <DialogDescription>
               目标用户：{selectedUser?.email ?? "-"}。角色变更会写入审计日志。
             </DialogDescription>
           </DialogHeader>
+          <div className="space-y-2">
+            <Label>目标角色</Label>
+            <Select
+              value={targetRole}
+              onValueChange={(value) => setTargetRole(value as AppUserRole)}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ROLE_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <div className="space-y-2">
             <Label htmlFor="roleReason">操作原因</Label>
             <Textarea
