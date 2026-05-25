@@ -108,6 +108,7 @@ type Group = {
 type Account = {
   id: string;
   groupId: string | null;
+  groupIds: string[];
   name: string;
   email: string | null;
   implementationMode: string;
@@ -349,6 +350,24 @@ function groupName(groups: Group[], groupId: string | null) {
   return groups.find((group) => group.id === groupId)?.name || "未分组";
 }
 
+function normalizeAccountGroupIds(groupIds?: string[] | null) {
+  return Array.from(
+    new Set((groupIds || []).map((groupId) => groupId.trim()).filter(Boolean))
+  );
+}
+
+function accountGroupIds(account: Account) {
+  const groupIds = normalizeAccountGroupIds(account.groupIds);
+  if (groupIds.length) return groupIds;
+  return account.groupId ? [account.groupId] : [];
+}
+
+function groupNames(groups: Group[], groupIds: string[]) {
+  const normalized = normalizeAccountGroupIds(groupIds);
+  if (!normalized.length) return "未分组";
+  return normalized.map((groupId) => groupName(groups, groupId)).join("、");
+}
+
 function planLabel(plan: SubscriptionPlan) {
   return PLAN_OPTIONS.find((option) => option.value === plan)?.label || plan;
 }
@@ -479,7 +498,7 @@ function accountSearchText(account: Account, groups: Group[]) {
     account.implementationMode,
     account.model,
     account.status,
-    groupName(groups, account.groupId),
+    groupNames(groups, accountGroupIds(account)),
     accountSourceLabel(account),
     account.metadata?.source,
     account.metadata?.sourceAccountId,
@@ -622,6 +641,7 @@ export function ImageBackendPoolAdminPanel({
   const [accountForm, setAccountForm] = useState({
     id: "",
     groupId: "default",
+    groupIds: [] as string[],
     name: "",
     email: "",
     accessToken: "",
@@ -765,8 +785,10 @@ export function ImageBackendPoolAdminPanel({
         const groupMatches =
           bulkAccountForm.selectionGroupId === "all" ||
           (bulkAccountForm.selectionGroupId === "default"
-            ? !account.groupId
-            : account.groupId === bulkAccountForm.selectionGroupId);
+            ? accountGroupIds(account).length === 0
+            : accountGroupIds(account).includes(
+                bulkAccountForm.selectionGroupId
+              ));
         const modeMatches =
           bulkAccountForm.selectionMode === "all" ||
           account.implementationMode === bulkAccountForm.selectionMode;
@@ -882,6 +904,7 @@ export function ImageBackendPoolAdminPanel({
     setAccountForm({
       id: "",
       groupId: "default",
+      groupIds: [],
       name: "",
       email: "",
       accessToken: "",
@@ -973,9 +996,11 @@ export function ImageBackendPoolAdminPanel({
   };
 
   const editAccount = (account: Account) => {
+    const selectedGroupIds = accountGroupIds(account);
     setAccountForm({
       id: account.id,
-      groupId: account.groupId || "default",
+      groupId: selectedGroupIds[0] || "default",
+      groupIds: selectedGroupIds,
       name: account.name,
       email: account.email || "",
       accessToken: "",
@@ -986,6 +1011,20 @@ export function ImageBackendPoolAdminPanel({
       isEnabled: account.isEnabled,
       priority: account.priority,
       concurrency: account.concurrency,
+    });
+  };
+
+  const toggleAccountFormGroup = (groupId: string, checked: boolean) => {
+    setAccountForm((current) => {
+      const currentGroupIds = normalizeAccountGroupIds(current.groupIds);
+      const nextGroupIds = checked
+        ? normalizeAccountGroupIds([...currentGroupIds, groupId])
+        : currentGroupIds.filter((id) => id !== groupId);
+      return {
+        ...current,
+        groupIds: nextGroupIds,
+        groupId: nextGroupIds[0] || "default",
+      };
     });
   };
 
@@ -2097,23 +2136,36 @@ export function ImageBackendPoolAdminPanel({
                   Sub2API 来源账号的 RT 由 Sub2API 管理，本站不允许修改。
                 </div>
               )}
-              <Select
-                value={accountForm.groupId}
-                onValueChange={(value) =>
-                  setAccountForm((current) => ({ ...current, groupId: value }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {groupOptions.map((group) => (
-                    <SelectItem key={group.id} value={group.id}>
-                      {group.name}
-                    </SelectItem>
+              <div className="space-y-2 rounded-md border p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <Label>所属分组</Label>
+                  <span className="text-xs text-muted-foreground">可多选</span>
+                </div>
+                <div className="grid max-h-40 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                  {groups.map((group) => (
+                    <Label
+                      key={group.id}
+                      className="flex min-h-9 items-center gap-2 rounded-md border px-2 text-sm"
+                    >
+                      <Checkbox
+                        checked={accountForm.groupIds.includes(group.id)}
+                        onCheckedChange={(checked) =>
+                          toggleAccountFormGroup(group.id, Boolean(checked))
+                        }
+                      />
+                      <span className="truncate">{group.name}</span>
+                    </Label>
                   ))}
-                </SelectContent>
-              </Select>
+                  {!groups.length && (
+                    <p className="text-xs text-muted-foreground">
+                      还没有可选分组。
+                    </p>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  取消全部分组即为未分组；同一账号可同时被多个分组调度。
+                </p>
+              </div>
               <Select
                 value={accountForm.implementationMode}
                 onValueChange={(value) =>
@@ -2195,7 +2247,13 @@ export function ImageBackendPoolAdminPanel({
               </div>
               <Button
                 className="w-full"
-                onClick={() => saveAccount(accountForm)}
+                onClick={() =>
+                  saveAccount({
+                    ...accountForm,
+                    groupId: accountForm.groupIds[0] || "default",
+                    groupIds: accountForm.groupIds,
+                  })
+                }
                 disabled={
                   isSavingAccount ||
                   !accountForm.name ||
@@ -2814,7 +2872,7 @@ export function ImageBackendPoolAdminPanel({
                       {account.email ||
                         getWebAccountInfo(account)?.email ||
                         "无邮箱"}{" "}
-                      · {groupName(groups, account.groupId)} · 优先级{" "}
+                      · {groupNames(groups, accountGroupIds(account))} · 优先级{" "}
                       {account.priority} · 并发权重 {account.concurrency} ·{" "}
                       {formatDate(account.lastUsedAt, timeZone)}
                     </p>

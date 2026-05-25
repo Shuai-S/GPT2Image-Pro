@@ -1,5 +1,6 @@
 import {
   boolean,
+  index,
   integer,
   json,
   numeric,
@@ -810,6 +811,27 @@ export const imageBackendAccount = pgTable(
   ]
 );
 
+export const imageBackendAccountGroup = pgTable(
+  "image_backend_account_group",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => imageBackendAccount.id, { onDelete: "cascade" }),
+    groupId: text("group_id")
+      .notNull()
+      .references(() => imageBackendGroup.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("image_backend_account_group_account_group_unique").on(
+      table.accountId,
+      table.groupId
+    ),
+    index("image_backend_account_group_group_idx").on(table.groupId),
+  ]
+);
+
 export const imageBackendApi = pgTable("image_backend_api", {
   id: text("id").primaryKey(),
   groupId: text("group_id").references(() => imageBackendGroup.id, {
@@ -857,6 +879,10 @@ export type ImageBackendGroup = typeof imageBackendGroup.$inferSelect;
 export type NewImageBackendGroup = typeof imageBackendGroup.$inferInsert;
 export type ImageBackendAccount = typeof imageBackendAccount.$inferSelect;
 export type NewImageBackendAccount = typeof imageBackendAccount.$inferInsert;
+export type ImageBackendAccountGroup =
+  typeof imageBackendAccountGroup.$inferSelect;
+export type NewImageBackendAccountGroup =
+  typeof imageBackendAccountGroup.$inferInsert;
 export type ImageBackendApi = typeof imageBackendApi.$inferSelect;
 export type NewImageBackendApi = typeof imageBackendApi.$inferInsert;
 export type UserImageBackendPreference =

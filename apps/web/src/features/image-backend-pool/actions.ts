@@ -254,6 +254,7 @@ export const saveImageBackendAccountAction = withImageBackendPoolAdminAction(
     z.object({
       id: z.string().trim().optional(),
       groupId: nullableGroupIdSchema,
+      groupIds: z.array(z.string().trim().min(1)).max(100).optional(),
       name: z.string().trim().min(1).max(120),
       email: z.string().trim().max(200).optional(),
       accessToken: z.string().trim().optional(),
@@ -271,6 +272,7 @@ export const saveImageBackendAccountAction = withImageBackendPoolAdminAction(
     const id = await upsertImageBackendAccount({
       id: parsedInput.id,
       groupId: parsedInput.groupId,
+      groupIds: parsedInput.groupIds,
       name: parsedInput.name,
       email: parsedInput.email || null,
       accessToken: parsedInput.accessToken || undefined,

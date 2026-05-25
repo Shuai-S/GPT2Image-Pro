@@ -3,6 +3,7 @@ import { db } from "@repo/database";
 import {
   externalApiKey,
   imageBackendAccount,
+  imageBackendAccountGroup,
   imageBackendApi,
   imageBackendGroup,
   systemSetting,
@@ -100,6 +101,7 @@ type PoolMember =
       type: "account";
       id: string;
       groupId: string | null;
+      groupIds: string[];
       groupMetadata: Record<string, unknown> | null;
       groupContentSafetyEnabled: boolean | null;
       name: string;
@@ -267,6 +269,29 @@ function getGroupChildGroupIds(
   metadata: Record<string, unknown> | null | undefined
 ) {
   return normalizeGroupChildGroupIds(asGroupMetadata(metadata).childGroupIds);
+}
+
+function normalizeAccountGroupIds(
+  groupIds?: readonly (string | null | undefined)[] | null
+) {
+  if (!groupIds) return [];
+  return Array.from(
+    new Set(
+      groupIds
+        .map((groupId) => (typeof groupId === "string" ? groupId.trim() : ""))
+        .filter((groupId) => groupId && groupId !== "default")
+    )
+  );
+}
+
+function accountGroupIdsFromInput(input: {
+  groupId?: string | null;
+  groupIds?: string[] | null;
+}) {
+  if (input.groupIds !== undefined) {
+    return normalizeAccountGroupIds(input.groupIds);
+  }
+  return normalizeAccountGroupIds(input.groupId ? [input.groupId] : []);
 }
 
 function groupBackendAllowsRequest(
@@ -1165,17 +1190,90 @@ async function selectPoolMember(
     : groupId
       ? eq(imageBackendApi.groupId, groupId)
       : sql`true`;
-  const accountGroupFilter = groupIds.length
-    ? inArray(imageBackendAccount.groupId, groupIds)
-    : groupId
-      ? eq(imageBackendAccount.groupId, groupId)
-      : sql`true`;
   const requiredAccountBackend =
-    requestKind === "responses" ? "responses" : effectiveAccountBackendPreference;
+    requestKind === "responses"
+      ? "responses"
+      : effectiveAccountBackendPreference;
   const accountBackendFilter = requiredAccountBackend
     ? eq(imageBackendAccount.implementationMode, requiredAccountBackend)
     : sql`true`;
   const now = new Date();
+  const accountBaseWhere = and(
+    eq(imageBackendAccount.isEnabled, true),
+    accountBackendFilter,
+    isBackendAvailableStatus(
+      imageBackendAccount.status,
+      imageBackendAccount.cooldownUntil,
+      now
+    ),
+    or(
+      sql`${imageBackendAccount.cooldownUntil} IS NULL`,
+      sql`${imageBackendAccount.cooldownUntil} <= ${now}`
+    )
+  );
+  const accountRowsPromise = groupIds.length
+    ? db
+        .select({
+          matchedGroupId: imageBackendAccountGroup.groupId,
+          id: imageBackendAccount.id,
+          groupId: imageBackendAccount.groupId,
+          name: imageBackendAccount.name,
+          accessToken: imageBackendAccount.accessToken,
+          model: imageBackendAccount.model,
+          implementationMode: imageBackendAccount.implementationMode,
+          contentSafetyEnabled: imageBackendAccount.contentSafetyEnabled,
+          priority: imageBackendAccount.priority,
+          concurrency: imageBackendAccount.concurrency,
+          lastUsedAt: imageBackendAccount.lastUsedAt,
+          createdAt: imageBackendAccount.createdAt,
+          metadata: imageBackendAccount.metadata,
+        })
+        .from(imageBackendAccount)
+        .innerJoin(
+          imageBackendAccountGroup,
+          eq(imageBackendAccountGroup.accountId, imageBackendAccount.id)
+        )
+        .where(
+          and(
+            accountBaseWhere,
+            inArray(imageBackendAccountGroup.groupId, groupIds)
+          )
+        )
+        .orderBy(
+          asc(imageBackendAccount.priority),
+          asc(imageBackendAccount.lastUsedAt),
+          asc(imageBackendAccount.createdAt)
+        )
+        .limit(50)
+    : db
+        .select({
+          matchedGroupId: imageBackendAccount.groupId,
+          id: imageBackendAccount.id,
+          groupId: imageBackendAccount.groupId,
+          name: imageBackendAccount.name,
+          accessToken: imageBackendAccount.accessToken,
+          model: imageBackendAccount.model,
+          implementationMode: imageBackendAccount.implementationMode,
+          contentSafetyEnabled: imageBackendAccount.contentSafetyEnabled,
+          priority: imageBackendAccount.priority,
+          concurrency: imageBackendAccount.concurrency,
+          lastUsedAt: imageBackendAccount.lastUsedAt,
+          createdAt: imageBackendAccount.createdAt,
+          metadata: imageBackendAccount.metadata,
+        })
+        .from(imageBackendAccount)
+        .where(
+          and(
+            accountBaseWhere,
+            groupId ? eq(imageBackendAccount.groupId, groupId) : sql`true`
+          )
+        )
+        .orderBy(
+          asc(imageBackendAccount.priority),
+          asc(imageBackendAccount.lastUsedAt),
+          asc(imageBackendAccount.createdAt)
+        )
+        .limit(50);
 
   const [apiRows, accountRows] = await Promise.all([
     db
@@ -1202,91 +1300,68 @@ async function selectPoolMember(
         asc(imageBackendApi.createdAt)
       )
       .limit(50),
-    db
-      .select()
-      .from(imageBackendAccount)
-      .where(
-        and(
-          eq(imageBackendAccount.isEnabled, true),
-          accountGroupFilter,
-          accountBackendFilter,
-          isBackendAvailableStatus(
-            imageBackendAccount.status,
-            imageBackendAccount.cooldownUntil,
-            now
-          ),
-          or(
-            sql`${imageBackendAccount.cooldownUntil} IS NULL`,
-            sql`${imageBackendAccount.cooldownUntil} <= ${now}`
-          )
-        )
-      )
-      .orderBy(
-        asc(imageBackendAccount.priority),
-        asc(imageBackendAccount.lastUsedAt),
-        asc(imageBackendAccount.createdAt)
-      )
-      .limit(50),
+    accountRowsPromise,
   ]);
 
-  const apiMembers: PoolMember[] = effectiveAccountBackendPreference === "web"
-    ? []
-    : apiRows
-        .filter((row) => {
-          const context = row.groupId ? contextMap.get(row.groupId) : null;
-          const metadata = context?.metadata ?? groupMetadata;
-          const effectiveRequestKind = requestKind || "image_generation";
-          const requiresResponsesEndpoint =
-            effectiveAccountBackendPreference === "responses";
-          return (
-            groupBackendAllowsRequest(metadata, effectiveRequestKind) &&
-            imageBackendApiInterfaceAllowsRequest(
-              row.interfaceMode,
-              effectiveRequestKind
-            ) &&
-            (!requiresResponsesEndpoint ||
-              imageBackendApiUsesResponsesEndpoint(
+  const apiMembers: PoolMember[] =
+    effectiveAccountBackendPreference === "web"
+      ? []
+      : apiRows
+          .filter((row) => {
+            const context = row.groupId ? contextMap.get(row.groupId) : null;
+            const metadata = context?.metadata ?? groupMetadata;
+            const effectiveRequestKind = requestKind || "image_generation";
+            const requiresResponsesEndpoint =
+              effectiveAccountBackendPreference === "responses";
+            return (
+              groupBackendAllowsRequest(metadata, effectiveRequestKind) &&
+              imageBackendApiInterfaceAllowsRequest(
                 row.interfaceMode,
-                effectiveRequestKind,
-                true
-              )
-            )
-          );
-        })
-        .map((row) => {
-          const context = row.groupId ? contextMap.get(row.groupId) : null;
-          return {
-            type: "api",
-            id: row.id,
-            groupId: row.groupId,
-            groupMetadata: context?.metadata ?? groupMetadata ?? null,
-            groupContentSafetyEnabled:
-              context?.contentSafetyEnabled ??
-              groupContentSafetyEnabled ??
-              null,
-            name: row.name,
-            baseUrl: row.baseUrl,
-            apiKey: row.apiKey,
-            model: row.model,
-            interfaceMode: normalizeImageBackendApiInterfaceMode(
-              row.interfaceMode
-            ),
-            useStream: row.useStream,
-            contentSafetyEnabled: row.contentSafetyEnabled,
-            priority: row.priority,
-            concurrency: 1,
-            lastUsedAt: row.lastUsedAt,
-            createdAt: row.createdAt,
-          };
-        });
+                effectiveRequestKind
+              ) &&
+              (!requiresResponsesEndpoint ||
+                imageBackendApiUsesResponsesEndpoint(
+                  row.interfaceMode,
+                  effectiveRequestKind,
+                  true
+                ))
+            );
+          })
+          .map((row) => {
+            const context = row.groupId ? contextMap.get(row.groupId) : null;
+            return {
+              type: "api",
+              id: row.id,
+              groupId: row.groupId,
+              groupMetadata: context?.metadata ?? groupMetadata ?? null,
+              groupContentSafetyEnabled:
+                context?.contentSafetyEnabled ??
+                groupContentSafetyEnabled ??
+                null,
+              name: row.name,
+              baseUrl: row.baseUrl,
+              apiKey: row.apiKey,
+              model: row.model,
+              interfaceMode: normalizeImageBackendApiInterfaceMode(
+                row.interfaceMode
+              ),
+              useStream: row.useStream,
+              contentSafetyEnabled: row.contentSafetyEnabled,
+              priority: row.priority,
+              concurrency: 1,
+              lastUsedAt: row.lastUsedAt,
+              createdAt: row.createdAt,
+            };
+          });
 
   const accountMembers: PoolMember[] = accountRows
     .filter((row) => {
       const backend = normalizeAccountBackend(row.implementationMode);
-      const context = row.groupId ? contextMap.get(row.groupId) : null;
+      const matchedGroupId = row.matchedGroupId || row.groupId;
+      const context = matchedGroupId ? contextMap.get(matchedGroupId) : null;
       const metadata = context?.metadata ?? groupMetadata;
-      const rowPreference = row.groupId
-        ? effectiveContextPreferences.get(row.groupId)
+      const rowPreference = matchedGroupId
+        ? effectiveContextPreferences.get(matchedGroupId)
         : effectiveAccountBackendPreference;
       return (
         (!rowPreference || rowPreference === backend) &&
@@ -1301,14 +1376,17 @@ async function selectPoolMember(
     .map((row) => ({
       type: "account",
       id: row.id,
-      groupId: row.groupId,
+      groupId: row.matchedGroupId || row.groupId,
+      groupIds: normalizeAccountGroupIds([row.groupId, row.matchedGroupId]),
       groupMetadata:
-        (row.groupId ? contextMap.get(row.groupId)?.metadata : null) ??
+        (row.matchedGroupId
+          ? contextMap.get(row.matchedGroupId)?.metadata
+          : null) ??
         groupMetadata ??
         null,
       groupContentSafetyEnabled:
-        (row.groupId
-          ? contextMap.get(row.groupId)?.contentSafetyEnabled
+        (row.matchedGroupId
+          ? contextMap.get(row.matchedGroupId)?.contentSafetyEnabled
           : null) ??
         groupContentSafetyEnabled ??
         null,
@@ -2014,6 +2092,8 @@ export async function deleteImageBackendGroup(groupId: string) {
 type UpsertAccountInput = {
   id?: string;
   groupId?: string | null;
+  groupIds?: string[] | null;
+  mergeGroupIds?: boolean;
   name: string;
   email?: string | null;
   accessToken?: string;
@@ -2030,6 +2110,31 @@ type UpsertAccountInput = {
   lastErrorAt?: Date | null;
   metadata?: Record<string, unknown> | null;
 };
+
+async function setImageBackendAccountGroups(input: {
+  accountId: string;
+  groupIds: string[];
+  replace: boolean;
+}) {
+  const groupIds = normalizeAccountGroupIds(input.groupIds);
+  if (input.replace) {
+    await db
+      .delete(imageBackendAccountGroup)
+      .where(eq(imageBackendAccountGroup.accountId, input.accountId));
+  }
+  if (!groupIds.length) return;
+
+  await db
+    .insert(imageBackendAccountGroup)
+    .values(
+      groupIds.map((groupId) => ({
+        id: `${input.accountId}:${groupId}`,
+        accountId: input.accountId,
+        groupId,
+      }))
+    )
+    .onConflictDoNothing();
+}
 
 function clientIdForAccountBackend(backend: ImageBackendAccountBackend) {
   return backend === "responses"
@@ -2059,19 +2164,29 @@ async function refreshAccessTokenForBackend(
 
 export async function upsertImageBackendAccount(input: UpsertAccountInput) {
   const implementationMode = normalizeAccountBackend(input.implementationMode);
+  const groupIds = accountGroupIdsFromInput(input);
+  const primaryGroupId = groupIds[0] || null;
   let accessToken = input.accessToken?.trim() || "";
   let refreshToken =
     input.refreshToken === undefined
       ? undefined
       : input.refreshToken?.trim() || null;
+  let existingPrimaryGroupId: string | null | undefined;
 
-  if (input.id && refreshToken !== undefined) {
+  if (input.id) {
     const [existingAccount] = await db
-      .select({ metadata: imageBackendAccount.metadata })
+      .select({
+        groupId: imageBackendAccount.groupId,
+        metadata: imageBackendAccount.metadata,
+      })
       .from(imageBackendAccount)
       .where(eq(imageBackendAccount.id, input.id))
       .limit(1);
-    if (isSub2ApiBackedMetadata(existingAccount?.metadata)) {
+    existingPrimaryGroupId = existingAccount?.groupId ?? null;
+    if (
+      refreshToken !== undefined &&
+      isSub2ApiBackedMetadata(existingAccount?.metadata)
+    ) {
       throw new Error("Sub2API 同步账号的 RT 由 Sub2API 管理，不能在这里修改");
     }
   }
@@ -2088,8 +2203,7 @@ export async function upsertImageBackendAccount(input: UpsertAccountInput) {
     refreshToken = refreshed.refreshToken || refreshToken;
   }
 
-  const update = {
-    groupId: input.groupId || null,
+  const updateBase = {
     name: input.name,
     email: input.email || null,
     implementationMode,
@@ -2114,6 +2228,12 @@ export async function upsertImageBackendAccount(input: UpsertAccountInput) {
   };
 
   if (input.id) {
+    const update = {
+      ...updateBase,
+      groupId: input.mergeGroupIds
+        ? existingPrimaryGroupId || primaryGroupId
+        : primaryGroupId,
+    };
     await db
       .update(imageBackendAccount)
       .set(
@@ -2126,6 +2246,11 @@ export async function upsertImageBackendAccount(input: UpsertAccountInput) {
           : update
       )
       .where(eq(imageBackendAccount.id, input.id));
+    await setImageBackendAccountGroups({
+      accountId: input.id,
+      groupIds,
+      replace: !input.mergeGroupIds,
+    });
     return input.id;
   }
 
@@ -2135,7 +2260,10 @@ export async function upsertImageBackendAccount(input: UpsertAccountInput) {
 
   const credentialHash = hashBackendCredential(accessToken);
   const [existing] = await db
-    .select({ id: imageBackendAccount.id })
+    .select({
+      id: imageBackendAccount.id,
+      groupId: imageBackendAccount.groupId,
+    })
     .from(imageBackendAccount)
     .where(
       and(
@@ -2145,6 +2273,12 @@ export async function upsertImageBackendAccount(input: UpsertAccountInput) {
     )
     .limit(1);
   if (existing) {
+    const update = {
+      ...updateBase,
+      groupId: input.mergeGroupIds
+        ? existing.groupId || primaryGroupId
+        : primaryGroupId,
+    };
     await db
       .update(imageBackendAccount)
       .set({
@@ -2153,16 +2287,30 @@ export async function upsertImageBackendAccount(input: UpsertAccountInput) {
         credentialHash,
       })
       .where(eq(imageBackendAccount.id, existing.id));
+    await setImageBackendAccountGroups({
+      accountId: existing.id,
+      groupIds,
+      replace: !input.mergeGroupIds,
+    });
     return existing.id;
   }
 
   const id = nanoid();
+  const update = {
+    ...updateBase,
+    groupId: primaryGroupId,
+  };
   await db.insert(imageBackendAccount).values({
     id,
     ...update,
     refreshToken: refreshToken || null,
     accessToken,
     credentialHash,
+  });
+  await setImageBackendAccountGroups({
+    accountId: id,
+    groupIds,
+    replace: true,
   });
   return id;
 }
@@ -2191,7 +2339,10 @@ export async function bulkUpdateImageBackendAccounts(
   const targetMode = input.implementationMode
     ? normalizeAccountBackend(input.implementationMode)
     : null;
-  if (input.groupId !== undefined) baseUpdate.groupId = input.groupId || null;
+  const bulkGroupIds =
+    input.groupId !== undefined
+      ? normalizeAccountGroupIds(input.groupId ? [input.groupId] : [])
+      : null;
   if (
     input.contentSafetyEnabled !== undefined &&
     input.contentSafetyEnabled !== null
@@ -2218,7 +2369,11 @@ export async function bulkUpdateImageBackendAccounts(
     baseUpdate.lastErrorAt = null;
   }
 
-  if (Object.keys(baseUpdate).length <= 1 && !targetMode) {
+  if (
+    Object.keys(baseUpdate).length <= 1 &&
+    !targetMode &&
+    bulkGroupIds === null
+  ) {
     throw new Error("请选择要批量修改的内容");
   }
 
@@ -2227,6 +2382,9 @@ export async function bulkUpdateImageBackendAccounts(
   for (const accountId of accountIds) {
     try {
       const update = { ...baseUpdate };
+      if (bulkGroupIds) {
+        update.groupId = bulkGroupIds[0] || null;
+      }
       if (targetMode) {
         const [account] = await db
           .select({
@@ -2264,6 +2422,13 @@ export async function bulkUpdateImageBackendAccounts(
         .update(imageBackendAccount)
         .set(update)
         .where(eq(imageBackendAccount.id, accountId));
+      if (bulkGroupIds) {
+        await setImageBackendAccountGroups({
+          accountId,
+          groupIds: bulkGroupIds,
+          replace: true,
+        });
+      }
       updatedCount++;
     } catch (error) {
       failedCount++;
@@ -2298,6 +2463,7 @@ async function importAccessTokens(
     try {
       const id = await upsertImageBackendAccount({
         groupId: input.webGroupId,
+        mergeGroupIds: true,
         name: `${input.namePrefix?.trim() || "Auth Session 导入"} ${
           index + 1
         } / Web`,
@@ -2497,6 +2663,7 @@ export async function importImageBackendAccountsFromRefreshTokens(input: {
           const id = await upsertImageBackendAccount({
             groupId:
               mode === "responses" ? input.responsesGroupId : input.webGroupId,
+            mergeGroupIds: true,
             name: `${
               input.namePrefix?.trim() || "Mobile RT 导入"
             } ${importIndex} / ${mode === "responses" ? "Codex" : "Web"}`,
@@ -2569,6 +2736,7 @@ export async function importImageBackendAccountsFromRefreshTokens(input: {
         const id = await upsertImageBackendAccount({
           groupId:
             mode === "responses" ? input.responsesGroupId : input.webGroupId,
+          mergeGroupIds: true,
           name: `${input.namePrefix?.trim() || "手工导入"} ${importIndex} / ${
             mode === "responses" ? "Codex" : "Web"
           }`,
@@ -3063,10 +3231,12 @@ async function getSub2ApiHealthOverride(account: Sub2ApiTokenAccount): Promise<{
     const fallbackCooldown = cooldownFromMinutes(minutes);
     return {
       status: "limited",
-      cooldownUntil:
-        isMeaningfulSourceCooldownForError(message, account.sourceCooldownUntil)
-          ? account.sourceCooldownUntil
-          : fallbackCooldown,
+      cooldownUntil: isMeaningfulSourceCooldownForError(
+        message,
+        account.sourceCooldownUntil
+      )
+        ? account.sourceCooldownUntil
+        : fallbackCooldown,
       lastError: message || "Sub2API 标记账号限流",
     };
   }
@@ -3184,7 +3354,10 @@ async function shouldPreserveLocalUnavailableState(
   if (existing.status === "error" || existing.status === "limited") {
     return true;
   }
-  if (!existing.cooldownUntil || existing.cooldownUntil.getTime() <= Date.now()) {
+  if (
+    !existing.cooldownUntil ||
+    existing.cooldownUntil.getTime() <= Date.now()
+  ) {
     return false;
   }
 
@@ -3568,7 +3741,9 @@ function normalizeSub2ApiSyncTask(value: unknown): Sub2ApiAutoSyncTask | null {
   const id = typeof raw.id === "string" ? raw.id.trim() : "";
   if (!id) return null;
   const syncMode =
-    raw.syncMode === "web" || raw.syncMode === "both" ? raw.syncMode : "responses";
+    raw.syncMode === "web" || raw.syncMode === "both"
+      ? raw.syncMode
+      : "responses";
   const normalizeGroupId = (value: unknown) =>
     typeof value === "string" && value.trim() && value.trim() !== "default"
       ? value.trim()
@@ -3589,7 +3764,8 @@ function normalizeSub2ApiSyncTask(value: unknown): Sub2ApiAutoSyncTask | null {
     syncMode,
     allowMobileRtImport: Boolean(raw.allowMobileRtImport),
     contentSafetyEnabled: raw.contentSafetyEnabled !== false,
-    overwriteLocalUnavailableState: raw.overwriteLocalUnavailableState !== false,
+    overwriteLocalUnavailableState:
+      raw.overwriteLocalUnavailableState !== false,
     planFilter: normalizeSub2ApiPlanFilter(
       typeof raw.planFilter === "string" ? raw.planFilter : null
     ),
@@ -3607,7 +3783,9 @@ async function getSub2ApiAutoSyncTasks() {
   const value = await getRuntimeSettingJson("SUB2API_AUTO_SYNC_TASKS");
   const items = Array.isArray(value)
     ? value
-    : value && typeof value === "object" && Array.isArray((value as { tasks?: unknown }).tasks)
+    : value &&
+        typeof value === "object" &&
+        Array.isArray((value as { tasks?: unknown }).tasks)
       ? (value as { tasks: unknown[] }).tasks
       : [];
   return items
@@ -3684,7 +3862,8 @@ async function upsertSub2ApiAutoSyncTask(input: {
         ? input.webGroupId.trim()
         : null,
     responsesGroupId:
-      input.responsesGroupId?.trim() && input.responsesGroupId.trim() !== "default"
+      input.responsesGroupId?.trim() &&
+      input.responsesGroupId.trim() !== "default"
         ? input.responsesGroupId.trim()
         : null,
     syncMode,
@@ -4112,6 +4291,16 @@ export async function syncImageBackendAccountsFromSub2Api(input: {
                 preTokenHealth,
                 syncTaskId
               );
+              await setImageBackendAccountGroups({
+                accountId: existing.id,
+                groupIds: accountGroupIdsFromInput({
+                  groupId:
+                    mode === "responses"
+                      ? input.responsesGroupId
+                      : input.webGroupId,
+                }),
+                replace: false,
+              });
               imported.push(existing.id);
               syncedByMode[mode]++;
               continue;
@@ -4131,6 +4320,7 @@ export async function syncImageBackendAccountsFromSub2Api(input: {
             id: existing?.id,
             groupId:
               mode === "responses" ? input.responsesGroupId : input.webGroupId,
+            mergeGroupIds: true,
             name:
               mode === "responses"
                 ? `${account.name} / Codex`
@@ -4478,7 +4668,8 @@ export async function runAutoSub2ApiAccessTokenSync(options?: {
         aggregate.failedByMode.web += result.failedByMode.web;
         aggregate.failedByMode.responses += result.failedByMode.responses;
         aggregate.deletedCount += result.deletedCount;
-        aggregate.refreshTokenWriteBackCount += result.refreshTokenWriteBackCount;
+        aggregate.refreshTokenWriteBackCount +=
+          result.refreshTokenWriteBackCount;
         aggregate.batches += result.batches;
         taskResults.push({
           id: task.id,
@@ -4735,9 +4926,9 @@ export async function listAdminImageBackendPool() {
     .from(imageBackendGroup)
     .orderBy(asc(imageBackendGroup.priority), asc(imageBackendGroup.createdAt));
   const accountCounts = await db
-    .select({ groupId: imageBackendAccount.groupId, value: count() })
-    .from(imageBackendAccount)
-    .groupBy(imageBackendAccount.groupId);
+    .select({ groupId: imageBackendAccountGroup.groupId, value: count() })
+    .from(imageBackendAccountGroup)
+    .groupBy(imageBackendAccountGroup.groupId);
   const apiCounts = await db
     .select({ groupId: imageBackendApi.groupId, value: count() })
     .from(imageBackendApi)
@@ -4793,6 +4984,26 @@ export async function listAdminImageBackendPool() {
       asc(imageBackendAccount.priority),
       desc(imageBackendAccount.createdAt)
     );
+  const accountGroupRows = accounts.length
+    ? await db
+        .select({
+          accountId: imageBackendAccountGroup.accountId,
+          groupId: imageBackendAccountGroup.groupId,
+        })
+        .from(imageBackendAccountGroup)
+        .where(
+          inArray(
+            imageBackendAccountGroup.accountId,
+            accounts.map((account) => account.id)
+          )
+        )
+    : [];
+  const accountGroupIdMap = new Map<string, string[]>();
+  for (const row of accountGroupRows) {
+    const current = accountGroupIdMap.get(row.accountId) || [];
+    current.push(row.groupId);
+    accountGroupIdMap.set(row.accountId, current);
+  }
 
   const apis = await db
     .select({
@@ -4820,7 +5031,12 @@ export async function listAdminImageBackendPool() {
 
   return {
     groups: summaries,
-    accounts,
+    accounts: accounts.map((account) => ({
+      ...account,
+      groupIds:
+        accountGroupIdMap.get(account.id) ||
+        normalizeAccountGroupIds(account.groupId ? [account.groupId] : []),
+    })),
     apis,
   };
 }
