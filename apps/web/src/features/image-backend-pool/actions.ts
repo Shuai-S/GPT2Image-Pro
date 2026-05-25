@@ -31,8 +31,10 @@ import {
   refreshImageBackendAccountInfo,
   refreshImageBackendAccountsInfo,
   setSub2ApiAutoSyncTaskEnabled,
+  setSub2ApiAutoSyncTaskOverwriteLocalUnavailableState,
   setUserImageBackendPreference,
   syncImageBackendAccountsFromSub2Api,
+  updateSub2ApiAutoSyncTaskOptions,
   upsertImageBackendAccount,
   upsertImageBackendApi,
   upsertImageBackendGroup,
@@ -152,6 +154,41 @@ export const setSub2ApiAutoSyncTaskEnabledAction =
       return { success: true };
     });
 
+export const setSub2ApiAutoSyncTaskOverwriteLocalUnavailableStateAction =
+  withImageBackendPoolAdminAction(
+    "setSub2ApiAutoSyncTaskOverwriteLocalUnavailableState"
+  )
+    .schema(
+      z.object({
+        taskId: z.string().trim().min(1),
+        overwriteLocalUnavailableState: z.boolean(),
+      })
+    )
+    .action(async ({ parsedInput }) => {
+      await setSub2ApiAutoSyncTaskOverwriteLocalUnavailableState(parsedInput);
+      return { success: true };
+    });
+
+export const updateSub2ApiAutoSyncTaskOptionsAction =
+  withImageBackendPoolAdminAction("updateSub2ApiAutoSyncTaskOptions")
+    .schema(
+      z.object({
+        taskId: z.string().trim().min(1),
+        enabled: z.boolean(),
+        webGroupId: optionalGroupIdSchema,
+        responsesGroupId: optionalGroupIdSchema,
+        syncMode: sub2ApiTokenSyncModeSchema.default("responses"),
+        allowMobileRtImport: z.boolean().default(false),
+        contentSafetyEnabled: z.boolean().default(true),
+        overwriteLocalUnavailableState: z.boolean().default(true),
+        planFilter: sub2ApiPlanFilterSchema.default("non_free"),
+      })
+    )
+    .action(async ({ parsedInput }) => {
+      await updateSub2ApiAutoSyncTaskOptions(parsedInput);
+      return { success: true };
+    });
+
 export const deleteSub2ApiAutoSyncTaskAction =
   withImageBackendPoolAdminAction("deleteSub2ApiAutoSyncTask")
     .schema(
@@ -178,6 +215,7 @@ export const saveImageBackendGroupAction = withImageBackendPoolAdminAction(
       contentSafety: safetyOverrideSchema.default("inherit"),
       backendType: groupBackendTypeSchema.default("mixed"),
       minPlan: subscriptionPlanSchema,
+      billingMultiplier: z.coerce.number().min(0.01).max(100).default(1),
       childGroupIds: z.array(z.string().trim().min(1)).max(100).default([]),
       priority: z.coerce.number().int().min(0).max(10000).default(50),
     })
@@ -193,6 +231,7 @@ export const saveImageBackendGroupAction = withImageBackendPoolAdminAction(
       contentSafetyEnabled: fromSafetyOverride(parsedInput.contentSafety),
       backendType: parsedInput.backendType,
       minPlan: parsedInput.minPlan,
+      billingMultiplier: parsedInput.billingMultiplier,
       childGroupIds: parsedInput.childGroupIds,
       priority: parsedInput.priority,
     });
@@ -258,6 +297,8 @@ export const bulkUpdateImageBackendAccountsAction =
         isEnabled: z.boolean().optional(),
         status: z.string().trim().max(80).optional(),
         resetAvailability: z.boolean().optional(),
+        priority: z.coerce.number().int().min(0).max(10000).optional(),
+        concurrency: z.coerce.number().int().min(1).max(100).optional(),
       })
     )
     .action(async ({ parsedInput }) => {
@@ -276,6 +317,12 @@ export const bulkUpdateImageBackendAccountsAction =
           parsedInput.resetAvailability === undefined
             ? null
             : parsedInput.resetAvailability,
+        priority:
+          parsedInput.priority === undefined ? null : parsedInput.priority,
+        concurrency:
+          parsedInput.concurrency === undefined
+            ? null
+            : parsedInput.concurrency,
       });
       return { success: true, ...result };
     });
@@ -374,6 +421,7 @@ export const syncImageBackendAccountsFromSub2ApiAction =
         offset: z.coerce.number().int().min(0).optional(),
         planFilter: sub2ApiPlanFilterSchema.default("non_free"),
         createSyncTask: z.boolean().default(false),
+        overwriteLocalUnavailableState: z.boolean().default(true),
       })
     )
     .action(async ({ parsedInput }) => {
@@ -392,6 +440,8 @@ export const syncImageBackendAccountsFromSub2ApiAction =
         planFilter: parsedInput.planFilter,
         createSyncTask: parsedInput.createSyncTask,
         cleanupManagedAccounts: parsedInput.createSyncTask,
+        overwriteLocalUnavailableState:
+          parsedInput.overwriteLocalUnavailableState,
       });
       return { success: true, ...result };
     });

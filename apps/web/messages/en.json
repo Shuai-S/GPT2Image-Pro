@@ -588,6 +588,7 @@
       "settings": "Settings",
       "userManagement": "User Management",
       "systemSettings": "System Settings",
+      "globalStatus": "Global Status",
       "imageBackendPool": "Image Backend Pool",
       "support": "Support",
       "newTicket": "New Ticket"
@@ -608,6 +609,7 @@
       "backendHelp": "System Docs",
       "userManagement": "User Management",
       "systemSettings": "System Settings",
+      "globalStatus": "Global Status",
       "imageBackendPool": "Image Backend Pool",
       "creditsBuy": "Buy Credits",
       "profile": "Profile",

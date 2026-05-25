@@ -23,12 +23,14 @@ import { toast } from "sonner";
 
 import { formatCredits } from "../../../credits/format";
 import {
+  adminAdjustCreditsAction,
   adminGrantCreditsAction,
   banUserAction,
   getAllUsersAction,
   getUserDetailAction,
   setExternalApiKeyStatusAction,
   setUserCreditsStatusAction,
+  setUserPlanAction,
   updateUserRoleAction,
 } from "../../actions/admin-users";
 import { Avatar, AvatarFallback, AvatarImage } from "@repo/ui/components/avatar";
@@ -208,6 +210,11 @@ const PLAN_OPTIONS: Array<{ value: PlanFilter; label: string }> = [
 const ROLE_OPTIONS: Array<{ value: AppUserRole; label: string }> =
   APP_USER_ROLES.map((role) => ({ value: role, label: getUserRoleLabel(role) }));
 
+const EDITABLE_PLAN_OPTIONS = PLAN_OPTIONS.filter(
+  (item): item is { value: Exclude<PlanFilter, "all">; label: string } =>
+    item.value !== "all"
+);
+
 function formatDateTime(value?: Date | string | null) {
   if (!value) {
     return "-";
@@ -338,6 +345,19 @@ export function AdminUsersManagement({
   const [grantReason, setGrantReason] = useState("");
   const [isGranting, setIsGranting] = useState(false);
 
+  const [creditAdjustOpen, setCreditAdjustOpen] = useState(false);
+  const [creditAdjustMode, setCreditAdjustMode] =
+    useState<"deduct" | "set">("deduct");
+  const [creditAdjustAmount, setCreditAdjustAmount] = useState("");
+  const [creditAdjustReason, setCreditAdjustReason] = useState("");
+  const [isAdjustingCredits, setIsAdjustingCredits] = useState(false);
+
+  const [planDialogOpen, setPlanDialogOpen] = useState(false);
+  const [targetPlan, setTargetPlan] =
+    useState<Exclude<PlanFilter, "all">>("free");
+  const [planReason, setPlanReason] = useState("");
+  const [isSettingPlan, setIsSettingPlan] = useState(false);
+
   const [banOpen, setBanOpen] = useState(false);
   const [banReason, setBanReason] = useState("");
   const [isBanning, setIsBanning] = useState(false);
@@ -439,6 +459,24 @@ export function AdminUsersManagement({
     setGrantOpen(true);
   };
 
+  const openCreditAdjustDialog = (
+    userRow: UserRow,
+    mode: "deduct" | "set"
+  ) => {
+    setSelectedUser(userRow);
+    setCreditAdjustMode(mode);
+    setCreditAdjustAmount(mode === "set" ? String(userRow.creditsBalance) : "");
+    setCreditAdjustReason("");
+    setCreditAdjustOpen(true);
+  };
+
+  const openPlanDialog = (userRow: UserRow) => {
+    setSelectedUser(userRow);
+    setTargetPlan(userRow.plan === "all" ? "free" : userRow.plan);
+    setPlanReason("");
+    setPlanDialogOpen(true);
+  };
+
   const openBanDialog = (userRow: UserRow) => {
     setSelectedUser(userRow);
     setBanReason("");
@@ -514,6 +552,82 @@ export function AdminUsersManagement({
       toast.error(error instanceof Error ? error.message : "充值失败");
     } finally {
       setIsGranting(false);
+    }
+  };
+
+  const handleCreditAdjust = async () => {
+    if (!selectedUser) {
+      return;
+    }
+    if (!canManageRoles) {
+      toast.error("只有超管可以调整用户积分");
+      return;
+    }
+    const amount = Number.parseFloat(creditAdjustAmount);
+    if (!Number.isFinite(amount) || amount < 0) {
+      toast.error("请输入有效的积分数量");
+      return;
+    }
+    if (creditAdjustMode === "deduct" && amount <= 0) {
+      toast.error("扣减积分必须大于 0");
+      return;
+    }
+    if (!creditAdjustReason.trim()) {
+      toast.error("请填写操作原因");
+      return;
+    }
+    setIsAdjustingCredits(true);
+    try {
+      const result = await adminAdjustCreditsAction({
+        userId: selectedUser.id,
+        mode: creditAdjustMode,
+        amount,
+        reason: creditAdjustReason.trim(),
+      });
+      if (result?.data) {
+        toast.success(result.data.message);
+        setCreditAdjustOpen(false);
+        await reloadCurrent();
+      } else if (result?.serverError) {
+        toast.error(result.serverError);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "积分调整失败");
+    } finally {
+      setIsAdjustingCredits(false);
+    }
+  };
+
+  const handlePlanChange = async () => {
+    if (!selectedUser) {
+      return;
+    }
+    if (!canManageRoles) {
+      toast.error("只有超管可以修改用户套餐");
+      return;
+    }
+    if (!planReason.trim()) {
+      toast.error("请填写操作原因");
+      return;
+    }
+    setIsSettingPlan(true);
+    try {
+      const result = await setUserPlanAction({
+        userId: selectedUser.id,
+        plan: targetPlan,
+        reason: planReason.trim(),
+      });
+      if (result?.data) {
+        toast.success(result.data.message);
+        setPlanDialogOpen(false);
+        await reloadCurrent();
+      } else if (result?.serverError) {
+        toast.error(result.serverError);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "套餐修改失败");
+    } finally {
+      setIsSettingPlan(false);
     }
   };
 
@@ -962,6 +1076,32 @@ export function AdminUsersManagement({
                                   <Coins className="h-4 w-4" />
                                   加积分
                                 </DropdownMenuItem>
+                                {canManageRoles && (
+                                  <>
+                                    <DropdownMenuItem
+                                      onClick={() =>
+                                        openCreditAdjustDialog(item, "deduct")
+                                      }
+                                    >
+                                      <CreditCard className="h-4 w-4" />
+                                      减积分
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() =>
+                                        openCreditAdjustDialog(item, "set")
+                                      }
+                                    >
+                                      <Coins className="h-4 w-4" />
+                                      覆盖积分
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => openPlanDialog(item)}
+                                    >
+                                      <Shield className="h-4 w-4" />
+                                      修改套餐
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
                                 <DropdownMenuItem
                                   onClick={() => openBanDialog(item)}
                                 >
@@ -1096,6 +1236,47 @@ export function AdminUsersManagement({
                     </CardContent>
                   </Card>
                 </div>
+
+                {canManageRoles && selectedUser ? (
+                  <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 p-3">
+                    <span className="mr-1 text-sm text-muted-foreground">
+                      超管操作
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => openGrantDialog(selectedUser)}
+                    >
+                      加积分
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        openCreditAdjustDialog(selectedUser, "deduct")
+                      }
+                    >
+                      减积分
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => openCreditAdjustDialog(selectedUser, "set")}
+                    >
+                      覆盖积分
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => openPlanDialog(selectedUser)}
+                    >
+                      修改套餐
+                    </Button>
+                    <span className="text-xs text-muted-foreground">
+                      修改套餐只变更权限，不发放套餐积分。
+                    </span>
+                  </div>
+                ) : null}
 
                 <Tabs defaultValue="overview" className="space-y-4">
                   <TabsList className="border bg-muted/40">
@@ -1404,6 +1585,121 @@ export function AdminUsersManagement({
             <Button onClick={handleGrant} disabled={isGranting}>
               {isGranting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               确认充值
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={creditAdjustOpen} onOpenChange={setCreditAdjustOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {creditAdjustMode === "deduct" ? "扣减积分" : "覆盖积分余额"}
+            </DialogTitle>
+            <DialogDescription>
+              目标用户：{selectedUser?.email ?? "-"}。
+              {creditAdjustMode === "deduct"
+                ? "将按有效积分批次 FIFO 扣减，并写入消费流水。"
+                : "会按当前余额自动补差或扣差，并写入审计日志。"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+              当前余额：{formatCredits(selectedUser?.creditsBalance ?? 0)}。
+              覆盖余额不会发放套餐积分；如果需要额外赠送，请使用加积分。
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="creditAdjustAmount">
+                {creditAdjustMode === "deduct" ? "扣减数量" : "目标余额"}
+              </Label>
+              <Input
+                id="creditAdjustAmount"
+                type="number"
+                min={creditAdjustMode === "deduct" ? 0.01 : 0}
+                max={1000000}
+                step={0.01}
+                value={creditAdjustAmount}
+                onChange={(event) => setCreditAdjustAmount(event.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="creditAdjustReason">操作原因</Label>
+              <Textarea
+                id="creditAdjustReason"
+                value={creditAdjustReason}
+                onChange={(event) => setCreditAdjustReason(event.target.value)}
+                placeholder="例如：风控扣减、人工校准余额、误充值修正"
+                maxLength={300}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreditAdjustOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={handleCreditAdjust} disabled={isAdjustingCredits}>
+              {isAdjustingCredits ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
+              确认
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={planDialogOpen} onOpenChange={setPlanDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>修改用户套餐</DialogTitle>
+            <DialogDescription>
+              目标用户：{selectedUser?.email ?? "-"}。只修改套餐权限，不发放套餐积分。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>目标套餐</Label>
+              <Select
+                value={targetPlan}
+                onValueChange={(value) =>
+                  setTargetPlan(value as Exclude<PlanFilter, "all">)
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {EDITABLE_PLAN_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+              非 Free 套餐会写入 active 订阅记录并使用月付 Price ID；Free
+              会立即结束当前订阅权益。该操作不会创建积分批次，也不会触发套餐月度积分。
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="planReason">操作原因</Label>
+              <Textarea
+                id="planReason"
+                value={planReason}
+                onChange={(event) => setPlanReason(event.target.value)}
+                placeholder="例如：客服补偿、人工升级、套餐纠错"
+                maxLength={300}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPlanDialogOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={handlePlanChange} disabled={isSettingPlan}>
+              {isSettingPlan ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
+              确认修改
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -88,6 +88,7 @@ import {
   normalizeImageSize,
   normalizeValidImageSize,
   parseImageSize,
+  roundUpCreditAmount,
   validateImageSize,
 } from "../resolution";
 import { ImageLightbox, type LightboxGeneration } from "./image-lightbox";
@@ -508,6 +509,7 @@ type BackendGroupOption = {
   isDefault: boolean;
   backendType: ImageBackendGroupBackendType;
   contentSafetyEnabled: boolean | null;
+  billingMultiplier: number;
 };
 
 const defaultDimensions = parseImageSize(DEFAULT_IMAGE_SIZE) || {
@@ -1680,6 +1682,14 @@ export function CreatePageClient({
     backendGroups.find((group) => group.id === selectedBackendGroupId) ||
     backendGroups.find((group) => group.isDefault) ||
     null;
+  const activeBillingMultiplier = Math.max(
+    0.01,
+    selectedBackendGroup?.billingMultiplier || 1
+  );
+  const applyBillingMultiplier = (credits: number) =>
+    activeBillingMultiplier === 1
+      ? credits
+      : roundUpCreditAmount(credits * activeBillingMultiplier);
   const activeBackendType = selectedBackendGroup?.backendType || "mixed";
   const isWebOnlyBackend = activeBackendType === "web";
   const showImageModelControls = !isWebOnlyBackend;
@@ -2274,8 +2284,8 @@ export function CreatePageClient({
   );
   const size = useAutoSize ? AUTO_IMAGE_SIZE : manualSize;
   const textImageCreditCost = useMemo(
-    () => getImageCreditCost(size, moderationCostOptions),
-    [moderationCostOptions, size]
+    () => applyBillingMultiplier(getImageCreditCost(size, moderationCostOptions)),
+    [activeBillingMultiplier, moderationCostOptions, size]
   );
   const textBatchCreditCost = textImageCreditCost * batchCount;
   const linePromptItems = useMemo(
@@ -2330,14 +2340,20 @@ export function CreatePageClient({
     return customEditSize;
   }, [customEditSize, firstImageOutputSize, useEditFirstImageSize]);
   const editImageCreditCost = effectiveEditSize
-    ? getImageCreditCost(
-        effectiveEditSize,
-        getModerationCostOptions(editImages.length)
+    ? applyBillingMultiplier(
+        getImageCreditCost(
+          effectiveEditSize,
+          getModerationCostOptions(editImages.length)
+        )
       )
-    : getImageCreditCost(undefined, moderationCostOptions);
+    : applyBillingMultiplier(getImageCreditCost(undefined, moderationCostOptions));
   const editBatchCreditCost = editImageCreditCost * editBatchCount;
-  const chatRoundCreditCost = capabilities.billing.chatRoundCredits;
-  const agentRoundCreditCost = capabilities.billing.agentRoundCredits;
+  const chatRoundCreditCost = applyBillingMultiplier(
+    capabilities.billing.chatRoundCredits
+  );
+  const agentRoundCreditCost = applyBillingMultiplier(
+    capabilities.billing.agentRoundCredits
+  );
   const chatSingleCreditCost =
     activeMode === "agent" ? agentRoundCreditCost : chatRoundCreditCost;
   const batchFallbackSize = hasChatImageAttachments ? chatCustomEditSize : size;
@@ -2375,9 +2391,11 @@ export function CreatePageClient({
         "1K 混合路由优先走 Web 时置灰；这些控制仅在回退到 Codex/Responses 后生效。"
       )
     : undefined;
-  const batchSingleCreditCost = getImageCreditCost(
-    batchFallbackSize,
-    getModerationCostOptions(chatImageAttachmentCount)
+  const batchSingleCreditCost = applyBillingMultiplier(
+    getImageCreditCost(
+      batchFallbackSize,
+      getModerationCostOptions(chatImageAttachmentCount)
+    )
   );
   const formattedBalance = formatCredits(balance);
   const formattedTextBatchCreditCost = formatCredits(textBatchCreditCost);
@@ -5048,10 +5066,12 @@ export function CreatePageClient({
     if (loadSize <= 0) return;
     if (batchStoppedRef.current && !options?.retryCardId) return;
 
-    const creditsPerRequest = getImageCreditCost(
-      fallbackSize,
-      getModerationCostOptions(
-        attachments.filter((item) => item.kind === "image").length
+    const creditsPerRequest = applyBillingMultiplier(
+      getImageCreditCost(
+        fallbackSize,
+        getModerationCostOptions(
+          attachments.filter((item) => item.kind === "image").length
+        )
       )
     );
     const pendingCredits = batchActiveRequestsRef.current * creditsPerRequest;

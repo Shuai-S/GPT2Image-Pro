@@ -51,6 +51,10 @@ import {
   imageBackendApiUsesResponsesEndpoint,
   normalizeImageBackendApiInterfaceMode,
 } from "./api-interface-mode";
+import {
+  getEffectiveBillingMultiplierForSelectedGroup,
+  getGroupBillingMultiplier,
+} from "./group-billing";
 import { parseImportTokensText } from "./import-token-parser";
 import type {
   ContentSafetyOverride,
@@ -156,6 +160,9 @@ type ImageBackendGroupMetadata = Record<string, unknown> & {
   minPlan?: unknown;
   backendType?: unknown;
   childGroupIds?: unknown;
+  billingMultiplier?: unknown;
+  creditMultiplier?: unknown;
+  costMultiplier?: unknown;
 };
 
 type SelectableGroupContext = {
@@ -1373,9 +1380,14 @@ async function touchSelectedMember(member: PoolMember) {
 function toResolvedPoolConfig(
   fallbackGroupId: string,
   member: PoolMember,
-  options: ResolveBackendOptions
+  options: ResolveBackendOptions,
+  billingGroupMetadata?: Record<string, unknown> | null
 ): ResolvedImageBackendPoolConfig {
   const groupId = member.groupId || fallbackGroupId;
+  const billingMultiplier = getEffectiveBillingMultiplierForSelectedGroup({
+    selectedGroupMetadata: billingGroupMetadata,
+    selectedMemberGroupMetadata: member.groupMetadata,
+  });
   const contentSafetyEnabled = effectiveContentSafety(
     member.groupContentSafetyEnabled,
     member.contentSafetyEnabled
@@ -1399,6 +1411,8 @@ function toResolvedPoolConfig(
           apiInterfaceMode: member.interfaceMode,
           apiForceResponsesEndpoint:
             options.accountBackendPreference === "responses",
+          billingGroupId: fallbackGroupId,
+          billingMultiplier,
           reportResult: true,
         },
       },
@@ -1440,6 +1454,8 @@ function toResolvedPoolConfig(
         apiKeyId: options.apiKeyId,
         requestKind: options.requestKind,
         accountBackend: implementationMode,
+        billingGroupId: fallbackGroupId,
+        billingMultiplier,
         reportResult: true,
       },
     },
@@ -1514,7 +1530,8 @@ export async function resolveImageBackendPoolConfig(
   const result = toResolvedPoolConfig(
     resolved.group.id,
     resolved.member,
-    options
+    options,
+    resolved.group.metadata
   );
   return result;
 }
@@ -1817,6 +1834,7 @@ export async function listImageBackendGroupOptions(options?: {
       ...group,
       minPlan: getGroupMinPlan(metadata),
       backendType: getGroupBackendType(metadata),
+      billingMultiplier: getGroupBillingMultiplier(metadata),
       childGroupIds: getGroupChildGroupIds(metadata),
     }));
 }
@@ -1897,6 +1915,7 @@ type UpsertGroupInput = {
   contentSafetyEnabled: boolean | null;
   backendType: ImageBackendGroupBackendType;
   minPlan: SubscriptionPlan;
+  billingMultiplier: number;
   childGroupIds?: string[];
   priority: number;
 };
@@ -1946,6 +1965,7 @@ export async function upsertImageBackendGroup(input: UpsertGroupInput) {
       ...asGroupMetadata(existing?.metadata),
       minPlan: input.minPlan,
       backendType: input.backendType,
+      billingMultiplier: input.billingMultiplier,
       childGroupIds,
     };
     await db
@@ -1977,6 +1997,7 @@ export async function upsertImageBackendGroup(input: UpsertGroupInput) {
     metadata: {
       minPlan: input.minPlan,
       backendType: input.backendType,
+      billingMultiplier: input.billingMultiplier,
       childGroupIds,
     },
     priority: input.priority,
@@ -2152,6 +2173,8 @@ type BulkUpdateAccountsInput = {
   isEnabled?: boolean | null;
   status?: string | null;
   resetAvailability?: boolean | null;
+  priority?: number | null;
+  concurrency?: number | null;
 };
 
 export async function bulkUpdateImageBackendAccounts(
@@ -2178,6 +2201,12 @@ export async function bulkUpdateImageBackendAccounts(
   }
   if (input.status !== undefined && input.status !== null) {
     baseUpdate.status = input.status || "active";
+  }
+  if (input.priority !== undefined && input.priority !== null) {
+    baseUpdate.priority = Math.max(0, Math.min(10000, input.priority));
+  }
+  if (input.concurrency !== undefined && input.concurrency !== null) {
+    baseUpdate.concurrency = Math.max(1, Math.min(100, input.concurrency));
   }
   if (input.resetAvailability) {
     baseUpdate.status = "active";
@@ -2656,6 +2685,7 @@ type Sub2ApiAutoSyncTask = {
   syncMode: Sub2ApiTokenSyncMode;
   allowMobileRtImport: boolean;
   contentSafetyEnabled: boolean;
+  overwriteLocalUnavailableState: boolean;
   planFilter: Sub2ApiPlanFilter;
   createdAt?: string;
   updatedAt?: string;
@@ -3177,6 +3207,23 @@ async function shouldPreserveLocalUnavailableState(
   );
 }
 
+async function normalizeSyncedAccountCooldown(input: {
+  status: string;
+  cooldownUntil: Date | null;
+  lastError?: string | null;
+}) {
+  if (input.status !== "limited" || input.cooldownUntil) {
+    return input.cooldownUntil;
+  }
+
+  const error = input.lastError || "";
+  const key = isUsageLimitBackendError(error)
+    ? "IMAGE_BACKEND_USAGE_LIMIT_COOLDOWN_MINUTES"
+    : "IMAGE_BACKEND_RATE_LIMIT_COOLDOWN_MINUTES";
+  const minutes = await getBackendCooldownMinutes(key);
+  return cooldownFromMinutes(minutes);
+}
+
 async function resolveSyncedAccountHealth(
   account: Sub2ApiTokenAccount,
   existing?: {
@@ -3185,13 +3232,18 @@ async function resolveSyncedAccountHealth(
     lastError: string | null;
     lastErrorAt: Date | null;
     isEnabled: boolean;
-  } | null
+  } | null,
+  options?: { overwriteLocalUnavailableState?: boolean }
 ) {
   const sourceHealth = await getSub2ApiHealthOverride(account);
+  const overwriteLocalUnavailableState =
+    options?.overwriteLocalUnavailableState !== false;
   const preserveLocalUnavailable =
-    !sourceHealth.status && (await shouldPreserveLocalUnavailableState(existing));
+    !overwriteLocalUnavailableState &&
+    !sourceHealth.status &&
+    (await shouldPreserveLocalUnavailableState(existing));
   const now = new Date();
-  const update = sourceHealth.status
+  const rawUpdate = sourceHealth.status
     ? {
         status: sourceHealth.status,
         isEnabled: sourceHealth.isEnabled ?? existing?.isEnabled ?? true,
@@ -3214,7 +3266,8 @@ async function resolveSyncedAccountHealth(
           lastError: null,
           lastErrorAt: null,
         };
-  return { ...update, preserveLocalUnavailable };
+  const cooldownUntil = await normalizeSyncedAccountCooldown(rawUpdate);
+  return { ...rawUpdate, cooldownUntil, preserveLocalUnavailable };
 }
 
 function buildSub2ApiAccountMetadata(
@@ -3534,6 +3587,7 @@ function normalizeSub2ApiSyncTask(value: unknown): Sub2ApiAutoSyncTask | null {
     syncMode,
     allowMobileRtImport: Boolean(raw.allowMobileRtImport),
     contentSafetyEnabled: raw.contentSafetyEnabled !== false,
+    overwriteLocalUnavailableState: raw.overwriteLocalUnavailableState !== false,
     planFilter: normalizeSub2ApiPlanFilter(
       typeof raw.planFilter === "string" ? raw.planFilter : null
     ),
@@ -3603,6 +3657,7 @@ async function upsertSub2ApiAutoSyncTask(input: {
   syncMode: Sub2ApiTokenSyncMode;
   allowMobileRtImport?: boolean;
   contentSafetyEnabled: boolean;
+  overwriteLocalUnavailableState?: boolean;
   planFilter?: Sub2ApiPlanFilter | null;
 }) {
   const now = new Date().toISOString();
@@ -3633,6 +3688,8 @@ async function upsertSub2ApiAutoSyncTask(input: {
     syncMode,
     allowMobileRtImport: Boolean(input.allowMobileRtImport),
     contentSafetyEnabled: input.contentSafetyEnabled,
+    overwriteLocalUnavailableState:
+      input.overwriteLocalUnavailableState !== false,
     planFilter,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
@@ -3700,6 +3757,71 @@ export async function setSub2ApiAutoSyncTaskEnabled(input: {
   if (!found) throw new Error("自动同步任务不存在");
   await setSub2ApiAutoSyncTasks(nextTasks);
   return { taskId, enabled: input.enabled };
+}
+
+export async function setSub2ApiAutoSyncTaskOverwriteLocalUnavailableState(input: {
+  taskId: string;
+  overwriteLocalUnavailableState: boolean;
+}) {
+  const taskId = input.taskId.trim();
+  const tasks = await getSub2ApiAutoSyncTasks();
+  let found = false;
+  const now = new Date().toISOString();
+  const nextTasks = tasks.map((task) => {
+    if (task.id !== taskId) return task;
+    found = true;
+    return {
+      ...task,
+      overwriteLocalUnavailableState: input.overwriteLocalUnavailableState,
+      updatedAt: now,
+    };
+  });
+  if (!found) throw new Error("自动同步任务不存在");
+  await setSub2ApiAutoSyncTasks(nextTasks);
+  return {
+    taskId,
+    overwriteLocalUnavailableState: input.overwriteLocalUnavailableState,
+  };
+}
+
+export async function updateSub2ApiAutoSyncTaskOptions(input: {
+  taskId: string;
+  enabled: boolean;
+  webGroupId?: string | null;
+  responsesGroupId?: string | null;
+  syncMode: Sub2ApiTokenSyncMode;
+  allowMobileRtImport?: boolean;
+  contentSafetyEnabled: boolean;
+  overwriteLocalUnavailableState: boolean;
+  planFilter?: Sub2ApiPlanFilter | null;
+}) {
+  const taskId = input.taskId.trim();
+  const tasks = await getSub2ApiAutoSyncTasks();
+  let found = false;
+  const allowMobileRtImport = Boolean(input.allowMobileRtImport);
+  const syncMode = allowMobileRtImport ? input.syncMode : "responses";
+  const now = new Date().toISOString();
+  const normalizeGroupId = (value?: string | null) =>
+    value?.trim() && value.trim() !== "default" ? value.trim() : null;
+  const nextTasks = tasks.map((task) => {
+    if (task.id !== taskId) return task;
+    found = true;
+    return {
+      ...task,
+      enabled: input.enabled,
+      webGroupId: normalizeGroupId(input.webGroupId),
+      responsesGroupId: normalizeGroupId(input.responsesGroupId),
+      syncMode,
+      allowMobileRtImport,
+      contentSafetyEnabled: input.contentSafetyEnabled,
+      overwriteLocalUnavailableState: input.overwriteLocalUnavailableState,
+      planFilter: normalizeSub2ApiPlanFilter(input.planFilter),
+      updatedAt: now,
+    };
+  });
+  if (!found) throw new Error("自动同步任务不存在");
+  await setSub2ApiAutoSyncTasks(nextTasks);
+  return { taskId };
 }
 
 export async function deleteSub2ApiAutoSyncTask(taskIdInput: string) {
@@ -3883,6 +4005,7 @@ export async function syncImageBackendAccountsFromSub2Api(input: {
   createSyncTask?: boolean;
   syncTaskId?: string | null;
   cleanupManagedAccounts?: boolean;
+  overwriteLocalUnavailableState?: boolean;
 }) {
   const configuredLimit = await getRuntimeSettingNumber(
     "SUB2API_POSTGRES_SYNC_LIMIT",
@@ -3911,6 +4034,7 @@ export async function syncImageBackendAccountsFromSub2Api(input: {
         syncMode: effectiveSyncMode,
         allowMobileRtImport: input.allowMobileRtImport,
         contentSafetyEnabled: input.contentSafetyEnabled,
+        overwriteLocalUnavailableState: input.overwriteLocalUnavailableState,
         planFilter,
       })
     : null;
@@ -3959,7 +4083,11 @@ export async function syncImageBackendAccountsFromSub2Api(input: {
           }
           const preTokenHealth = await resolveSyncedAccountHealth(
             account,
-            existing
+            existing,
+            {
+              overwriteLocalUnavailableState:
+                input.overwriteLocalUnavailableState,
+            }
           );
           const { accessToken, tokenSource } =
             await resolveSub2ApiAccessTokenForMode(account, mode, {
@@ -3991,7 +4119,11 @@ export async function syncImageBackendAccountsFromSub2Api(input: {
           }
           const healthUpdate = await resolveSyncedAccountHealth(
             account,
-            existing
+            existing,
+            {
+              overwriteLocalUnavailableState:
+                input.overwriteLocalUnavailableState,
+            }
           );
           const id = await upsertImageBackendAccount({
             id: existing?.id,
@@ -4176,6 +4308,7 @@ async function runSub2ApiSyncConfig(input: {
   limit: number;
   syncTaskId?: string | null;
   cleanupManagedAccounts?: boolean;
+  overwriteLocalUnavailableState?: boolean;
 }) {
   let offset = 0;
   let hasMore = true;
@@ -4195,6 +4328,7 @@ async function runSub2ApiSyncConfig(input: {
       offset,
       syncTaskId: input.syncTaskId,
       cleanupManagedAccounts: input.cleanupManagedAccounts,
+      overwriteLocalUnavailableState: input.overwriteLocalUnavailableState,
     });
     aggregate.sourceCount += result.sourceCount;
     aggregate.totalSourceCount = result.totalSourceCount;
@@ -4329,6 +4463,7 @@ export async function runAutoSub2ApiAccessTokenSync(options?: {
           limit,
           syncTaskId: task.id,
           cleanupManagedAccounts: true,
+          overwriteLocalUnavailableState: task.overwriteLocalUnavailableState,
         });
         aggregate.sourceCount += result.sourceCount;
         aggregate.totalSourceCount += result.totalSourceCount;
@@ -4622,6 +4757,7 @@ export async function listAdminImageBackendPool() {
     contentSafetyEnabled: group.contentSafetyEnabled,
     backendType: getGroupBackendType(group.metadata),
     minPlan: getGroupMinPlan(group.metadata),
+    billingMultiplier: getGroupBillingMultiplier(group.metadata),
     childGroupIds: getGroupChildGroupIds(group.metadata),
     priority: group.priority,
     apiCount: apiCountMap.get(group.id) ?? 0,

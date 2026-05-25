@@ -22,6 +22,7 @@ export type ImageBackendGroupSummary = {
   contentSafetyEnabled: boolean | null;
   backendType: ImageBackendGroupBackendType;
   minPlan: SubscriptionPlan;
+  billingMultiplier: number;
   childGroupIds: string[];
   priority: number;
   apiCount: number;

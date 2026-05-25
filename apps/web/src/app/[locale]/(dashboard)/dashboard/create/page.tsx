@@ -65,6 +65,7 @@ export default async function CreatePage() {
         isDefault: group.isDefault,
         backendType: group.backendType,
         contentSafetyEnabled: group.contentSafetyEnabled,
+        billingMultiplier: group.billingMultiplier,
       }))}
       selectedBackendGroupId={selectedBackendGroupId}
       customApiActive={Boolean(userApiConfig)}

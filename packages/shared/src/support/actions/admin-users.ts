@@ -36,7 +36,9 @@ import {
 import { PRICE_IDS } from "../../config/payment";
 import { CREDIT_CONFIG_DEFAULTS } from "../../credits/config";
 import {
+  consumeCredits,
   freezeCreditsAccount,
+  getCreditsBalance,
   grantCredits,
   unfreezeCreditsAccount,
 } from "../../credits/core";
@@ -109,8 +111,32 @@ const grantCreditsSchema = userIdSchema.extend({
   reason: reasonSchema,
 });
 
+const adjustCreditsSchema = userIdSchema
+  .extend({
+    mode: z.enum(["deduct", "set"]),
+    amount: z
+      .number()
+      .min(0, "积分数量不能小于0")
+      .max(1000000, "单次最多调整100万积分"),
+    reason: reasonSchema,
+  })
+  .superRefine((data, ctx) => {
+    if (data.mode === "deduct" && data.amount <= 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["amount"],
+        message: "扣减积分必须大于0",
+      });
+    }
+  });
+
 const setCreditsStatusSchema = userIdSchema.extend({
   status: z.enum(["active", "frozen"]),
+  reason: reasonSchema,
+});
+
+const setUserPlanSchema = userIdSchema.extend({
+  plan: z.enum(["free", "starter", "pro", "ultra", "enterprise"]),
   reason: reasonSchema,
 });
 
@@ -185,6 +211,24 @@ function getPlanPriceIds(plan: Exclude<PlanFilter, "all" | "free">) {
       }
       return getPlanFromPriceId(value) === plan;
     });
+}
+
+function getMonthlyPriceIdForPlan(plan: Exclude<SubscriptionPlan, "free">) {
+  const priceIdMap: Record<Exclude<SubscriptionPlan, "free">, string> = {
+    starter: PRICE_IDS.STARTER_MONTHLY,
+    pro: PRICE_IDS.PRO_MONTHLY,
+    ultra: PRICE_IDS.ULTRA_MONTHLY,
+    enterprise: PRICE_IDS.ENTERPRISE_MONTHLY,
+  };
+  const priceId = priceIdMap[plan]?.trim();
+  if (!priceId) {
+    throw new Error(`套餐 ${plan} 未配置月付 Price ID，无法手动切换`);
+  }
+  return priceId;
+}
+
+function normalizeAdminCreditAmount(amount: number) {
+  return Math.round((amount + Number.EPSILON) * 100) / 100;
 }
 
 function buildUserFilters(input: ReturnType<typeof normalizeListInput>) {
@@ -680,6 +724,218 @@ export const adminGrantCreditsAction = withAdminUsersAction("grantCredits")
     return {
       message: `已为用户充值 ${data.amount} 积分`,
       ...result,
+    };
+  });
+
+export const adminAdjustCreditsAction = withSuperAdminUsersAction(
+  "adjustCredits"
+)
+  .schema(adjustCreditsSchema)
+  .action(async ({ parsedInput: data, ctx }) => {
+    await getUserBasicOrThrow(data.userId);
+
+    const amount = normalizeAdminCreditAmount(data.amount);
+    const before = await getCreditsBalance(data.userId);
+    const beforeBalance = normalizeAdminCreditAmount(before.balance);
+    const adjustment =
+      data.mode === "set" ? normalizeAdminCreditAmount(amount - beforeBalance) : -amount;
+    let operationResult: Record<string, unknown> | null = null;
+
+    if (data.mode === "deduct" && amount > beforeBalance) {
+      throw new Error(
+        `用户余额不足，当前余额 ${beforeBalance}，无法扣减 ${amount}`
+      );
+    }
+
+    if (data.mode === "set" && adjustment === 0) {
+      await writeAdminAuditLog({
+        adminUserId: ctx.userId,
+        targetUserId: data.userId,
+        action: "credits.override.noop",
+        reason: data.reason,
+        before: { balance: beforeBalance },
+        after: { balance: beforeBalance },
+        metadata: {
+          requestedBalance: amount,
+        },
+      });
+      return {
+        message: `用户余额已是 ${amount} 积分，无需调整`,
+        balance: beforeBalance,
+      };
+    }
+
+    if (adjustment > 0) {
+      const expiryDays = await getRuntimeSettingNumber(
+        "FREE_CREDITS_EXPIRY_DAYS",
+        CREDIT_CONFIG_DEFAULTS.freeCreditsExpiryDays,
+        { positive: true }
+      );
+      const expiresAt = expiryDays
+        ? new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000)
+        : null;
+      const grantResult = await grantCredits({
+        userId: data.userId,
+        amount: adjustment,
+        sourceType: "bonus",
+        debitAccount: `ADMIN:${ctx.userId}`,
+        transactionType: "admin_grant",
+        expiresAt,
+        description: `超管覆盖积分补差: ${data.reason}`,
+        metadata: {
+          adminUserId: ctx.userId,
+          reason: data.reason,
+          mode: data.mode,
+          requestedBalance: amount,
+          previousBalance: beforeBalance,
+        },
+      });
+      operationResult = {
+        type: "grant",
+        ...grantResult,
+      };
+    } else {
+      const consumeResult = await consumeCredits({
+        userId: data.userId,
+        amount: Math.abs(adjustment),
+        serviceName: "admin_credit_adjustment",
+        description:
+          data.mode === "deduct"
+            ? `超管手动扣减积分: ${data.reason}`
+            : `超管覆盖积分扣差: ${data.reason}`,
+        metadata: {
+          adminUserId: ctx.userId,
+          reason: data.reason,
+          mode: data.mode,
+          requestedBalance: data.mode === "set" ? amount : undefined,
+          previousBalance: beforeBalance,
+        },
+      });
+      operationResult = {
+        type: "consume",
+        success: consumeResult.success,
+        consumedAmount: consumeResult.consumedAmount,
+        remainingBalance: consumeResult.remainingBalance,
+        transactionId: consumeResult.transactionId,
+        consumedBatches: consumeResult.consumedBatches,
+      };
+    }
+
+    const after = await getCreditsBalance(data.userId);
+    const action = data.mode === "deduct" ? "credits.deduct" : "credits.override";
+    await writeAdminAuditLog({
+      adminUserId: ctx.userId,
+      targetUserId: data.userId,
+      action,
+      reason: data.reason,
+      before: {
+        balance: beforeBalance,
+        status: before.status,
+      },
+      after: {
+        balance: after.balance,
+        status: after.status,
+      },
+      metadata: {
+        mode: data.mode,
+        amount,
+        adjustment,
+        operationResult,
+      },
+    });
+
+    revalidatePath("/dashboard/users");
+    return {
+      message:
+        data.mode === "deduct"
+          ? `已扣减 ${amount} 积分`
+          : `已覆盖余额为 ${formatNumberForMessage(amount)} 积分`,
+      balance: after.balance,
+    };
+  });
+
+function formatNumberForMessage(value: number) {
+  return new Intl.NumberFormat("zh-CN", {
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+export const setUserPlanAction = withSuperAdminUsersAction("setUserPlan")
+  .schema(setUserPlanSchema)
+  .action(async ({ parsedInput: data, ctx }) => {
+    await getUserBasicOrThrow(data.userId);
+
+    const [before] = await db
+      .select()
+      .from(subscription)
+      .where(eq(subscription.userId, data.userId))
+      .limit(1);
+
+    const now = new Date();
+    if (data.plan === "free") {
+      if (before) {
+        await db
+          .update(subscription)
+          .set({
+            status: "canceled",
+            currentPeriodEnd: now,
+            cancelAtPeriodEnd: false,
+            updatedAt: now,
+          })
+          .where(eq(subscription.userId, data.userId));
+      }
+    } else {
+      const priceId = getMonthlyPriceIdForPlan(data.plan);
+      const subscriptionData = {
+        subscriptionId: before?.subscriptionId ?? `manual:${data.userId}`,
+        priceId,
+        status: "active",
+        currentPeriodStart: now,
+        currentPeriodEnd: null,
+        cancelAtPeriodEnd: false,
+        updatedAt: now,
+      };
+
+      if (before) {
+        await db
+          .update(subscription)
+          .set(subscriptionData)
+          .where(eq(subscription.userId, data.userId));
+      } else {
+        await db.insert(subscription).values({
+          id: crypto.randomUUID(),
+          userId: data.userId,
+          ...subscriptionData,
+        });
+      }
+    }
+
+    const [after] = await db
+      .select()
+      .from(subscription)
+      .where(eq(subscription.userId, data.userId))
+      .limit(1);
+
+    await writeAdminAuditLog({
+      adminUserId: ctx.userId,
+      targetUserId: data.userId,
+      action: "subscription.plan.set",
+      reason: data.reason,
+      before,
+      after,
+      metadata: {
+        targetPlan: data.plan,
+        grantPlanCredits: false,
+        note: "Manual plan change only updates subscription state and does not grant plan credits.",
+      },
+    });
+
+    revalidatePath("/dashboard/users");
+    return {
+      message:
+        data.plan === "free"
+          ? "已将用户套餐改为 Free，不发放套餐积分"
+          : `已将用户套餐改为 ${data.plan.toUpperCase()}，不发放套餐积分`,
     };
   });
 

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Activity,
   ChevronsUpDown,
   LogOut,
   Server,
@@ -109,6 +110,7 @@ export function DashboardSidebar() {
       "Billing & Usage": t("nav.billing"),
       Settings: t("nav.settings"),
       "System Settings": t("nav.systemSettings"),
+      "Global Status": t("nav.globalStatus"),
       "Image Backend Pool": t("nav.imageBackendPool"),
       Support: t("nav.support"),
       "New Ticket": t("nav.newTicket"),
@@ -212,6 +214,11 @@ export function DashboardSidebar() {
                   ...(isAdmin
                     ? [
                         {
+                          title: "Global Status",
+                          href: "/dashboard/admin/status",
+                          icon: Activity,
+                        },
+                        {
                           title: "User Management",
                           href: "/dashboard/admin/users",
                           icon: Users,
@@ -224,6 +231,11 @@ export function DashboardSidebar() {
                       ]
                     : isObserverAdmin
                       ? [
+                          {
+                            title: "Global Status",
+                            href: "/dashboard/admin/status",
+                            icon: Activity,
+                          },
                           {
                             title: "Image Backend Pool",
                             href: "/dashboard/admin/settings",

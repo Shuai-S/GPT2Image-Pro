@@ -77,7 +77,9 @@ import {
   saveImageBackendApiAction,
   saveImageBackendGroupAction,
   setSub2ApiAutoSyncTaskEnabledAction,
+  setSub2ApiAutoSyncTaskOverwriteLocalUnavailableStateAction,
   syncImageBackendAccountsFromSub2ApiAction,
+  updateSub2ApiAutoSyncTaskOptionsAction,
 } from "./actions";
 import { parseImportTokensText } from "./import-token-parser";
 import type {
@@ -95,6 +97,7 @@ type Group = {
   contentSafetyEnabled: boolean | null;
   backendType: ImageBackendGroupBackendType;
   minPlan: SubscriptionPlan;
+  billingMultiplier: number;
   childGroupIds: string[];
   priority: number;
   apiCount: number;
@@ -181,6 +184,7 @@ type Sub2ApiAutoSyncTask = {
   syncMode: TokenSyncMode;
   allowMobileRtImport: boolean;
   contentSafetyEnabled: boolean;
+  overwriteLocalUnavailableState: boolean;
   planFilter: Sub2ApiPlanFilter;
   createdAt?: string;
   updatedAt?: string;
@@ -221,6 +225,10 @@ type BulkAccountForm = {
   isEnabled: boolean;
   setContentSafety: boolean;
   contentSafetyEnabled: boolean;
+  setPriority: boolean;
+  priority: number;
+  setConcurrency: boolean;
+  concurrency: number;
   deleteSelected: boolean;
 };
 
@@ -604,6 +612,7 @@ export function ImageBackendPoolAdminPanel({
     contentSafety: "inherit" as ContentSafetyFormValue,
     backendType: "mixed" as GroupBackendTypeFormValue,
     minPlan: "free" as SubscriptionPlan,
+    billingMultiplier: 1,
     childGroupIds: [] as string[],
     priority: 50,
   });
@@ -648,6 +657,10 @@ export function ImageBackendPoolAdminPanel({
     isEnabled: true,
     setContentSafety: false,
     contentSafetyEnabled: true,
+    setPriority: false,
+    priority: 50,
+    setConcurrency: false,
+    concurrency: 1,
     deleteSelected: false,
   } satisfies BulkAccountForm);
   const [manualImportForm, setManualImportForm] = useState({
@@ -687,7 +700,21 @@ export function ImageBackendPoolAdminPanel({
     planFilter: "non_free" as Sub2ApiPlanFilter,
     createSyncTask: true,
     contentSafetyEnabled: true,
+    overwriteLocalUnavailableState: true,
     limit: 100,
+  });
+  const [editingSyncTask, setEditingSyncTask] =
+    useState<Sub2ApiAutoSyncTask | null>(null);
+  const [syncTaskForm, setSyncTaskForm] = useState({
+    taskId: "",
+    enabled: true,
+    webGroupId: "default",
+    responsesGroupId: "default",
+    syncMode: "responses" as TokenSyncMode,
+    allowMobileRtImport: false,
+    planFilter: "non_free" as Sub2ApiPlanFilter,
+    contentSafetyEnabled: true,
+    overwriteLocalUnavailableState: true,
   });
   const [syncProgress, setSyncProgress] = useState<SyncProgressState>({
     status: "idle",
@@ -812,6 +839,8 @@ export function ImageBackendPoolAdminPanel({
     bulkAccountForm.setMode ||
     bulkAccountForm.setEnabled ||
     bulkAccountForm.setContentSafety ||
+    bulkAccountForm.setPriority ||
+    bulkAccountForm.setConcurrency ||
     bulkAccountForm.deleteSelected;
   const editingAccount = accountForm.id
     ? accounts.find((account) => account.id === accountForm.id)
@@ -841,6 +870,7 @@ export function ImageBackendPoolAdminPanel({
       contentSafety: "inherit" as ContentSafetyFormValue,
       backendType: "mixed" as GroupBackendTypeFormValue,
       minPlan: "free" as SubscriptionPlan,
+      billingMultiplier: 1,
       childGroupIds: [] as string[],
       priority: 50,
     });
@@ -907,6 +937,21 @@ export function ImageBackendPoolAdminPanel({
       concurrency: 1,
     });
 
+  const openSyncTaskEditor = (task: Sub2ApiAutoSyncTask) => {
+    setEditingSyncTask(task);
+    setSyncTaskForm({
+      taskId: task.id,
+      enabled: task.enabled,
+      webGroupId: task.webGroupId || "default",
+      responsesGroupId: task.responsesGroupId || "default",
+      syncMode: task.allowMobileRtImport ? task.syncMode : "responses",
+      allowMobileRtImport: task.allowMobileRtImport,
+      planFilter: task.planFilter,
+      contentSafetyEnabled: task.contentSafetyEnabled,
+      overwriteLocalUnavailableState: task.overwriteLocalUnavailableState,
+    });
+  };
+
   const editGroup = (group: Group) => {
     setGroupForm({
       id: group.id,
@@ -918,6 +963,7 @@ export function ImageBackendPoolAdminPanel({
       contentSafety: safetyValue(group.contentSafetyEnabled),
       backendType: group.backendType || "mixed",
       minPlan: group.minPlan || "free",
+      billingMultiplier: group.billingMultiplier || 1,
       childGroupIds: group.childGroupIds || [],
       priority: group.priority,
     });
@@ -1134,6 +1180,29 @@ export function ImageBackendPoolAdminPanel({
       },
       onError: ({ error }) =>
         toast.error(error.serverError || "更新自动同步任务失败"),
+    });
+
+  const {
+    execute: setSub2ApiTaskOverwriteLocalUnavailableState,
+    isPending: isUpdatingSyncTaskOverwrite,
+  } = useAction(setSub2ApiAutoSyncTaskOverwriteLocalUnavailableStateAction, {
+    onSuccess: () => {
+      toast.success("自动同步任务已更新");
+      loadSub2ApiSyncTasks();
+    },
+    onError: ({ error }) =>
+      toast.error(error.serverError || "更新自动同步任务失败"),
+  });
+
+  const { execute: updateSub2ApiSyncTask, isPending: isSavingSyncTask } =
+    useAction(updateSub2ApiAutoSyncTaskOptionsAction, {
+      onSuccess: () => {
+        toast.success("自动同步任务已保存");
+        setEditingSyncTask(null);
+        loadSub2ApiSyncTasks();
+      },
+      onError: ({ error }) =>
+        toast.error(error.serverError || "保存自动同步任务失败"),
     });
 
   const { execute: deleteSub2ApiTask, isPending: isDeletingSyncTask } =
@@ -1359,6 +1428,8 @@ export function ImageBackendPoolAdminPanel({
           planFilter: importForm.planFilter,
           createSyncTask: importForm.createSyncTask,
           contentSafetyEnabled: importForm.contentSafetyEnabled,
+          overwriteLocalUnavailableState:
+            importForm.overwriteLocalUnavailableState,
           limit: batchSize,
           offset,
         });
@@ -1486,6 +1557,12 @@ export function ImageBackendPoolAdminPanel({
         : {}),
       ...(bulkAccountForm.setContentSafety
         ? { contentSafetyEnabled: bulkAccountForm.contentSafetyEnabled }
+        : {}),
+      ...(bulkAccountForm.setPriority
+        ? { priority: bulkAccountForm.priority }
+        : {}),
+      ...(bulkAccountForm.setConcurrency
+        ? { concurrency: bulkAccountForm.concurrency }
         : {}),
     });
   };
@@ -1809,6 +1886,26 @@ export function ImageBackendPoolAdminPanel({
                 </p>
               </div>
               <div className="space-y-1.5">
+                <Label>计费倍率</Label>
+                <Input
+                  type="number"
+                  min={0.01}
+                  max={100}
+                  step={0.01}
+                  value={groupForm.billingMultiplier}
+                  onChange={(event) =>
+                    setGroupForm((current) => ({
+                      ...current,
+                      billingMultiplier: Number(event.target.value),
+                    }))
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  该分组被用户选中或设为默认时，本站积分按此倍率结算；mixed
+                  父分组调度到子分组成员时，只使用父分组倍率，子分组倍率不生效。
+                </p>
+              </div>
+              <div className="space-y-1.5">
                 <Label>分组优先级</Label>
                 <Input
                   type="number"
@@ -1868,6 +1965,11 @@ export function ImageBackendPoolAdminPanel({
                       <Badge variant="outline">
                         {groupBackendTypeLabel(group.backendType)}
                       </Badge>
+                      {group.billingMultiplier !== 1 && (
+                        <Badge variant="secondary">
+                          计费 x{group.billingMultiplier}
+                        </Badge>
+                      )}
                       {group.childGroupIds.length > 0 && (
                         <Badge variant="secondary">
                           子分组 {group.childGroupIds.length}
@@ -1885,7 +1987,8 @@ export function ImageBackendPoolAdminPanel({
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
                       {group.description || "无说明"} · 优先级 {group.priority}{" "}
-                      · 账号 {group.accountCount} · API {group.apiCount}
+                      · 计费倍率 x{group.billingMultiplier} · 账号{" "}
+                      {group.accountCount} · API {group.apiCount}
                     </p>
                     {group.childGroupIds.length > 0 && (
                       <p className="mt-1 text-xs text-muted-foreground">
@@ -2558,6 +2661,62 @@ export function ImageBackendPoolAdminPanel({
                         </SelectContent>
                       </Select>
                     </Label>
+                    <Label className="flex min-h-10 items-center gap-2 rounded-md border px-3 text-sm">
+                      <Checkbox
+                        checked={bulkAccountForm.setPriority}
+                        disabled={bulkAccountForm.deleteSelected}
+                        onCheckedChange={(checked) =>
+                          setBulkAccountForm((current) => ({
+                            ...current,
+                            setPriority: Boolean(checked),
+                          }))
+                        }
+                      />
+                      改优先级
+                      <Input
+                        className="ml-auto w-24"
+                        type="number"
+                        min={0}
+                        max={10000}
+                        step={1}
+                        value={bulkAccountForm.priority}
+                        disabled={!bulkAccountForm.setPriority}
+                        onChange={(event) =>
+                          setBulkAccountForm((current) => ({
+                            ...current,
+                            priority: Number(event.target.value),
+                          }))
+                        }
+                      />
+                    </Label>
+                    <Label className="flex min-h-10 items-center gap-2 rounded-md border px-3 text-sm">
+                      <Checkbox
+                        checked={bulkAccountForm.setConcurrency}
+                        disabled={bulkAccountForm.deleteSelected}
+                        onCheckedChange={(checked) =>
+                          setBulkAccountForm((current) => ({
+                            ...current,
+                            setConcurrency: Boolean(checked),
+                          }))
+                        }
+                      />
+                      改并发权重
+                      <Input
+                        className="ml-auto w-24"
+                        type="number"
+                        min={1}
+                        max={100}
+                        step={1}
+                        value={bulkAccountForm.concurrency}
+                        disabled={!bulkAccountForm.setConcurrency}
+                        onChange={(event) =>
+                          setBulkAccountForm((current) => ({
+                            ...current,
+                            concurrency: Number(event.target.value),
+                          }))
+                        }
+                      />
+                    </Label>
                     <Label className="flex min-h-10 items-center gap-2 rounded-md border border-destructive/40 px-3 text-sm text-destructive md:col-span-2">
                       <Checkbox
                         checked={bulkAccountForm.deleteSelected}
@@ -2571,6 +2730,10 @@ export function ImageBackendPoolAdminPanel({
                             setContentSafety: checked
                               ? false
                               : current.setContentSafety,
+                            setPriority: checked ? false : current.setPriority,
+                            setConcurrency: checked
+                              ? false
+                              : current.setConcurrency,
                           }))
                         }
                       />
@@ -3107,6 +3270,25 @@ export function ImageBackendPoolAdminPanel({
                     }
                   />
                 </div>
+                <div className="flex items-start justify-between gap-3 rounded-md border p-3">
+                  <div>
+                    <Label>覆盖本站异常状态</Label>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      同步时以 Sub2API
+                      当前状态为准，覆盖本站账号池里的错误、限流和冷却状态。
+                    </p>
+                  </div>
+                  <Switch
+                    checked={importForm.overwriteLocalUnavailableState}
+                    disabled={isSub2ApiSyncUnavailable}
+                    onCheckedChange={(checked) =>
+                      setImportForm((current) => ({
+                        ...current,
+                        overwriteLocalUnavailableState: checked,
+                      }))
+                    }
+                  />
+                </div>
               </div>
               <div className="flex items-start justify-between gap-3 rounded-md border p-3">
                 <div>
@@ -3286,6 +3468,10 @@ export function ImageBackendPoolAdminPanel({
                               管理账号 {task.managedAccountCount} · Mobile RT{" "}
                               {task.allowMobileRtImport ? "允许" : "关闭"} · 审核{" "}
                               {task.contentSafetyEnabled ? "开启" : "关闭"} ·
+                              覆盖异常{" "}
+                              {task.overwriteLocalUnavailableState
+                                ? "开启"
+                                : "关闭"} ·
                               上次运行 {formatOptionalDate(task.lastRunAt || null)}
                             </p>
                             {task.lastResult && (
@@ -3298,17 +3484,42 @@ export function ImageBackendPoolAdminPanel({
                               </p>
                             )}
                           </div>
-                          <div className="flex shrink-0 items-center gap-2">
-                            <Switch
-                              checked={task.enabled}
-                              disabled={isUpdatingSyncTask}
-                              onCheckedChange={(checked) =>
-                                setSub2ApiTaskEnabled({
-                                  taskId: task.id,
-                                  enabled: checked,
-                                })
-                              }
-                            />
+                          <div className="flex shrink-0 flex-col gap-2 text-xs text-muted-foreground">
+                            <Label className="flex items-center justify-between gap-3">
+                              启用
+                              <Switch
+                                checked={task.enabled}
+                                disabled={isUpdatingSyncTask}
+                                onCheckedChange={(checked) =>
+                                  setSub2ApiTaskEnabled({
+                                    taskId: task.id,
+                                    enabled: checked,
+                                  })
+                                }
+                              />
+                            </Label>
+                            <Label className="flex items-center justify-between gap-3">
+                              覆盖异常
+                              <Switch
+                                checked={task.overwriteLocalUnavailableState}
+                                disabled={isUpdatingSyncTaskOverwrite}
+                                onCheckedChange={(checked) =>
+                                  setSub2ApiTaskOverwriteLocalUnavailableState({
+                                    taskId: task.id,
+                                    overwriteLocalUnavailableState: checked,
+                                  })
+                                }
+                              />
+                            </Label>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openSyncTaskEditor(task)}
+                            >
+                              <Pencil className="mr-2 h-4 w-4" />
+                              编辑
+                            </Button>
                             <Button
                               type="button"
                               variant="outline"
@@ -3734,6 +3945,192 @@ export function ImageBackendPoolAdminPanel({
           </div>
         </DialogContent>
       </Dialog>
+      )}
+      {!readOnly && (
+        <Dialog
+          open={Boolean(editingSyncTask)}
+          onOpenChange={(open) => {
+            if (!open) setEditingSyncTask(null);
+          }}
+        >
+          <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>编辑自动同步任务</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+                来源范围：
+                {editingSyncTask?.sourceGroupName ||
+                  editingSyncTask?.sourceGroupId ||
+                  "全部 Sub2API OpenAI 账号"}
+                。来源分组变化会影响托管账号清理范围，如需更换来源，请删除后重新创建任务。
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="flex items-center justify-between rounded-md border p-3">
+                  <Label>启用任务</Label>
+                  <Switch
+                    checked={syncTaskForm.enabled}
+                    onCheckedChange={(checked) =>
+                      setSyncTaskForm((current) => ({
+                        ...current,
+                        enabled: checked,
+                      }))
+                    }
+                  />
+                </div>
+                <div className="flex items-center justify-between rounded-md border p-3">
+                  <Label>Mobile RT 同步</Label>
+                  <Switch
+                    checked={syncTaskForm.allowMobileRtImport}
+                    onCheckedChange={(checked) =>
+                      setSyncTaskForm((current) => ({
+                        ...current,
+                        allowMobileRtImport: checked,
+                        syncMode: checked ? current.syncMode : "responses",
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Select
+                  value={syncTaskForm.planFilter}
+                  onValueChange={(value) =>
+                    setSyncTaskForm((current) => ({
+                      ...current,
+                      planFilter: value as Sub2ApiPlanFilter,
+                    }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="non_free">排除 free</SelectItem>
+                    <SelectItem value="all">全部套餐</SelectItem>
+                    <SelectItem value="plus">只同步 plus</SelectItem>
+                    <SelectItem value="pro">只同步 pro</SelectItem>
+                    <SelectItem value="free">只同步 free</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={syncTaskForm.syncMode}
+                  onValueChange={(value) =>
+                    setSyncTaskForm((current) => ({
+                      ...current,
+                      syncMode: value as TokenSyncMode,
+                    }))
+                  }
+                  disabled={!syncTaskForm.allowMobileRtImport}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="both">同时同步 Web 和 Codex</SelectItem>
+                    <SelectItem value="web">只同步 Web</SelectItem>
+                    <SelectItem value="responses">
+                      只同步 Codex/Responses
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Select
+                  value={syncTaskForm.webGroupId}
+                  onValueChange={(value) =>
+                    setSyncTaskForm((current) => ({
+                      ...current,
+                      webGroupId: value,
+                    }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Web 目标分组" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {groupOptions.map((group) => (
+                      <SelectItem key={group.id} value={group.id}>
+                        Web：{group.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={syncTaskForm.responsesGroupId}
+                  onValueChange={(value) =>
+                    setSyncTaskForm((current) => ({
+                      ...current,
+                      responsesGroupId: value,
+                    }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Codex 目标分组" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {groupOptions.map((group) => (
+                      <SelectItem key={group.id} value={group.id}>
+                        Codex：{group.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="flex items-center justify-between rounded-md border p-3">
+                  <Label>接入内容安全审核</Label>
+                  <Switch
+                    checked={syncTaskForm.contentSafetyEnabled}
+                    onCheckedChange={(checked) =>
+                      setSyncTaskForm((current) => ({
+                        ...current,
+                        contentSafetyEnabled: checked,
+                      }))
+                    }
+                  />
+                </div>
+                <div className="flex items-start justify-between gap-3 rounded-md border p-3">
+                  <div>
+                    <Label>覆盖本站异常状态</Label>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      同步时使用 Sub2API 当前状态覆盖本站错误、限流和冷却。
+                    </p>
+                  </div>
+                  <Switch
+                    checked={syncTaskForm.overwriteLocalUnavailableState}
+                    onCheckedChange={(checked) =>
+                      setSyncTaskForm((current) => ({
+                        ...current,
+                        overwriteLocalUnavailableState: checked,
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setEditingSyncTask(null)}
+                  disabled={isSavingSyncTask}
+                >
+                  取消
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => updateSub2ApiSyncTask(syncTaskForm)}
+                  disabled={isSavingSyncTask}
+                >
+                  {isSavingSyncTask && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
+                  保存任务
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );

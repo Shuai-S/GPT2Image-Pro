@@ -40,6 +40,13 @@ function readRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+function applyBillingMultiplier(value: number, multiplier: number) {
+  if (!Number.isFinite(multiplier) || multiplier <= 0 || multiplier === 1) {
+    return value;
+  }
+  return Math.round((value * multiplier + Number.EPSILON) * 100) / 100;
+}
+
 export function getFailedGenerationTargetCreditsFromMetadata(params: {
   reason: FailedGenerationSettlementReason;
   chargedCredits: number;
@@ -48,9 +55,17 @@ export function getFailedGenerationTargetCreditsFromMetadata(params: {
   const metadata = params.metadata ?? {};
   const creditCost = readRecord(metadata.creditCost);
   const chargedCredits = Math.max(0, params.chargedCredits);
+  const billingMultiplier = readNumber(metadata.billingMultiplier) ?? 1;
   const moderationFailureCredits =
     readNumber(metadata.moderationFailureCredits) ?? chargedCredits;
-  const moderationOnlyCredits = readNumber(creditCost?.moderationOnlyCredits);
+  const moderationOnlyCredits =
+    readNumber(creditCost?.moderationOnlyCredits) ??
+    (readNumber(creditCost?.moderationCredits) !== undefined
+      ? applyBillingMultiplier(
+          readNumber(creditCost?.moderationCredits) ?? 0,
+          billingMultiplier
+        )
+      : undefined);
   const settlementParams: Parameters<typeof getFailedGenerationTargetCredits>[0] =
     {
       reason: params.reason,

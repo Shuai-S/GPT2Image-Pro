@@ -50,6 +50,7 @@ type ImageBackendGroupOption = {
   isEnabled: boolean;
   contentSafetyEnabled: boolean | null;
   backendType: ImageBackendGroupBackendType;
+  billingMultiplier?: number;
 };
 
 type ExternalApiKeySummary = {
@@ -85,7 +86,11 @@ function groupOptionLabel(group: ImageBackendGroupOption) {
       : group.contentSafetyEnabled === false
         ? "内容审核关闭"
         : "内容审核按成员配置";
-  return `${group.name}${group.isDefault ? "（默认）" : ""} · ${backend} · ${safety}`;
+  const billing =
+    group.billingMultiplier && group.billingMultiplier !== 1
+      ? ` · 计费 x${group.billingMultiplier}`
+      : "";
+  return `${group.name}${group.isDefault ? "（默认）" : ""} · ${backend} · ${safety}${billing}`;
 }
 
 export function ExternalApiKeySection() {

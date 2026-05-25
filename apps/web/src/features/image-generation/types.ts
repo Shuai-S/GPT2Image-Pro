@@ -244,6 +244,8 @@ export interface ApiConfig {
     accountBackend?: "web" | "responses";
     apiInterfaceMode?: "images" | "responses" | "mixed";
     apiForceResponsesEndpoint?: boolean;
+    billingGroupId?: string | null;
+    billingMultiplier?: number;
     reportResult?: boolean;
   };
 }

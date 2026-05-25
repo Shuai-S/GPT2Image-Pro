@@ -57,6 +57,22 @@ describe("failed generation settlement", () => {
     ).toBe(0.04);
   });
 
+  it("uses multiplied moderation-only settlement from generation metadata", () => {
+    expect(
+      getFailedGenerationTargetCreditsFromMetadata({
+        reason: "generation_error",
+        chargedCredits: 3,
+        metadata: {
+          billingMultiplier: 2,
+          moderationFailureCredits: 3,
+          creditCost: {
+            moderationOnlyCredits: 0.08,
+          },
+        },
+      })
+    ).toBe(0.08);
+  });
+
   it("keeps old timeout rows compatible when metadata has no cost breakdown", () => {
     expect(
       getFailedGenerationTargetCreditsFromMetadata({
