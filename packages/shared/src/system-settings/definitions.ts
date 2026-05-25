@@ -1056,7 +1056,7 @@ export const SYSTEM_SETTING_DEFINITIONS = [
         allowMobileRtImport: false,
         planFilter: "non_free",
         webGroupId: null,
-        responsesGroupId: "default",
+        responsesGroupId: null,
         contentSafetyEnabled: true,
       },
     ],

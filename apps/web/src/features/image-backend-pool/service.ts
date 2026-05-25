@@ -3488,6 +3488,10 @@ function normalizeSub2ApiSyncTask(value: unknown): Sub2ApiAutoSyncTask | null {
   if (!id) return null;
   const syncMode =
     raw.syncMode === "web" || raw.syncMode === "both" ? raw.syncMode : "responses";
+  const normalizeGroupId = (value: unknown) =>
+    typeof value === "string" && value.trim() && value.trim() !== "default"
+      ? value.trim()
+      : null;
   return {
     id,
     enabled: raw.enabled !== false,
@@ -3499,14 +3503,8 @@ function normalizeSub2ApiSyncTask(value: unknown): Sub2ApiAutoSyncTask | null {
       typeof raw.sourceGroupName === "string" && raw.sourceGroupName.trim()
         ? raw.sourceGroupName.trim()
         : null,
-    webGroupId:
-      typeof raw.webGroupId === "string" && raw.webGroupId.trim()
-        ? raw.webGroupId.trim()
-        : null,
-    responsesGroupId:
-      typeof raw.responsesGroupId === "string" && raw.responsesGroupId.trim()
-        ? raw.responsesGroupId.trim()
-        : null,
+    webGroupId: normalizeGroupId(raw.webGroupId),
+    responsesGroupId: normalizeGroupId(raw.responsesGroupId),
     syncMode,
     allowMobileRtImport: Boolean(raw.allowMobileRtImport),
     contentSafetyEnabled: raw.contentSafetyEnabled !== false,
@@ -3598,8 +3596,14 @@ async function upsertSub2ApiAutoSyncTask(input: {
     enabled: true,
     sourceGroupId: input.sourceGroupId?.trim() || null,
     sourceGroupName: input.sourceGroupName?.trim() || null,
-    webGroupId: input.webGroupId?.trim() || null,
-    responsesGroupId: input.responsesGroupId?.trim() || null,
+    webGroupId:
+      input.webGroupId?.trim() && input.webGroupId.trim() !== "default"
+        ? input.webGroupId.trim()
+        : null,
+    responsesGroupId:
+      input.responsesGroupId?.trim() && input.responsesGroupId.trim() !== "default"
+        ? input.responsesGroupId.trim()
+        : null,
     syncMode,
     allowMobileRtImport: Boolean(input.allowMobileRtImport),
     contentSafetyEnabled: input.contentSafetyEnabled,
