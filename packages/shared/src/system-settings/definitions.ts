@@ -101,6 +101,8 @@ export type SettingKey =
   | "IMAGE_AGENT_MAX_ROUNDS"
   | "IMAGE_AGENT_FORCE_MAX_ROUNDS"
   | "IMAGE_RESPONSES_PREVIOUS_RESPONSE_ENABLED"
+  | "IMAGE_FORCE_WEB_MIN_PIXELS"
+  | "IMAGE_FORCE_WEB_MAX_PIXELS"
   | "CHATGPT_WEB_PROXY_URL"
   | "CHATGPT_WEB_PROXY_SECRET"
   | "CHATGPT_WEB_ACCOUNT_REFRESH_STALE_MINUTES"
@@ -920,6 +922,24 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     category: "models",
     valueType: "boolean",
     defaultValue: false,
+  },
+  {
+    key: "IMAGE_FORCE_WEB_MIN_PIXELS",
+    label: "force_web 最小像素数",
+    description:
+      "外接 image API 传入 force_web / forceWeb 时，只有请求尺寸总像素大于等于该值才会强制调度 Web 账号。默认 660000，约 0.66MP。",
+    category: "models",
+    valueType: "number",
+    defaultValue: 660000,
+  },
+  {
+    key: "IMAGE_FORCE_WEB_MAX_PIXELS",
+    label: "force_web 最大像素数",
+    description:
+      "外接 image API 传入 force_web / forceWeb 时，只有请求尺寸总像素小于等于该值才会强制调度 Web 账号。默认 2000000，约 2MP；4K 请求默认不会强制 Web。",
+    category: "models",
+    valueType: "number",
+    defaultValue: 2000000,
   },
   {
     key: "CHATGPT_WEB_PROXY_URL",

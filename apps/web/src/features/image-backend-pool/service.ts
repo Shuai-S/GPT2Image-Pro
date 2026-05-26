@@ -521,6 +521,14 @@ function isTransientNetworkBackendError(error?: string | null) {
   );
 }
 
+function isLocalAbortTimeoutError(error?: string | null) {
+  const normalized = (error || "").toLowerCase();
+  return (
+    normalized.includes("operation was aborted") &&
+    normalized.includes("timeout")
+  );
+}
+
 function isUserRequestBackendError(error?: string | null) {
   const normalized = (error || "").toLowerCase();
   return (
@@ -538,6 +546,7 @@ export function isImageBackendSwitchableError(error?: string | null) {
   return Boolean(
     error &&
       !isUserRequestBackendError(error) &&
+      !isLocalAbortTimeoutError(error) &&
       (isRecoverableBackendError(error) ||
         isInvalidBackendCredentialError(error))
   );
@@ -1263,7 +1272,6 @@ async function selectPoolMember(
           asc(imageBackendAccount.lastUsedAt),
           asc(imageBackendAccount.createdAt)
         )
-        .limit(50)
     : db
         .select({
           matchedGroupId: imageBackendAccount.groupId,
@@ -1291,8 +1299,7 @@ async function selectPoolMember(
           asc(imageBackendAccount.priority),
           asc(imageBackendAccount.lastUsedAt),
           asc(imageBackendAccount.createdAt)
-        )
-        .limit(50);
+        );
 
   const [apiRows, accountRows] = await Promise.all([
     db
@@ -1317,8 +1324,7 @@ async function selectPoolMember(
         asc(imageBackendApi.priority),
         asc(imageBackendApi.lastUsedAt),
         asc(imageBackendApi.createdAt)
-      )
-      .limit(50),
+      ),
     accountRowsPromise,
   ]);
 

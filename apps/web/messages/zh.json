@@ -677,6 +677,8 @@
       "lastUsed": "最后使用",
       "never": "从未使用",
       "revoke": "撤销",
+      "delete": "删除",
+      "confirmDelete": "确定删除这个已撤销的 API Key？此操作不可恢复。",
       "quota": {
         "label": "积分限额",
         "description": "每个 API Key 可设置独立积分总额度；为空表示不限额，仍会消耗账户余额。",
@@ -704,6 +706,7 @@
         "created": "API Key 已创建",
         "copied": "API Key 已复制",
         "revoked": "API Key 已撤销",
+        "deleted": "API Key 已删除",
         "updated": "设置已更新",
         "quotaUpdated": "API Key 限额已更新"
       },
@@ -711,6 +714,7 @@
         "load": "加载 API Key 失败",
         "create": "创建 API Key 失败",
         "revoke": "撤销 API Key 失败",
+        "delete": "删除 API Key 失败",
         "update": "更新设置失败",
         "quota": "更新 API Key 限额失败",
         "quotaInvalid": "请输入大于等于 0 的积分限额，或留空表示不限额"

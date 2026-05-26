@@ -677,6 +677,8 @@
       "lastUsed": "Last used",
       "never": "Never",
       "revoke": "Revoke",
+      "delete": "Delete",
+      "confirmDelete": "Delete this revoked API key? This cannot be undone.",
       "quota": {
         "label": "Credit limit",
         "description": "Each API key can have its own total credit limit. Leave it empty for unlimited; account credits are still consumed.",
@@ -704,6 +706,7 @@
         "created": "API key created",
         "copied": "API key copied",
         "revoked": "API key revoked",
+        "deleted": "API key deleted",
         "updated": "Settings updated",
         "quotaUpdated": "API key quota updated"
       },
@@ -711,6 +714,7 @@
         "load": "Failed to load API keys",
         "create": "Failed to create API key",
         "revoke": "Failed to revoke API key",
+        "delete": "Failed to delete API key",
         "update": "Failed to update settings",
         "quota": "Failed to update API key quota",
         "quotaInvalid": "Enter a credit limit greater than or equal to 0, or leave it empty for unlimited"

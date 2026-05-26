@@ -9,6 +9,7 @@ export {
 export { deleteAccountAction } from "./delete-account";
 export {
   createExternalApiKey,
+  deleteExternalApiKey,
   getExternalApiKeys,
   revokeExternalApiKey,
   updateExternalApiKeyGroup,

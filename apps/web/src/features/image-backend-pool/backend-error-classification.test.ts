@@ -18,6 +18,16 @@ describe("image backend error classification", () => {
     expect(isImageBackendSwitchableError("other side closed")).toBe(true);
   });
 
+  it("does not switch accounts after the global request timeout aborts", async () => {
+    const isImageBackendSwitchableError = await loadClassifier();
+
+    expect(
+      isImageBackendSwitchableError(
+        "The operation was aborted due to timeout"
+      )
+    ).toBe(false);
+  });
+
   it("does not switch accounts for user safety rejections", async () => {
     const isImageBackendSwitchableError = await loadClassifier();
 

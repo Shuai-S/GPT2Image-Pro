@@ -4,6 +4,7 @@ import {
   getImageBaseCredits,
   getImageCreditCostBreakdown,
   IMAGE_1024_BASE_PIXELS,
+  isImageSizeWithinPixelRange,
   MIN_IMAGE_PIXELS,
   MAX_IMAGE_PIXELS,
   validateImageSize,
@@ -54,5 +55,26 @@ describe("image resolution credit pricing", () => {
         textModerationCount: 0,
       }).baseCredits
     ).toBe(2);
+  });
+
+  it("checks force web eligibility by configured pixel range", () => {
+    const minPixels = 660_000;
+    const maxPixels = 2_000_000;
+
+    expect(isImageSizeWithinPixelRange("1024x1024", minPixels, maxPixels)).toBe(
+      true
+    );
+    expect(isImageSizeWithinPixelRange("2000x1000", minPixels, maxPixels)).toBe(
+      true
+    );
+    expect(isImageSizeWithinPixelRange("3840x2160", minPixels, maxPixels)).toBe(
+      false
+    );
+    expect(isImageSizeWithinPixelRange("512x512", minPixels, maxPixels)).toBe(
+      false
+    );
+    expect(isImageSizeWithinPixelRange("auto", minPixels, maxPixels)).toBe(
+      false
+    );
   });
 });

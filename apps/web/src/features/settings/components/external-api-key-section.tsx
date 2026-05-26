@@ -36,6 +36,7 @@ import { toast } from "sonner";
 
 import {
   createExternalApiKey,
+  deleteExternalApiKey,
   getExternalApiKeys,
   revokeExternalApiKey,
   updateExternalApiKeyGroup,
@@ -206,6 +207,19 @@ export function ExternalApiKeySection({ timeZone }: { timeZone?: string }) {
       },
       onError: ({ error }) => {
         toast.error(error.serverError || t("errors.revoke"));
+      },
+    }
+  );
+
+  const { execute: deleteKey, isPending: isDeleting } = useAction(
+    deleteExternalApiKey,
+    {
+      onSuccess: () => {
+        toast.success(t("success.deleted"));
+        loadKeys();
+      },
+      onError: ({ error }) => {
+        toast.error(error.serverError || t("errors.delete"));
       },
     }
   );
@@ -617,6 +631,22 @@ export function ExternalApiKeySection({ timeZone }: { timeZone?: string }) {
                 >
                   <Trash2 className="mr-2 h-3 w-3" />
                   {t("revoke")}
+                </Button>
+              )}
+              {!key.isActive && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive"
+                  onClick={() => {
+                    if (!window.confirm(t("confirmDelete"))) return;
+                    deleteKey({ id: key.id });
+                  }}
+                  disabled={isDeleting}
+                >
+                  <Trash2 className="mr-2 h-3 w-3" />
+                  {t("delete")}
                 </Button>
               )}
               </div>

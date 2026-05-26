@@ -19,7 +19,10 @@ import {
   normalizePlanModerationBlockRiskLevel,
 } from "@repo/shared/subscription/services/plan-capabilities";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
-import { getRuntimeSettingString } from "@repo/shared/system-settings";
+import {
+  getRuntimeSettingNumber,
+  getRuntimeSettingString,
+} from "@repo/shared/system-settings";
 import { and, eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { ImageBackendPoolUnavailableError } from "@/features/image-backend-pool/service";
@@ -41,6 +44,7 @@ import {
   getImageCreditCostBreakdown,
   getImageModel,
   type ImageBaseCreditPricing,
+  isImageSizeWithinPixelRange,
   isOneKImageSize,
   normalizeImageSize,
   roundCreditAmount,
@@ -101,6 +105,42 @@ type RunImageGenerationInput =
       forceWebBackend?: boolean;
       requiresResponsesBackend?: boolean;
     } & ChatImageParams);
+
+const DEFAULT_FORCE_WEB_MIN_PIXELS = 660_000;
+const DEFAULT_FORCE_WEB_MAX_PIXELS = 2_000_000;
+
+async function getForceWebPixelRange() {
+  const [minPixels, maxPixels] = await Promise.all([
+    getRuntimeSettingNumber(
+      "IMAGE_FORCE_WEB_MIN_PIXELS",
+      DEFAULT_FORCE_WEB_MIN_PIXELS,
+      { nonNegative: true }
+    ),
+    getRuntimeSettingNumber(
+      "IMAGE_FORCE_WEB_MAX_PIXELS",
+      DEFAULT_FORCE_WEB_MAX_PIXELS,
+      { positive: true }
+    ),
+  ]);
+
+  return {
+    minPixels: Math.min(minPixels, maxPixels),
+    maxPixels: Math.max(minPixels, maxPixels),
+  };
+}
+
+async function shouldForceWebBackend(
+  input: RunImageGenerationInput,
+  size: string
+) {
+  const requiresResponsesBackend = Boolean(
+    input.requiresResponsesBackend || (input.mode === "chat" && input.agentMode)
+  );
+  if (!input.forceWebBackend || requiresResponsesBackend) return false;
+
+  const { minPixels, maxPixels } = await getForceWebPixelRange();
+  return isImageSizeWithinPixelRange(size, minPixels, maxPixels);
+}
 
 const TEXT_MODERATION_ONLY_CREDITS = getImageCreditCostBreakdown(
   DEFAULT_IMAGE_SIZE
@@ -783,9 +823,7 @@ export async function runImageGenerationForUser(
   const requiresResponsesBackend = Boolean(
     input.requiresResponsesBackend || (input.mode === "chat" && input.agentMode)
   );
-  const forceWebBackend = Boolean(
-    input.forceWebBackend && !requiresResponsesBackend
-  );
+  const forceWebBackend = await shouldForceWebBackend(input, size);
   const mixWebFirst = Boolean(
     input.mixWebFirst &&
       isOneKImageSize(size) &&
@@ -1089,12 +1127,12 @@ export async function runImageGenerationForUser(
           bucket,
           userPlan,
           moderationBlockRiskLevel,
-    moderationFailureCredits,
-    promptOptimization,
-    apiPrompt,
-    moderationPrompt,
-    imageBasePricing,
-    config,
+          moderationFailureCredits,
+          promptOptimization,
+          apiPrompt,
+          moderationPrompt,
+          imageBasePricing,
+          config,
           useCredits,
           billingMultiplier,
           imageModel,
@@ -1102,6 +1140,7 @@ export async function runImageGenerationForUser(
           recordModel,
           allowGpt55: planCapabilities.features["models.gpt55"],
           moderationEnabled,
+          forceWebBackend,
         })
     );
   } catch (error) {
@@ -1142,6 +1181,7 @@ async function runQueuedImageGenerationForUser({
   recordModel,
   allowGpt55,
   moderationEnabled,
+  forceWebBackend,
 }: {
   input: RunImageGenerationInput;
   callbacks?: ImageGenerationCallbacks;
@@ -1169,6 +1209,7 @@ async function runQueuedImageGenerationForUser({
   recordModel: string;
   allowGpt55: boolean;
   moderationEnabled: boolean;
+  forceWebBackend: boolean;
 }): Promise<ImageGenerationOperationResult> {
   const startedAt = Date.now();
   const promptOptimizationMetadata = buildPromptOptimizationMetadata({
@@ -1186,7 +1227,6 @@ async function runQueuedImageGenerationForUser({
     gptModel,
     recordModel,
   });
-  const forceWebBackend = Boolean(input.forceWebBackend);
   const mixWebFirst = Boolean(
     input.mixWebFirst && isOneKImageSize(size) && !forceWebBackend
   );

@@ -188,6 +188,25 @@ export function isOneKImageSize(size?: string | null) {
   return Math.max(dimensions.width, dimensions.height) <= IMAGE_1K_BASE_EDGE;
 }
 
+export function getImageSizePixels(size?: string | null) {
+  if (!size || size.trim().toLowerCase() === AUTO_IMAGE_SIZE) return null;
+  const dimensions = parseImageSize(size);
+  if (!dimensions) return null;
+  return dimensions.width * dimensions.height;
+}
+
+export function isImageSizeWithinPixelRange(
+  size: string | null | undefined,
+  minPixels: number,
+  maxPixels: number
+) {
+  const pixels = getImageSizePixels(size);
+  if (pixels === null) return false;
+  const lower = Math.min(minPixels, maxPixels);
+  const upper = Math.max(minPixels, maxPixels);
+  return pixels >= lower && pixels <= upper;
+}
+
 export function normalizeImageSize(width: number, height: number) {
   return `${width}x${height}`;
 }

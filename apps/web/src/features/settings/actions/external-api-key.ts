@@ -158,6 +158,44 @@ export const revokeExternalApiKey = withExternalApiKeyAction("revoke")
     return { success: true };
   });
 
+export const deleteExternalApiKey = withExternalApiKeyAction("delete")
+  .schema(
+    z.object({
+      id: z.string().min(1),
+    })
+  )
+  .action(async ({ parsedInput, ctx }) => {
+    const keys = await db
+      .select({ id: externalApiKey.id, isActive: externalApiKey.isActive })
+      .from(externalApiKey)
+      .where(
+        and(
+          eq(externalApiKey.id, parsedInput.id),
+          eq(externalApiKey.userId, ctx.userId)
+        )
+      )
+      .limit(1);
+
+    if (!keys[0]) {
+      throw new Error("API key not found");
+    }
+    if (keys[0].isActive) {
+      throw new Error("Revoke API key before deleting it");
+    }
+
+    await db
+      .delete(externalApiKey)
+      .where(
+        and(
+          eq(externalApiKey.id, parsedInput.id),
+          eq(externalApiKey.userId, ctx.userId),
+          eq(externalApiKey.isActive, false)
+        )
+      );
+
+    return { success: true };
+  });
+
 export const updateExternalApiKeyModeration = withExternalApiKeyAction(
   "updateModeration"
 )

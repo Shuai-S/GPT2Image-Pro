@@ -416,7 +416,7 @@ curl https://gpt2image.superapi.buzz/v1/images/generations \\
     "promptOptimization": false
   }'
 
-# 4. mixed 分组强制调度 Web 账号；非 mixed 分组会忽略 force_web
+# 4. mixed 分组按可配置像素区间强制调度 Web 账号；非 mixed 分组会忽略 force_web
 curl https://gpt2image.superapi.buzz/v1/images/generations \\
   -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
   -H "Content-Type: application/json" \\
@@ -543,7 +543,7 @@ data: {"type":"image_generation.completed","index":0,"generation_id":"...","gene
               requirement: "可选",
               custom: true,
               description:
-                "仅 image 接口支持。用户自接 API 优先时忽略；进入平台账号池且命中的后端分组为 mixed 时，只调度 Web 账号。非 mixed 分组忽略该字段。Web 后端不能严格保证分辨率或 4K。",
+                "仅 image 接口支持。用户自接 API 优先时忽略；进入平台账号池、命中的后端分组为 mixed，且请求尺寸总像素在 IMAGE_FORCE_WEB_MIN_PIXELS 到 IMAGE_FORCE_WEB_MAX_PIXELS 之间时，只调度 Web 账号。默认区间为 0.66MP-2MP；非 mixed 或不在区间内会忽略该字段。Web 后端不能严格保证分辨率或 4K。",
             },
           ],
           responses: [
@@ -650,7 +650,7 @@ curl https://gpt2image.superapi.buzz/v1/images/edits \\
     "thinking": "low"
   }'
 
-# 4. mixed 分组强制调度 Web 账号；非 mixed 分组会忽略 force_web
+# 4. mixed 分组按可配置像素区间强制调度 Web 账号；非 mixed 分组会忽略 force_web
 curl https://gpt2image.superapi.buzz/v1/images/edits \\
   -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
   -H "Content-Type: application/json" \\
@@ -801,7 +801,7 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
               requirement: "可选",
               custom: true,
               description:
-                "仅 image 接口支持。用户自接 API 优先时忽略；进入平台账号池且命中的后端分组为 mixed 时，只调度 Web 账号。非 mixed 分组忽略该字段。Web 后端不能严格保证分辨率或 4K。",
+                "仅 image 接口支持。用户自接 API 优先时忽略；进入平台账号池、命中的后端分组为 mixed，且请求尺寸总像素在 IMAGE_FORCE_WEB_MIN_PIXELS 到 IMAGE_FORCE_WEB_MAX_PIXELS 之间时，只调度 Web 账号。默认区间为 0.66MP-2MP；非 mixed 或不在区间内会忽略该字段。Web 后端不能严格保证分辨率或 4K。",
             },
           ],
           responses: [
@@ -1748,7 +1748,7 @@ curl https://gpt2image.superapi.buzz/v1/images/generations \\
     "promptOptimization": false
   }'
 
-# 4. Force Web account scheduling for mixed groups. Non-mixed groups ignore force_web.
+# 4. Force Web account scheduling for mixed groups within the configured pixel range. Non-mixed groups ignore force_web.
 curl https://gpt2image.superapi.buzz/v1/images/generations \\
   -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
   -H "Content-Type: application/json" \\
@@ -1875,7 +1875,7 @@ data: {"type":"image_generation.completed","index":0,"generation_id":"...","gene
               requirement: "Optional",
               custom: true,
               description:
-                "Only supported by image endpoints. Ignored when a user custom upstream API takes priority; after routing enters the platform pool, mixed backend groups schedule Web accounts only. Non-mixed groups ignore this field. Web backends cannot strictly guarantee resolution or 4K output.",
+                "Only supported by image endpoints. Ignored when a user custom upstream API takes priority; after routing enters the platform pool, mixed backend groups schedule Web accounts only when the requested total pixels are between IMAGE_FORCE_WEB_MIN_PIXELS and IMAGE_FORCE_WEB_MAX_PIXELS. The default range is 0.66MP-2MP; non-mixed or out-of-range requests ignore this field. Web backends cannot strictly guarantee resolution or 4K output.",
             },
           ],
           responses: [
@@ -1983,7 +1983,7 @@ curl https://gpt2image.superapi.buzz/v1/images/edits \\
     "thinking": "low"
   }'
 
-# 4. Force Web account scheduling for mixed groups. Non-mixed groups ignore force_web.
+# 4. Force Web account scheduling for mixed groups within the configured pixel range. Non-mixed groups ignore force_web.
 curl https://gpt2image.superapi.buzz/v1/images/edits \\
   -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
   -H "Content-Type: application/json" \\
@@ -2136,7 +2136,7 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
               requirement: "Optional",
               custom: true,
               description:
-                "Only supported by image endpoints. Ignored when a user custom upstream API takes priority; after routing enters the platform pool, mixed backend groups schedule Web accounts only. Non-mixed groups ignore this field. Web backends cannot strictly guarantee resolution or 4K output.",
+                "Only supported by image endpoints. Ignored when a user custom upstream API takes priority; after routing enters the platform pool, mixed backend groups schedule Web accounts only when the requested total pixels are between IMAGE_FORCE_WEB_MIN_PIXELS and IMAGE_FORCE_WEB_MAX_PIXELS. The default range is 0.66MP-2MP; non-mixed or out-of-range requests ignore this field. Web backends cannot strictly guarantee resolution or 4K output.",
             },
           ],
           responses: [
