@@ -4,7 +4,9 @@ import {
   getImageBaseCredits,
   getImageCreditCostBreakdown,
   IMAGE_1024_BASE_PIXELS,
+  MIN_IMAGE_PIXELS,
   MAX_IMAGE_PIXELS,
+  validateImageSize,
 } from "./resolution";
 
 describe("image resolution credit pricing", () => {
@@ -35,5 +37,22 @@ describe("image resolution credit pricing", () => {
 
     expect(getImageBaseCredits(512 * 512, pricing)).toBe(2);
     expect(getImageBaseCredits(MAX_IMAGE_PIXELS * 2, pricing)).toBe(20);
+  });
+
+  it("charges the 1024 base price for the legal lower-bound size", () => {
+    const pricing = { base1024Credits: 2, base4kCredits: 20 };
+    const lowerBoundSize = "1024x640";
+
+    expect(validateImageSize(lowerBoundSize)).toMatchObject({
+      valid: true,
+      dimensions: { width: 1024, height: 640 },
+    });
+    expect(1024 * 640).toBe(MIN_IMAGE_PIXELS);
+    expect(
+      getImageCreditCostBreakdown(lowerBoundSize, {
+        basePricing: pricing,
+        textModerationCount: 0,
+      }).baseCredits
+    ).toBe(2);
   });
 });

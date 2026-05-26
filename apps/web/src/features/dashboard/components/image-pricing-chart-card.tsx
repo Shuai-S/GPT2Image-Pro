@@ -19,9 +19,13 @@ import { useEffect, useRef, useState } from "react";
 import {
   getImageBaseCreditPricing,
   getImageBaseCredits,
+  DEFAULT_IMAGE_SIZE,
   IMAGE_1024_BASE_PIXELS,
   IMAGE_1K_BASE_SIZE,
+  MAX_IMAGE_ASPECT_RATIO,
   MAX_IMAGE_PIXELS,
+  MIN_IMAGE_DIMENSION,
+  MIN_IMAGE_PIXELS,
   REFERENCE_CREDIT_PRICE_CNY,
   TEXT_MODERATION_PRICE_CNY,
   IMAGE_MODERATION_PRICE_CNY,
@@ -49,6 +53,11 @@ type PricingPoint = {
 };
 
 const PRICING_POINTS = [
+  {
+    label: "Lower bound",
+    size: "1024x640",
+    pixels: MIN_IMAGE_PIXELS,
+  },
   { label: "1024", size: "1024x1024", pixels: IMAGE_1024_BASE_PIXELS },
   {
     label: "1K",
@@ -71,6 +80,43 @@ function buildChartData(pricing: ImageBaseCreditPricing): PricingPoint[] {
 
 function formatPrice(value: number) {
   return formatCredits(value);
+}
+
+function formatPixels(value: number) {
+  return Math.round(value).toLocaleString("en-US");
+}
+
+function formatMegapixels(value: number) {
+  return `${Number(value.toFixed(2))}MP`;
+}
+
+function getExampleFormula(point: PricingPoint, pricing: ImageBaseCreditPricing) {
+  if (point.pixels <= IMAGE_1024_BASE_PIXELS) {
+    return {
+      baseCredits: pricing.base1024Credits ?? 0,
+      formula: `P <= ${formatPixels(IMAGE_1024_BASE_PIXELS)}`,
+    };
+  }
+
+  if (point.pixels >= MAX_IMAGE_PIXELS) {
+    return {
+      baseCredits: pricing.base4kCredits ?? 0,
+      formula: `P >= ${formatPixels(MAX_IMAGE_PIXELS)}`,
+    };
+  }
+
+  const progress =
+    (point.pixels - IMAGE_1024_BASE_PIXELS) /
+    (MAX_IMAGE_PIXELS - IMAGE_1024_BASE_PIXELS);
+
+  return {
+    baseCredits: getImageBaseCredits(point.pixels, pricing),
+    formula: `${formatPrice(pricing.base1024Credits ?? 0)} + ${Number(
+      progress.toFixed(4)
+    )} x (${formatPrice(pricing.base4kCredits ?? 0)} - ${formatPrice(
+      pricing.base1024Credits ?? 0
+    )})`,
+  };
 }
 
 function useElementWidth() {
@@ -107,6 +153,13 @@ export function ImagePricingChartCard({
 }: ImagePricingChartCardProps) {
   const normalizedPricing = getImageBaseCreditPricing(pricing);
   const data = buildChartData(normalizedPricing);
+  const chartXTicks = [
+    Number((MIN_IMAGE_PIXELS / 1_000_000).toFixed(2)),
+    Number((IMAGE_1024_BASE_PIXELS / 1_000_000).toFixed(2)),
+    Number(((1248 * 1248) / 1_000_000).toFixed(2)),
+    Number(((2048 * 2048) / 1_000_000).toFixed(2)),
+    Number((MAX_IMAGE_PIXELS / 1_000_000).toFixed(2)),
+  ];
   const copy = (en: string, zh: string) => (isZh ? zh : en);
   const { ref: chartContainerRef, width: chartWidth } = useElementWidth();
   const textModerationCredits =
@@ -145,6 +198,12 @@ export function ImagePricingChartCard({
         : copy("Not enabled for this plan", "当前套餐未启用"),
     },
   ];
+  const examplePoints = [
+    data[0],
+    data.find((point) => point.size === DEFAULT_IMAGE_SIZE),
+    data.find((point) => point.size === "2048x2048"),
+    data[data.length - 1],
+  ].filter(Boolean) as PricingPoint[];
 
   return (
     <Card>
@@ -163,7 +222,7 @@ export function ImagePricingChartCard({
               normalizedPricing.base1024Credits
             )} 到 3840x2160 的 ${formatPrice(
               normalizedPricing.base4kCredits
-            )} 之间按像素线性推算。`
+            )} 之间按像素线性推算；低于 1024x1024 但仍满足模型尺寸限制时按 1024 基础价封底。`
           )}
         </p>
       </CardHeader>
@@ -176,14 +235,18 @@ export function ImagePricingChartCard({
             <LineChart
               data={data}
               height={240}
-              margin={{ bottom: 8, left: 0, right: 10, top: 10 }}
+              margin={{ bottom: 8, left: 6, right: 18, top: 10 }}
               width={chartWidth}
             >
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis
                 dataKey="megapixels"
-                domain={["dataMin", "dataMax"]}
-                tickFormatter={(value) => `${Number(value).toFixed(1)}MP`}
+                domain={[
+                  Number((MIN_IMAGE_PIXELS / 1_000_000).toFixed(2)),
+                  Number((MAX_IMAGE_PIXELS / 1_000_000).toFixed(2)),
+                ]}
+                tickFormatter={(value) => formatMegapixels(Number(value))}
+                ticks={chartXTicks}
                 tickLine={false}
                 type="number"
               />
@@ -193,7 +256,7 @@ export function ImagePricingChartCard({
                 width={42}
               />
               <Tooltip
-                cursor={{ stroke: "hsl(var(--muted-foreground))" }}
+                cursor={{ stroke: "var(--muted-foreground)" }}
                 formatter={(value) => [
                   `${formatPrice(Number(value))} ${copy("credits", "积分")}`,
                   copy("Base credits", "基础积分"),
@@ -203,16 +266,19 @@ export function ImagePricingChartCard({
                     | PricingPoint
                     | undefined;
                   if (!point) return "";
-                  return `${point.label} · ${point.size} · ${point.megapixels}MP`;
+                  return `${point.label} · ${point.size} · ${formatMegapixels(
+                    point.megapixels
+                  )}`;
                 }}
               />
               <Line
                 activeDot={{ r: 5 }}
                 dataKey="baseCredits"
                 dot={{ r: 3 }}
-                stroke="hsl(var(--primary))"
-                strokeWidth={2}
-                type="monotone"
+                isAnimationActive={false}
+                stroke="var(--primary)"
+                strokeWidth={3}
+                type="linear"
               />
             </LineChart>
           ) : (
@@ -229,6 +295,90 @@ export function ImagePricingChartCard({
               <div className="mt-1 text-sm font-medium">{item.value}</div>
             </div>
           ))}
+        </div>
+        <div className="grid gap-3 lg:grid-cols-[1fr_1.2fr]">
+          <div className="rounded-lg border bg-muted/20 p-3 text-xs">
+            <div className="font-medium text-foreground">
+              {copy("Base formula", "基础公式")}
+            </div>
+            <div className="mt-2 space-y-1 text-muted-foreground">
+              <p>{copy("P = width x height.", "P = 宽 x 高。")}</p>
+              <p>
+                {copy(
+                  `Valid GPT image sizes start at ${formatPixels(
+                    MIN_IMAGE_PIXELS
+                  )} pixels, dimensions must be at least ${MIN_IMAGE_DIMENSION}px, and aspect ratio must be <= ${MAX_IMAGE_ASPECT_RATIO}:1.`,
+                  `GPT 合法尺寸从 ${formatPixels(
+                    MIN_IMAGE_PIXELS
+                  )} 像素起，宽高至少 ${MIN_IMAGE_DIMENSION}px，宽高比不超过 ${MAX_IMAGE_ASPECT_RATIO}:1。`
+                )}
+              </p>
+              <p>
+                {copy(
+                  `If P <= ${formatPixels(
+                    IMAGE_1024_BASE_PIXELS
+                  )}, base = ${formatPrice(
+                    normalizedPricing.base1024Credits
+                  )}.`,
+                  `若 P <= ${formatPixels(
+                    IMAGE_1024_BASE_PIXELS
+                  )}，基础价 = ${formatPrice(
+                    normalizedPricing.base1024Credits
+                  )}。`
+                )}
+              </p>
+              <p>
+                {copy(
+                  `If ${formatPixels(
+                    IMAGE_1024_BASE_PIXELS
+                  )} < P < ${formatPixels(
+                    MAX_IMAGE_PIXELS
+                  )}, base = B1024 + (P - P1024) / (P4K - P1024) x (B4K - B1024).`,
+                  `若 ${formatPixels(
+                    IMAGE_1024_BASE_PIXELS
+                  )} < P < ${formatPixels(
+                    MAX_IMAGE_PIXELS
+                  )}，基础价 = B1024 + (P - P1024) / (P4K - P1024) x (B4K - B1024)。`
+                )}
+              </p>
+              <p>
+                {copy(
+                  `Final single-image charge = ceil2(ceil2(base + review add-ons) x group multiplier).`,
+                  `单张最终扣费 = 向上保留两位(向上保留两位(基础价 + 审核附加) x 分组倍率)。`
+                )}
+              </p>
+            </div>
+          </div>
+          <div className="rounded-lg border bg-muted/20 p-3 text-xs">
+            <div className="font-medium text-foreground">
+              {copy("Examples", "计算示例")}
+            </div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {examplePoints.map((point) => {
+                const example = getExampleFormula(point, normalizedPricing);
+                return (
+                  <div
+                    className="rounded-md border bg-background/70 p-2"
+                    key={point.size}
+                  >
+                    <div className="font-medium text-foreground">
+                      {point.size} · {formatMegapixels(point.megapixels)}
+                    </div>
+                    <div className="mt-1 text-muted-foreground">
+                      P = {formatPixels(point.pixels)}
+                    </div>
+                    <div className="mt-1 text-muted-foreground">
+                      {example.formula}
+                    </div>
+                    <div className="mt-1 font-medium text-foreground">
+                      = {formatPrice(example.baseCredits)}{" "}
+                      {copy("credits", "积分")}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
         <div className="grid gap-2 text-xs text-muted-foreground md:grid-cols-2">
           <p>
