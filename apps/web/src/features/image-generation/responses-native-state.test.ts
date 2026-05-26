@@ -5,6 +5,7 @@ import {
   buildResponsesImageGenerationRequest,
 } from "./responses-image";
 import {
+  buildResponsesStoreFalseFallbackRequestBody,
   buildAgentContinuationInput,
   buildPreviousResponseFallbackRequestBody,
   buildCurrentResponsesContent,
@@ -13,6 +14,7 @@ import {
   buildResponsesInput,
   getContinueGenerationFunctionCalls,
   isPreviousResponseStateError,
+  isResponsesStoreUnsupportedError,
   RESPONSES_IMAGE_REFERENCE_INSTRUCTIONS,
   resolvePromptImageReferences,
   resolveResponsesNativeState,
@@ -105,6 +107,24 @@ describe("Responses native state request planning", () => {
 
     expect(state.canUsePreviousResponseId).toBe(true);
     expect(state.previousResponseId).toBe("resp_previous");
+  });
+
+  it("does not skip a newer assistant turn without native state", () => {
+    const state = resolveResponsesNativeState({
+      enabled: true,
+      currentBackendMember: accountA,
+      history: [
+        assistantWithNativeState,
+        {
+          role: "assistant",
+          variants: [{ text: "PDF turn used store:false" }],
+          activeVariant: 0,
+        },
+      ],
+    });
+
+    expect(state.canUsePreviousResponseId).toBe(false);
+    expect(state.previousResponseId).toBeUndefined();
   });
 
   it("does not reuse previous_response_id after account pool rotation", () => {
@@ -703,6 +723,19 @@ describe("backend isolation", () => {
     expect(
       shouldEnableResponsesPreviousResponse({
         settingEnabled: true,
+        currentBackendMember: accountA,
+        files: [
+          {
+            data: Buffer.from("%PDF"),
+            name: "brief.pdf",
+            type: "application/pdf",
+          },
+        ],
+      })
+    ).toBe(false);
+    expect(
+      shouldEnableResponsesPreviousResponse({
+        settingEnabled: true,
         currentBackendMember: webAccount,
       })
     ).toBe(false);
@@ -755,6 +788,28 @@ describe("backend isolation", () => {
     expect(request.instructions).not.toContain(
       RESPONSES_IMAGE_REFERENCE_INSTRUCTIONS
     );
+  });
+
+  it("recognizes store=false upstream errors and builds a store-disabled retry body", () => {
+    expect(
+      isResponsesStoreUnsupportedError(
+        "Upstream Responses API returned HTTP 400: Store must be set to false"
+      )
+    ).toBe(true);
+
+    expect(
+      buildResponsesStoreFalseFallbackRequestBody({
+        model: "gpt-5.4",
+        input: "draw",
+        store: true,
+        previous_response_id: "resp_previous",
+      })
+    ).toMatchObject({
+      model: "gpt-5.4",
+      input: "draw",
+      store: false,
+      previous_response_id: undefined,
+    });
   });
 
   it("adds global image reference instructions to direct Responses edit requests", () => {

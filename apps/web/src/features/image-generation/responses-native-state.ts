@@ -337,6 +337,7 @@ export function getLatestResponsesPreviousResponseState(
     if (!message || message.role !== "assistant" || message.error) continue;
     const state = getHistoryVariant(message)?.responsesPreviousResponse;
     if (state?.responseId) return state;
+    return undefined;
   }
   return undefined;
 }
@@ -695,12 +696,19 @@ export function shouldEnableResponsesPreviousResponse(params: {
   settingEnabled: boolean;
   rawResponsesBody?: unknown;
   currentBackendMember?: StickyBackendMemberState;
+  files?: ResponsesInputFile[];
 }) {
   return Boolean(
     params.settingEnabled &&
       !params.rawResponsesBody &&
+      !params.files?.length &&
       params.currentBackendMember?.accountBackend === "responses"
   );
+}
+
+export function isResponsesStoreUnsupportedError(error: string | undefined) {
+  const message = error?.toLowerCase() || "";
+  return message.includes("store") && message.includes("false");
 }
 
 export function resolveResponsesNativeState(params: {
@@ -734,6 +742,19 @@ export function buildPreviousResponseFallbackRequestBody(
   return {
     ...requestBody,
     input: fallbackInput,
+    previous_response_id: undefined,
+  };
+}
+
+export function buildResponsesStoreFalseFallbackRequestBody(
+  requestBody: Record<string, unknown>
+): Record<string, unknown> & {
+  store: false;
+  previous_response_id: undefined;
+} {
+  return {
+    ...requestBody,
+    store: false,
     previous_response_id: undefined,
   };
 }

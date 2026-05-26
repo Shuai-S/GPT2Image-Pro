@@ -71,9 +71,11 @@ import {
   buildGeneratedImageReferenceInstruction,
   buildResponsesInput,
   buildPreviousResponseFallbackRequestBody,
+  buildResponsesStoreFalseFallbackRequestBody,
   getContinueGenerationFunctionCalls,
   getNextAssistantImageRoundIndex,
   isPreviousResponseStateError,
+  isResponsesStoreUnsupportedError,
   resolveResponsesNativeState,
   resolvePromptImageReferences,
   shouldEnableResponsesPreviousResponse,
@@ -885,6 +887,20 @@ async function fetchResponsesWithPreviousResponseFallback(
     },
     callbacks
   );
+  if (result.error && isResponsesStoreUnsupportedError(result.error)) {
+    return await fetchResponses(
+      config,
+      {
+        ...buildResponsesStoreFalseFallbackRequestBody(requestBody),
+        input: fallbackInput,
+      },
+      {
+        signal: options.signal,
+        stream: options.stream,
+      },
+      callbacks
+    );
+  }
   if (
     !options.previousResponseUsed ||
     !result.error ||
@@ -1190,6 +1206,7 @@ function shouldRetryAgentRoundWithManualHistory(error?: string | null) {
   return Boolean(
     normalized &&
       (isPreviousResponseStateError(error || undefined) ||
+        isResponsesStoreUnsupportedError(error || undefined) ||
         normalized.includes("empty non-json") ||
         normalized.includes("empty response") ||
         normalized.includes("http 200 ok"))
@@ -3242,6 +3259,7 @@ export async function generateChatImage(
         ),
         rawResponsesBody: params.rawResponsesBody,
         currentBackendMember,
+        files: params.files,
       });
     const { previousState: previousResponsesState, canUsePreviousResponseId } =
       resolveResponsesNativeState({
@@ -3417,9 +3435,9 @@ export async function generateChatImage(
           });
           if (
             round === 1 &&
-            canUsePreviousResponseId &&
             roundResult.error &&
-            isPreviousResponseStateError(roundResult.error)
+            (canUsePreviousResponseId &&
+              isPreviousResponseStateError(roundResult.error))
           ) {
             agentPreviousResponseId = undefined;
             roundResult = await fetchAgentRoundResponses({
@@ -3428,6 +3446,26 @@ export async function generateChatImage(
                 ...roundRequestBody,
                 input: manualHistoryInput,
                 previous_response_id: undefined,
+              },
+              signal: params.signal,
+              stream,
+              callbacks: roundCallbacks,
+            });
+          }
+          if (
+            round === 1 &&
+            agentPreviousResponseEnabled &&
+            roundResult.error &&
+            isResponsesStoreUnsupportedError(roundResult.error)
+          ) {
+            agentPreviousResponseId = undefined;
+            roundResult = await fetchAgentRoundResponses({
+              config,
+              requestBody: {
+                ...roundRequestBody,
+                input: manualHistoryInput,
+                previous_response_id: undefined,
+                store: false,
               },
               signal: params.signal,
               stream,
