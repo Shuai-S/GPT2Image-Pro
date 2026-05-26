@@ -1,4 +1,5 @@
 import type { QueuePriority } from "@repo/shared/config/subscription-plan";
+import { getRuntimeSettingNumber } from "@repo/shared/system-settings";
 
 type QueueTask<T> = {
   id: number;
@@ -19,6 +20,7 @@ const PRIORITY_WEIGHT: Record<QueuePriority, number> = {
 
 let nextTaskId = 1;
 let running = 0;
+let scheduling = false;
 const runningByUser = new Map<string, number>();
 const queue: QueueTask<unknown>[] = [];
 
@@ -27,8 +29,15 @@ function getPositiveIntegerEnv(name: string, fallback: number) {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-function getGlobalConcurrency() {
-  return getPositiveIntegerEnv("IMAGE_GENERATION_GLOBAL_CONCURRENCY", 500);
+async function getGlobalConcurrency() {
+  const value = await getRuntimeSettingNumber(
+    "IMAGE_GENERATION_GLOBAL_CONCURRENCY",
+    500,
+    {
+      positive: true,
+    }
+  );
+  return Math.max(1, Math.floor(value));
 }
 
 function getQueueTimeoutMs() {
@@ -57,15 +66,6 @@ function getQueuedTaskTimeoutError(
   );
 }
 
-function canStartTask(
-  task: Pick<QueueTask<unknown>, "userId" | "userConcurrency">
-) {
-  return (
-    running < getGlobalConcurrency() &&
-    (runningByUser.get(task.userId) || 0) < task.userConcurrency
-  );
-}
-
 function sortQueue() {
   queue.sort((a, b) => {
     const priorityDelta =
@@ -83,17 +83,29 @@ function removeQueuedTask(task: QueueTask<unknown>) {
   return false;
 }
 
-function scheduleQueue() {
-  sortQueue();
+async function scheduleQueue() {
+  if (scheduling) return;
+  scheduling = true;
+  try {
+    sortQueue();
+    const globalConcurrency = await getGlobalConcurrency();
 
-  for (let index = 0; index < queue.length; index += 1) {
-    const task = queue[index];
-    if (!task) continue;
-    if (!canStartTask(task)) continue;
+    for (let index = 0; index < queue.length; index += 1) {
+      const task = queue[index];
+      if (!task) continue;
+      if (
+        running >= globalConcurrency ||
+        (runningByUser.get(task.userId) || 0) >= task.userConcurrency
+      ) {
+        continue;
+      }
 
-    queue.splice(index, 1);
-    index -= 1;
-    startTask(task);
+      queue.splice(index, 1);
+      index -= 1;
+      startTask(task);
+    }
+  } finally {
+    scheduling = false;
   }
 }
 
@@ -113,11 +125,11 @@ function startTask<T>(task: QueueTask<T>) {
       } else {
         runningByUser.delete(task.userId);
       }
-      scheduleQueue();
+      void scheduleQueue();
     });
 }
 
-export function withImageGenerationQueue<T>(
+export async function withImageGenerationQueue<T>(
   options: {
     userId: string;
     priority: QueuePriority;
@@ -126,20 +138,6 @@ export function withImageGenerationQueue<T>(
   },
   run: () => Promise<T>
 ): Promise<T> {
-  if (canStartTask(options)) {
-    return new Promise<T>((resolve, reject) => {
-      startTask({
-        id: nextTaskId++,
-        userId: options.userId,
-        priority: options.priority,
-        userConcurrency: options.userConcurrency,
-        resolve,
-        reject,
-        run,
-      });
-    });
-  }
-
   return new Promise<T>((resolve, reject) => {
     const timeoutMs = options.timeoutMs || getQueueTimeoutMs();
     let task: QueueTask<T>;
@@ -159,6 +157,6 @@ export function withImageGenerationQueue<T>(
     };
 
     queue.push(task as QueueTask<unknown>);
-    scheduleQueue();
+    void scheduleQueue();
   });
 }

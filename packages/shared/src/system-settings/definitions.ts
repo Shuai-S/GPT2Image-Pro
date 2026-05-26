@@ -97,6 +97,7 @@ export type SettingKey =
   | "OPENAI_MODERATION_MODEL"
   | "PLATFORM_RESPONSES_MODEL"
   | "PLATFORM_CHAT_MODEL"
+  | "IMAGE_GENERATION_GLOBAL_CONCURRENCY"
   | "IMAGE_AGENT_MAX_ROUNDS"
   | "IMAGE_AGENT_FORCE_MAX_ROUNDS"
   | "IMAGE_RESPONSES_PREVIOUS_RESPONSE_ENABLED"
@@ -883,6 +884,15 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     description: "兼容旧配置。",
     category: "models",
     valueType: "string",
+  },
+  {
+    key: "IMAGE_GENERATION_GLOBAL_CONCURRENCY",
+    label: "全局生图并发",
+    description:
+      "整站同时执行的生图任务硬上限。套餐能力矩阵中的生图并发仍按单用户限制；实际启动任务时必须同时满足全局并发和单用户并发。",
+    category: "models",
+    valueType: "number",
+    defaultValue: 500,
   },
   {
     key: "IMAGE_AGENT_MAX_ROUNDS",

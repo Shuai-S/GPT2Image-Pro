@@ -193,7 +193,7 @@ curl https://your-domain.com/v1/images/generations \
 
 `n`/`count` 批量张数是一次 HTTP 发送；一次生成 10 张会创建 10 条 generation 记录并按 10 张结算。运行时按套餐的“生图并发”受限并行，超过并发上限的图片会在本批次内排队等待，不会一次性吃掉 10 个并发。
 
-并发与排队规则：底层只有一条进程内生图队列，任务按套餐 `queuePriority` 排序，优先级相同则先进先出；队列同时用全局并发 `IMAGE_GENERATION_GLOBAL_CONCURRENCY` 和单用户 `imageGenerationConcurrency` 计数器控制启动。批量请求还有一层请求内 runner：只同时启动套餐允许的并发数，剩余图片留在本批次内等待，等前一张完成后再进入底层队列。排队等待没有创建 generation，也不会扣图像生成积分；底层队列排队超过 `IMAGE_GENERATION_QUEUE_TIMEOUT_MS` 会返回 429 类错误。单张任务真正开始执行后才进入 20 分钟运行超时，运行超时会按失败结算规则处理积分。
+并发与排队规则：底层只有一条进程内生图队列，任务按套餐 `queuePriority` 排序，优先级相同则先进先出；队列同时用全局并发 `IMAGE_GENERATION_GLOBAL_CONCURRENCY` 和单用户 `imageGenerationConcurrency` 计数器控制启动。全局并发可在后台「系统设置 > 模型 > 全局生图并发」配置，环境变量只作为兜底默认值。批量请求还有一层请求内 runner：只同时启动套餐允许的并发数，剩余图片留在本批次内等待，等前一张完成后再进入底层队列。排队等待没有创建 generation，也不会扣图像生成积分；底层队列排队超过 `IMAGE_GENERATION_QUEUE_TIMEOUT_MS` 会返回 429 类错误。单张任务真正开始执行后才进入 20 分钟运行超时，运行超时会按失败结算规则处理积分。
 
 流式文生图示例：
 
