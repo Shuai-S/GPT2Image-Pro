@@ -3015,6 +3015,9 @@ type Sub2ApiTokenAccount = {
   sourceSchedulable: boolean | null;
   sourceError: string | null;
   sourceStatusCode: string | null;
+  sourceRateLimitResetAt: Date | null;
+  sourceOverloadUntil: Date | null;
+  sourceTempUnschedulableUntil: Date | null;
   sourceCooldownUntil: Date | null;
 };
 
@@ -3165,6 +3168,10 @@ function credentialDate(
   return null;
 }
 
+function isFutureDate(value?: Date | null) {
+  return Boolean(value && value.getTime() > Date.now());
+}
+
 function compactSub2ApiErrorParts(parts: Array<unknown>) {
   const text = parts
     .map((part) => {
@@ -3272,7 +3279,19 @@ function mapSub2ApiAccountRow(
       "disabledReason",
     ]),
   ]);
-  const sourceCooldownUntil = credentialDate(sourceData, [
+  const sourceRateLimitResetAt = credentialDate(sourceData, [
+    "rate_limit_reset_at",
+    "rateLimitResetAt",
+  ]);
+  const sourceOverloadUntil = credentialDate(sourceData, [
+    "overload_until",
+    "overloadUntil",
+  ]);
+  const sourceTempUnschedulableUntil = credentialDate(sourceData, [
+    "temp_unschedulable_until",
+    "tempUnschedulableUntil",
+  ]);
+  const sourceGenericCooldownUntil = credentialDate(sourceData, [
     "cooldown_until",
     "cooldownUntil",
     "cooldown_at",
@@ -3288,6 +3307,17 @@ function mapSub2ApiAccountRow(
     "retry_after_seconds",
     "retryAfterSeconds",
   ]);
+  const sourceCooldownUntil =
+    [
+      sourceRateLimitResetAt,
+      sourceOverloadUntil,
+      sourceTempUnschedulableUntil,
+      sourceGenericCooldownUntil,
+    ].find(isFutureDate) ||
+    sourceRateLimitResetAt ||
+    sourceOverloadUntil ||
+    sourceTempUnschedulableUntil ||
+    sourceGenericCooldownUntil;
   const sourceId = String(row.id);
   const name = row.name?.trim() || email || `Sub2API 账号 ${sourceId}`;
 
@@ -3309,6 +3339,9 @@ function mapSub2ApiAccountRow(
     sourceSchedulable: row.schedulable,
     sourceError,
     sourceStatusCode,
+    sourceRateLimitResetAt,
+    sourceOverloadUntil,
+    sourceTempUnschedulableUntil,
     sourceCooldownUntil,
   };
 }
@@ -3399,6 +3432,11 @@ async function getSub2ApiHealthOverride(account: Sub2ApiTokenAccount): Promise<{
     .join(" ");
   const lowerCombined = combined.toLowerCase();
   const statusCode = sub2ApiStatusCodeNumber(account.sourceStatusCode);
+  const futureRateLimitReset = isFutureDate(account.sourceRateLimitResetAt);
+  const futureOverloadUntil = isFutureDate(account.sourceOverloadUntil);
+  const futureTempUnschedulableUntil = isFutureDate(
+    account.sourceTempUnschedulableUntil
+  );
 
   if (
     account.sourceStatus?.trim().toLowerCase() === "disabled" ||
@@ -3412,9 +3450,18 @@ async function getSub2ApiHealthOverride(account: Sub2ApiTokenAccount): Promise<{
     };
   }
 
+  if (isInvalidBackendCredentialError(combined)) {
+    return {
+      status: "error",
+      cooldownUntil: null,
+      lastError: message || "Sub2API 标记账号错误",
+    };
+  }
+
   if (
     isSub2ApiLimitedStatus(account.sourceStatus) ||
     isUsageLimitBackendError(combined) ||
+    futureRateLimitReset ||
     statusCode === 429 ||
     /(?:^|\D)429(?:\D|$)/.test(combined) ||
     lowerCombined.includes("rate limit")
@@ -3427,12 +3474,14 @@ async function getSub2ApiHealthOverride(account: Sub2ApiTokenAccount): Promise<{
     const fallbackCooldown = cooldownFromMinutes(minutes);
     return {
       status: "limited",
-      cooldownUntil: isMeaningfulSourceCooldownForError(
-        message,
-        account.sourceCooldownUntil
-      )
-        ? account.sourceCooldownUntil
-        : fallbackCooldown,
+      cooldownUntil:
+        account.sourceRateLimitResetAt ||
+        (isMeaningfulSourceCooldownForError(
+          message,
+          account.sourceCooldownUntil
+        )
+          ? account.sourceCooldownUntil
+          : fallbackCooldown),
       lastError: message || "Sub2API 标记账号限流",
     };
   }
@@ -3467,7 +3516,12 @@ async function getSub2ApiHealthOverride(account: Sub2ApiTokenAccount): Promise<{
     );
     return {
       status: "active",
-      cooldownUntil: cooldownFromMinutes(minutes),
+      cooldownUntil:
+        (futureOverloadUntil
+          ? account.sourceOverloadUntil
+          : futureTempUnschedulableUntil
+            ? account.sourceTempUnschedulableUntil
+            : null) || cooldownFromMinutes(minutes),
       lastError: message || "Sub2API 标记账号临时不可用",
     };
   }
@@ -3660,6 +3714,15 @@ function buildSub2ApiAccountMetadata(
     sub2apiSchedulable: account.sourceSchedulable,
     sub2apiStatusCode: account.sourceStatusCode,
     sub2apiError: account.sourceError,
+    sub2apiRateLimitResetAt: account.sourceRateLimitResetAt
+      ? account.sourceRateLimitResetAt.toISOString()
+      : null,
+    sub2apiOverloadUntil: account.sourceOverloadUntil
+      ? account.sourceOverloadUntil.toISOString()
+      : null,
+    sub2apiTempUnschedulableUntil: account.sourceTempUnschedulableUntil
+      ? account.sourceTempUnschedulableUntil.toISOString()
+      : null,
     sub2apiCooldownUntil: account.sourceCooldownUntil
       ? account.sourceCooldownUntil.toISOString()
       : null,
