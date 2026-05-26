@@ -17,6 +17,7 @@ import {
   Testimonials,
   UseCasesSection,
 } from "@/features/marketing/components";
+import { getRuntimeImageBaseCreditPricing } from "@/features/image-generation/pricing-settings";
 import { getRecentGenerationSlaStats } from "@/features/image-generation/sla";
 
 export const dynamic = "force-dynamic";
@@ -89,6 +90,7 @@ export default async function HomePage({
     capabilityMatrix,
     creditPackages,
     creditPackageExpiryDays,
+    imageBasePricing,
     slaStats,
   ] = await Promise.all([
     getRuntimePaymentConfig(),
@@ -99,6 +101,7 @@ export default async function HomePage({
       CREDIT_CONFIG_DEFAULTS.creditsExpiryDays,
       { nonNegative: true }
     ),
+    getRuntimeImageBaseCreditPricing(),
     getRecentGenerationSlaStats(1000),
   ]);
 
@@ -120,6 +123,7 @@ export default async function HomePage({
         capabilityMatrix={capabilityMatrix}
         creditPackages={creditPackages}
         creditPackageExpiryDays={creditPackageExpiryDays}
+        imageBasePricing={imageBasePricing}
       />
       <FAQSection />
       <CTASection />

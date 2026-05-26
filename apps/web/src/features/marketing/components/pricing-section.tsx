@@ -29,6 +29,14 @@ import {
   createCheckoutSession,
   getUserSubscription,
 } from "@/features/payment/actions";
+import {
+  getImageBaseCreditPricing,
+  getImageCreditCostBreakdown,
+  IMAGE_MODERATION_PRICE_CNY,
+  REFERENCE_CREDIT_PRICE_CNY,
+  TEXT_MODERATION_PRICE_CNY,
+  type ImageBaseCreditPricing,
+} from "@/features/image-generation/resolution";
 import { PlanInterval } from "@/features/payment/types";
 import { useRouter } from "@/i18n/routing";
 
@@ -60,7 +68,6 @@ const PLAN_IDS = ["free", "starter", "pro", "ultra", "enterprise"] as const;
 type PricingPlanId = (typeof PLAN_IDS)[number];
 
 const PLAN_ID_SET: ReadonlySet<string> = new Set(PLAN_IDS);
-const TEXT_TO_4K_CREDITS = 10.04;
 
 function isPricingPlanId(value: string): value is PricingPlanId {
   return PLAN_ID_SET.has(value);
@@ -76,6 +83,7 @@ interface PricingSectionProps {
   capabilityMatrix: PlanCapabilityMatrix;
   creditPackages?: RuntimeCreditPackage[];
   creditPackageExpiryDays?: number;
+  imageBasePricing?: ImageBaseCreditPricing;
 }
 
 /**
@@ -87,6 +95,7 @@ export function PricingSection({
   capabilityMatrix,
   creditPackages = [],
   creditPackageExpiryDays,
+  imageBasePricing,
 }: PricingSectionProps) {
   const t = useTranslations("Pricing");
   const locale = useLocale();
@@ -220,6 +229,8 @@ export function PricingSection({
   ) => new Intl.NumberFormat(locale, options).format(value);
   const formatCredits = (value: number) =>
     formatNumber(value, { maximumFractionDigits: 0 });
+  const formatCreditAmount = (value: number) =>
+    formatNumber(value, { maximumFractionDigits: 2 });
   const formatMoney = (value: number) =>
     `¥${formatNumber(value, { maximumFractionDigits: 2 })}`;
   const formatMegabytes = (value: number) =>
@@ -237,8 +248,111 @@ export function PricingSection({
   };
   const getPlanCredits = (planId: string) =>
     getPlanLimits(planId).monthlyCredits;
+  const normalizedImageBasePricing = getImageBaseCreditPricing(imageBasePricing);
+  const textModerationCredits =
+    TEXT_MODERATION_PRICE_CNY / REFERENCE_CREDIT_PRICE_CNY;
+  const imageModerationCredits =
+    IMAGE_MODERATION_PRICE_CNY / REFERENCE_CREDIT_PRICE_CNY;
+  const textTo4kCredits = getImageCreditCostBreakdown("3840x2160", {
+    basePricing: normalizedImageBasePricing,
+    imageModerationCount: 0,
+    textModerationCount: 1,
+  }).totalCredits;
   const getEstimated4kCount = (credits: number) =>
-    Math.max(0, Math.floor(credits / TEXT_TO_4K_CREDITS));
+    Math.max(0, Math.floor(credits / textTo4kCredits));
+
+  const getRoundCreditSummary = (
+    key: "chatRoundCredits" | "agentRoundCredits"
+  ) => {
+    const entries = PLAN_IDS.map((planId) => ({
+      planId,
+      value: capabilityMatrix.billing[planId as SubscriptionPlan][key],
+    }));
+    const uniqueValues = new Set(entries.map((entry) => entry.value));
+    if (uniqueValues.size === 1) {
+      const firstValue = entries[0]?.value ?? 0;
+      return copy(
+        `${formatCreditAmount(firstValue)} credits/round for all plans`,
+        `所有套餐 ${formatCreditAmount(firstValue)} 积分/轮`
+      );
+    }
+    return entries
+      .map(({ planId, value }) =>
+        copy(
+          `${t(`plans.${planId}.name`)} ${formatCreditAmount(value)}`,
+          `${t(`plans.${planId}.name`)} ${formatCreditAmount(value)}`
+        )
+      )
+      .join(copy(", ", "，"));
+  };
+
+  const pricingSubtitle = copy(
+    `Pay with credits. Subscription credits follow the current plan period; other credits follow the batch expiry shown on the usage page. Base image pricing is loaded from admin settings: 1024×1024 = ${formatCreditAmount(
+      normalizedImageBasePricing.base1024Credits
+    )} credits, 4K = ${formatCreditAmount(
+      normalizedImageBasePricing.base4kCredits
+    )} credits, plus ${formatCreditAmount(
+      textModerationCredits
+    )} text review and ${formatCreditAmount(imageModerationCredits)} image review credits.`,
+    `按积分付费，订阅积分按套餐周期有效，其他积分以用量页显示的批次到期时间为准。出图基础价格读取后台配置：1024×1024 = ${formatCreditAmount(
+      normalizedImageBasePricing.base1024Credits
+    )} 积分，4K = ${formatCreditAmount(
+      normalizedImageBasePricing.base4kCredits
+    )} 积分，并叠加文本审核 ${formatCreditAmount(
+      textModerationCredits
+    )}、图片审核 ${formatCreditAmount(imageModerationCredits)} 积分。`
+  );
+
+  const billingRuleItems = [
+    copy(
+      `Base image credits are loaded from admin settings: 1024×1024 = ${formatCreditAmount(
+        normalizedImageBasePricing.base1024Credits
+      )} credits, 3840×2160 / 2160×3840 = ${formatCreditAmount(
+        normalizedImageBasePricing.base4kCredits
+      )} credits. Sizes between them are linearly interpolated by output pixels; below 1024×1024 uses the 1024 price floor, and above 4K uses the 4K cap.`,
+      `基础出图读取后台配置：1024×1024 = ${formatCreditAmount(
+        normalizedImageBasePricing.base1024Credits
+      )} 积分，3840×2160 / 2160×3840 = ${formatCreditAmount(
+        normalizedImageBasePricing.base4kCredits
+      )} 积分；中间尺寸按实际输出像素量线性推算，低于 1024×1024 按 1024 价格封底，高于 4K 按 4K 价格封顶。`
+    ),
+    copy(
+      `Page Chat base round charge comes from the Plan Capability Matrix: ${getRoundCreditSummary(
+        "chatRoundCredits"
+      )}. If the round generates images, actual image output and review fees are added.`,
+      `页面 Chat 基础轮次费读取套餐能力矩阵：${getRoundCreditSummary(
+        "chatRoundCredits"
+      )}；若本轮生成图片，再叠加实际图片输出和审核费用。`
+    ),
+    copy(
+      `Page Agent base round charge comes from the Plan Capability Matrix: ${getRoundCreditSummary(
+        "agentRoundCredits"
+      )}. Agent stream previews are not charged as final image outputs; final completed images are billed by actual size and count.`,
+      `页面 Agent 基础轮次费读取套餐能力矩阵：${getRoundCreditSummary(
+        "agentRoundCredits"
+      )}；Agent 流式预览不按成品图单独收费，最终成品图按实际尺寸和数量追加计费。`
+    ),
+    copy(
+      `Text review: ${formatCreditAmount(
+        textModerationCredits
+      )} credits per request, calculated only from the latest input text.`,
+      `文本审核：每次 ${formatCreditAmount(
+        textModerationCredits
+      )} 积分，只按本次最新输入文本计算。`
+    ),
+    copy(
+      `Image review: ${formatCreditAmount(
+        imageModerationCredits
+      )} credits for each image in the current input; text-to-image has no image review fee.`,
+      `图片审核：本次输入的每张图片 ${formatCreditAmount(
+        imageModerationCredits
+      )} 积分；文生图无输入图时不收图片审核费。`
+    ),
+    copy(
+      "Final price = Chat/Agent base round credits + base image credits + text review credits + input image review credits, shown and charged with two decimals. Plain text-to-image/image-edit requests do not include Chat/Agent base round credits.",
+      "最终价格 = Chat/Agent 每轮基础积分 + 基础出图积分 + 文本审核积分 + 输入图片审核积分，按两位小数展示和扣费。普通文生图/图生图没有 Chat/Agent 每轮基础积分。"
+    ),
+  ];
 
   const getPlanDescription = (planId: string) => {
     const credits = formatCredits(getPlanCredits(planId));
@@ -520,13 +634,7 @@ export function PricingSection({
             {t("title")}
           </h2>
           <p className="mx-auto max-w-2xl text-muted-foreground">
-            {t.rich("subtitle", {
-              strong: (chunks) => (
-                <strong className="font-semibold text-foreground">
-                  {chunks}
-                </strong>
-              ),
-            })}
+            {pricingSubtitle}
           </p>
         </div>
 
@@ -808,7 +916,7 @@ export function PricingSection({
         <div className="mt-8 rounded-lg border bg-muted/30 px-4 py-4">
           <h3 className="text-sm font-semibold">{t("billingRules.title")}</h3>
           <ul className="mt-3 grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
-            {(t.raw("billingRules.items") as string[]).map((item) => (
+            {billingRuleItems.map((item) => (
               <li key={item} className="flex gap-2">
                 <Check className="mt-0.5 h-4 w-4 shrink-0 text-foreground" />
                 <span>{item}</span>
