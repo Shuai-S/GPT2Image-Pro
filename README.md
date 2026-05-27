@@ -408,6 +408,11 @@ TODO：
 - 进一步原子化 `@` 图片引用交互：将 `@图1`、`@第N轮图M` 做成不可半删的输入标签，支持图片重排后自动重映射，以及缺失引用提示。
 - Agent 分支对话/轮次树：编辑或重生成历史某一轮时，不覆盖后续记录，而是从该轮派生新分支；支持在旧分支和新分支之间切换，并重映射 `@第N轮图M` / `<ref id="...">` 图片引用，避免引用错位。
 
+## 后续 TODO
+
+- Sub2API 非数据库接口：当前同步依赖 `SUB2API_POSTGRES_URL` 直连 Sub2API PostgreSQL。后续调研并适配 Sub2API 管理员 Key / HTTP API 路线，优先用正式接口完成账号查询、分组筛选、状态读取、错误清理和同步任务；只有接口缺字段或能力不足时再保留数据库直连兜底。
+- PSD 生成接口：准备适配 PSD/分层文件生成能力，需先明确上游接口协议、输出 MIME/扩展名、存储与预览策略、积分计费、外接 API 响应字段、后台能力矩阵开关和页面下载入口。
+
 ## 部署
 
 `https://gpt2image.superapi.buzz` 当前线上实例使用 systemd release + Nginx 静态 alias + 3308 upstream，详细操作见 [Superapi 生图站部署 Runbook](docs/deploy-superapi.md)。通用部署说明如下。
