@@ -36,6 +36,12 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# local operational notes and captures
+MEMORY.md
+**/MEMORY.md
+*.har
+rollout-*.jsonl
+
 # env files (can opt-in for committing if needed)
 .env*
 !.env*.example
