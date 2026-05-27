@@ -91,9 +91,9 @@ CHATGPT_WEB_PROXY_URL=http://127.0.0.1:3021
 CHATGPT_WEB_PROXY_SECRET=<proxy-secret>
 ```
 
-### 3. Crontab
+### 3. 定时任务
 
-crontab 模块安装并配置好即可，不要求手工逐条敲命令；确保它会携带 `Authorization: Bearer $CRON_SECRET` 调用任务接口。推荐最小任务：
+Web 应用只提供受 `CRON_SECRET` 保护的 HTTP 任务接口，不会自动创建系统 crontab。生产环境需要部署者用 crontab、systemd timer、宝塔计划任务、Vercel Cron 或其他外部调度器定时调用。推荐最小任务：
 
 ```cron
 */5 * * * * curl -fsS -X POST -H "Authorization: Bearer <cron-secret>" https://your-domain.example/api/jobs/images/expire-pending >/dev/null
