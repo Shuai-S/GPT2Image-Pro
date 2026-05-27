@@ -50,6 +50,6 @@ export const GET = withApiLogging(async () => {
     method: "POST",
     description:
       "Expire pending image generations older than 20 minutes and destroy completed image files when configured",
-    authentication: "Bearer token required (CRON_SECRET)",
+    authentication: "Bearer token required (process env CRON_SECRET)",
   });
 });

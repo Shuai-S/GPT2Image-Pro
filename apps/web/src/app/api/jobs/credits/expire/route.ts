@@ -89,6 +89,6 @@ export const GET = withApiLogging(async () => {
     endpoint: "/api/jobs/credits/expire",
     method: "POST",
     description: "Process expired credit batches",
-    authentication: "Bearer token required (CRON_SECRET)",
+    authentication: "Bearer token required (process env CRON_SECRET)",
   });
 });

@@ -3,13 +3,12 @@ import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { withApiLogging } from "@repo/shared/api-logger";
-import { getRuntimeSettingString } from "@repo/shared/system-settings";
 
 import { runSub2ApiSyncJob } from "@/server/scheduled-jobs";
 
 async function validateCronSecret(authHeader: string | null) {
   if (!authHeader) return false;
-  const cronSecret = await getRuntimeSettingString("CRON_SECRET");
+  const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret) return false;
   const token = authHeader.startsWith("Bearer ")
     ? authHeader.slice(7)
@@ -50,6 +49,6 @@ export const GET = withApiLogging(async () =>
     description: "Sync Sub2API current access tokens into the image backend pool",
     schedule:
       "Call from crontab regularly; actual interval is controlled by SUB2API_AUTO_SYNC_INTERVAL_MINUTES.",
-    authentication: "Bearer token required (CRON_SECRET)",
+    authentication: "Bearer token required (process env CRON_SECRET)",
   })
 );

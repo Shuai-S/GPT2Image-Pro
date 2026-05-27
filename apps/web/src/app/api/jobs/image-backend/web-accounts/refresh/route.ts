@@ -3,13 +3,12 @@ import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { withApiLogging } from "@repo/shared/api-logger";
-import { getRuntimeSettingString } from "@repo/shared/system-settings";
 
 import { runWebAccountsRefreshJob } from "@/server/scheduled-jobs";
 
 async function validateCronSecret(authHeader: string | null) {
   if (!authHeader) return false;
-  const cronSecret = await getRuntimeSettingString("CRON_SECRET");
+  const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret) return false;
   const token = authHeader.startsWith("Bearer ")
     ? authHeader.slice(7)
@@ -38,6 +37,6 @@ export const GET = withApiLogging(async () =>
     status: "ok",
     endpoint: "/api/jobs/image-backend/web-accounts/refresh",
     method: "POST",
-    authentication: "Bearer token required (CRON_SECRET)",
+    authentication: "Bearer token required (process env CRON_SECRET)",
   })
 );

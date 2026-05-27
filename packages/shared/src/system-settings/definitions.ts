@@ -153,7 +153,6 @@ export type SettingKey =
   | "SENTRY_AUTH_TOKEN"
   | "AXIOM_TOKEN"
   | "AXIOM_DATASET"
-  | "CRON_SECRET"
   | "INTERNAL_JOB_SCHEDULER_ENABLED"
   | "INTERNAL_JOB_IMAGES_MAINTENANCE_INTERVAL_MINUTES"
   | "INTERNAL_JOB_CREDITS_EXPIRE_INTERVAL_MINUTES"
@@ -1406,15 +1405,6 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     category: "analytics",
     valueType: "string",
     defaultValue: "gpt2image",
-  },
-  {
-    key: "CRON_SECRET",
-    label: "HTTP Job 兼容密钥",
-    description:
-      "仅用于手动调用旧 HTTP Job 接口的兼容鉴权；内置定时任务不需要配置。",
-    category: "general",
-    valueType: "string",
-    secret: true,
   },
   {
     key: "INTERNAL_JOB_SCHEDULER_ENABLED",
