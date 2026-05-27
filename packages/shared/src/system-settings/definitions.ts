@@ -23,6 +23,7 @@ export type SettingKey =
   | "NEXT_PUBLIC_APP_NAME"
   | "NEXT_PUBLIC_ASSET_PREFIX"
   | "APP_TIME_ZONE"
+  | "MARKETING_SLA_STATUS_ENABLED"
   | "SELF_USE_MODE_ENABLED"
   | "BETTER_AUTH_SECRET"
   | "BETTER_AUTH_URL"
@@ -390,6 +391,15 @@ export const SYSTEM_SETTING_DEFINITIONS = [
       { label: "伦敦时间 (Europe/London)", value: "Europe/London" },
     ],
     defaultValue: "UTC",
+  },
+  {
+    key: "MARKETING_SLA_STATUS_ENABLED",
+    label: "首页 SLA 展示",
+    description:
+      "控制主页是否展示生图服务 SLA 区块。管理员和超管可在首页直接关闭或开启；观察管理员只读。",
+    category: "general",
+    valueType: "boolean",
+    defaultValue: true,
   },
   {
     key: "SELF_USE_MODE_ENABLED",

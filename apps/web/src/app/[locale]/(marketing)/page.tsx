@@ -1,10 +1,16 @@
 import type { Metadata } from "next";
+import { getUserRoleById } from "@repo/shared/auth/role-server";
+import { isAdminRole } from "@repo/shared/auth/roles";
+import { getServerSession } from "@repo/shared/auth/server";
 import { SiteJsonLd, SoftwareAppJsonLd } from "@/components/seo/json-ld";
 import { siteConfig } from "@repo/shared/config";
 import { getRuntimePaymentConfig } from "@repo/shared/config/payment-runtime";
 import { CREDIT_CONFIG_DEFAULTS } from "@repo/shared/credits/config";
 import { getRuntimeCreditPackages } from "@repo/shared/credits/packages";
-import { getRuntimeSettingNumber } from "@repo/shared/system-settings";
+import {
+  getRuntimeSettingBoolean,
+  getRuntimeSettingNumber,
+} from "@repo/shared/system-settings";
 import { getPlanCapabilityMatrix } from "@repo/shared/subscription/services/plan-capabilities";
 import {
   CTASection,
@@ -91,7 +97,9 @@ export default async function HomePage({
     creditPackages,
     creditPackageExpiryDays,
     imageBasePricing,
+    slaEnabled,
     slaStats,
+    session,
   ] = await Promise.all([
     getRuntimePaymentConfig(),
     getPlanCapabilityMatrix(),
@@ -102,8 +110,14 @@ export default async function HomePage({
       { nonNegative: true }
     ),
     getRuntimeImageBaseCreditPricing(),
+    getRuntimeSettingBoolean("MARKETING_SLA_STATUS_ENABLED", true),
     getRecentGenerationSlaStats(1000),
+    getServerSession(),
   ]);
+  const role = session?.user?.id
+    ? await getUserRoleById(session.user.id)
+    : "user";
+  const canToggleSlaStatus = isAdminRole(role);
 
   return (
     <>
@@ -117,7 +131,14 @@ export default async function HomePage({
       <HowItWorks />
       <UseCasesSection />
       <Testimonials />
-      <SlaStatusSection locale={locale} stats={slaStats} />
+      {(slaEnabled || canToggleSlaStatus) && (
+        <SlaStatusSection
+          locale={locale}
+          stats={slaStats}
+          initiallyEnabled={slaEnabled}
+          canToggleVisibility={canToggleSlaStatus}
+        />
+      )}
       <PricingSection
         payment={runtimePaymentConfig}
         capabilityMatrix={capabilityMatrix}

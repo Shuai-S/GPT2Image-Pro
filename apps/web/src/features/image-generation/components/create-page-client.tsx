@@ -23,11 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@repo/ui/components/select";
-import {
-  Tabs,
-  TabsList,
-  TabsTrigger,
-} from "@repo/ui/components/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@repo/ui/components/tabs";
 import { Textarea } from "@repo/ui/components/textarea";
 import {
   Brush,
@@ -57,16 +53,21 @@ import {
   X,
 } from "lucide-react";
 import Image from "next/image";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useLocale } from "next-intl";
 import { nanoid } from "nanoid";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
   useCreateRuntimeRef,
   useCreateRuntimeState,
 } from "@/features/image-generation/create-runtime-store";
+import {
+  consumePendingReferenceHandoff,
+  normalizeReferenceFetchUrl,
+  type ReferenceHandoffMode,
+} from "@/features/image-generation/reference-handoff";
 import type { ImageBackendGroupBackendType } from "@/features/image-backend-pool/types";
 import {
   agentEventToImageUrl,
@@ -502,6 +503,7 @@ type ImageAspectRatio =
   | "21:9";
 
 type ActiveMode = "text" | "image" | "chat" | "agent" | "waterfall";
+type ReferenceTargetMode = Extract<ActiveMode, ReferenceHandoffMode>;
 type VisualOutputMode = "text-single" | "text-lines" | "image";
 
 type BackendGroupOption = {
@@ -1443,7 +1445,12 @@ function sanitizeChatConversations(value: unknown): ChatConversation[] {
     const entries: Array<{ mode: ConversationMode; messages: ChatMessage[] }> =
       byMode.length > 1
         ? byMode
-        : [{ mode: storedMode || inferChatConversationMode(messages), messages }];
+        : [
+            {
+              mode: storedMode || inferChatConversationMode(messages),
+              messages,
+            },
+          ];
 
     return entries.map((entry) => ({
       id:
@@ -1653,7 +1660,7 @@ async function urlToEditImageFile(
   name: string,
   sourceId?: string
 ): Promise<EditImageFile> {
-  const response = await fetch(imageUrl);
+  const response = await fetch(normalizeReferenceFetchUrl(imageUrl));
   if (!response.ok) {
     throw new Error(`Failed to load image: ${response.status}`);
   }
@@ -1683,9 +1690,14 @@ export function CreatePageClient({
   timeZone,
 }: CreatePageClientProps) {
   const locale = useLocale();
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const isZh = locale === "zh";
-  const copy = (en: string, zh: string) => (isZh ? zh : en);
+  const copy = useCallback(
+    (en: string, zh: string) => (isZh ? zh : en),
+    [isZh]
+  );
   const selectedBackendGroup =
     backendGroups.find((group) => group.id === selectedBackendGroupId) ||
     backendGroups.find((group) => group.isDefault) ||
@@ -1855,15 +1867,19 @@ export function CreatePageClient({
     readStoredCreateActiveMode()
   );
   const [prompt, setPrompt] = useCreateRuntimeState("prompt", "");
-  const [textMode, setTextMode] =
-    useCreateRuntimeState<TextGenerationMode>("textMode", "single");
+  const [textMode, setTextMode] = useCreateRuntimeState<TextGenerationMode>(
+    "textMode",
+    "single"
+  );
   const [linePrompts, setLinePrompts] = useCreateRuntimeState(
     "linePrompts",
     ""
   );
   const [editPrompt, setEditPrompt] = useCreateRuntimeState("editPrompt", "");
-  const [promptOptimization, setPromptOptimization] =
-    useCreateRuntimeState("promptOptimization", true);
+  const [promptOptimization, setPromptOptimization] = useCreateRuntimeState(
+    "promptOptimization",
+    true
+  );
   const [chatPrompt, setChatPrompt] = useCreateRuntimeState("chatPrompt", "");
   const [editMention, setEditMention] =
     useCreateRuntimeState<MentionState | null>("editMention", null);
@@ -1895,14 +1911,18 @@ export function CreatePageClient({
     "batchPrompt",
     ""
   );
-  const [isBatchActive, setIsBatchActive] =
-    useCreateRuntimeState("isBatchActive", false);
+  const [isBatchActive, setIsBatchActive] = useCreateRuntimeState(
+    "isBatchActive",
+    false
+  );
   const [isBatchLoadingMore, setIsBatchLoadingMore] = useCreateRuntimeState(
     "isBatchLoadingMore",
     false
   );
-  const [isBatchStopped, setIsBatchStopped] =
-    useCreateRuntimeState("isBatchStopped", false);
+  const [isBatchStopped, setIsBatchStopped] = useCreateRuntimeState(
+    "isBatchStopped",
+    false
+  );
   const [waterfallCreditsConsumed, setWaterfallCreditsConsumed] =
     useCreateRuntimeState("waterfallCreditsConsumed", 0);
   const [waterfallStats, setWaterfallStats] =
@@ -1911,30 +1931,37 @@ export function CreatePageClient({
       success: 0,
       failed: 0,
     });
-  const [chatModel, setChatModel] =
-    useCreateRuntimeState<ChatModel>("chatModel", GPT54_CHAT_MODEL);
+  const [chatModel, setChatModel] = useCreateRuntimeState<ChatModel>(
+    "chatModel",
+    GPT54_CHAT_MODEL
+  );
   const [chatThinking, setChatThinking] =
     useCreateRuntimeState<ChatThinkingLevel>("chatThinking", "low");
-  const [agentForceRounds, setAgentForceRounds] =
-    useCreateRuntimeState("agentForceRounds", false);
-  const [agentMaxRounds, setAgentMaxRounds] =
-    useCreateRuntimeState("agentMaxRounds", 3);
+  const [agentForceRounds, setAgentForceRounds] = useCreateRuntimeState(
+    "agentForceRounds",
+    false
+  );
+  const [agentMaxRounds, setAgentMaxRounds] = useCreateRuntimeState(
+    "agentMaxRounds",
+    3
+  );
   const [imageGptModel, setImageGptModel] = useCreateRuntimeState<
     ChatModel | "default"
-  >(
-    "imageGptModel",
-    "default"
-  );
+  >("imageGptModel", "default");
   const [imageThinking, setImageThinking] =
     useCreateRuntimeState<ChatThinkingLevel>("imageThinking", "low");
   const [chatFirstImageSize, setChatFirstImageSize] = useCreateRuntimeState<{
     width: number;
     height: number;
   } | null>("chatFirstImageSize", null);
-  const [isChatGenerating, setIsChatGenerating] =
-    useCreateRuntimeState("isChatGenerating", false);
-  const [useAutoSize, setUseAutoSize] =
-    useCreateRuntimeState("useAutoSize", false);
+  const [isChatGenerating, setIsChatGenerating] = useCreateRuntimeState(
+    "isChatGenerating",
+    false
+  );
+  const [useAutoSize, setUseAutoSize] = useCreateRuntimeState(
+    "useAutoSize",
+    false
+  );
   const [width, setWidth] = useCreateRuntimeState(
     "width",
     defaultDimensions.width
@@ -1943,26 +1970,41 @@ export function CreatePageClient({
     "height",
     defaultDimensions.height
   );
-  const [textMixWebFirst, setTextMixWebFirst] =
-    useCreateRuntimeState("textMixWebFirst", true);
-  const [editMixWebFirst, setEditMixWebFirst] =
-    useCreateRuntimeState("editMixWebFirst", true);
-  const [chatMixWebFirst, setChatMixWebFirst] =
-    useCreateRuntimeState("chatMixWebFirst", true);
-  const [quality, setQuality] =
-    useCreateRuntimeState<ImageQuality>("quality", "auto");
-  const [moderation, setModeration] =
-    useCreateRuntimeState<ImageModeration>("moderation", "auto");
+  const [textMixWebFirst, setTextMixWebFirst] = useCreateRuntimeState(
+    "textMixWebFirst",
+    true
+  );
+  const [editMixWebFirst, setEditMixWebFirst] = useCreateRuntimeState(
+    "editMixWebFirst",
+    true
+  );
+  const [chatMixWebFirst, setChatMixWebFirst] = useCreateRuntimeState(
+    "chatMixWebFirst",
+    true
+  );
+  const [quality, setQuality] = useCreateRuntimeState<ImageQuality>(
+    "quality",
+    "auto"
+  );
+  const [moderation, setModeration] = useCreateRuntimeState<ImageModeration>(
+    "moderation",
+    "auto"
+  );
   const [outputFormat, setOutputFormat] =
     useCreateRuntimeState<ImageOutputFormat>("outputFormat", "png");
-  const [outputCompression, setOutputCompression] =
-    useCreateRuntimeState("outputCompression", 100);
-  const [batchCount, setBatchCount] =
-    useCreateRuntimeState("batchCount", 1);
-  const [lineBatchRepeatCount, setLineBatchRepeatCount] =
-    useCreateRuntimeState("lineBatchRepeatCount", 1);
-  const [editBatchCount, setEditBatchCount] =
-    useCreateRuntimeState("editBatchCount", 1);
+  const [outputCompression, setOutputCompression] = useCreateRuntimeState(
+    "outputCompression",
+    100
+  );
+  const [batchCount, setBatchCount] = useCreateRuntimeState("batchCount", 1);
+  const [lineBatchRepeatCount, setLineBatchRepeatCount] = useCreateRuntimeState(
+    "lineBatchRepeatCount",
+    1
+  );
+  const [editBatchCount, setEditBatchCount] = useCreateRuntimeState(
+    "editBatchCount",
+    1
+  );
   useEffect(() => {
     setBatchCount((value) => Math.min(value, maxBatchCount));
     setLineBatchRepeatCount((value) => Math.min(value, maxBatchCount));
@@ -1970,20 +2012,65 @@ export function CreatePageClient({
   }, [maxBatchCount]);
 
   useEffect(() => {
-    const referenceUrl = searchParams.get("ref");
-    if (!referenceUrl) return;
-
-    const modeParam = searchParams.get("mode");
-    const requestedMode: ActiveMode =
-      modeParam === "agent" || modeParam === "waterfall" || modeParam === "chat"
-        ? modeParam
+    const parseReferenceMode = (
+      value: string | null | undefined
+    ): ReferenceTargetMode =>
+      value === "agent" || value === "waterfall" || value === "chat"
+        ? value
         : "image";
-    const sourceId = searchParams.get("sourceId") || referenceUrl;
-    const sourceName = searchParams.get("sourceName") || "reference";
-    const intentId = searchParams.get("intent") || "";
-    const referenceKey = [requestedMode, sourceId, referenceUrl, intentId].join(
-      "|"
-    );
+    const clearReferenceParams = () => {
+      const nextParams = new URLSearchParams(searchParams.toString());
+      for (const key of [
+        "mode",
+        "ref",
+        "sourceId",
+        "sourceName",
+        "intent",
+        "sendRef",
+      ]) {
+        nextParams.delete(key);
+      }
+      const nextQuery = nextParams.toString();
+      router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, {
+        scroll: false,
+      });
+    };
+
+    const referenceUrl = searchParams.get("ref");
+    const sendRef = searchParams.get("sendRef");
+    if (referenceUrl && sendRef) {
+      consumePendingReferenceHandoff(sendRef);
+    }
+    const pendingReference = referenceUrl
+      ? null
+      : consumePendingReferenceHandoff(sendRef);
+    const reference = referenceUrl
+      ? {
+          mode: parseReferenceMode(searchParams.get("mode")),
+          imageUrl: referenceUrl,
+          sourceId: searchParams.get("sourceId") || referenceUrl,
+          sourceName: searchParams.get("sourceName") || "reference",
+          intentId: searchParams.get("intent") || sendRef || "",
+          fromUrl: true,
+        }
+      : pendingReference
+        ? {
+            mode: parseReferenceMode(pendingReference.mode),
+            imageUrl: pendingReference.imageUrl,
+            sourceId: pendingReference.sourceId || pendingReference.imageUrl,
+            sourceName: pendingReference.sourceName || "reference",
+            intentId: pendingReference.id,
+            fromUrl: false,
+          }
+        : null;
+    if (!reference) return;
+
+    const referenceKey = [
+      reference.mode,
+      reference.sourceId,
+      reference.imageUrl,
+      reference.intentId,
+    ].join("|");
     if (appliedReferenceParamKeyRef.current === referenceKey) return;
     appliedReferenceParamKeyRef.current = referenceKey;
     let cancelled = false;
@@ -1991,9 +2078,9 @@ export function CreatePageClient({
     const attachReference = async () => {
       try {
         const item = await urlToEditImageFile(
-          referenceUrl,
-          sourceName,
-          sourceId
+          reference.imageUrl,
+          reference.sourceName,
+          reference.sourceId
         );
         if (cancelled) {
           revokePreview(item.previewUrl);
@@ -2001,14 +2088,14 @@ export function CreatePageClient({
         }
 
         if (
-          requestedMode === "chat" ||
-          requestedMode === "agent" ||
-          requestedMode === "waterfall"
+          reference.mode === "chat" ||
+          reference.mode === "agent" ||
+          reference.mode === "waterfall"
         ) {
           const modeAllowed =
-            requestedMode === "agent"
+            reference.mode === "agent"
               ? agentAllowed
-              : requestedMode === "waterfall"
+              : reference.mode === "waterfall"
                 ? waterfallAllowed
                 : chatAllowed;
           if (!modeAllowed) {
@@ -2024,7 +2111,11 @@ export function CreatePageClient({
           }
 
           setChatAttachments((prev) => {
-            if (prev.some((attachment) => attachment.sourceId === sourceId)) {
+            if (
+              prev.some(
+                (attachment) => attachment.sourceId === reference.sourceId
+              )
+            ) {
               revokePreview(item.previewUrl);
               return prev;
             }
@@ -2040,13 +2131,14 @@ export function CreatePageClient({
             }
             return [...prev, { ...item, kind: "image" }];
           });
-          setActiveMode(requestedMode);
+          setActiveMode(reference.mode);
           toast.success(copy("Reference image attached", "参考图片已添加"));
+          if (reference.fromUrl && !cancelled) clearReferenceParams();
           return;
         }
 
         setEditImages((prev) => {
-          if (prev.some((image) => image.sourceId === sourceId)) {
+          if (prev.some((image) => image.sourceId === reference.sourceId)) {
             revokePreview(item.previewUrl);
             return prev;
           }
@@ -2064,6 +2156,7 @@ export function CreatePageClient({
         });
         setActiveMode("image");
         toast.success(copy("Reference image selected", "参考图片已选择"));
+        if (reference.fromUrl && !cancelled) clearReferenceParams();
       } catch (error) {
         toast.error(
           copy("Failed to load reference image", "参考图片加载失败"),
@@ -2077,6 +2170,7 @@ export function CreatePageClient({
         if (appliedReferenceParamKeyRef.current === referenceKey) {
           appliedReferenceParamKeyRef.current = null;
         }
+        if (reference.fromUrl && !cancelled) clearReferenceParams();
       }
     };
 
@@ -2091,20 +2185,30 @@ export function CreatePageClient({
     copy,
     maxChatImages,
     maxEditImages,
+    pathname,
+    router,
     searchParams,
     waterfallAllowed,
   ]);
 
-  const [textModel, setTextModel] =
-    useCreateRuntimeState("textModel", "default");
-  const [editModel, setEditModel] =
-    useCreateRuntimeState("editModel", "default");
-  const [chatImageModel, setChatImageModel] =
-    useCreateRuntimeState("chatImageModel", "default");
+  const [textModel, setTextModel] = useCreateRuntimeState(
+    "textModel",
+    "default"
+  );
+  const [editModel, setEditModel] = useCreateRuntimeState(
+    "editModel",
+    "default"
+  );
+  const [chatImageModel, setChatImageModel] = useCreateRuntimeState(
+    "chatImageModel",
+    "default"
+  );
   const [useEditFirstImageSize, setUseEditFirstImageSize] =
     useCreateRuntimeState("useEditFirstImageSize", true);
-  const [useAutoEditSize, setUseAutoEditSize] =
-    useCreateRuntimeState("useAutoEditSize", false);
+  const [useAutoEditSize, setUseAutoEditSize] = useCreateRuntimeState(
+    "useAutoEditSize",
+    false
+  );
   const [useAutoChatEditSize, setUseAutoChatEditSize] = useCreateRuntimeState(
     "useAutoChatEditSize",
     false
@@ -2132,22 +2236,27 @@ export function CreatePageClient({
     "editImages",
     []
   );
-  const [maskFile, setMaskFile] =
-    useCreateRuntimeState<EditImageFile | null>("maskFile", null);
-  const [maskEditorOpen, setMaskEditorOpen] =
-    useCreateRuntimeState("maskEditorOpen", false);
+  const [maskFile, setMaskFile] = useCreateRuntimeState<EditImageFile | null>(
+    "maskFile",
+    null
+  );
+  const [maskEditorOpen, setMaskEditorOpen] = useCreateRuntimeState(
+    "maskEditorOpen",
+    false
+  );
   const [maskPoints, setMaskPoints] = useCreateRuntimeState<MaskPoint[]>(
     "maskPoints",
     []
   );
-  const [maskBrushSize, setMaskBrushSize] =
-    useCreateRuntimeState("maskBrushSize", 32);
+  const [maskBrushSize, setMaskBrushSize] = useCreateRuntimeState(
+    "maskBrushSize",
+    32
+  );
   const [firstImageSize, setFirstImageSize] = useCreateRuntimeState<{
     width: number;
     height: number;
   } | null>("firstImageSize", null);
-  const [isEditing, setIsEditing] =
-    useCreateRuntimeState("isEditing", false);
+  const [isEditing, setIsEditing] = useCreateRuntimeState("isEditing", false);
   const [isTextSingleGenerating, setIsTextSingleGenerating] =
     useCreateRuntimeState("isTextSingleGenerating", false);
   const [isTextLinesGenerating, setIsTextLinesGenerating] =
@@ -2162,10 +2271,14 @@ export function CreatePageClient({
   const [visualLoading, setVisualLoading] = useCreateRuntimeState<
     Partial<Record<VisualOutputMode, { size: string } | null>>
   >("visualLoading", {});
-  const [balance, setBalance] =
-    useCreateRuntimeState("balance", initialBalance);
-  const [result, setResult] =
-    useCreateRuntimeState<ResultState | null>("result", null);
+  const [balance, setBalance] = useCreateRuntimeState(
+    "balance",
+    initialBalance
+  );
+  const [result, setResult] = useCreateRuntimeState<ResultState | null>(
+    "result",
+    null
+  );
   const [visualResults, setVisualResults] = useCreateRuntimeState<
     Partial<Record<VisualOutputMode, ResultState | null>>
   >("visualResults", {});
@@ -2208,21 +2321,12 @@ export function CreatePageClient({
     0
   );
   const batchPromptRef = useCreateRuntimeRef("batchPromptRef", "");
-  const batchSizeRef = useCreateRuntimeRef(
-    "batchSizeRef",
-    DEFAULT_IMAGE_SIZE
-  );
-  const batchLoadingMoreRef = useCreateRuntimeRef(
-    "batchLoadingMoreRef",
-    false
-  );
+  const batchSizeRef = useCreateRuntimeRef("batchSizeRef", DEFAULT_IMAGE_SIZE);
+  const batchLoadingMoreRef = useCreateRuntimeRef("batchLoadingMoreRef", false);
   const batchStoppedRef = useCreateRuntimeRef("batchStoppedRef", false);
   const batchAbortControllersRef = useCreateRuntimeRef<
     Map<string, AbortController>
-  >(
-    "batchAbortControllersRef",
-    () => new Map()
-  );
+  >("batchAbortControllersRef", () => new Map());
   const triggerBatchGenerationRef = useRef<
     ((options?: { retryCardId?: string }) => Promise<void>) | null
   >(null);
@@ -2407,9 +2511,9 @@ export function CreatePageClient({
       ? editMixWebFirstActive
       : activeMode === "agent"
         ? false
-      : isConversationMode(activeMode)
-        ? chatMixWebFirstActive
-        : textMixWebFirstActive;
+        : isConversationMode(activeMode)
+          ? chatMixWebFirstActive
+          : textMixWebFirstActive;
   const disableResponsesOnlyControls =
     isWebOnlyBackend || currentModeMixWebFirstActive;
   const responsesOnlyDisabledReason = currentModeMixWebFirstActive
@@ -2894,7 +2998,10 @@ export function CreatePageClient({
     chatMessagesModeRef.current = nextMode;
     setChatConversationId(nextId);
     setChatMessages(conversation?.messages || []);
-    window.localStorage.setItem(chatActiveConversationStorageKey(nextMode), nextId);
+    window.localStorage.setItem(
+      chatActiveConversationStorageKey(nextMode),
+      nextId
+    );
   };
 
   const setVisualStreamingPreview = (
@@ -3626,8 +3733,7 @@ export function CreatePageClient({
           sortedConversations[0];
         chatConversationsRef.current = sortedConversations;
         setChatConversations(sortedConversations);
-        chatMessagesConversationIdRef.current =
-          activeConversation?.id || null;
+        chatMessagesConversationIdRef.current = activeConversation?.id || null;
         chatMessagesModeRef.current = activeConversation?.mode || null;
         setChatConversationId(activeConversation?.id || createLocalId());
         setChatMessages(activeConversation?.messages || []);
@@ -3652,7 +3758,9 @@ export function CreatePageClient({
       window.localStorage.removeItem(CHAT_STORAGE_KEY);
       window.localStorage.removeItem(CHAT_CONVERSATIONS_STORAGE_KEY);
       window.localStorage.removeItem(CHAT_ACTIVE_CONVERSATION_STORAGE_KEY);
-      window.localStorage.removeItem(CHAT_ACTIVE_AGENT_CONVERSATION_STORAGE_KEY);
+      window.localStorage.removeItem(
+        CHAT_ACTIVE_AGENT_CONVERSATION_STORAGE_KEY
+      );
     } finally {
       didLoadChatRef.current = true;
     }
@@ -3666,7 +3774,8 @@ export function CreatePageClient({
         chatMessagesConversationIdRef.current &&
         (chatMessagesConversationIdRef.current !== chatConversationId ||
           (chatMessagesModeRef.current &&
-            chatMessagesModeRef.current !== inferChatConversationMode(chatMessages)))
+            chatMessagesModeRef.current !==
+              inferChatConversationMode(chatMessages)))
       ) {
         return;
       }
@@ -4742,7 +4851,11 @@ export function CreatePageClient({
       <div className="rounded-lg border border-border bg-muted/35 px-3 py-3 text-sm text-foreground">
         {renderThinkingBlock(chatStream.thinking, true)}
         {hasVisibleAgentProgress
-          ? renderAgentRoundCards(chatStream.agentEvents, chatStream.agent, true)
+          ? renderAgentRoundCards(
+              chatStream.agentEvents,
+              chatStream.agent,
+              true
+            )
           : null}
         {chatStream.text && (
           <p className="whitespace-pre-wrap break-words leading-relaxed">

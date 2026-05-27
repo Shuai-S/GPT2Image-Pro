@@ -23,6 +23,7 @@ import { type PointerEvent, useRef, useState } from "react";
 import { toast } from "sonner";
 import { deleteGenerationAction } from "@/features/image-generation/actions";
 import type { GenerationCreditDetails } from "@/features/image-generation/credit-calculation-details";
+import { writePendingReferenceHandoff } from "@/features/image-generation/reference-handoff";
 
 export interface LightboxGeneration {
   id: string;
@@ -173,12 +174,12 @@ export function ImageLightbox({
                 creditDetails.actualSize &&
                 creditDetails.requestedSize !== creditDetails.actualSize
                   ? `${creditDetails.requestedSize} -> ${creditDetails.actualSize}`
-                  : creditDetails.actualSize || creditDetails.requestedSize || "-",
+                  : creditDetails.actualSize ||
+                    creditDetails.requestedSize ||
+                    "-",
             }
           : null,
-      ].filter(
-        (row): row is { label: string; value: string } => row !== null
-      )
+      ].filter((row): row is { label: string; value: string } => row !== null)
     : [];
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [detailsWidth, setDetailsWidth] = useState(44);
@@ -196,6 +197,7 @@ export function ImageLightbox({
       sourceId: generation.id,
       sourceName: `gpt2image-${generation.id}`,
       intent,
+      sendRef: intent,
     });
     return `/${locale}/dashboard/create?${params.toString()}`;
   };
@@ -209,7 +211,15 @@ export function ImageLightbox({
 
   const handleSendReference = (mode: "image" | "chat") => {
     if (!imageUrl) return;
-    router.push(createReferenceHref(mode, createReferenceIntent()));
+    const intent = createReferenceIntent();
+    writePendingReferenceHandoff({
+      id: intent,
+      mode,
+      imageUrl,
+      sourceId: generation.id,
+      sourceName: `gpt2image-${generation.id}`,
+    });
+    router.push(createReferenceHref(mode, intent));
     onClose();
   };
 
@@ -428,9 +438,7 @@ export function ImageLightbox({
                     <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                       {creditRows.map((row) => (
                         <div key={row.label}>
-                          <dt className="text-muted-foreground">
-                            {row.label}
-                          </dt>
+                          <dt className="text-muted-foreground">{row.label}</dt>
                           <dd className="mt-0.5 font-medium text-foreground">
                             {row.value}
                           </dd>
