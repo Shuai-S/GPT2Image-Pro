@@ -9,9 +9,7 @@
     "typecheck": "turbo typecheck",
     "lint": "turbo lint",
     "dev:web": "turbo dev --filter=@repo/web",
-    "dev:admin": "turbo dev --filter=@repo/admin",
     "build:web": "turbo build --filter=@repo/web",
-    "build:admin": "turbo build --filter=@repo/admin",
     "db:generate": "turbo db:generate --filter=@repo/database",
     "db:push": "turbo db:push --filter=@repo/database",
     "db:studio": "turbo db:studio --filter=@repo/database"

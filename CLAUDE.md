@@ -4,20 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-GPT2Image-Pro is an AI-powered image generation platform. **Turborepo monorepo** with two Next.js apps and three shared packages.
+GPT2Image-Pro is an AI-powered image generation platform. **Turborepo monorepo** with one Next.js app and three shared packages.
 
 **Architecture:**
 ```
 gpt2image-pro/
 ├── apps/
-│   ├── web/          # 用户站 (gpt2image.pro:3000)
-│   └── admin/        # 管理站 (admin.gpt2image.pro:3001)
+│   └── web/          # 主应用和管理后台
 ├── packages/
 │   ├── database/     # Drizzle ORM schema + DB connection
 │   ├── ui/           # Shadcn/UI components + theme
 │   └── shared/       # 共享业务逻辑 (auth, credits, storage, payment, etc.)
 ├── docker-compose.yml
-├── Dockerfile.web / Dockerfile.admin
+├── Dockerfile.web
 └── turbo.json
 ```
 
@@ -33,8 +32,7 @@ turbo typecheck              # 类型检查
 turbo lint                   # Biome lint
 
 # 单个 app
-pnpm --filter @repo/web dev  # 仅用户站 (port 3000)
-pnpm --filter @repo/admin dev # 仅管理站 (port 3001)
+pnpm --filter @repo/web dev  # 主应用 (port 3000)
 
 # 数据库
 pnpm --filter @repo/database db:push     # Push schema
@@ -65,11 +63,11 @@ docker compose logs -f web    # 查看日志
 
 ## Architecture
 
-### apps/web — 用户站
+### apps/web — 主应用
 
 **Route Groups** (`apps/web/src/app/[locale]/`):
 - `(marketing)/` — 公开页面 (首页, 定价, 博客, 法律)
-- `(dashboard)/` — 用户面板 (图片生成, 画廊, 设置, 工单). 需要认证
+- `(dashboard)/` — 用户面板和管理后台 (图片生成, 画廊, 设置, 工单, 用户管理, 系统设置). 需要认证
 - `(auth)/` — 登录/注册/忘记密码
 - `docs/` — Fumadocs 文档
 
@@ -88,12 +86,6 @@ docker compose logs -f web    # 查看日志
 - `settings/` — 用户设置
 - `auth/` — 认证表单
 - `blog/`, `analytics/`, `pseo/`
-
-### apps/admin — 管理站
-
-**Route Groups** (`apps/admin/src/app/[locale]/`):
-- `(dashboard)/dashboard/` — 管理面板 (用户管理, 工单管理)
-- `(auth)/` — 管理员登录
 
 ### packages/shared — 共享业务逻辑
 

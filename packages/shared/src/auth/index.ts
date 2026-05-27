@@ -67,7 +67,6 @@ export const auth = betterAuth({
    */
   trustedOrigins: [
     settingValue("NEXT_PUBLIC_APP_URL", "http://localhost:3000"),
-    settingValue("NEXT_PUBLIC_ADMIN_URL", "http://localhost:3001"),
   ].filter(Boolean),
 
   /**

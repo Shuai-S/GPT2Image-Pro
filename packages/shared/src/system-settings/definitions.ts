@@ -19,7 +19,6 @@ export type SettingValueType =
 
 export type SettingKey =
   | "NEXT_PUBLIC_APP_URL"
-  | "NEXT_PUBLIC_ADMIN_URL"
   | "NEXT_PUBLIC_APP_NAME"
   | "NEXT_PUBLIC_ASSET_PREFIX"
   | "APP_TIME_ZONE"
@@ -349,15 +348,6 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     key: "NEXT_PUBLIC_APP_URL",
     label: "应用地址",
     description: "Web 站点公开访问地址，用于回调、邮件链接和图片 URL。",
-    category: "general",
-    valueType: "string",
-    requiresRestart: true,
-    requiresRebuild: true,
-  },
-  {
-    key: "NEXT_PUBLIC_ADMIN_URL",
-    label: "管理后台地址",
-    description: "Admin 站点公开访问地址，用于认证可信来源。",
     category: "general",
     valueType: "string",
     requiresRestart: true,
