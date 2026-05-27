@@ -93,23 +93,9 @@ CHATGPT_WEB_PROXY_SECRET=<proxy-secret>
 
 Web 应用默认启用内置定时任务，会自动执行 pending 超时退款、照片销毁清理、积分过期、Web 账号刷新和 Sub2API 自动同步检查。多实例部署时会使用 PostgreSQL advisory lock，避免多个 Web 进程重复执行同一个任务。
 
-后台可在系统设置里调整 `INTERNAL_JOB_SCHEDULER_ENABLED` 和各任务间隔。外部 crontab、systemd timer、宝塔计划任务、Vercel Cron 仍可作为兜底方案；如果使用外部调度器，建议关闭内置调度器或确保任务接口具备幂等性。外部调用示例：
-
-外部调度器需要配置 `CRON_SECRET`；只使用内置定时任务时不需要。
-
-```cron
-*/5 * * * * curl -fsS -X POST -H "Authorization: Bearer <cron-secret>" https://your-domain.example/api/jobs/images/expire-pending >/dev/null
-0 0 * * * curl -fsS -X POST -H "Authorization: Bearer <cron-secret>" https://your-domain.example/api/jobs/credits/expire >/dev/null
-*/10 * * * * curl -fsS -X POST -H "Authorization: Bearer <cron-secret>" https://your-domain.example/api/jobs/image-backend/web-accounts/refresh >/dev/null
-```
+普通部署不需要配置 crontab。后台可在系统设置里调整 `INTERNAL_JOB_SCHEDULER_ENABLED` 和各任务间隔。
 
 其中 `/api/jobs/images/expire-pending` 同时负责 pending 超时退款和“照片销毁”清理。后台「系统设置 > 存储 > 照片销毁时间（小时）」默认为 `0`，表示生成图永久保存；填入小时数后，超过保留时长的图片文件会被清理，生成记录和计费流水仍保留。
-
-如果用外部调度器触发 Sub2API 自动同步，再增加：
-
-```cron
-0 */12 * * * curl -fsS -X POST -H "Authorization: Bearer <cron-secret>" https://your-domain.example/api/jobs/image-backend/sub2api/sync >/dev/null
-```
 
 ### 推荐模块
 
