@@ -155,4 +155,4 @@ pnpm db:studio
 
 ## License
 
-MIT
+AGPL-3.0-only

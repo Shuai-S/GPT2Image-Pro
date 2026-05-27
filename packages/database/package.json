@@ -26,5 +26,6 @@
     "dotenv": "^16.5.0",
     "drizzle-kit": "^0.31.8",
     "typescript": "^5"
-  }
+  },
+  "license": "AGPL-3.0-only"
 }
