@@ -1336,6 +1336,16 @@ data: {"type":"response.completed","response":{"id":"resp_...","object":"respons
         ["外接 API", "平台尽量透传，最终行为取决于外接服务。"],
       ],
     },
+    roadmap: {
+      title: "后续规划",
+      items: [
+        "Sub2API 非数据库接口：当前同步依赖 SUB2API_POSTGRES_URL 直连 Sub2API PostgreSQL。后续调研并适配 Sub2API 管理员 Key / HTTP API 路线，优先用正式接口完成账号查询、分组筛选、状态读取、错误清理和同步任务；只有接口缺字段或能力不足时再保留数据库直连兜底。",
+        "PSD 生成接口：准备适配 PSD/分层文件生成能力，需先明确上游接口协议、输出 MIME/扩展名、存储与预览策略、积分计费、外接 API 响应字段、后台能力矩阵开关和页面下载入口。",
+        "Agent 批量生图工具：参考 generate_image_batch 模式，让模型规划多张独立图片后由后端并发执行；接入前需要先设计它与 Responses previous_response_id 粘性会话的关系。",
+        "图片引用交互：继续完善 @图1、@第N轮图M 的原子化输入、图片重排后的引用重映射和缺失引用提示。",
+        "Agent 分支对话/轮次树：编辑或重生成历史某一轮时，从该轮派生新分支，避免覆盖后续记录。",
+      ],
+    },
   },
   en: {
     title: "System Docs",
@@ -2681,6 +2691,16 @@ data: {"type":"response.completed","response":{"id":"resp_...","object":"respons
         ],
       ],
     },
+    roadmap: {
+      title: "Roadmap",
+      items: [
+        "Sub2API non-database interface: current sync uses SUB2API_POSTGRES_URL to connect to Sub2API PostgreSQL. Future work should evaluate the Sub2API admin key / HTTP API path for account lookup, group filtering, status reads, error cleanup, and sync jobs; keep direct DB access only as a fallback when the API lacks required fields.",
+        "PSD generation API: prepare support for PSD/layered outputs by defining the upstream contract, MIME/extension handling, storage and preview behavior, credit billing, external API response fields, capability matrix switch, and page download entry.",
+        "Agent batch image tool: evaluate a generate_image_batch-style tool where the model plans multiple independent images and the backend executes them with bounded parallelism; design the interaction with Responses previous_response_id before enabling it.",
+        "Image reference UX: improve atomic @图1 and @第N轮图M tokens, remap references after image reorder, and surface missing-reference warnings.",
+        "Agent branching: when editing or regenerating an older round, fork a new branch instead of overwriting later records.",
+      ],
+    },
   },
 } as const;
 
@@ -3328,6 +3348,22 @@ export function SystemDocsContent({
               </div>
             ))}
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-lg">
+        <CardHeader>
+          <CardTitle className="text-base">{content.roadmap.title}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ul className="space-y-2 text-sm text-muted-foreground">
+            {content.roadmap.items.map((item) => (
+              <li className="flex gap-2" key={item}>
+                <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
         </CardContent>
       </Card>
     </div>
