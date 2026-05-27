@@ -1,5 +1,5 @@
-import { db } from "@repo/database";
-import { sql } from "drizzle-orm";
+import { db, systemSetting } from "@repo/database";
+import { eq, sql } from "drizzle-orm";
 
 import {
   getRuntimeSettingBoolean,
@@ -96,7 +96,25 @@ function readBooleanResult(result: unknown, key: string) {
   return firstRow(result)?.[key] === true;
 }
 
-async function withJobLock<T>(job: InternalJob, run: () => Promise<T>) {
+function getJobStateKey(job: InternalJob) {
+  return `__internal_job_scheduler:${job.name}`;
+}
+
+function readLastStartedAt(value: unknown) {
+  const candidate =
+    typeof value === "object" && value !== null
+      ? (value as Record<string, unknown>).lastStartedAt
+      : undefined;
+  if (typeof candidate !== "string") return undefined;
+  const timestamp = Date.parse(candidate);
+  return Number.isFinite(timestamp) ? timestamp : undefined;
+}
+
+async function withJobLock<T>(
+  job: InternalJob,
+  intervalMs: number,
+  run: () => Promise<T>
+) {
   return await db.transaction(async (tx) => {
     const lockResult = await tx.execute(
       sql`select pg_try_advisory_xact_lock(${LOCK_NAMESPACE}, ${job.lockKey}) as locked`
@@ -105,9 +123,121 @@ async function withJobLock<T>(job: InternalJob, run: () => Promise<T>) {
       return { locked: false as const };
     }
 
+    const stateKey = getJobStateKey(job);
+    const now = new Date();
+    const [state] = await tx
+      .select({ value: systemSetting.value })
+      .from(systemSetting)
+      .where(eq(systemSetting.key, stateKey))
+      .limit(1);
+    const lastStartedAt = readLastStartedAt(state?.value);
+    if (
+      lastStartedAt !== undefined &&
+      now.getTime() - lastStartedAt < intervalMs
+    ) {
+      return {
+        locked: true as const,
+        skipped: true as const,
+        reason: "interval_not_reached",
+      };
+    }
+
+    await tx
+      .insert(systemSetting)
+      .values({
+        key: stateKey,
+        value: {
+          job: job.name,
+          status: "running",
+          lastStartedAt: now.toISOString(),
+        },
+        isSecret: false,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: systemSetting.key,
+        set: {
+          value: {
+            job: job.name,
+            status: "running",
+            lastStartedAt: now.toISOString(),
+          },
+          isSecret: false,
+          updatedAt: now,
+        },
+      });
+
+    try {
+      const result = await run();
+      const finishedAt = new Date();
+      await tx
+        .insert(systemSetting)
+        .values({
+          key: stateKey,
+          value: {
+            job: job.name,
+            status: "success",
+            lastStartedAt: now.toISOString(),
+            lastFinishedAt: finishedAt.toISOString(),
+          },
+          isSecret: false,
+          updatedAt: finishedAt,
+        })
+        .onConflictDoUpdate({
+          target: systemSetting.key,
+          set: {
+            value: {
+              job: job.name,
+              status: "success",
+              lastStartedAt: now.toISOString(),
+              lastFinishedAt: finishedAt.toISOString(),
+            },
+            isSecret: false,
+            updatedAt: finishedAt,
+          },
+        });
+
+      return {
+        locked: true as const,
+        skipped: false as const,
+        result,
+      };
+    } catch (error) {
+      const finishedAt = new Date();
+      await tx
+        .insert(systemSetting)
+        .values({
+          key: stateKey,
+          value: {
+            job: job.name,
+            status: "error",
+            lastStartedAt: now.toISOString(),
+            lastFinishedAt: finishedAt.toISOString(),
+            error: error instanceof Error ? error.message : "Unknown error",
+          },
+          isSecret: false,
+          updatedAt: finishedAt,
+        })
+        .onConflictDoUpdate({
+          target: systemSetting.key,
+          set: {
+            value: {
+              job: job.name,
+              status: "error",
+              lastStartedAt: now.toISOString(),
+              lastFinishedAt: finishedAt.toISOString(),
+              error: error instanceof Error ? error.message : "Unknown error",
+            },
+            isSecret: false,
+            updatedAt: finishedAt,
+          },
+        });
+      throw error;
+    }
+
     return {
       locked: true as const,
-      result: await run(),
+      skipped: false as const,
     };
   });
 }
@@ -130,8 +260,10 @@ async function runJob(job: InternalJob) {
 
   const startedAt = Date.now();
   try {
-    const result = await withJobLock(job, job.run);
+    const intervalMs = await getIntervalMs(job);
+    const result = await withJobLock(job, intervalMs, job.run);
     if (!result.locked) return;
+    if (result.skipped) return;
     console.info(
       `[internal-jobs] ${job.name} completed in ${Date.now() - startedAt}ms`
     );
