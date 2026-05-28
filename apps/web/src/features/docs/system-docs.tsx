@@ -592,6 +592,7 @@ data: {"id":"chatcmpl_...","object":"chat.completion.chunk","choices":[{"index":
             },
           ],
           notes: [
+            "OpenAI 官方 Chat Completions 并不定义“生成图片”的标准返回字段；本站为了兼容对话生图，在 Chat Completions 外形上扩展 choices[].message.images、顶层 images，并在 content 中追加 Markdown 图片链接。严格按官方生图协议接入时，建议使用 /v1/images/generations、/v1/images/edits 或 /v1/responses。",
             "该接口走页面 Chat 的非 Agent 模式，不会注入 web_search、continue_generation，也不会展示 Agent 多轮任务卡。",
             "调度类型是 chat，可命中 Web 账号、Codex/Responses 账号或支持 /responses 的外接 API 后端；用户自接 API 可用时仍保持最高优先级。",
             "计费等同页面 Chat：先收 Chat 每轮基础积分，再按最终图片实际尺寸和数量追加图片积分、审核积分和分组倍率。",
@@ -682,7 +683,7 @@ curl https://your-domain.example/v1/images/generations \\
   -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "model": "gpt-image-2",
+    "model": "gpt-image-1.5",
     "prompt": "一张透明背景的产品图标",
     "size": "1024x1024",
     "response_format": "url",
@@ -799,7 +800,7 @@ curl https://your-domain.example/v1/images/task_... \\
               name: "background",
               requirement: "可选",
               description:
-                "transparent、opaque、auto。透明背景通常需要 png 或 webp；最终是否生效取决于命中的上游。",
+                "transparent、opaque、auto。透明背景需要命中的上游模型支持，通常还需要 output_format 为 png 或 webp；不支持的模型会返回类似 “Transparent background is not supported for this model” 的 400 错误。无法确认支持时建议使用 auto 或 opaque。",
             },
             {
               name: "stream",
@@ -884,6 +885,7 @@ curl https://your-domain.example/v1/images/task_... \\
             "并发与排队：底层只有一条进程内生图队列，任务按套餐队列优先级排序，同优先级先进先出；队列同时受全局并发和单用户生图并发限制。全局并发可在后台「系统设置 > 模型 > 全局生图并发」配置，环境变量 IMAGE_GENERATION_GLOBAL_CONCURRENCY 只作为兜底默认值。批量请求额外有请求内 runner，只启动套餐允许的并发数，剩余图片留在本批次内等待，不会一次性塞满底层队列。",
             "排队等待阶段不会创建 generation，也不会扣图像生成积分；底层队列排队超过 IMAGE_GENERATION_QUEUE_TIMEOUT_MS 会返回 429 类错误。单张任务开始执行后才进入 20 分钟运行超时，运行超时按失败结算规则处理积分。",
             "Web 后端无法严格控制输出尺寸和输出格式；本站保存时会按实际图片头识别扩展名和 MIME。",
+            "background=transparent 并非所有模型都支持；OpenAI 官方文档当前列出 gpt-image-1.5、gpt-image-1、gpt-image-1-mini 支持透明背景，且通常还要求 png 或 webp 输出。不支持的上游可能直接返回 HTTP 400，而不是自动降级。",
             "async 任务当前为进程内状态，30 分钟后过期；服务重启或多实例切换会导致未完成任务无法继续查询，callback 已发送的结果不受影响。",
             "如果实际生成尺寸与请求尺寸不一致，本站会按检测到的实际尺寸修正记录和计费。",
             "官方 Images API 可能返回 usage；本站当前 usage 通常为 null，但会通过顶层 credits_consumed、错误对象或流式完成事件返回本站结算积分。命中用户自接 API 时不扣本站积分。",
@@ -981,7 +983,7 @@ curl -N https://your-domain.example/v1/images/edits \\
 # 6. 异步图生图；也可在 URL 后追加 ?async=true。callback_url 可选
 curl https://your-domain.example/v1/images/edits \\
   -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
-  -F model="gpt-image-2" \\
+  -F model="gpt-image-1.5" \\
   -F prompt="去除背景，输出透明 PNG" \\
   -F size="1024x1024" \\
   -F response_format="url" \\
@@ -1081,7 +1083,7 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
               name: "background",
               requirement: "可选",
               description:
-                "transparent、opaque、auto。透明背景通常需要 png 或 webp；最终是否生效取决于命中的上游。",
+                "transparent、opaque、auto。透明背景需要命中的上游模型支持，通常还需要 output_format 为 png 或 webp；不支持的模型会返回类似 “Transparent background is not supported for this model” 的 400 错误。无法确认支持时建议使用 auto 或 opaque。",
             },
             {
               name: "stream",
@@ -1167,6 +1169,7 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
             "URL 图片会先由本站服务端下载并校验公网可访问性、类型和大小。",
             "不支持私网、localhost、metadata/internal 域名或带用户名密码的 URL。",
             "官方 JSON file_id 图片引用当前未实现，请使用公网 image_url 或 multipart 上传。",
+            "background=transparent 并非所有模型都支持；OpenAI 官方文档当前列出 gpt-image-1.5、gpt-image-1、gpt-image-1-mini 支持透明背景，且通常还要求 png 或 webp 输出。不支持的上游可能直接返回 HTTP 400，而不是自动降级。",
             "async 任务当前为进程内状态，30 分钟后过期；服务重启或多实例切换会导致未完成任务无法继续查询，callback 已发送的结果不受影响。",
           ],
         },
@@ -2279,6 +2282,7 @@ data: {"id":"chatcmpl_...","object":"chat.completion.chunk","choices":[{"index":
             },
           ],
           notes: [
+            "OpenAI official Chat Completions does not define a standard generated-image response field. GPT2IMAGE extends the Chat Completions shape with choices[].message.images, top-level images, and Markdown image links in content. For strict official image-generation semantics, use /v1/images/generations, /v1/images/edits, or /v1/responses.",
             "This endpoint uses page Chat non-Agent mode. It does not inject web_search or continue_generation and does not return Agent task cards.",
             "The request kind is chat, so routing can select Web accounts, Codex/Responses accounts, or external API backends that support /responses. User custom upstream APIs still keep highest priority when available.",
             "Billing matches page Chat: a base Chat round charge first, then actual completed image output credits, moderation credits, and group multipliers.",
@@ -2369,7 +2373,7 @@ curl https://your-domain.example/v1/images/generations \\
   -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "model": "gpt-image-2",
+    "model": "gpt-image-1.5",
     "prompt": "A transparent-background product icon",
     "size": "1024x1024",
     "response_format": "url",
@@ -2486,7 +2490,7 @@ curl https://your-domain.example/v1/images/task_... \\
               name: "background",
               requirement: "Optional",
               description:
-                "transparent, opaque, or auto. Transparent backgrounds usually require png or webp; final behavior depends on the selected upstream.",
+                "transparent, opaque, or auto. Transparent backgrounds require support from the selected upstream model and usually require png or webp output. Unsupported models may return a 400 error such as “Transparent background is not supported for this model”. Use auto or opaque when support is unknown.",
             },
             {
               name: "stream",
@@ -2572,6 +2576,7 @@ curl https://your-domain.example/v1/images/task_... \\
             "Concurrency and queueing: the runtime uses one in-process image queue. Tasks are sorted by plan queue priority, then FIFO within the same priority, and are started only when both the global concurrency and per-user image-generation concurrency allow it. Global concurrency is configurable in Admin System Settings > Models > Global image generation concurrency; IMAGE_GENERATION_GLOBAL_CONCURRENCY is only the fallback default. Batch requests add a request-local bounded runner, so only the allowed number of batch items are started and the rest wait inside that batch instead of flooding the shared queue.",
             "Waiting in a queue does not create a generation record or charge image credits. If the shared queue wait exceeds IMAGE_GENERATION_QUEUE_TIMEOUT_MS, the API returns a 429-style error. The 20-minute runtime timeout starts only after an individual image task begins execution, and timeout settlement follows the failed-generation credit rules.",
             "Web backends cannot strictly control output dimensions or output format. GPT2IMAGE labels stored files by the detected image header and MIME.",
+            "background=transparent is not universally supported. OpenAI's official docs currently list gpt-image-1.5, gpt-image-1, and gpt-image-1-mini as supporting transparent backgrounds, and png or webp output is usually required. Unsupported upstream models may reject the request with HTTP 400 instead of silently falling back.",
             "async tasks are process-local and expire after 30 minutes. A restart or multi-instance switch can make unfinished tasks unavailable for polling; already-sent callbacks are unaffected.",
             "If the actual generated dimensions differ from the requested size, GPT2IMAGE records and bills using the detected actual size.",
             "The official Images API may return usage. GPT2IMAGE usually returns usage: null, but GPT2IMAGE-billed credits are returned through top-level credits_consumed, error payloads, or streaming completion events. When a user custom upstream API wins, GPT2IMAGE does not charge credits.",
@@ -2669,7 +2674,7 @@ curl -N https://your-domain.example/v1/images/edits \\
 # 6. Async image edit. You may also append ?async=true. callback_url is optional.
 curl https://your-domain.example/v1/images/edits \\
   -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
-  -F model="gpt-image-2" \\
+  -F model="gpt-image-1.5" \\
   -F prompt="Remove the background and output a transparent PNG" \\
   -F size="1024x1024" \\
   -F response_format="url" \\
@@ -2771,7 +2776,7 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
               name: "background",
               requirement: "Optional",
               description:
-                "transparent, opaque, or auto. Transparent backgrounds usually require png or webp; final behavior depends on the selected upstream.",
+                "transparent, opaque, or auto. Transparent backgrounds require support from the selected upstream model and usually require png or webp output. Unsupported models may return a 400 error such as “Transparent background is not supported for this model”. Use auto or opaque when support is unknown.",
             },
             {
               name: "stream",
@@ -2857,6 +2862,7 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
             "URL images are downloaded server-side and checked for public reachability, type, and size.",
             "Private networks, localhost, metadata/internal hosts, and URLs with credentials are rejected.",
             "Official JSON file_id image references are not implemented. Use public image_url or multipart uploads.",
+            "background=transparent is not universally supported. OpenAI's official docs currently list gpt-image-1.5, gpt-image-1, and gpt-image-1-mini as supporting transparent backgrounds, and png or webp output is usually required. Unsupported upstream models may reject the request with HTTP 400 instead of silently falling back.",
             "async tasks are process-local and expire after 30 minutes. A restart or multi-instance switch can make unfinished tasks unavailable for polling; already-sent callbacks are unaffected.",
           ],
         },
