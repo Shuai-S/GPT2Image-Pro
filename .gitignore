@@ -65,5 +65,8 @@ nul
 # local storage (dev-mode image files)
 /storage/
 
+# local registration tool runtime config
+注册机/config.yaml
+
 # deploy artifacts
 deploy.tgz
