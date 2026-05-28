@@ -889,14 +889,18 @@ export async function runImageGenerationForUser(
         : "imageGeneration.agent"
       : input.waterfallMode
         ? "imageGeneration.waterfall"
-        : "imageGeneration.chat";
+        : input.apiKeyId
+          ? "externalApi.chat.completions"
+          : "imageGeneration.chat";
     const chatLabel = input.agentMode
       ? input.apiKeyId
         ? "External Agent API"
         : "Agent mode"
       : input.waterfallMode
         ? "Waterfall mode"
-        : "Chat mode";
+        : input.apiKeyId
+          ? "External Chat Completions API"
+          : "Chat mode";
     if (!planCapabilities.features[chatCapability]) {
       return {
         error: `${chatLabel} is not enabled for this plan.`,

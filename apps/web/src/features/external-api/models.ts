@@ -47,6 +47,20 @@ export function getExternalResponsesImageModels(
   return models;
 }
 
+export function getExternalChatCompletionModels(
+  plan: SubscriptionPlan,
+  options?: { chatCompletionsAllowed?: boolean; gpt55Allowed?: boolean }
+) {
+  if (options?.chatCompletionsAllowed === false) {
+    return [];
+  }
+
+  return getExternalResponsesImageModels(plan, {
+    responsesAllowed: true,
+    gpt55Allowed: options?.gpt55Allowed,
+  });
+}
+
 export async function isExternalResponsesImageModelAllowed(
   model: string | undefined,
   plan: SubscriptionPlan
@@ -75,14 +89,20 @@ export async function getExternalModelsForUser(
   const plan = await getUserPlan(userId);
   const capabilities = await getPlanCapabilitySnapshot(plan.plan);
   const imageModels = [DEFAULT_IMAGE_MODEL];
+  const chatModels = getExternalChatCompletionModels(plan.plan, {
+    chatCompletionsAllowed:
+      capabilities.features["externalApi.chat.completions"],
+    gpt55Allowed: capabilities.features["models.gpt55"],
+  });
+  const responsesModels = getExternalResponsesImageModels(plan.plan, {
+    responsesAllowed: capabilities.features["externalApi.responses"],
+    gpt55Allowed: capabilities.features["models.gpt55"],
+  });
+  const modelIds = Array.from(
+    new Set([...imageModels, ...chatModels, ...responsesModels])
+  );
   return {
     object: "list",
-    data: [
-      ...imageModels.map(toOpenAIModel),
-      ...getExternalResponsesImageModels(plan.plan, {
-        responsesAllowed: capabilities.features["externalApi.responses"],
-        gpt55Allowed: capabilities.features["models.gpt55"],
-      }).map(toOpenAIModel),
-    ],
+    data: modelIds.map(toOpenAIModel),
   };
 }
