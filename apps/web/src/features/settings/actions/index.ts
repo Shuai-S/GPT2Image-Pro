@@ -15,5 +15,6 @@ export {
   updateExternalApiKeyGroup,
   updateExternalApiKeyModeration,
   updateExternalApiKeyQuota,
+  updateExternalApiKeyRelay,
 } from "./external-api-key";
 export { updateProfileAction } from "./update-profile";

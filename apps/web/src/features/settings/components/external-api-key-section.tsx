@@ -11,8 +11,10 @@ import type { PlanCapabilitySnapshot } from "@repo/shared/subscription/services/
 import { getMyPlanAction } from "@repo/shared/subscription/actions/get-user-plan";
 import { formatDateInTimeZone } from "@repo/shared/time-zone";
 import { Button } from "@repo/ui/components/button";
+import { Badge } from "@repo/ui/components/badge";
 import { Input } from "@repo/ui/components/input";
 import { Label } from "@repo/ui/components/label";
+import { Switch } from "@repo/ui/components/switch";
 import {
   Select,
   SelectContent,
@@ -26,6 +28,7 @@ import {
   KeyRound,
   Loader2,
   RefreshCw,
+  ShieldCheck,
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
@@ -42,6 +45,7 @@ import {
   updateExternalApiKeyGroup,
   updateExternalApiKeyModeration,
   updateExternalApiKeyQuota,
+  updateExternalApiKeyRelay,
 } from "../actions";
 import type { ImageBackendGroupBackendType } from "@/features/image-backend-pool/types";
 
@@ -66,6 +70,7 @@ type ExternalApiKeySummary = {
   generationGroupId: string | null;
   creditLimit: number | null;
   creditsUsed: number;
+  relayOnly: boolean;
   lastUsedAt: Date | string | null;
   isActive: boolean;
   createdAt: Date | string;
@@ -122,6 +127,7 @@ export function ExternalApiKeySection({ timeZone }: { timeZone?: string }) {
     useState<ModerationBlockRiskLevel>("low");
   const [newKeyGroupId, setNewKeyGroupId] = useState("default");
   const [newKeyCreditLimit, setNewKeyCreditLimit] = useState("");
+  const [newKeyRelayOnly, setNewKeyRelayOnly] = useState(false);
   const [quotaDrafts, setQuotaDrafts] = useState<Record<string, string>>({});
   const [groups, setGroups] = useState<ImageBackendGroupOption[]>([]);
   const [loading, setLoading] = useState(true);
@@ -137,6 +143,7 @@ export function ExternalApiKeySection({ timeZone }: { timeZone?: string }) {
     capabilities?.features["moderation.blocking"] ?? true;
   const moderationControlAllowed =
     moderationBlockingEnabled && moderationOptions.length > 1;
+  const relayAllowed = capabilities?.features["externalApi.relay"] ?? false;
   const defaultGroup = groups.find((group) => group.isDefault) ?? null;
   const newKeyGroup =
     newKeyGroupId === "default"
@@ -156,6 +163,7 @@ export function ExternalApiKeySection({ timeZone }: { timeZone?: string }) {
             creditLimit:
               typeof key.creditLimit === "number" ? key.creditLimit : null,
             creditsUsed: Number(key.creditsUsed || 0),
+            relayOnly: key.relayOnly === true,
             moderationBlockRiskLevel:
               key.moderationBlockRiskLevel === "medium" ||
               key.moderationBlockRiskLevel === "high"
@@ -259,6 +267,19 @@ export function ExternalApiKeySection({ timeZone }: { timeZone?: string }) {
       },
       onError: ({ error }) => {
         toast.error(error.serverError || t("errors.quota"));
+      },
+    }
+  );
+
+  const { execute: updateKeyRelay, isPending: isUpdatingRelay } = useAction(
+    updateExternalApiKeyRelay,
+    {
+      onSuccess: () => {
+        toast.success(t("success.updated"));
+        loadKeys();
+      },
+      onError: ({ error }) => {
+        toast.error(error.serverError || t("errors.update"));
       },
     }
   );
@@ -457,6 +478,7 @@ export function ExternalApiKeySection({ timeZone }: { timeZone?: string }) {
               moderationBlockRiskLevel: newKeyModerationLevel,
               generationGroupId: newKeyGroupId,
               creditLimit,
+              relayOnly: relayAllowed ? newKeyRelayOnly : false,
             });
           }}
           disabled={isCreating || !externalApiAllowed}
@@ -465,6 +487,29 @@ export function ExternalApiKeySection({ timeZone }: { timeZone?: string }) {
           {t("create")}
         </Button>
       </div>
+      {relayAllowed && (
+        <div className="flex items-start gap-3 rounded-md border border-border bg-muted/30 p-3">
+          <Switch
+            id="new-external-api-key-relay"
+            checked={newKeyRelayOnly}
+            onCheckedChange={setNewKeyRelayOnly}
+            disabled={!externalApiAllowed}
+            aria-label="纯中转模式"
+          />
+          <div className="space-y-1">
+            <Label
+              htmlFor="new-external-api-key-relay"
+              className="flex items-center gap-1.5 text-sm"
+            >
+              <ShieldCheck className="h-3.5 w-3.5" />
+              纯中转模式（隐私）
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              开启后：不记录生成历史、站内画廊不可见、不留存图片到服务器；仍正常扣费并进行内容审核。适合对隐私敏感的中转使用。
+            </p>
+          </div>
+        </div>
+      )}
       {newKeyGroup && (
         <p className="text-xs text-muted-foreground">
           {t("backendGroup.label")}: {groupOptionLabel(newKeyGroup)}
@@ -497,6 +542,12 @@ export function ExternalApiKeySection({ timeZone }: { timeZone?: string }) {
                   <span className="rounded-sm bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
                     {key.isActive ? t("active") : t("revoked")}
                   </span>
+                  {key.relayOnly && (
+                    <Badge variant="secondary" className="gap-1">
+                      <ShieldCheck className="h-3 w-3" />
+                      纯中转
+                    </Badge>
+                  )}
                 </div>
                 <p className="mt-1 font-mono text-xs text-muted-foreground">
                   {key.keyPrefix}...{key.lastFour} · {t("lastUsed")}{" "}
@@ -622,6 +673,35 @@ export function ExternalApiKeySection({ timeZone }: { timeZone?: string }) {
                     {t("quota.save")}
                   </Button>
                 </div>
+                {(relayAllowed || key.relayOnly) && (
+                  <div className="mt-3 flex max-w-xs items-start gap-3">
+                    <Switch
+                      id={`external-key-relay-${key.id}`}
+                      checked={key.relayOnly}
+                      onCheckedChange={(checked) =>
+                        updateKeyRelay({ id: key.id, relayOnly: checked })
+                      }
+                      disabled={
+                        !externalApiAllowed ||
+                        isUpdatingRelay ||
+                        (!relayAllowed && !key.relayOnly)
+                      }
+                      aria-label="纯中转模式"
+                    />
+                    <div className="space-y-1">
+                      <Label
+                        htmlFor={`external-key-relay-${key.id}`}
+                        className="flex items-center gap-1.5"
+                      >
+                        <ShieldCheck className="h-3.5 w-3.5" />
+                        纯中转模式（隐私）
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        不记录历史、不留存图片、画廊不可见；仍扣费与审核。
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
               {key.isActive && (
                 <Button
