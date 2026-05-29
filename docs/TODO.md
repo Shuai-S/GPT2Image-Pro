@@ -1,25 +1,20 @@
 # TODO
 
-## 🔴 安全运维补救（用户必须手动执行 — 代码无法修复）
+> 来源：2026-05-29 多 Agent 安全审计（`docs/security-audit-2026-05.md`）。
+> 高危的经济损失 / 入侵口子已在 `dev` 修复（提交 2beb0e0 / b69c10b / 14a88d8 / 07d7a18）。
+> 本清单只记录**仍真实存在的代码层问题**。
 
-> 来源：2026-05-29 多 Agent 安全审计，详见 `docs/security-audit-2026-05.md`。
-> 代码层修复已在 `dev` 分支完成（提交 2beb0e0 / b69c10b / 14a88d8 / 07d7a18）。
+## 仍存在的代码层问题（待办）
 
-- [ ] **C1（最高优先级）轮换数据库口令**：`.env.local` 中 `postgresql://root:...@104.248.226.34:8888/...` 为公网可达 root 连接串。轮换口令，并将 `104.248.226.34:8888` 防火墙限制为仅应用出口 IP。
-- [ ] **C2 轮换 `PLATFORM_API_KEY`**（`sk-317Wgs...`）—上游图像 API 花费凭证。
-- [ ] **C3 生产配置 Upstash**（`UPSTASH_REDIS_REST_URL/_TOKEN`）以获得分布式限流；否则仅有单实例内存兜底（auth/strict）。
-- [ ] **C4 设置强 `BETTER_AUTH_SECRET`**（`openssl rand -base64 32`），勿用 `...change-in-production`。
-- [ ] **C5** `git rm --cached 注册机/ChatGPTRegister.exe` 并 gitignore `注册机/*.exe`（14MB 不可审计二进制随仓库分发）。
-- [ ] **C6** 给 `/sign-up` 与验证码发送加 CAPTCHA/Turnstile（阻断批量注册薅羊毛）。
+- [ ] **成本放大（中危·经济）**：`quality`、`thinking/reasoning.effort` 等高成本参数不计入积分定价（`resolution.ts`）；`/v1/chat/completions` 纯文本按固定 1 积分/轮。上游成本可能数倍于收费，长期亏损。需做定价决策后实现。
+- [ ] **v1 无 per-key / per-user 频率限流（中危）**：单个 key 可高频刷请求拖垮上游成本。需在各 v1 handler 顶部加滑窗限流（独立于中间件的 per-IP）。
+- [ ] **generations 存储对象无鉴权（中低危）**：仅靠 `userId/nanoid(32)` 不可猜 URL 保护。建议 generations 桶走 session+属主校验或短时签名 URL（avatars 保持公开）。**改动前需 UI 实测**，避免破坏全站图片渲染 / 外链分享 / og:image。
+- [ ] **SSRF DNS 重绑定残留（低危）**：已堵静态内网 + 重定向跳内网；"校验后连接时重解析到内网"需在连接层 pin 已校验 IP 才能根除。
 
-## 🟠 数据库迁移（部署前）
+## 部署前必做
 
-- [ ] 应用 `0025_credits_batch_idempotency.sql` 前，先排查 `credits_batch` 是否已有重复 `(source_type, source_ref)`（历史双发遗留），否则唯一索引创建会失败。排查 SQL 见迁移文件头注释。
+- [ ] 应用 `packages/database/drizzle/0025_credits_batch_idempotency.sql` 前，先排查 `credits_batch` 是否已有重复 `(source_type, source_ref)`（历史双发遗留），否则唯一索引创建会失败。排查 SQL 见迁移文件头注释。
 
-## 🟡 已记录、推迟实现（需进一步评估/测试）
+---
 
-- [ ] A11 Creem webhook `order.amount`/`currency` 交叉校验（需先对齐 Creem 产品价单位/币种，避免误拒真实支付）。
-- [ ] A15 generations 存储对象鉴权/属主校验或短时签名 URL（需 UI 测试，避免破坏全站图片渲染/外链分享）。
-- [ ] 成本放大：将 `quality`、`thinking/reasoning.effort` 计入积分定价（`resolution.ts`），并对 v1 文本代理按上下文/推理计量。
-- [ ] v1 端点增加 per-apiKey / per-user 频率限流。
-- [ ] SSRF 残留：在连接层 pin 已校验 IP 以根除 DNS 重绑定。
+运维层补救（轮换密钥 / 配置 Upstash 等）见 `docs/security-audit-2026-05.md` C 节，本清单不展开。
