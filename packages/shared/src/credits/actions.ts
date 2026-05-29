@@ -11,10 +11,9 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 
 import { db } from "@repo/database";
-import { creditsTransaction, subscription } from "@repo/database/schema";
+import { creditsTransaction } from "@repo/database/schema";
 import { getBaseUrl } from "../config/payment";
 import {
-  getPlanFromPriceId,
   isPlanAtLeast,
   type SubscriptionPlan,
 } from "../config/subscription-plan";
@@ -25,10 +24,9 @@ import {
   saveEpayOrder,
 } from "../payment/epay";
 import { logEvent } from "../logger/index";
-import { actionClient, protectedAction } from "../safe-action";
+import { protectedAction } from "../safe-action";
 import { getUserPlanType } from "../subscription/services/user-plan";
 import { getRuntimeSettingNumber } from "../system-settings";
-import { getPlanMonthlyCredits } from "../subscription/services/plan-capabilities";
 
 import {
   CREDIT_CONFIG_DEFAULTS,
@@ -53,8 +51,6 @@ import {
   InsufficientCreditsError,
 } from "./core";
 
-const withPublicCreditsAction = (name: string) =>
-  actionClient.metadata({ action: `credits.${name}` });
 const withProtectedCreditsAction = (name: string) =>
   protectedAction.metadata({ action: `credits.${name}` });
 
@@ -65,14 +61,6 @@ async function getRuntimeRegistrationBonusCredits() {
     "REGISTRATION_BONUS_CREDITS",
     CREDIT_CONFIG_DEFAULTS.registrationBonusCredits,
     { positive: true }
-  );
-}
-
-async function getRuntimeCreditsExpiryDays() {
-  return getRuntimeSettingNumber(
-    "CREDITS_EXPIRY_DAYS",
-    CREDIT_CONFIG_DEFAULTS.creditsExpiryDays,
-    { nonNegative: true }
   );
 }
 
@@ -322,121 +310,6 @@ export const checkCreditsAvailable = withProtectedCreditsAction(
       currentBalance: balance.balance,
       required: amount,
       status: balance.status,
-    };
-  });
-
-// ============================================
-// 订阅相关积分 Actions
-// ============================================
-
-/**
- * 发放月度订阅积分
- *
- * 在订阅续费时调用
- */
-export const grantMonthlySubscriptionCredits = withPublicCreditsAction(
-  "grantMonthlySubscriptionCredits"
-)
-  .schema(
-    z.object({
-      userId: z.string().min(1),
-      subscriptionId: z.string().min(1),
-    })
-  )
-  .action(async ({ parsedInput }) => {
-    const { userId, subscriptionId } = parsedInput;
-
-    // 查询用户订阅以获取 priceId，根据套餐档位确定积分数量
-    const [sub] = await db
-      .select({ priceId: subscription.priceId })
-      .from(subscription)
-      .where(eq(subscription.userId, userId))
-      .limit(1);
-
-    // 使用 subscription-plan.ts 作为单一事实来源
-    let plan: SubscriptionPlan = "starter";
-    if (sub?.priceId) {
-      const resolved = getPlanFromPriceId(sub.priceId);
-      if (resolved) {
-        plan = resolved;
-      }
-    }
-    const creditsAmount = await getPlanMonthlyCredits(plan);
-
-    // 月度积分，下个月过期
-    const expiresAt = new Date();
-    expiresAt.setMonth(expiresAt.getMonth() + 1);
-
-    const result = await grantCredits({
-      userId,
-      amount: creditsAmount,
-      sourceType: "subscription",
-      debitAccount: `SUBSCRIPTION:${subscriptionId}`,
-      transactionType: "monthly_grant",
-      expiresAt,
-      sourceRef: subscriptionId,
-      description: "月度订阅积分",
-      metadata: {
-        subscriptionId,
-        grantType: "monthly",
-        planId: sub?.priceId ?? "unknown",
-        creditsAmount,
-        monthlyCredits: creditsAmount,
-      },
-    });
-
-    return {
-      success: true,
-      ...result,
-    };
-  });
-
-/**
- * 购买积分 (内部函数)
- *
- * 由 Creem Webhook 调用，在支付成功后发放积分
- * 注意: 这个函数不应该直接被前端调用
- */
-export const purchaseCredits = withProtectedCreditsAction("purchaseCredits")
-  .schema(
-    z.object({
-      amount: z.number().positive(),
-      paymentId: z.string().min(1),
-      expiresInDays: z.number().nonnegative().optional(),
-    })
-  )
-  .action(async ({ parsedInput, ctx }) => {
-    const { userId } = ctx;
-    const { amount, paymentId, expiresInDays } = parsedInput;
-
-    const expiryDays = expiresInDays ?? (await getRuntimeCreditsExpiryDays());
-    const expiresAt = getExpiryDate(expiryDays);
-
-    const result = await grantCredits({
-      userId,
-      amount,
-      sourceType: "purchase",
-      debitAccount: `PAYMENT:${paymentId}`,
-      transactionType: "purchase",
-      expiresAt,
-      sourceRef: paymentId,
-      description: `购买 ${amount} 积分`,
-      metadata: {
-        paymentId,
-        purchaseType: "direct",
-      },
-    });
-
-    logEvent("credits.purchased", {
-      userId,
-      amount,
-      paymentId,
-      source: "creem",
-    });
-
-    return {
-      success: true,
-      ...result,
     };
   });
 

@@ -14,7 +14,7 @@ import {
 } from "../system-settings";
 import { db } from "@repo/database";
 import { epayOrder } from "@repo/database/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 export const EPAY_TRADE_SUCCESS = "TRADE_SUCCESS";
 
@@ -343,6 +343,41 @@ export async function updateEpayOrderStatus(
       updatedAt: new Date(),
     })
     .where(eq(epayOrder.outTradeNo, outTradeNo));
+}
+
+export async function getEpayOrderStatus(
+  outTradeNo: string
+): Promise<EpayOrderStatus | null> {
+  if (!outTradeNo) return null;
+
+  const [order] = await db
+    .select({ status: epayOrder.status })
+    .from(epayOrder)
+    .where(eq(epayOrder.outTradeNo, outTradeNo))
+    .limit(1);
+
+  return (order?.status as EpayOrderStatus | undefined) ?? null;
+}
+
+/**
+ * 原子领取订单进行发放：仅当订单仍为 pending 时将其置为 success。
+ * 返回 true 表示本次成功领取（可继续发放），false 表示订单不存在或已被处理。
+ * 用于防止异步通知与重复回调对同一订单的重复发放。
+ */
+export async function claimEpayOrderForFulfillment(
+  outTradeNo: string
+): Promise<boolean> {
+  if (!outTradeNo) return false;
+
+  const claimed = await db
+    .update(epayOrder)
+    .set({ status: "success", updatedAt: new Date() })
+    .where(
+      and(eq(epayOrder.outTradeNo, outTradeNo), eq(epayOrder.status, "pending"))
+    )
+    .returning({ outTradeNo: epayOrder.outTradeNo });
+
+  return claimed.length > 0;
 }
 
 export function verifyEpayParams(

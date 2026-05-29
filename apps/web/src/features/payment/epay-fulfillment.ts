@@ -27,6 +27,7 @@ import {
 import { getRuntimeSettingNumber } from "@repo/shared/system-settings";
 import { getUserPlanType } from "@repo/shared/subscription/services/user-plan";
 import {
+  claimEpayOrderForFulfillment,
   decodeEpayMetadata,
   getEpayOrderMetadata,
   type EpayMetadata,
@@ -104,6 +105,18 @@ async function fulfillSuccessfulEpayPaymentInner(
     throw new Error("Invalid or mismatched Epay metadata");
   }
 
+  // 原子领取订单（pending → success）。重复异步通知 / 并发回调将领取失败，
+  // 在此安全跳过，避免重复履约。即使后续发放因 A3 唯一约束幂等，
+  // 该门闩仍可避免重复的订阅写入等副作用。
+  const claimed = await claimEpayOrderForFulfillment(verifyInfo.outTradeNo);
+  if (!claimed) {
+    logger.info(
+      { source, outTradeNo: verifyInfo.outTradeNo },
+      "Epay order already fulfilled or not pending; skipping"
+    );
+    return { metadata };
+  }
+
   try {
     if (metadata.type === "credit_purchase") {
       await handleCreditPurchase(
@@ -123,11 +136,11 @@ async function fulfillSuccessfulEpayPaymentInner(
       );
     }
   } catch (error) {
-    await updateEpayOrderStatus(verifyInfo.outTradeNo, "failed");
+    // 履约失败：释放领取（success → pending），以便后续异步通知重试。
+    await updateEpayOrderStatus(verifyInfo.outTradeNo, "pending");
     throw error;
   }
 
-  await updateEpayOrderStatus(verifyInfo.outTradeNo, "success");
   return { metadata };
 }
 

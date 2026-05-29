@@ -10,6 +10,7 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 /**
  * Better Auth 核心表 Schema
@@ -412,23 +413,34 @@ export const creditsBalance = pgTable("credits_balance", {
  * @field createdAt - 创建时间
  * @field updatedAt - 更新时间
  */
-export const creditsBatch = pgTable("credits_batch", {
-  id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-  amount: numeric("amount", { precision: 18, scale: 2, mode: "number" })
-    .notNull(),
-  remaining: numeric("remaining", { precision: 18, scale: 2, mode: "number" })
-    .notNull(),
-  issuedAt: timestamp("issued_at").notNull().defaultNow(),
-  expiresAt: timestamp("expires_at"),
-  status: creditsBatchStatusEnum("status").notNull().default("active"),
-  sourceType: creditsBatchSourceEnum("source_type").notNull(),
-  sourceRef: text("source_ref"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+export const creditsBatch = pgTable(
+  "credits_batch",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    amount: numeric("amount", { precision: 18, scale: 2, mode: "number" })
+      .notNull(),
+    remaining: numeric("remaining", { precision: 18, scale: 2, mode: "number" })
+      .notNull(),
+    issuedAt: timestamp("issued_at").notNull().defaultNow(),
+    expiresAt: timestamp("expires_at"),
+    status: creditsBatchStatusEnum("status").notNull().default("active"),
+    sourceType: creditsBatchSourceEnum("source_type").notNull(),
+    sourceRef: text("source_ref"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    // 幂等性约束：同一 (来源类型, 来源引用) 只能发放一次。
+    // 关闭支付 webhook 重放 / 并发双发 / 注册奖励farming 等积分双重发放风险。
+    // 偏索引：source_ref 为空的批次（如手动调整）不受约束。
+    uniqueIndex("credits_batch_source_ref_unique")
+      .on(table.sourceType, table.sourceRef)
+      .where(sql`${table.sourceRef} is not null`),
+  ]
+);
 
 // ============================================
 // 积分交易表 (Credits Transactions)

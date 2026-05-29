@@ -380,17 +380,37 @@ export async function grantCredits(params: GrantCreditsParams) {
           : await getDefaultCreditsExpiryDate(issuedAt)
         : expiresAt;
     const batchId = crypto.randomUUID();
-    await tx.insert(creditsBatch).values({
-      id: batchId,
-      userId,
-      amount,
-      remaining: amount,
-      issuedAt,
-      expiresAt: effectiveExpiresAt,
-      status: "active",
-      sourceType,
-      sourceRef,
-    });
+    const insertedBatch = await tx
+      .insert(creditsBatch)
+      .values({
+        id: batchId,
+        userId,
+        amount,
+        remaining: amount,
+        issuedAt,
+        expiresAt: effectiveExpiresAt,
+        status: "active",
+        sourceType,
+        sourceRef,
+      })
+      .onConflictDoNothing({
+        target: [creditsBatch.sourceType, creditsBatch.sourceRef],
+        where: sql`${creditsBatch.sourceRef} is not null`,
+      })
+      .returning({ id: creditsBatch.id });
+
+    // 幂等性保障：(sourceType, sourceRef) 唯一索引使重复发放的插入为空。
+    // 此时跳过记账与余额累加，避免支付 webhook 重放 / 并发回调 / 注册奖励
+    // 重复领取导致的积分双重发放（薅羊毛）。
+    if (insertedBatch.length === 0) {
+      return {
+        batchId: null,
+        transactionId: null,
+        amount: 0,
+        newBalance: currentBalance.balance,
+        alreadyGranted: true,
+      };
+    }
 
     const transactionId = crypto.randomUUID();
     const creditAccount = `WALLET:${userId}`;
@@ -426,6 +446,7 @@ export async function grantCredits(params: GrantCreditsParams) {
       transactionId,
       amount,
       newBalance: currentBalance.balance + amount,
+      alreadyGranted: false,
     };
   });
 }

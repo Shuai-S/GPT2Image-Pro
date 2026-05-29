@@ -176,6 +176,13 @@
       "when": 1779770000000,
       "tag": "0024_chat_completions_upstream_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1780000000000,
+      "tag": "0025_credits_batch_idempotency",
+      "breakpoints": true
     }
   ]
 }
