@@ -17,6 +17,8 @@
 <p align="center">
   <a href="https://gpt2image.superapi.buzz">免费体验</a>
   ·
+  QQ 交流群：375682052
+  ·
   <a href="#生产部署">生产部署</a>
   ·
   <a href="#docker-compose">Docker Compose</a>
@@ -32,6 +34,7 @@ GPT2Image-Pro 主应用位于 `apps/web`，共享能力位于 `packages/*`。REA
 
 - 公开系统文档：`/docs/system`
 - 登录后台文档：`/dashboard/backend-help`
+- QQ 交流群：375682052
 
 ## 项目定位
 
