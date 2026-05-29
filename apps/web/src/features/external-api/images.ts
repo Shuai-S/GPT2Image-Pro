@@ -53,12 +53,26 @@ export function getPublicImageUrl(request: Request, imageUrl?: string) {
 export async function getImageBase64(request: Request, imageUrl?: string) {
   if (!imageUrl) return undefined;
 
-  const url =
-    imageUrl.startsWith("http://") || imageUrl.startsWith("https://")
-      ? imageUrl
-      : new URL(imageUrl, getRequestBaseUrl(request)).toString();
+  const isAbsolute =
+    imageUrl.startsWith("http://") || imageUrl.startsWith("https://");
+  const url = isAbsolute
+    ? imageUrl
+    : new URL(imageUrl, getRequestBaseUrl(request)).toString();
 
-  const authorization = request.headers.get("authorization");
+  // 仅在目标为第一方（相对路径或我方 origin）时转发客户端 Authorization。
+  // 纯中转模式下 imageUrl 可能是上游第三方 URL，绝不能把用户的 bearer token 外发。
+  let firstParty = !isAbsolute;
+  if (isAbsolute) {
+    try {
+      firstParty =
+        new URL(url).origin === new URL(getRequestBaseUrl(request)).origin;
+    } catch {
+      firstParty = false;
+    }
+  }
+  const authorization = firstParty
+    ? request.headers.get("authorization")
+    : null;
   const response = await fetch(url, {
     headers: authorization ? { Authorization: authorization } : undefined,
   });

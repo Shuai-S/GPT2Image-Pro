@@ -6,6 +6,7 @@ import {
   type ModerationBlockRiskLevel,
 } from "@repo/shared/config/subscription-plan";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
+import { canUsePlanCapability } from "@repo/shared/subscription/services/plan-capabilities";
 import { and, eq } from "drizzle-orm";
 
 function hashApiKey(apiKey: string) {
@@ -63,6 +64,12 @@ export async function authenticateExternalApiRequest(request: Request) {
 
   const plan = await getUserPlan(apiKey.userId);
 
+  // 请求期复核纯中转权限：套餐降级后立即失效（不依赖降级钩子重置 DB 列）。
+  // 失去 externalApi.relay 能力的 key 退回普通模式（仍记录/存储），不报错。
+  const relayOnly =
+    apiKey.relayOnly === true &&
+    (await canUsePlanCapability(plan.plan, "externalApi.relay"));
+
   await db
     .update(externalApiKey)
     .set({ lastUsedAt: new Date(), updatedAt: new Date() })
@@ -79,6 +86,6 @@ export async function authenticateExternalApiRequest(request: Request) {
     ) satisfies ModerationBlockRiskLevel,
     creditLimit: apiKey.creditLimit ?? null,
     creditsUsed: Number(apiKey.creditsUsed || 0),
-    relayOnly: apiKey.relayOnly === true,
+    relayOnly,
   };
 }
