@@ -105,6 +105,12 @@ const chatCompletionSchema = z
     mix_web_first: z.boolean().optional(),
     requiresResponsesBackend: z.boolean().optional(),
     requires_responses_backend: z.boolean().optional(),
+    chatCompletionsUpstream: z
+      .enum(["responses", "chat_completions"])
+      .optional(),
+    chat_completions_upstream: z
+      .enum(["responses", "chat_completions"])
+      .optional(),
   })
   .passthrough();
 
@@ -456,9 +462,15 @@ export const postExternalChatCompletions = withApiLogging(
       thinking: normalizeThinking(
         parsed.data.thinking || parsed.data.reasoning?.effort
       ),
-      // Responses image_generation requires upstream streaming; non-stream
-      // Chat Completions callers still receive a buffered JSON response.
-      stream: true,
+      // Downstream streaming is handled by this route. Upstream streaming is
+      // controlled by the selected backend config so external/user APIs can run
+      // in either streamed or non-streamed mode.
+      stream: undefined,
+      rawChatCompletionsBody: parsed.data,
+      chatCompletionsUpstreamMode:
+        parsed.data.chatCompletionsUpstream ||
+        parsed.data.chat_completions_upstream ||
+        "responses",
       mixWebFirst: parsed.data.mixWebFirst ?? parsed.data.mix_web_first,
       requiresResponsesBackend:
         parsed.data.requiresResponsesBackend ??
