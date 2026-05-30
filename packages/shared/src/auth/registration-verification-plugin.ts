@@ -63,12 +63,22 @@ async function assertUserCanAuthenticate(userId: string) {
     .where(eq(userTable.id, userId))
     .limit(1);
 
-  if (existingUser?.banned && existingUser.bannedReason === "account_deleted") {
+  if (!existingUser?.banned) return;
+
+  // 任意 banned=true 都拒绝创建会话/账户，不再只拦 account_deleted。
+  // 否则管理员的普通封禁（banUserAction 写入的 banned=true + 普通原因）在 Web 通道形同摆设，
+  // 被封用户重新登录即可创建新会话照常调用受保护操作（生图/扣费/工单/设置）。
+  if (existingUser.bannedReason === "account_deleted") {
     throw new APIError("FORBIDDEN", {
       message: "Account has been deleted",
       code: "ACCOUNT_DELETED",
     });
   }
+
+  throw new APIError("FORBIDDEN", {
+    message: "Account has been banned",
+    code: "ACCOUNT_BANNED",
+  });
 }
 
 export const registrationVerificationPlugin = (): BetterAuthPlugin => ({

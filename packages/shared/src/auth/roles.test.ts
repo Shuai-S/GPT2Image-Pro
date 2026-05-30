@@ -1,6 +1,74 @@
 import { describe, expect, it } from "vitest";
 
-import { canActOnTargetRole } from "./roles";
+import {
+  canAccessAdminArea,
+  canActOnTargetRole,
+  canManageUserPermissions,
+  canViewImageBackendPool,
+  isAdminRole,
+  normalizeUserRole,
+} from "./roles";
+
+// 守护审计 C-H6：四个角色对三道能力门的越权边界全部用表驱动断言。
+// observer_admin 必须能看后端池但绝不能进后台/管权限；admin 能进后台但
+// 仅 super_admin 能管权限。任一常量数组被误改即应有用例失败。
+describe("角色能力门矩阵", () => {
+  const cases: Array<{
+    role: string;
+    backendPool: boolean;
+    adminArea: boolean;
+    managePermissions: boolean;
+  }> = [
+    {
+      role: "user",
+      backendPool: false,
+      adminArea: false,
+      managePermissions: false,
+    },
+    {
+      role: "observer_admin",
+      backendPool: true,
+      adminArea: false,
+      managePermissions: false,
+    },
+    {
+      role: "admin",
+      backendPool: true,
+      adminArea: true,
+      managePermissions: false,
+    },
+    {
+      role: "super_admin",
+      backendPool: true,
+      adminArea: true,
+      managePermissions: true,
+    },
+  ];
+
+  for (const { role, backendPool, adminArea, managePermissions } of cases) {
+    it(`${role} 的三道能力门符合预期`, () => {
+      expect(canViewImageBackendPool(role)).toBe(backendPool);
+      expect(canAccessAdminArea(role)).toBe(adminArea);
+      expect(canManageUserPermissions(role)).toBe(managePermissions);
+    });
+  }
+
+  it("isAdminRole 仅 admin 与 super_admin 为真", () => {
+    expect(isAdminRole("admin")).toBe(true);
+    expect(isAdminRole("super_admin")).toBe(true);
+    expect(isAdminRole("observer_admin")).toBe(false);
+    expect(isAdminRole("user")).toBe(false);
+  });
+
+  it("normalizeUserRole 对未知/空值回退 user", () => {
+    expect(normalizeUserRole("admin")).toBe("admin");
+    expect(normalizeUserRole("observer_admin")).toBe("observer_admin");
+    expect(normalizeUserRole("bogus-role")).toBe("user");
+    expect(normalizeUserRole("")).toBe("user");
+    expect(normalizeUserRole(null)).toBe("user");
+    expect(normalizeUserRole(undefined)).toBe("user");
+  });
+});
 
 // 守护审计 S-H5 的目标权限护栏：防止普通 admin 封禁/锁死 super_admin 或越级互操作。
 describe("canActOnTargetRole", () => {

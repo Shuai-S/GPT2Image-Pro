@@ -7,14 +7,18 @@ import {
   normalizeEmail,
 } from "./email-domain";
 import { isRegistrationEmailTaken } from "./registration-identity";
+import {
+  EXPIRES_IN_MINUTES,
+  encodeCodeValue,
+  evaluateVerificationAttempt,
+  getResendCooldownRemainingSeconds,
+} from "./registration-verification-core";
 import { RegistrationVerificationCodeEmail } from "../mail/templates/primary-action-email";
 import { sendEmail } from "../mail/utils";
 import { isSelfUseModeEnabled } from "./self-use-mode";
 
 const PURPOSE = "registration-email-code";
 const CODE_LENGTH = 6;
-const EXPIRES_IN_MINUTES = 10;
-const MAX_VERIFY_ATTEMPTS = 5;
 
 function getIdentifier(email: string) {
   return `${PURPOSE}:${normalizeEmail(email)}`;
@@ -22,22 +26,6 @@ function getIdentifier(email: string) {
 
 function generateCode() {
   return Array.from({ length: CODE_LENGTH }, () => randomInt(0, 10)).join("");
-}
-
-// value 字段编码为 `code|attempts`，用于在不新增列的前提下记录错误尝试次数。
-// 仅本模块（PURPOSE 前缀的 identifier）使用该编码。
-function encodeCodeValue(code: string, attempts: number) {
-  return `${code}|${attempts}`;
-}
-
-function decodeCodeValue(value: string): { code: string; attempts: number } {
-  const separatorIndex = value.lastIndexOf("|");
-  if (separatorIndex < 0) {
-    return { code: value, attempts: 0 };
-  }
-  const code = value.slice(0, separatorIndex);
-  const attempts = Number(value.slice(separatorIndex + 1));
-  return { code, attempts: Number.isFinite(attempts) ? attempts : 0 };
 }
 
 export async function sendRegistrationVerificationCode(email: string) {
@@ -60,6 +48,25 @@ export async function sendRegistrationVerificationCode(email: string) {
   }
 
   const identifier = getIdentifier(normalizedEmail);
+
+  // 每邮箱发码冷却（审计 S-H6）：复用上一封验证码行的 createdAt 判断间隔，
+  // 冷却期内拒绝再次发送，防止对任意白名单邮箱无限轰炸放大邮件出账成本。
+  const [existing] = await db
+    .select({ createdAt: verification.createdAt })
+    .from(verification)
+    .where(eq(verification.identifier, identifier))
+    .limit(1);
+
+  const cooldownRemaining = getResendCooldownRemainingSeconds(
+    existing?.createdAt,
+    new Date()
+  );
+  if (cooldownRemaining > 0) {
+    throw new Error(
+      `Please wait ${cooldownRemaining} seconds before requesting another code`
+    );
+  }
+
   const code = generateCode();
   const expiresAt = new Date(Date.now() + EXPIRES_IN_MINUTES * 60 * 1000);
 
@@ -109,34 +116,23 @@ export async function verifyRegistrationCode(email: string, code: string) {
     return false;
   }
 
-  if (record.expiresAt.getTime() < Date.now()) {
+  // 状态机判定（过期 / 锁定 / 匹配 / 失败计数）抽到 DB-free 纯函数，
+  // 这里只按其结论执行对应的 DB 副作用（删除或写回新尝试次数）。
+  const decision = evaluateVerificationAttempt(
+    record,
+    normalizedCode,
+    new Date()
+  );
+
+  if (decision.shouldDelete) {
     await db.delete(verification).where(eq(verification.id, record.id));
-    return false;
+    return decision.outcome === "valid";
   }
 
-  const { code: storedCode, attempts } = decodeCodeValue(record.value);
-
-  // 超过最大错误次数：作废验证码，阻断暴力破解（6 位码空间仅 10^6）。
-  if (attempts >= MAX_VERIFY_ATTEMPTS) {
-    await db.delete(verification).where(eq(verification.id, record.id));
-    return false;
-  }
-
-  const valid = storedCode === normalizedCode;
-
-  if (valid) {
-    await db.delete(verification).where(eq(verification.id, record.id));
-    return true;
-  }
-
-  // 记录一次失败尝试；达到上限即作废。
-  const nextAttempts = attempts + 1;
-  if (nextAttempts >= MAX_VERIFY_ATTEMPTS) {
-    await db.delete(verification).where(eq(verification.id, record.id));
-  } else {
+  if (decision.nextValue !== null) {
     await db
       .update(verification)
-      .set({ value: encodeCodeValue(storedCode, nextAttempts) })
+      .set({ value: decision.nextValue })
       .where(eq(verification.id, record.id));
   }
 
