@@ -18,6 +18,9 @@ import {
 const BYTES_PER_MB = 1024 * 1024;
 const MAX_LIMIT_VALUE = 1_000_000;
 const MAX_BATCH_COUNT = 100;
+// 单用户图片生成并发上限的归一化硬顶。设计上支持并发 1000 以上(issue #16)，
+// 故取较大上界；实际并行仍受全局并发(默认 500)与队列调度约束。
+const MAX_GENERATION_CONCURRENCY = 10_000;
 const MAX_IMAGE_COUNT = 100;
 const MAX_CHAT_CONTEXT_CHARS = 200_000;
 
@@ -319,7 +322,7 @@ function normalizePlanLimits(value: unknown) {
         imageGenerationConcurrency: parsePositiveNumber(
           raw.imageGenerationConcurrency,
           fallback.imageGenerationConcurrency,
-          { integer: true, max: 1_000 }
+          { integer: true, max: MAX_GENERATION_CONCURRENCY }
         ),
         monthlyCredits: parsePositiveNumber(
           raw.monthlyCredits,

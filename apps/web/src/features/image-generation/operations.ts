@@ -953,9 +953,9 @@ export async function runImageGenerationForUser(
       generationId,
     };
   }
-  if (requestedCount > planCapabilities.limits.maxBatchCount) {
+  if (requestedCount > planCapabilities.limits.imageGenerationConcurrency) {
     return {
-      error: `Image count must be no more than ${planCapabilities.limits.maxBatchCount}.`,
+      error: `Image count must be no more than ${planCapabilities.limits.imageGenerationConcurrency}.`,
       generationId,
     };
   }

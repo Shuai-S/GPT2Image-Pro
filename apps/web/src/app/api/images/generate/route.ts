@@ -42,7 +42,7 @@ const generateImageSchema = z.object({
   gpt_model: z.string().optional(),
   thinking: z.enum(["none", "low", "medium", "high", "xhigh"]).optional(),
   stream: z.boolean().optional(),
-  count: z.number().int().min(1).max(100).optional(),
+  count: z.number().int().min(1).max(10_000).optional(),
   quality: z.enum(["auto", "low", "medium", "high"]).optional(),
   moderation: z.enum(["auto", "low"]).optional(),
   output_format: z.enum(["png", "jpeg", "webp"]).optional(),
@@ -104,9 +104,9 @@ export const POST = withApiLogging(async (request: NextRequest) => {
       403
     );
   }
-  if (count > planLimits.maxBatchCount) {
+  if (count > planLimits.imageGenerationConcurrency) {
     return errorResponse(
-      `count must be between 1 and ${planLimits.maxBatchCount}.`
+      `count must be between 1 and ${planLimits.imageGenerationConcurrency}.`
     );
   }
 

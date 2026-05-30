@@ -978,13 +978,64 @@ const IMAGE_ASPECT_RATIOS: Array<{
   { value: "3:4", width: 3, height: 4 },
   { value: "21:9", width: 21, height: 9 },
 ];
-const DEFAULT_BATCH_OPTIONS = [1, 2, 4, 6, 8, 10] as const;
 // 瀑布流每批并发预设(对齐原项目 TIER_PRESETS)：tier 决定每批生成张数。
 // 运行时按套餐 imageGenerationConcurrency(单用户并发上限)过滤可选项。
 const WATERFALL_TIER_PRESETS = [1, 5, 10, 20] as const;
 const DEFAULT_WATERFALL_TIER = 5;
 // 单批最大并发 = tier * 该倍数(再与套餐并发上限取 min 兜底)，对齐原项目 maxConcurrent = tier * 3。
 const WATERFALL_CONCURRENCY_MULTIPLIER = 3;
+
+// 数字输入 + 鼠标滚轮增减的"数量/并发"控件(issue #16)。
+// max = 套餐生图并发 imageGenerationConcurrency(可达 1000+)，下拉框无法承载，故改数字输入。
+// 滚轮：用包裹层的非被动监听 preventDefault，仅在悬停于控件上时增减，避免连带滚动页面。
+// 取值始终钳制到 [1, max]；越界输入(含空值)归一到 1。
+function ConcurrencyNumberInput({
+  id,
+  value,
+  max,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  value: number;
+  max: number;
+  disabled?: boolean;
+  onChange: (next: number) => void;
+}) {
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const element = wrapperRef.current;
+    if (!element || disabled) return;
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const delta = event.deltaY < 0 ? 1 : -1;
+      onChange(Math.min(max, Math.max(1, Math.floor(value + delta))));
+    };
+    // 非被动监听，确保可 preventDefault 阻止页面滚动
+    element.addEventListener("wheel", handleWheel, { passive: false });
+    return () => element.removeEventListener("wheel", handleWheel);
+  }, [value, max, disabled, onChange]);
+  return (
+    <div ref={wrapperRef} className="w-full">
+      <Input
+        id={id}
+        type="number"
+        inputMode="numeric"
+        min={1}
+        max={max}
+        step={1}
+        value={value}
+        disabled={disabled}
+        onChange={(event) =>
+          onChange(
+            Math.min(max, Math.max(1, Math.floor(Number(event.target.value) || 1)))
+          )
+        }
+        className="w-full"
+      />
+    </div>
+  );
+}
 const CHAT_MODEL_OPTIONS: Array<{
   value: ChatModel;
   label: string;
@@ -1749,8 +1800,6 @@ export function CreatePageClient({
     message: ChatMessage,
     mode: ConversationMode
   ) => (mode === "agent" ? message.mode === "agent" : message.mode !== "agent");
-  const imageCountLabel = (count: number) =>
-    copy(`${count} image${count > 1 ? "s" : ""}`, `${count} 张图片`);
   const batchCostSuffix = (count: number) =>
     count > 1
       ? copy(` for ${count}`, `，共 ${count} 张`)
@@ -1882,14 +1931,14 @@ export function CreatePageClient({
   const gpt55ChatAllowed = capabilities.features["models.gpt55"];
   const promptOptimizationAllowed =
     capabilities.features["promptOptimization.control"];
-  const maxBatchCount = capabilities.limits.maxBatchCount;
   const maxEditImages = capabilities.limits.maxEditImages;
   const maxChatImages = capabilities.limits.maxChatImages;
-  const batchOptions = DEFAULT_BATCH_OPTIONS.filter(
-    (count) => count <= maxBatchCount
+  // "数量/并发"控件上限 = 套餐生图并发 imageGenerationConcurrency(issue #16)；
+  // 服务端 count 校验(generate/edit/chat 路由与 operations 管线)同样按此值，前后端一致。
+  const concurrencyMax = Math.max(
+    1,
+    capabilities.limits.imageGenerationConcurrency
   );
-  const safeBatchOptions =
-    batchOptions.length > 0 ? batchOptions : ([1] as number[]);
   const maxImageBytes =
     uploadLimits.maxFileSizeBytes || DEFAULT_MAX_IMAGE_BYTES;
   const maxEditRequestBytes =
@@ -2081,12 +2130,12 @@ export function CreatePageClient({
     1
   );
   useEffect(() => {
-    setBatchCount((value) => Math.min(value, maxBatchCount));
-    setLineBatchRepeatCount((value) => Math.min(value, maxBatchCount));
-    setEditBatchCount((value) => Math.min(value, maxBatchCount));
+    setBatchCount((value) => Math.min(value, concurrencyMax));
+    setLineBatchRepeatCount((value) => Math.min(value, concurrencyMax));
+    setEditBatchCount((value) => Math.min(value, concurrencyMax));
     // 瀑布流 tier 也钳制到当前套餐允许上限(套餐切换/管理员调整并发时收紧)
     setWaterfallTier((value) => Math.max(1, Math.min(value, waterfallTierLimit)));
-  }, [maxBatchCount, waterfallTierLimit]);
+  }, [concurrencyMax, waterfallTierLimit]);
 
   useEffect(() => {
     const parseReferenceMode = (
@@ -6664,7 +6713,7 @@ export function CreatePageClient({
       : isTextSingleGenerating;
     const countValue = isLineMode ? lineBatchRepeatCount : batchCount;
     const setCountValue = (value: number) => {
-      const normalized = Math.min(Math.max(1, value), maxBatchCount);
+      const normalized = Math.min(Math.max(1, value), concurrencyMax);
       if (isLineMode) {
         setLineBatchRepeatCount(normalized);
       } else {
@@ -6783,25 +6832,13 @@ export function CreatePageClient({
                     ? copy("Repeat each line", "每行重复")
                     : copy("Repeat prompt", "重复生成")}
                 </label>
-                <Select
-                  value={String(countValue)}
-                  onValueChange={(value) => setCountValue(Number(value))}
+                <ConcurrencyNumberInput
+                  id={isLineMode ? "line-repeat-count" : "batch-count"}
+                  value={countValue}
+                  max={concurrencyMax}
                   disabled={modeBusy}
-                >
-                  <SelectTrigger
-                    id={isLineMode ? "line-repeat-count" : "batch-count"}
-                    className="w-full"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {safeBatchOptions.map((count) => (
-                      <SelectItem key={count} value={String(count)}>
-                        {imageCountLabel(count)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  onChange={setCountValue}
+                />
               </div>
             </div>
 
@@ -7925,26 +7962,13 @@ export function CreatePageClient({
                   >
                     {copy("Batch", "批量")}
                   </label>
-                  <Select
-                    value={String(editBatchCount)}
-                    onValueChange={(value) =>
-                      setEditBatchCount(
-                        Math.min(Math.max(1, Number(value)), maxBatchCount)
-                      )
-                    }
+                  <ConcurrencyNumberInput
+                    id="edit-batch-count"
+                    value={editBatchCount}
+                    max={concurrencyMax}
                     disabled={isEditing}
-                  >
-                    <SelectTrigger id="edit-batch-count" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {safeBatchOptions.map((count) => (
-                        <SelectItem key={count} value={String(count)}>
-                          {imageCountLabel(count)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    onChange={setEditBatchCount}
+                  />
                 </div>
 
                 <div className="space-y-3 rounded-md bg-muted/40 p-3">
