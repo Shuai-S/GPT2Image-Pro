@@ -50,12 +50,33 @@
 
 测试环境保留运行，可在修复后 git pull + HMR 复测。SSH 隧道命令：ssh -L 3100:127.0.0.1:3100 api2。
 
-## 进行中 / 待办
+## 阶段 A 审计：已完成
 
-- [x] dev server Windows 启动验证（可编译启动；缺 DB 时 SSR 500，已用 api2 隔离栈解决）
-- [ ] 阶段 A 审计 workflow：首轮因会话用量上限中断，需复核/重跑产出报告
-- [ ] 阶段 B 依审计报告修复+重构
-- [ ] 阶段 D 补单测提升覆盖率
+- Workflow 复核确认 128 条（critical 1 / high 27 / medium 58 / low 39 / info 3；security 27 / maintainability 41 / coverage 60）。
+- 报告：`docs/plan/2026-05-31-audit-report.md`（每条带 file:line + WHY + 修复建议 + 对抗复核结论）。
+- 注意：报告中 file 路径多省略 `gpt2image-pro/` 前缀。
+
+## 阶段 B 修复：进行中
+
+已修复并提交 dev（每条 typecheck+test 验证；当前 shared 50 + web 129 = 179 单测全绿）：
+
+- [x] **S-C1 (critical)** 系统设置写入收紧为 superAdminAction + UI tab 仅超管可见（堵 admin 改 BETTER_AUTH_SECRET 提权/账号接管）。commit 03cc6bd。
+- [x] **S-H5 (high)** 用户管理高敏操作加目标权限护栏 `canActOnTargetRole` + 禁止自助铸币（堵 admin 封超管/自助铸币），附 roles.test.ts。commit edbc0d6。
+- [x] **S-H1/S-H2 (high)** 聊天历史下载改 fetchPublicImage 堵 SSRF + 25MB 上限；storage 分支限 generations 桶 + 拒穿越堵 IDOR；模块改 DB-free 可测，附 web-history-references.test.ts。commit f1216df。
+
+剩余安全高危（待修，详见审计报告对应条目）：
+
+- [ ] **S-H3 / S-M2** 异步任务 callback_url SSRF：postAsyncImageCallback 改 redirect:manual 逐跳复检（async-image-tasks.ts）。
+- [ ] **S-H4 / S-H7** 管理员封禁对第一方会话不生效：protectedAction 加 banned 校验 + banUserAction 删 session（safe-action.ts + admin-users.ts，触核心鉴权中间件，需谨慎）。
+- [ ] **S-H6** 注册验证码无每邮箱/每IP冷却，可邮件轰炸（registration-verification.ts + middleware 限流旁路）。
+- [ ] **S-H2 残留** 同桶跨用户读需把请求方 userId 透传至 downloadWebHistoryImageReference 做 key 前缀校验（需改 WebImageParams 多层热路径）。
+
+剩余 medium/low 安全、可维护性（含 service.ts 5310 行 / create-page-client.tsx 9233 行上帝组件重构）、覆盖率缺口（runImageGenerationForUser 扣费编排、credits/core.ts、epay 验签等）共 100+ 条：见审计报告，属多轮迭代工作，未在本轮完成。
+
+## 阶段 D 补单测：进行中
+
+- [x] 新增 roles.test.ts(5) + web-history-references.test.ts(3)，随对应修复落地。
+- [ ] 核心金融逻辑（credits/core.ts、runImageGenerationForUser 结算、epay 验签）抽纯函数 + DB-free 单测：见审计 coverage 高危项，待做。
 
 ## 风险与注意
 
