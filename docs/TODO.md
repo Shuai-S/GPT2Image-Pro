@@ -10,10 +10,8 @@
 
 - [x] **分支保护已启用**（2026-05-30，经 gh API）：`dev` 与 `main` 均要求 5 个 status check 通过（`Docs mirror (CLAUDE == AGENTS)`/`Lint & format (changed files)`/`Typecheck`/`Unit tests`/`Build web`），strict（须先与目标分支同步）、禁 force-push/删除、要求会话解决。`enforce_admins=false`（管理员可应急直推）。
 - [x] **`main` 分支已创建**（= 当时绿色的 dev HEAD `bc1b139`）。默认分支仍为 `dev`；如需以 main 为默认请在仓库设置切换。
-- [ ] **Dependabot 首批 PR 待三角处理**（#4–#13 共 10 个）：
-  - github-actions major（checkout v5→v6 等，#4–#7…）：CI 多为绿，可按需合并。
-  - npm minor-and-patch 分组（#8，42 项）：按 CI 结果合并。
-  - npm major（typescript 6 / @types/node 25 / lucide-react 1.17 / fumadocs-mdx 15 / dotenv 17，#9–#13）：**多数 CI 失败**（破坏性升级），分支保护会自动拦截，建议关闭或单独评估。
+- [x] **Dependabot 首批 11 个 PR（#3–#13）已处理**（2026-05-30）：在 `.github/dependabot.yml` 增加忽略 semver-major 规则（npm + github-actions）后，Dependabot **自动关闭**了全部 10 个大版本 PR（#3–#7 Action 大版本、#9–#13 npm 大版本）；#8（npm minor/patch 分组，42 项）非大版本未被自动关，已手动关闭——因其破坏 `Build web`（分组内含破坏性变更）。当前 0 个 open PR。
+- [ ] **#8 残留问题**：minor/patch 分组（非大版本）在 CI 破坏 `Build web`，下一轮 Dependabot 仍会重开。需 root-cause 是 42 项里哪个依赖破坏 `next build`，再决定单独忽略该依赖或修复。可临时把 npm 分组拆细（去掉 group）以隔离定位。
 - [ ] **（可选）docker-build 设为必需**：当前 `docker-build` 在 PR 上运行但未列为 required（保 PR 迭代速度）。如需强制可加入 required checks。
 - [ ] **（可选）全仓格式化**：历史代码未全量 biome 格式化，故 `lint` 门禁用 `biome lint`（仅 lint、不查格式）。若做一次性 `biome format --write` 全仓重排（大 diff），可将门禁升级为含格式的 `biome ci`。
 - [ ] **（可选）修复存量 lint**：`biome lint` 全仓有 38 errors / 299 warnings 历史债（不阻塞改动文件门禁），可逐步清理；其中 `system-settings-panel.tsx` 有 3 处 `noLabelWithoutControl`（a11y）。
