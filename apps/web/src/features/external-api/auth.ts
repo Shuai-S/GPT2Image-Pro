@@ -1,4 +1,3 @@
-import { createHash, timingSafeEqual } from "node:crypto";
 import { db } from "@repo/database";
 import { externalApiKey, user } from "@repo/database/schema";
 import {
@@ -9,28 +8,7 @@ import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { canUsePlanCapability } from "@repo/shared/subscription/services/plan-capabilities";
 import { and, eq } from "drizzle-orm";
 
-function hashApiKey(apiKey: string) {
-  return createHash("sha256").update(apiKey).digest("hex");
-}
-
-function safeEqual(value: string, expected: string) {
-  const valueBuffer = Buffer.from(value);
-  const expectedBuffer = Buffer.from(expected);
-  return (
-    valueBuffer.length === expectedBuffer.length &&
-    timingSafeEqual(valueBuffer, expectedBuffer)
-  );
-}
-
-function getBearerToken(request: Request) {
-  const authorization = request.headers.get("authorization") || "";
-  if (!authorization.startsWith("Bearer ")) {
-    return null;
-  }
-
-  const token = authorization.slice("Bearer ".length).trim();
-  return token.length > 0 ? token : null;
-}
+import { getBearerToken, hashApiKey, safeEqual } from "./auth-token";
 
 export async function authenticateExternalApiRequest(request: Request) {
   const token = getBearerToken(request);

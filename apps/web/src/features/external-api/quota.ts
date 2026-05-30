@@ -2,56 +2,19 @@ import { db } from "@repo/database";
 import { externalApiKey } from "@repo/database/schema";
 import { and, eq, gte, isNull, or, sql } from "drizzle-orm";
 
-const CREDIT_DECIMAL_PLACES = 2;
-const CREDIT_DECIMAL_FACTOR = 10 ** CREDIT_DECIMAL_PLACES;
+import {
+  ExternalApiKeyQuotaExceededError,
+  getExternalApiKeyQuotaRemaining,
+  roundQuotaCredits,
+} from "./quota-math";
 
-function roundQuotaCredits(value: number) {
-  return (
-    Math.round((value + Number.EPSILON) * CREDIT_DECIMAL_FACTOR) /
-    CREDIT_DECIMAL_FACTOR
-  );
-}
-
-export function normalizeExternalApiKeyCreditLimit(
-  value: number | string | null | undefined
-) {
-  if (value === undefined || value === null || value === "") return null;
-  const numeric = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(numeric) || numeric < 0) {
-    throw new Error("API Key 额度必须是大于等于 0 的数字");
-  }
-  return roundQuotaCredits(numeric);
-}
-
-export class ExternalApiKeyQuotaExceededError extends Error {
-  readonly code = "api_key_quota_exceeded";
-
-  constructor(
-    public readonly required: number,
-    public readonly remaining: number,
-    public readonly limit: number | null,
-    public readonly used: number
-  ) {
-    super(
-      `API key quota exceeded: required ${required}, remaining ${remaining}`
-    );
-    this.name = "ExternalApiKeyQuotaExceededError";
-  }
-}
-
-export function isExternalApiKeyQuotaExceededError(
-  error: unknown
-): error is ExternalApiKeyQuotaExceededError {
-  return error instanceof ExternalApiKeyQuotaExceededError;
-}
-
-export function getExternalApiKeyQuotaRemaining(
-  creditLimit: number | null,
-  creditsUsed: number
-) {
-  if (creditLimit === null) return null;
-  return roundQuotaCredits(Math.max(0, creditLimit - creditsUsed));
-}
+// 纯逻辑已抽到 quota-math.ts（DB-free 可单测），此处 re-export 保持调用方导入路径不变。
+export {
+  ExternalApiKeyQuotaExceededError,
+  getExternalApiKeyQuotaRemaining,
+  isExternalApiKeyQuotaExceededError,
+  normalizeExternalApiKeyCreditLimit,
+} from "./quota-math";
 
 export async function getExternalApiKeyQuota(params: {
   apiKeyId: string;

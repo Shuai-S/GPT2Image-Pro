@@ -12,7 +12,10 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 
 import { authenticateExternalApiRequest } from "@/features/external-api/auth";
-import { fetchPublicImage } from "@/features/external-api/safe-image-fetch";
+import {
+  fetchPublicImage,
+  readResponseBytesWithLimit,
+} from "@/features/external-api/safe-image-fetch";
 import {
   createExternalImageStreamResponse,
   createJsonKeepAliveResponse,
@@ -34,6 +37,7 @@ import {
   getImageModel,
   validateImageSize,
 } from "@/features/image-generation/resolution";
+import { DEFAULT_MAX_IMAGE_BYTES } from "@/features/image-generation/request-utils";
 import type {
   ChatGptWebConversationState,
   ChatHistoryMessage,
@@ -467,8 +471,17 @@ async function imageUrlToInputFile(
   }
   const type = response.headers.get("content-type") || "image/png";
   if (!type.startsWith("image/")) return null;
+  // 流式读取并在累计超 25MB 时主动 abort：此前完全无上限，巨大响应可逼近 OOM。
+  // content-length 头可伪造，必须按真实字节累计判断。
+  const data = await readResponseBytesWithLimit(
+    response,
+    DEFAULT_MAX_IMAGE_BYTES,
+    () => {
+      throw new Error("Input image exceeds the 25MB limit.");
+    }
+  );
   return {
-    data: Buffer.from(await response.arrayBuffer()),
+    data,
     name: `response-input-image-${index + 1}`,
     type,
     url: imageUrl,

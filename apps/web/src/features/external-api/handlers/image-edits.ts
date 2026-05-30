@@ -33,7 +33,10 @@ import {
 } from "@/features/external-api/images";
 import { runBatchImageGeneration } from "@/features/image-generation/batch-runner";
 import { runImageGenerationForUser } from "@/features/image-generation/operations";
-import { fetchPublicImage } from "@/features/external-api/safe-image-fetch";
+import {
+  fetchPublicImage,
+  readResponseBytesWithLimit,
+} from "@/features/external-api/safe-image-fetch";
 import {
   normalizeImageBackground,
   normalizeOutputCompression,
@@ -404,22 +407,15 @@ async function fetchImageReference(
     (response.headers.get("content-type") || "").split(";")[0] || ""
   ).trim();
   const type = contentType || (options?.mask ? "image/png" : "image/png");
-  const contentLength = Number(response.headers.get("content-length") || 0);
   const maxImageBytes = options?.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES;
-  if (contentLength > maxImageBytes) {
+  // 流式读取并在累计超限时主动 abort：content-length 头可伪造，不能据其预判大小，
+  // 也不能先把整段正文缓冲进内存（否则可被巨大响应逼近 OOM）。
+  const buffer = await readResponseBytesWithLimit(response, maxImageBytes, () => {
     throw new ImageReferenceError(
       `${options?.mask ? "Mask" : "Image URL"} exceeds the ${formatMegabytes(maxImageBytes)} limit.`,
       413
     );
-  }
-
-  const buffer = Buffer.from(await response.arrayBuffer());
-  if (buffer.length > maxImageBytes) {
-    throw new ImageReferenceError(
-      `${options?.mask ? "Mask" : "Image URL"} exceeds the ${formatMegabytes(maxImageBytes)} limit.`,
-      413
-    );
-  }
+  });
 
   return new File(
     [buffer],

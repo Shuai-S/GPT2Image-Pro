@@ -8,7 +8,10 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 
 import { authenticateExternalApiRequest } from "@/features/external-api/auth";
-import { fetchPublicImage } from "@/features/external-api/safe-image-fetch";
+import {
+  fetchPublicImage,
+  readResponseBytesWithLimit,
+} from "@/features/external-api/safe-image-fetch";
 import {
   createExternalImageStreamResponse,
   createJsonKeepAliveResponse,
@@ -169,20 +172,20 @@ async function imageUrlToInputFile(params: {
     throw new Error(`Failed to load input image: HTTP ${response.status}`);
   }
 
-  const contentLength = Number(response.headers.get("content-length") || "0");
-  if (contentLength > params.maxImageBytes) {
-    throw new Error("Input image exceeds this plan's per-file limit.");
-  }
-
   const type = response.headers.get("content-type") || "image/png";
   if (!type.startsWith("image/")) {
     throw new Error("input image_url must point to an image.");
   }
 
-  const data = Buffer.from(await response.arrayBuffer());
-  if (data.byteLength > params.maxImageBytes) {
-    throw new Error("Input image exceeds this plan's per-file limit.");
-  }
+  // 流式读取并在累计超限时主动 abort：content-length 头可伪造，不能据其预判大小，
+  // 也不能先把整段正文缓冲进内存（否则可被巨大响应逼近 OOM）。
+  const data = await readResponseBytesWithLimit(
+    response,
+    params.maxImageBytes,
+    () => {
+      throw new Error("Input image exceeds this plan's per-file limit.");
+    }
+  );
 
   return {
     data,

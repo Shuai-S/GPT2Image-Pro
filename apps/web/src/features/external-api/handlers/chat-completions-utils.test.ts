@@ -47,4 +47,64 @@ describe("chat completions adapter utilities", () => {
       "Here is the result.\n\n![generated image 1](https://example.com/out.png)"
     );
   });
+
+  it("maps tool/function role into history with a Tool output prefix", () => {
+    const params = chatCompletionMessagesToChatParams([
+      { role: "user", content: "Look up the weather." },
+      { role: "tool", content: "Sunny, 24C." },
+      { role: "function", content: "Humidity 40%." },
+      { role: "user", content: "Now draw it." },
+    ]);
+
+    expect(params.history).toEqual([
+      { role: "user", text: "Look up the weather.", imageUrls: undefined },
+      { role: "assistant", text: "Tool output:\nSunny, 24C." },
+      { role: "assistant", text: "Tool output:\nHumidity 40%." },
+    ]);
+    expect(params.prompt).toBe("Now draw it.");
+  });
+
+  it("extracts string-form image_url parts", () => {
+    const params = chatCompletionMessagesToChatParams([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Use this." },
+          { type: "image_url", image_url: "https://example.com/string.png" },
+        ],
+      },
+    ]);
+
+    expect(params.promptImageUrls).toEqual(["https://example.com/string.png"]);
+  });
+
+  it("flushes an earlier user message into history when followed by another user message", () => {
+    const params = chatCompletionMessagesToChatParams([
+      { role: "user", content: "First message." },
+      { role: "user", content: "Second message." },
+    ]);
+
+    expect(params.history).toEqual([
+      { role: "user", text: "First message.", imageUrls: undefined },
+    ]);
+    expect(params.prompt).toBe("Second message.");
+  });
+
+  it("falls back to 'Image generated.' when there is no text", () => {
+    expect(
+      buildChatCompletionAssistantContent({
+        images: [{ b64_json: "data" }],
+      })
+    ).toBe("Image generated.");
+  });
+
+  it("omits assistant text when includeText is false", () => {
+    expect(
+      buildChatCompletionAssistantContent({
+        text: "Suppressed narration.",
+        images: [{ url: "https://example.com/out.png" }],
+        includeText: false,
+      })
+    ).toBe("![generated image 1](https://example.com/out.png)");
+  });
 });
