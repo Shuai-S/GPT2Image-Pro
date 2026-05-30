@@ -836,6 +836,7 @@ describe("backend isolation", () => {
     expect(body.store).toBe(false);
     expect(body.stream).toBe(false);
     expect(body.previous_response_id).toBe("resp_external");
+    expect(body.input).toBe("draw");
     expect(body.size).toBeUndefined();
     expect(body.tools).toEqual([
       { type: "web_search" },

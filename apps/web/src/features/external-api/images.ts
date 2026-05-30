@@ -423,7 +423,37 @@ export function createExternalImageStreamResponse(
   );
 }
 
+function defaultErrorTypeForStatus(status: number) {
+  if (status === 401) return "authentication_error";
+  if (status === 403) return "permission_error";
+  if (status === 429) return "rate_limit_error";
+  if (status >= 400 && status < 500) return "invalid_request_error";
+  return "server_error";
+}
+
+function parseUpstreamHttpError(message: string) {
+  const match = /^Upstream\s+.+?\s+API returned HTTP\s+(\d+):\s*(.*)$/i.exec(
+    message
+  );
+  if (!match) return null;
+
+  const status = Number(match[1]);
+  if (!Number.isInteger(status) || status < 100 || status > 599) return null;
+
+  const parts = (match[2] || "")
+    .split("|")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const code = parts[1] || (status === 429 ? "rate_limit_exceeded" : null);
+  const type = parts[2] || defaultErrorTypeForStatus(status);
+
+  return { type, code, status };
+}
+
 function classifyExternalApiError(message: string) {
+  const upstreamHttpError = parseUpstreamHttpError(message);
+  if (upstreamHttpError) return upstreamHttpError;
+
   const normalized = message.toLowerCase();
 
   if (

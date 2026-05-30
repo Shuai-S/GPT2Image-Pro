@@ -293,6 +293,28 @@ describe("external API error classification", () => {
     });
   });
 
+  it("preserves upstream HTTP error status and metadata", () => {
+    expect(
+      toOpenAIErrorPayload(
+        "Upstream Responses API returned HTTP 400: Input must be a list | invalid_request_error | invalid_request_error"
+      ).error
+    ).toMatchObject({
+      type: "invalid_request_error",
+      code: "invalid_request_error",
+      status: 400,
+    });
+
+    expect(
+      toOpenAIErrorPayload(
+        "Upstream Responses API returned HTTP 429: The usage limit has been reached | usage_limit_reached"
+      ).error
+    ).toMatchObject({
+      type: "rate_limit_error",
+      code: "usage_limit_reached",
+      status: 429,
+    });
+  });
+
   it("maps safety refusals to content policy violations", () => {
     expect(
       toOpenAIErrorPayload(
