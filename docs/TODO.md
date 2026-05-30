@@ -31,12 +31,22 @@
   - [ ] **UI/端到端实测**：#1 建号→登录验证哈希链路、改邮箱查重、重设密码；#15 瀑布流 tier/质量/尺寸/3 警告全流程；#16 数字输入+滚轮在 free/pro 账号下上限正确、count>10 能提交且服务端不再 400。
 - [ ] **既有 lint 债（PR 门禁风险）**：`create-page-client.tsx` 有 5 个**既有** error（非本次引入）：`noLabelWithoutControl`×4(ImageSizeDialog)、`noUselessFragments`×2、`useHookAtTopLevel`×1。CI lint 门禁仅 PR、对改动文件全量 lint，故**未来任何 PR 触碰此文件都会被这些既有 error 卡住**。push 到 dev 不跑 lint 故不阻塞当前提交。需择机清理或在门禁中豁免。
 
+## 2026-05-31 审计修复 workflow（已落地 dev，未修/defer backlog）
+
+> 详见 `docs/plan/2026-05-31-audit-test-refactor.md`。本轮共修 94 条、未修 23 条、defer 4 个上帝组件；dev 9 主题提交 0babd1f..01906e0；终验 typecheck+test 全绿（shared235+web257=492）。
+
+- [ ] **上帝组件结构性拆分（defer，需人在环专项 + 重新 UI 实测）**：
+  - `image-generation/components/create-page-client.tsx` 9233 行（含已实测 #15/#16，拆分前须充分理解其状态机/runtime store）。
+  - `image-backend-pool/service.ts` 5310 行（按 7+ 职责拆为 scheduler/error-classification/cooldown/oauth/import/sub2api-sync/crud）。
+  - `image-backend-pool/admin-panel.tsx` 4350 行、`system-settings/components/system-settings-panel.tsx` 1825 行。
+- [ ] **跨文件重构/DB 迁移类未修 23 条**：C-H2 门闩抽纯函数、S-M11 Creem 金额校验、S-L1/S-L7 财务/存储归属深防御、M-M7/M-M10/M-M15/M-M17 DRY 合并等，逐条理由见计划文档 backlog 节。
+
 ## 仍存在的代码层问题（待办）
 
 - [ ] **成本放大（中危·经济）**：`quality`、`thinking/reasoning.effort` 等高成本参数不计入积分定价（`resolution.ts`）；`/v1/chat/completions` 纯文本按固定 1 积分/轮。上游成本可能数倍于收费，长期亏损。需做定价决策后实现。
-- [ ] **v1 无 per-key / per-user 频率限流（中危）**：单个 key 可高频刷请求拖垮上游成本。需在各 v1 handler 顶部加滑窗限流（独立于中间件的 per-IP）。
-- [ ] **generations 存储对象无鉴权（中低危）**：仅靠 `userId/nanoid(32)` 不可猜 URL 保护。建议 generations 桶走 session+属主校验或短时签名 URL（avatars 保持公开）。**改动前需 UI 实测**，避免破坏全站图片渲染 / 外链分享 / og:image。
-- [ ] **SSRF DNS 重绑定残留（低危）**：已堵静态内网 + 重定向跳内网；"校验后连接时重解析到内网"需在连接层 pin 已校验 IP 才能根除。
+- [~] **v1 频率限流**：2026-05-31 已修限流默认 fail-open（未配 Upstash 时所有类型走内存兜底）+ 可信代理头开关（`RATE_LIMIT_TRUSTED_PROXY`，commit d2a51f4）。**残留**：仍缺各 v1 handler 顶部独立于 per-IP 的 per-key 滑窗限流（单 key 高频刷上游成本）。
+- [ ] **generations 存储对象无鉴权（中低危·S-L7 未修）**：仅靠 `userId/nanoid(32)` 不可猜 URL 保护。建议 generations 桶走 session+属主校验或短时签名 URL（avatars 保持公开）。**改动前需 UI 实测**，避免破坏全站图片渲染 / 外链分享 / og:image。
+- [ ] **SSRF DNS 重绑定残留（低危）**：已堵静态内网 + 重定向逐跳复检（含回调 S-H3）；"校验后连接时重解析到内网"需在连接层 pin 已校验 IP 才能根除。
 
 ## 部署前必做
 

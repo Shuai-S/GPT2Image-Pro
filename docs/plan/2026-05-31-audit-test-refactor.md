@@ -64,19 +64,44 @@
 - [x] **S-H5 (high)** 用户管理高敏操作加目标权限护栏 `canActOnTargetRole` + 禁止自助铸币（堵 admin 封超管/自助铸币），附 roles.test.ts。commit edbc0d6。
 - [x] **S-H1/S-H2 (high)** 聊天历史下载改 fetchPublicImage 堵 SSRF + 25MB 上限；storage 分支限 generations 桶 + 拒穿越堵 IDOR；模块改 DB-free 可测，附 web-history-references.test.ts。commit f1216df。
 
-剩余安全高危（待修，详见审计报告对应条目）：
+剩余安全高危（已由 2026-05-31 修复 workflow 落地，见下节）：
 
-- [ ] **S-H3 / S-M2** 异步任务 callback_url SSRF：postAsyncImageCallback 改 redirect:manual 逐跳复检（async-image-tasks.ts）。
-- [ ] **S-H4 / S-H7** 管理员封禁对第一方会话不生效：protectedAction 加 banned 校验 + banUserAction 删 session（safe-action.ts + admin-users.ts，触核心鉴权中间件，需谨慎）。
-- [ ] **S-H6** 注册验证码无每邮箱/每IP冷却，可邮件轰炸（registration-verification.ts + middleware 限流旁路）。
-- [ ] **S-H2 残留** 同桶跨用户读需把请求方 userId 透传至 downloadWebHistoryImageReference 做 key 前缀校验（需改 WebImageParams 多层热路径）。
+- [x] **S-H3 / S-M2** 异步任务 callback_url SSRF：收敛到 safe-image-fetch，提交期 assertPublicCallbackUrl 强制 https+公网、投递期 fetchPublicCallback 逐跳 redirect:manual 复检（堵 TOCTOU）。commit 0babd1f。
+- [x] **S-H4 / S-H7** 管理员封禁对第一方会话不生效：protectedAction 中间件复查 session.user.banned + banUserAction 删目标全部 session 行。commit 0babd1f。
+- [x] **S-H6** 注册验证码无每邮箱冷却：sendRegistrationVerificationCode 按上一封 createdAt 计算冷却、期内拒发。commit 7102b12。
+- [ ] **S-H2 残留（未修）** 同桶跨用户读需把请求方 userId 透传至 downloadWebHistoryImageReference 做 key 前缀校验（需改 WebImageParams 多层热路径，高回归风险，留待专项）。
 
-剩余 medium/low 安全、可维护性（含 service.ts 5310 行 / create-page-client.tsx 9233 行上帝组件重构）、覆盖率缺口（runImageGenerationForUser 扣费编排、credits/core.ts、epay 验签等）共 100+ 条：见审计报告，属多轮迭代工作，未在本轮完成。
+## 阶段 B/D 修复 workflow 结果（2026-05-31，已完成）
 
-## 阶段 D 补单测：进行中
+授权："workflow 修复全部问题"。结构：梳理（按文件连通分量切分、排除已修 4 条 + defer 上帝组件）→ 并行修复（15 单元各改自己文件 + 补 DB-free 测试）→ 验证（typecheck+test，有界 repair）。
 
-- [x] 新增 roles.test.ts(5) + web-history-references.test.ts(3)，随对应修复落地。
-- [ ] 核心金融逻辑（credits/core.ts、runImageGenerationForUser 结算、epay 验签）抽纯函数 + DB-free 单测：见审计 coverage 高危项，待做。
+- **切分**：可修复单元 15、defer 4。
+- **已修确认项 94 条；未修 23 条**（均带理由，详见审计报告与下方 backlog）。
+- **终验全绿**（本机独立复跑）：typecheck shared+web 通过；test shared 25 文件/235 + web 33 文件/257 = **492 通过**（修复前 179，净增 +313）。
+- **dev 提交（9 个主题组）**：0babd1f 封禁会话+回调SSRF / 80b1d8b 存储越权 / d2a51f4 限流fail-open+可信代理 / d41c5c3 moderate恒定时间 / 7102b12 注册冷却+验证状态机 / 4fdd24a external-api覆盖 / c58f6d2 支付覆盖 / d6b804b 订阅+系统设置覆盖 / 01906e0 生成/任务/会话/上传覆盖。
+
+### 未修 backlog（23 条，需跨文件重构 / DB 迁移 / 改既有支付鉴权行为，超"小修不破坏行为"边界）
+
+- **C-H2** operations.ts 鉴权/数量/上下文门闩抽 validateGenerationRequest：门闩交织在 1100 行 runQueuedImageGenerationForUser，干净抽取需重排序、对计费/授权管线回归风险高。
+- **C-M5/C-H3 DB 部分** reserveExternalApiKeyCredits 原子 UPDATE 0 行的 DB-path 集成断言未补（纯函数已测）。
+- **S-M11** Creem 不校验实付金额/币种：单位/币种不一致，硬校验会误拒真实支付，需先对齐 Creem 产品价配置（security-audit-2026-05.md A11 已记录团队推迟）。
+- **S-L1** consumeCredits 幂等按 userId 归属：需改财务核心查询 + 改偏唯一索引 DB 迁移。
+- **S-L7** generations 桶 session/属主鉴权：行为性改动，落地前须 UI 实测以免破坏全站图片渲染/外链/og:image。
+- **M-H5 残留** admin/layout.tsx 集中守卫：需新建 layout（载荷部分已由 canActOnTargetRole 实现，本次仅补会话删除）。
+- **M-M7/M-M10/M-M15/M-M16/M-M17/M-L8/M-L11/M-L12/M-L16/M-M24/M-M27/M-L25/M-M28/S-M8/S-L2/C-M33/C-L23/C-L38** 等：均为跨 unit DRY 合并、新增共享模块、改公共签名或缓存失效机制，属中等以上重构，按小修原则未做（详见审计报告与 workflow fixSummary.unfixed）。
+
+### Defer（4 个上帝组件，结构性拆分，需人在环专项 + 重新 UI 实测）
+
+- **M-H7** create-page-client.tsx 9233 行（CreatePageClient ~7480 行，含已实测 #15/#16）+ create-runtime-store.tsx / reference-handoff.ts / waterfall-warning-popup.tsx。用户已点名 defer。
+- **M-H2** image-backend-pool/service.ts 5310 行（7+ 职责）+ actions.ts / scheduler-selection.test.ts / nested-groups.ts。用户已点名 defer。
+- **M-H3** image-backend-pool/admin-panel.tsx 4350 行 client 上帝组件（25+ useState）。
+- **M-M23** system-settings-panel.tsx 1825 行巨型 'use client'。
+
+## 阶段 D 补单测：已完成（随修复 workflow 落地）
+
+- [x] 早期：roles.test.ts(5) + web-history-references.test.ts(3)。
+- [x] workflow：external-api(quota-math/auth-token/models/resolution/chat-completions-utils)、payment(creem 16/epay 18/epay-fulfillment 6/subscription-upgrade 8)、subscription(user-plan 状态机/upload-limits/plan-capabilities)、system-settings(env-file/index/defaults)、moderation(risk/index/proxy-secret)、auth(roles 矩阵/email-domain/registration-core/role-server)、storage(utils/local/providers/route)、generation(settlement/maintenance/queue/batch-runner/streaming)、session-current-core、scheduled-jobs-response、upload validation、credits/packages 等，合计 shared 235 + web 257 = 492 通过。
+- [ ] 残留：runImageGenerationForUser 结算门闩（C-H2 validateGenerationRequest）与 reserveExternalApiKeyCredits 的 DB-path 集成断言（C-M5）未抽/未补，见 backlog。
 
 ## 风险与注意
 

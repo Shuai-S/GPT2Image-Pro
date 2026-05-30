@@ -6,7 +6,8 @@
 ## 安全
 
 - [2026-05 安全审计](security-audit-2026-05.md) — 6 维度并发安全审查；高危经济/入侵口子已在 dev 修复（2beb0e0/b69c10b/14a88d8/07d7a18）
-- [2026-05-31 对抗式审计报告](plan/2026-05-31-audit-report.md) — 12子系统x3镜头确认128条(critical1/high27/medium58/low39/info3)；已修 S-C1(系统设置提权 03cc6bd)/S-H5(铸币越权 edbc0d6)/S-H1+H2(历史 SSRF+IDOR f1216df)；剩余高危S-H3/H4/H6/H7+重构+覆盖率见 [测试重构计划](plan/2026-05-31-audit-test-refactor.md)
+- [2026-05-31 对抗式审计报告](plan/2026-05-31-audit-report.md) — 12子系统x3镜头确认128条(critical1/high27/medium58/low39/info3)
+- **2026-05-31 修复 workflow 完成**：先修 S-C1(03cc6bd)/S-H5(edbc0d6)/S-H1+H2(f1216df)；再经 15 单元并行修复 workflow 共修 94 条、未修 23 条、defer 4 个上帝组件；dev 9 主题提交 0babd1f..01906e0(封禁会话/回调SSRF/存储越权/限流fail-open/moderate恒定时间/注册冷却/external-api+支付+订阅+生成覆盖)；终验 typecheck+test 全绿(shared235+web257=492)。未修与 defer backlog 见 [测试重构计划](plan/2026-05-31-audit-test-refactor.md)
 - **#1/#15/#16 浏览器实测通过**（api2 隔离测试栈 2026-05-31，未发现真实 Bug；积分首屏短暂0为异步发放假象自愈）
 - [待办清单](TODO.md) — 仍存在的代码层问题 + 部署前必做
 
