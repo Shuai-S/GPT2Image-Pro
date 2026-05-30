@@ -39,6 +39,8 @@ yarn-error.log*
 # local operational notes and captures
 MEMORY.md
 **/MEMORY.md
+# docs/MEMORY.md 是所有贡献者 Agent 的共享长期记忆，需纳入版本管理（豁免上面的忽略规则）
+!docs/MEMORY.md
 *.har
 rollout-*.jsonl
 .gpt2image/
