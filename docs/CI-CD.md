@@ -16,16 +16,19 @@
 
 并行运行，各自在 PR 的 Checks 面板独立显示，便于设为「必须通过」。
 
-1. **docs-mirror**：断言 `CLAUDE.md` 与 `AGENTS.md` 逐字一致（镜像文件约束）。秒级、免依赖。
-2. **lint（仅改动文件）**：用仓库锁定的 Biome 2.3.11，对本次 PR/push **触及的文件**执行 `biome ci --changed --since=<base>`（lint + 格式 + import 排序）。
-   - **为何只查改动文件**：仓库历史代码尚未全量 biome 格式化（全仓 `biome ci` 有 300+ 格式告警）。改动文件门禁既强约束新代码，又不强迫一次性全仓重排。
+1. **docs-mirror**（push + PR）：断言 `CLAUDE.md` 与 `AGENTS.md` 逐字一致（镜像文件约束）。秒级、免依赖。
+2. **lint（仅 PR、仅改动文件）**：用仓库锁定的 Biome 2.3.11，对本次 **PR 触及的文件**执行 `biome lint --changed --since=<base.sha>`。
+   - **为何用 `biome lint` 而非 `biome ci`**：仓库历史代码从未全量 biome 格式化（全仓 `biome ci` 有 300+ 格式报错），团队既有约定 `turbo lint` 即 `biome lint`。强制格式会误伤大量历史文件，故只查 lint 规则、不查格式。
+   - **为何只在 PR**：贡献者门禁的精确点是 PR，diff = PR 相对目标分支的净改动（小而准）。push（尤其合并提交）改动集巨大，会把所触碰文件里的历史 lint 债一并暴露，造成无关失败。
+   - **退出码**：有 lint 错误（如 `noExplicitAny` / `noUnusedImports`）即失败；告警级规则（如 `noNonNullAssertion: warn`）不阻断（与本地 `biome lint` 一致）。
    - 纯文档 PR（无 JS/TS 改动）→ `Checked 0 files` → 通过。
-3. **typecheck**：`pnpm turbo typecheck`（全仓 strict `tsc --noEmit`）。当前全绿，硬性强制。
-4. **test**：`pnpm turbo test`（全仓 vitest，DB-free）。覆盖积分/扣费/幂等/API 等核心逻辑。
-5. **build**：`pnpm turbo build --filter=@repo/web`（Next standalone 生产构建，含整体类型与编译校验）。环境变量为占位值，与 `Dockerfile.web` 的 build-args 一致；**不设 `NODE_ENV=production`**（否则 pnpm 跳过 devDependencies 导致构建失败）。
+3. **typecheck**（push + PR）：先 `pnpm --filter @repo/web exec fumadocs-mdx` 生成 Fumadocs 的 `.source`（被 .gitignore 忽略、平时由 `next dev/build` 的 createMDX 产出；独立 `tsc` 不会触发，缺失会引发 `src/lib/source.ts` 找不到 `.source/server` 的连锁 any 报错），再 `pnpm turbo typecheck`（全仓 strict `tsc --noEmit`）。
+4. **test**（push + PR）：`pnpm turbo test`（全仓 vitest，DB-free）。覆盖积分/扣费/幂等/API 等核心逻辑。
+5. **build**（push + PR）：`pnpm turbo build --filter=@repo/web`（Next standalone 生产构建，`next build` 会自行生成 `.source`）。环境变量为占位值，与 `Dockerfile.web` 的 build-args 一致；**不设 `NODE_ENV=production`**（否则 pnpm 跳过 devDependencies 导致构建失败）。
 6. **docker-build（仅 PR）**：用 `Dockerfile.web` 实打实构建 web 镜像但**不推送**，验证多阶段 Dockerfile（turbo prune → install → build → standalone）未损坏。在前 4 个 job 通过后才跑（`needs`），gha 缓存加速。
 
-> 风格门禁的有效性已本地验证：含 `noExplicitAny` 的改动文件会令 `lint` job 失败（EXIT≠0）；纯文档改动通过。
+> 门禁有效性已本地验证：`biome lint --changed` 对含 `noExplicitAny` 的改动文件失败（EXIT≠0），对仅含 `noNonNullAssertion` 告警的文件通过；纯文档改动 `Checked 0 files` 通过。
+> 首次推送（2026-05-30）经 CI 实跑修正：typecheck 因缺 `.source` 失败 → 增生成步骤；lint 原用 `biome ci`（含格式）在大合并改动集上暴露 300+ 历史格式债 → 改 `biome lint` 且仅 PR。
 
 ## docker-release.yml —— 发布（tag 触发）
 

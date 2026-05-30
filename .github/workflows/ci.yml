@@ -57,12 +57,19 @@ jobs:
           echo "OK：CLAUDE.md 与 AGENTS.md 一致。"
 
   # ───────────────────────────────────────────────────────────────────────────
-  # 2) 代码风格 / Lint（仅改动文件）：Biome 对本次 PR/push 触及的文件执行
-  #    lint + 格式 + import 排序检查（biome ci）。新代码必须达标，历史文件不受牵连。
-  # ───────────────────────────────────────────────────────────────────────────
+  # 2) 代码风格 / Lint（仅 PR、仅改动文件）：Biome 对本次 PR 触及的文件执行 lint。
+  #
+  #    设计取舍（均经验证，见 docs/CI-CD.md）：
+  #    - 用 `biome lint`（仅 lint）而非 `biome ci`（lint + 格式 + import 排序）：
+  #      本仓库历史代码从未做过全仓 biome 格式化（全仓 `biome ci` 有 300+ 格式报错），
+  #      团队既有约定 `turbo lint` 即 `biome lint`。强制格式会误伤大量历史文件。
+  #    - 仅在 `pull_request` 触发：贡献者门禁的精确位置是 PR，diff = PR 相对目标分支的净改动（小而准）。
+  #      push（尤其合并提交）的改动集巨大，会把所触碰文件里的历史 lint 债一并暴露，造成无关失败。
+  #      类型/测试/构建仍在 push+PR 双跑以保证主干常绿。
   lint:
     name: Lint & format (changed files)
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
     steps:
       # fetch-depth: 0 拉取完整历史，否则 --since 的基准提交可能不在浅克隆里。
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5（钉 SHA 防 tag 重指向；dependabot 维护）
@@ -71,33 +78,25 @@ jobs:
 
       - uses: ./.github/actions/setup
 
-      # 计算 diff 基准 SHA：PR 用目标分支的 base.sha；push 用上一个提交 before。
-      # 首次推送（before 全 0）时无基准，跳过本检查（SKIP=1）。
+      # PR 场景的 diff 基准即目标分支的 base.sha（GitHub 保证存在且可达）。
       - name: Resolve diff base
         id: base
-        run: |
-          BASE="${{ github.event.pull_request.base.sha }}"
-          if [ -z "$BASE" ]; then BASE="${{ github.event.before }}"; fi
-          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
-            echo "无 diff 基准（新分支首推），跳过改动文件风格检查。"
-            echo "skip=1" >> "$GITHUB_OUTPUT"
-          else
-            echo "base=$BASE" >> "$GITHUB_OUTPUT"
-          fi
+        run: echo "base=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
 
       # 直接调用仓库锁定的 Biome 版本（apps/web 的依赖，2.3.11），cwd=仓库根，
-      # 保证与开发者本地完全同款行为；--changed 仅查相对 base 改动的文件。
+      # 保证与开发者本地 `biome lint` 完全同款行为；--changed 仅查相对 base 改动的文件。
       # --no-errors-on-unmatched：纯文档类 PR（无 JS/TS 改动）不应判失败。
-      - name: Biome CI (changed files only)
-        if: steps.base.outputs.skip != '1'
+      # 退出码：有 lint 错误（如 noExplicitAny / noUnusedImports）即失败；
+      #         告警级规则（如 noNonNullAssertion=warn）不阻断（与本地一致）。
+      - name: Biome lint (changed files only)
         run: |
-          ./apps/web/node_modules/.bin/biome ci \
+          ./apps/web/node_modules/.bin/biome lint \
             --changed --since="${{ steps.base.outputs.base }}" \
             --no-errors-on-unmatched \
             .
 
   # ───────────────────────────────────────────────────────────────────────────
-  # 3) 类型检查（鲁棒性）：全仓 strict tsc --noEmit。仓库当前已全绿，硬性强制。
+  # 3) 类型检查（鲁棒性）：全仓 strict tsc --noEmit。
   # ───────────────────────────────────────────────────────────────────────────
   typecheck:
     name: Typecheck
@@ -105,6 +104,11 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5（钉 SHA 防 tag 重指向；dependabot 维护）
       - uses: ./.github/actions/setup
+      # 生成 Fumadocs 的 `.source`（.gitignore 忽略、由 createMDX 在 next build/dev 时产出）。
+      # 独立 `tsc --noEmit` 不会触发该产出，缺失会导致 src/lib/source.ts 找不到 ../../.source/server，
+      # 引发一连串隐式 any 报错。build 任务走 next build 会自生成，故仅 typecheck 需要这一步。
+      - name: Generate Fumadocs source
+        run: pnpm --filter @repo/web exec fumadocs-mdx
       - run: pnpm turbo typecheck
 
   # ───────────────────────────────────────────────────────────────────────────
