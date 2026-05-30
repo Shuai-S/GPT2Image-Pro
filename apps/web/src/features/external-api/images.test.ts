@@ -293,6 +293,27 @@ describe("external API error classification", () => {
     });
   });
 
+  it("maps safety refusals to content policy violations", () => {
+    expect(
+      toOpenAIErrorPayload(
+        "I’m sorry, but the edit request couldn’t be completed because the referenced image was flagged by the safety system."
+      ).error
+    ).toMatchObject({
+      type: "invalid_request_error",
+      code: "content_policy_violation",
+      status: 400,
+    });
+
+    expect(
+      toOpenAIErrorPayload("抱歉，我不能协助对这张包含露骨性内容的漫画进行上色。")
+        .error
+    ).toMatchObject({
+      type: "invalid_request_error",
+      code: "content_policy_violation",
+      status: 400,
+    });
+  });
+
   it("maps unavailable backend pool errors to service unavailable", () => {
     expect(
       toOpenAIErrorPayload("当前生图后端分组没有可用账号或 API").error

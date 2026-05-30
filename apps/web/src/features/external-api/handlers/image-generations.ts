@@ -22,6 +22,7 @@ import {
   getExternalFinalImageOutputs,
   getImageBase64,
   getPublicImageUrl,
+  IMAGE_JSON_KEEP_ALIVE_INITIAL_WAIT_MS,
   openAIImageError,
   toOpenAIErrorPayload,
   toOpenAIImagesResponse,
@@ -355,26 +356,29 @@ export const postExternalImageGenerations = withApiLogging(
       return Response.json(toAsyncImageTaskResponse(task));
     }
 
-    return createJsonKeepAliveResponse(async () => {
-      const created = Math.floor(Date.now() / 1000);
+    return createJsonKeepAliveResponse(
+      async () => {
+        const created = Math.floor(Date.now() / 1000);
 
-      const results = await runBatchImageGeneration({
-        count,
-        concurrency: limits.imageGenerationConcurrency,
-        run: () => runImageGenerationForUser(input),
-      });
-      return await toOpenAIImagesResponse(
-        request,
-        results,
-        responseFormat,
-        created,
-        {
-          route: "/v1/images/generations",
-          stream: false,
-          model: imageModel,
-          size: input.size,
-        }
-      );
-    });
+        const results = await runBatchImageGeneration({
+          count,
+          concurrency: limits.imageGenerationConcurrency,
+          run: () => runImageGenerationForUser(input),
+        });
+        return await toOpenAIImagesResponse(
+          request,
+          results,
+          responseFormat,
+          created,
+          {
+            route: "/v1/images/generations",
+            stream: false,
+            model: imageModel,
+            size: input.size,
+          }
+        );
+      },
+      { initialWaitMs: IMAGE_JSON_KEEP_ALIVE_INITIAL_WAIT_MS }
+    );
   }
 );

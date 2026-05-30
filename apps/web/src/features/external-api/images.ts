@@ -46,6 +46,8 @@ const DEFAULT_JSON_KEEP_ALIVE_INITIAL_WAIT_MS = 2_000;
 const DEFAULT_JSON_KEEP_ALIVE_INTERVAL_MS = 10_000;
 const JSON_KEEP_ALIVE_PADDING = `${" ".repeat(2048)}\n`;
 
+export const IMAGE_JSON_KEEP_ALIVE_INITIAL_WAIT_MS = 80_000;
+
 function getRequestBaseUrl(request: Request) {
   return (
     process.env.NEXT_PUBLIC_APP_URL ||
@@ -426,7 +428,16 @@ function classifyExternalApiError(message: string) {
 
   if (
     normalized.includes("content failed moderation") ||
-    normalized.includes("content blocked")
+    normalized.includes("content blocked") ||
+    normalized.includes("content policy") ||
+    normalized.includes("safety system") ||
+    normalized.includes("flagged by the safety") ||
+    normalized.includes("未能通过安全") ||
+    normalized.includes("安全系统") ||
+    normalized.includes("露骨") ||
+    normalized.includes("成人性") ||
+    normalized.includes("不能帮助") ||
+    normalized.includes("不能协助")
   ) {
     return {
       type: "invalid_request_error",
