@@ -64,6 +64,11 @@ import {
   useCreateRuntimeState,
 } from "@/features/image-generation/create-runtime-store";
 import {
+  hasSeenWaterfallFirstTimeWarning,
+  WaterfallWarningPopup,
+  type WaterfallWarningType,
+} from "@/features/image-generation/components/waterfall-warning-popup";
+import {
   consumePendingReferenceHandoff,
   normalizeReferenceFetchUrl,
   type ReferenceHandoffMode,
@@ -974,8 +979,12 @@ const IMAGE_ASPECT_RATIOS: Array<{
   { value: "21:9", width: 21, height: 9 },
 ];
 const DEFAULT_BATCH_OPTIONS = [1, 2, 4, 6, 8, 10] as const;
-const WATERFALL_LOAD_SIZE = 5;
-const WATERFALL_MAX_CONCURRENT = WATERFALL_LOAD_SIZE * 3;
+// 瀑布流每批并发预设(对齐原项目 TIER_PRESETS)：tier 决定每批生成张数。
+// 运行时按套餐 imageGenerationConcurrency(单用户并发上限)过滤可选项。
+const WATERFALL_TIER_PRESETS = [1, 5, 10, 20] as const;
+const DEFAULT_WATERFALL_TIER = 5;
+// 单批最大并发 = tier * 该倍数(再与套餐并发上限取 min 兜底)，对齐原项目 maxConcurrent = tier * 3。
+const WATERFALL_CONCURRENCY_MULTIPLIER = 3;
 const CHAT_MODEL_OPTIONS: Array<{
   value: ChatModel;
   label: string;
@@ -1954,6 +1963,45 @@ export function CreatePageClient({
       success: 0,
       failed: 0,
     });
+  // 瀑布流“每批并发张数”(tier)：对齐原项目 TIER。瀑布流每张卡片是独立 count=1 请求，
+  // 故真正的并发硬上限是套餐 imageGenerationConcurrency(队列 userConcurrency 实际钳制的值)，
+  // 与“单次请求张数上限 maxBatchCount”无关，因此 tier 仅受 imageGenerationConcurrency 约束。
+  const [waterfallTier, setWaterfallTier] = useCreateRuntimeState(
+    "waterfallTier",
+    DEFAULT_WATERFALL_TIER
+  );
+  // 瀑布流警告弹窗状态：null 表示无弹窗；承载 type/tier/count。
+  const [waterfallWarning, setWaterfallWarning] = useCreateRuntimeState<{
+    type: WaterfallWarningType;
+    tier: number;
+    count: number;
+  } | null>("waterfallWarning", null);
+  // tier 允许上限 = 套餐单用户并发上限(至少 1)
+  const waterfallTierLimit = Math.max(
+    1,
+    capabilities.limits.imageGenerationConcurrency
+  );
+  // 可选 tier：预设中不超过套餐上限者；若全部超限则保底 [1]
+  const waterfallTierOptions = (() => {
+    const filtered = WATERFALL_TIER_PRESETS.filter(
+      (value) => value <= waterfallTierLimit
+    );
+    return filtered.length > 0 ? filtered : [1];
+  })();
+  // 实际生效 tier：钳制到允许上限
+  const effectiveWaterfallTier = Math.max(
+    1,
+    Math.min(waterfallTier, waterfallTierLimit)
+  );
+  // 每批载入张数 = tier；单批最大并发 = tier * 倍数，再与套餐并发上限取 min 兜底
+  const waterfallLoadSize = effectiveWaterfallTier;
+  const waterfallMaxConcurrent = Math.max(
+    1,
+    Math.min(
+      effectiveWaterfallTier * WATERFALL_CONCURRENCY_MULTIPLIER,
+      waterfallTierLimit
+    )
+  );
   const [chatModel, setChatModel] = useCreateRuntimeState<ChatModel>(
     "chatModel",
     GPT54_CHAT_MODEL
@@ -2036,7 +2084,9 @@ export function CreatePageClient({
     setBatchCount((value) => Math.min(value, maxBatchCount));
     setLineBatchRepeatCount((value) => Math.min(value, maxBatchCount));
     setEditBatchCount((value) => Math.min(value, maxBatchCount));
-  }, [maxBatchCount]);
+    // 瀑布流 tier 也钳制到当前套餐允许上限(套餐切换/管理员调整并发时收紧)
+    setWaterfallTier((value) => Math.max(1, Math.min(value, waterfallTierLimit)));
+  }, [maxBatchCount, waterfallTierLimit]);
 
   useEffect(() => {
     const parseReferenceMode = (
@@ -2354,6 +2404,21 @@ export function CreatePageClient({
   const batchAbortControllersRef = useCreateRuntimeRef<
     Map<string, AbortController>
   >("batchAbortControllersRef", () => new Map());
+  // 里程碑警告期间阻塞自动续批；用户确认后解除并恢复生成
+  const warningBlockRef = useCreateRuntimeRef("waterfallWarningBlockRef", false);
+  // 本会话累计“已发起”的瀑布流张数，用于跨越里程碑阈值判断
+  const sessionCountRef = useCreateRuntimeRef("waterfallSessionCountRef", 0);
+  // 已展示过的里程碑阈值集合，避免同一阈值重复弹窗
+  const milestoneShownRef = useCreateRuntimeRef<Set<number>>(
+    "waterfallMilestoneShownRef",
+    () => new Set<number>()
+  );
+  // 跟踪最新的单批最大并发(供 IntersectionObserver 闭包读取最新值，避免依赖数组过期)
+  const waterfallMaxConcurrentRef = useCreateRuntimeRef(
+    "waterfallMaxConcurrentRef",
+    waterfallMaxConcurrent
+  );
+  waterfallMaxConcurrentRef.current = waterfallMaxConcurrent;
   const triggerBatchGenerationRef = useRef<
     ((options?: { retryCardId?: string }) => Promise<void>) | null
   >(null);
@@ -2371,6 +2436,25 @@ export function CreatePageClient({
       isCreatePageMountedRef.current = false;
     };
   }, []);
+  // 首次进入瀑布流模式且从未看过提示时，弹出 first-time 额度消耗警告。
+  // 用 activeMode 作触发条件(瀑布流是 Tab 之一而非独立页面)，避免打扰其它模式用户。
+  // 已弹窗(waterfallWarning 非空)或已看过(localStorage)时早退，不会重复弹。
+  useEffect(() => {
+    if (activeMode !== "waterfall") {
+      return;
+    }
+    if (waterfallWarning) {
+      return;
+    }
+    if (hasSeenWaterfallFirstTimeWarning()) {
+      return;
+    }
+    setWaterfallWarning({
+      type: "first-time",
+      tier: effectiveWaterfallTier,
+      count: 0,
+    });
+  }, [activeMode, waterfallWarning, effectiveWaterfallTier]);
   const hasChatImageAttachments = chatImageAttachmentCount > 0;
   const textSizeDialogValue = useMemo(
     () => ({
@@ -5243,6 +5327,8 @@ export function CreatePageClient({
 
   const triggerBatchGeneration = async (options?: { retryCardId?: string }) => {
     if (batchStoppedRef.current && !options?.retryCardId) return;
+    // 里程碑警告期间阻塞自动续批(单卡 retry 不受影响)，待用户确认后解除
+    if (warningBlockRef.current && !options?.retryCardId) return;
     const currentPrompt = (batchPromptRef.current || batchPrompt).trim();
     if (!currentPrompt) return;
     if (hasPromptImageReference(currentPrompt)) {
@@ -5273,11 +5359,34 @@ export function CreatePageClient({
     }));
     if (!validateChatAttachments(attachments)) return;
 
-    const requestCount = options?.retryCardId ? 1 : WATERFALL_LOAD_SIZE;
-    const available = WATERFALL_MAX_CONCURRENT - batchActiveRequestsRef.current;
+    const requestCount = options?.retryCardId ? 1 : waterfallLoadSize;
+    const available = waterfallMaxConcurrent - batchActiveRequestsRef.current;
     const loadSize = Math.min(requestCount, Math.max(available, 0));
     if (loadSize <= 0) return;
     if (batchStoppedRef.current && !options?.retryCardId) return;
+
+    // 里程碑阈值检测：仅对自动续批(非 retry)生效。当本会话累计生成数跨越
+    // [tier*10, tier*100, tier*1000] 中某个未展示阈值时，弹用量提醒并阻塞本批，
+    // 待用户确认后由弹窗 onClose 解除阻塞并续批(对齐原项目)。
+    if (!options?.retryCardId) {
+      const tier = effectiveWaterfallTier;
+      const nextCount = sessionCountRef.current + loadSize;
+      const thresholds = [tier * 10, tier * 100, tier * 1000];
+      for (const threshold of thresholds) {
+        if (
+          sessionCountRef.current < threshold &&
+          nextCount >= threshold &&
+          !milestoneShownRef.current.has(threshold)
+        ) {
+          milestoneShownRef.current.add(threshold);
+          sessionCountRef.current = nextCount;
+          warningBlockRef.current = true;
+          setWaterfallWarning({ type: "milestone", tier, count: nextCount });
+          return;
+        }
+      }
+      sessionCountRef.current = nextCount;
+    }
 
     const creditsPerRequest = applyBillingMultiplier(
       getPricedImageCreditCost(
@@ -5459,6 +5568,10 @@ export function CreatePageClient({
     batchAbortControllersRef.current.clear();
     batchLoadingMoreRef.current = false;
     batchStoppedRef.current = false;
+    // 新会话：重置里程碑计数/已展示阈值/阻塞标记，避免跨会话残留
+    sessionCountRef.current = 0;
+    milestoneShownRef.current = new Set<number>();
+    warningBlockRef.current = false;
     setBatchCards([]);
     setWaterfallCreditsConsumed(0);
     setWaterfallStats({ sent: 0, success: 0, failed: 0 });
@@ -5503,6 +5616,11 @@ export function CreatePageClient({
     batchAbortControllersRef.current.clear();
     batchActiveRequestsRef.current = 0;
     batchLoadingMoreRef.current = false;
+    // 清空瀑布流：一并重置里程碑计数/阈值/阻塞，并关闭可能驻留的警告弹窗
+    sessionCountRef.current = 0;
+    milestoneShownRef.current = new Set<number>();
+    warningBlockRef.current = false;
+    setWaterfallWarning(null);
     setBatchCards([]);
     setWaterfallCreditsConsumed(0);
     setWaterfallStats({ sent: 0, success: 0, failed: 0 });
@@ -5525,7 +5643,8 @@ export function CreatePageClient({
         if (!entries[0]?.isIntersecting) return;
         if (!batchPromptRef.current || batchLoadingMoreRef.current) return;
         if (batchStoppedRef.current) return;
-        if (batchActiveRequestsRef.current >= WATERFALL_MAX_CONCURRENT) return;
+        if (batchActiveRequestsRef.current >= waterfallMaxConcurrentRef.current)
+          return;
         const triggerGeneration = triggerBatchGenerationRef.current;
         if (!triggerGeneration) return;
         batchLoadingMoreRef.current = true;
@@ -8436,6 +8555,78 @@ export function CreatePageClient({
                   onChange: setChatThinking,
                   compact: true,
                 })}
+                {/* 每批并发张数(tier)：对齐原项目 TIER，可选项受套餐并发上限约束 */}
+                <Select
+                  value={String(effectiveWaterfallTier)}
+                  onValueChange={(value) => setWaterfallTier(Number(value))}
+                  disabled={isBatchActive}
+                >
+                  <SelectTrigger
+                    id="waterfall-tier"
+                    className="h-8 w-auto gap-1"
+                    title={copy(
+                      "Images per batch (concurrency)",
+                      "每批生成张数(并发)"
+                    )}
+                  >
+                    <span className="text-xs text-muted-foreground">
+                      {copy("Batch", "每批")}
+                    </span>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {waterfallTierOptions.map((value) => (
+                      <SelectItem key={value} value={String(value)}>
+                        {value}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {/* 质量：复用 quality 状态(瀑布流请求已发送该参数)，Web-only 后端不支持故隐藏 */}
+                {!isWebOnlyBackend && (
+                  <Select
+                    value={quality}
+                    onValueChange={(value) => setQuality(value as ImageQuality)}
+                    disabled={isBatchActive || disableResponsesOnlyControls}
+                  >
+                    <SelectTrigger
+                      id="waterfall-quality"
+                      className="h-8 w-auto gap-1"
+                      title={copy("Image quality", "图像质量")}
+                    >
+                      <span className="text-xs text-muted-foreground">
+                        {copy("Quality", "质量")}
+                      </span>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {QUALITY_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {qualityLabel(option.value)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                {/* 尺寸：复用既有 chat 尺寸弹窗(与 getBatchFallbackSize 同源)，运行中禁用避免批次中途变更 */}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  disabled={isBatchActive}
+                  onClick={() => setChatSizeDialogOpen(true)}
+                  title={copy("Set image size", "设置图像尺寸")}
+                >
+                  {copy("Size", "尺寸")}：
+                  {hasChatImageAttachments
+                    ? useAutoChatEditSize
+                      ? autoSizeLabel
+                      : chatCustomEditSize
+                    : useAutoSize
+                      ? autoSizeLabel
+                      : size}
+                </Button>
                 {!isWebOnlyBackend && (
                   <div
                     className={chatMixWebFirstActive ? "opacity-55" : ""}
@@ -8996,6 +9187,23 @@ export function CreatePageClient({
           }
         }}
       />
+      {waterfallWarning && (
+        <WaterfallWarningPopup
+          type={waterfallWarning.type}
+          tier={waterfallWarning.tier}
+          count={waterfallWarning.count}
+          copy={copy}
+          onClose={() => {
+            // 里程碑警告确认后：解除阻塞并恢复自动续批；首次提示关闭仅落标记不续批
+            const wasMilestoneBlock = warningBlockRef.current;
+            setWaterfallWarning(null);
+            if (wasMilestoneBlock) {
+              warningBlockRef.current = false;
+              void triggerBatchGeneration();
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
