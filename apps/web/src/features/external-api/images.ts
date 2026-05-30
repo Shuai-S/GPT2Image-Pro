@@ -1,4 +1,6 @@
+import { logWarn } from "@repo/shared/logger";
 import type { ImageGenerationOperationResult } from "@/features/image-generation/operations";
+import type { GeneratedImageOutput } from "@/features/image-generation/types";
 
 type OpenAIImageData = {
   url?: string;
@@ -26,6 +28,11 @@ type StorageImageReference = {
   bucket: string;
   key: string;
 };
+
+export type ExternalFinalImageOutput = Pick<
+  GeneratedImageOutput,
+  "imageUrl" | "imageBase64" | "revisedPrompt" | "generationId" | "outputRole"
+>;
 
 export type ExternalApiErrorOptions = {
   type?: string;
@@ -125,13 +132,17 @@ export async function getImageBase64(request: Request, imageUrl?: string) {
 
 export async function toOpenAIImageData(
   request: Request,
-  result: ImageGenerationOperationResult,
+  result: Pick<
+    ImageGenerationOperationResult,
+    "imageUrl" | "revisedPrompt"
+  > & { imageBase64?: string },
   responseFormat: "url" | "b64_json"
 ): Promise<OpenAIImageData> {
   const data: OpenAIImageData = {};
 
   if (responseFormat === "b64_json") {
-    data.b64_json = await getImageBase64(request, result.imageUrl);
+    data.b64_json =
+      result.imageBase64 || (await getImageBase64(request, result.imageUrl));
   } else {
     data.url = getPublicImageUrl(request, result.imageUrl);
   }
@@ -141,6 +152,48 @@ export async function toOpenAIImageData(
   }
 
   return data;
+}
+
+export function getExternalFinalImageOutputs(
+  result: Pick<
+    ImageGenerationOperationResult,
+    "imageUrl" | "imageOutputs" | "revisedPrompt" | "generationId"
+  >
+): ExternalFinalImageOutput[] {
+  const outputs = (result.imageOutputs || []).filter(
+    (output) => output.imageUrl || output.imageBase64
+  );
+  const choices = outputs.filter((output) => output.outputRole === "choice");
+  if (choices.length > 0) return choices;
+
+  const finals = outputs.filter((output) => output.outputRole === "final");
+  if (finals.length > 0) return finals;
+
+  const nonDrafts = outputs.filter(
+    (output) => output.outputRole !== "agent_draft"
+  );
+  if (nonDrafts.length > 0) {
+    const last = nonDrafts[nonDrafts.length - 1]!;
+    return [{ ...last, outputRole: last.outputRole || "final" }];
+  }
+
+  if (result.imageUrl) {
+    return [
+      {
+        imageUrl: result.imageUrl,
+        revisedPrompt: result.revisedPrompt,
+        generationId: result.generationId,
+        outputRole: "final",
+      },
+    ];
+  }
+
+  if (outputs.length > 0) {
+    const last = outputs[outputs.length - 1]!;
+    return [{ ...last, outputRole: "final" }];
+  }
+
+  return [];
 }
 
 export async function toOpenAIImagesResponse(
@@ -158,22 +211,19 @@ export async function toOpenAIImagesResponse(
         creditsConsumed: result.creditsConsumed,
       });
     }
-    if (result.imageOutputs?.length) {
-      for (const output of result.imageOutputs) {
-        data.push(
-          await toOpenAIImageData(
-            request,
-            {
-              ...result,
-              imageUrl: output.imageUrl,
-              revisedPrompt: output.revisedPrompt || result.revisedPrompt,
-            },
-            responseFormat
-          )
-        );
-      }
-    } else {
-      data.push(await toOpenAIImageData(request, result, responseFormat));
+    const outputs = getExternalFinalImageOutputs(result);
+    for (const output of outputs) {
+      data.push(
+        await toOpenAIImageData(
+          request,
+          {
+            imageBase64: output.imageBase64,
+            imageUrl: output.imageUrl,
+            revisedPrompt: output.revisedPrompt || result.revisedPrompt,
+          },
+          responseFormat
+        )
+      );
     }
   }
 
@@ -467,6 +517,24 @@ export function toOpenAIErrorPayload(
       ? { credits_consumed: creditsConsumed }
       : {}),
   };
+}
+
+export function toLoggedOpenAIErrorPayload(
+  message: string,
+  context: Record<string, unknown>,
+  options?: ExternalApiErrorOptions
+) {
+  const payload = toOpenAIErrorPayload(message, options);
+  logWarn("External API image request failed", {
+    ...context,
+    errorType: payload.error.type,
+    errorCode: payload.error.code,
+    status: payload.error.status,
+    generationId: payload.generation_id,
+    creditsConsumed: payload.credits_consumed,
+    message,
+  });
+  return payload;
 }
 
 function isErrorPayload(data: unknown) {

@@ -19,6 +19,7 @@ import { authenticateExternalApiRequest } from "@/features/external-api/auth";
 import {
   createExternalImageStreamResponse,
   createJsonKeepAliveResponse,
+  getExternalFinalImageOutputs,
   getImageBase64,
   getPublicImageUrl,
   openAIImageError,
@@ -75,14 +76,15 @@ async function toStreamCompletedPayload(
   responseFormat: "url" | "b64_json",
   index: number
 ) {
-  const outputs = result.imageOutputs?.length
-    ? result.imageOutputs
-    : [{ imageUrl: result.imageUrl, revisedPrompt: result.revisedPrompt }];
+  const outputs = getExternalFinalImageOutputs(result);
   const images = [];
   for (const output of outputs) {
     const image =
       responseFormat === "b64_json"
-        ? { b64_json: await getImageBase64(request, output.imageUrl) }
+        ? {
+            b64_json:
+              output.imageBase64 || (await getImageBase64(request, output.imageUrl)),
+          }
         : { url: getPublicImageUrl(request, output.imageUrl) };
     images.push({
       ...image,

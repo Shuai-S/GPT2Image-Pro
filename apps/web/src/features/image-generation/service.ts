@@ -1834,8 +1834,9 @@ function getPayloadError(payload: unknown): string | null {
 function extractImageFromPayload(
   payload: ImageResponsePayload
 ): GenerateImageResult | null {
-  const image = payload.data?.find((item) => item.b64_json || item.url);
-  if (image) {
+  const images = (payload.data || []).filter((item) => item.b64_json || item.url);
+  if (images.length > 0) {
+    const image = images[images.length - 1]!;
     return toGenerateImageResult(image);
   }
 
@@ -2906,16 +2907,20 @@ async function processResponsesEventPayload(
     );
     const result = parseResponsesOutput(completedPayload.output);
     if (result) {
+      const completedImageOutputCount = result.imageOutputs?.length || 0;
       state.completedResult = {
         ...result,
         responseId: completedPayload.id,
         outputItems: completedPayload.output,
         responsesUsage: extractResponsesTokenUsage(completedPayload),
-        imageOutputs: result.imageOutputs || state.fallbackResult?.imageOutputs,
-        imageOutputCount: Math.max(
-          result.imageOutputCount || 0,
-          state.fallbackResult?.imageOutputCount || 0
-        ),
+        imageOutputs:
+          completedImageOutputCount > 0
+            ? result.imageOutputs
+            : state.fallbackResult?.imageOutputs,
+        imageOutputCount:
+          completedImageOutputCount > 0
+            ? completedImageOutputCount
+            : state.fallbackResult?.imageOutputCount,
         responseAgent: state.responseAgent || result.responseAgent,
         agentEvents: mergeAgentEvents(state.agentEvents, result.agentEvents),
       };

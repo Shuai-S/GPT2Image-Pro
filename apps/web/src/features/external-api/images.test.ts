@@ -3,9 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createExternalImageStreamResponse,
   createJsonKeepAliveResponse,
+  getExternalFinalImageOutputs,
   getImageBase64,
   toExternalGenerationUsage,
   toOpenAIErrorPayload,
+  toOpenAIImagesResponse,
 } from "./images";
 
 const storageMocks = vi.hoisted(() => {
@@ -103,6 +105,73 @@ describe("external generation usage payload", () => {
       generationIds: ["gen_1", "gen_2"],
       credits_consumed: 3.28,
     });
+  });
+});
+
+describe("external final image selection", () => {
+  it("returns final outputs instead of agent drafts", async () => {
+    const request = new Request("https://example.com/v1/images/generations");
+
+    const payload = await toOpenAIImagesResponse(
+      request,
+      [
+        {
+          generationId: "gen_1",
+          imageUrl: "/api/storage/generations/final.png",
+          revisedPrompt: "top level prompt",
+          creditsConsumed: 1,
+          imageOutputs: [
+            {
+              imageUrl: "/api/storage/generations/draft.png",
+              revisedPrompt: "draft prompt",
+              outputRole: "agent_draft",
+            },
+            {
+              imageUrl: "/api/storage/generations/final.png",
+              revisedPrompt: "final prompt",
+              outputRole: "final",
+            },
+          ],
+        },
+      ],
+      "url",
+      123
+    );
+
+    expect(payload).toMatchObject({
+      created: 123,
+      data: [
+        {
+          url: "https://example.com/api/storage/generations/final.png",
+          revised_prompt: "final prompt",
+        },
+      ],
+      generation_id: "gen_1",
+      credits_consumed: 1,
+    });
+  });
+
+  it("falls back to the stored primary image when only draft outputs exist", () => {
+    expect(
+      getExternalFinalImageOutputs({
+        generationId: "gen_1",
+        imageUrl: "/api/storage/generations/final.png",
+        revisedPrompt: "final prompt",
+        imageOutputs: [
+          {
+            imageUrl: "/api/storage/generations/draft.png",
+            outputRole: "agent_draft",
+          },
+        ],
+      })
+    ).toEqual([
+      {
+        imageUrl: "/api/storage/generations/final.png",
+        revisedPrompt: "final prompt",
+        generationId: "gen_1",
+        outputRole: "final",
+      },
+    ]);
   });
 });
 
