@@ -173,6 +173,32 @@ describe("external final image selection", () => {
       },
     ]);
   });
+
+  it("returns an error payload when an image result has no final image", async () => {
+    const request = new Request("https://example.com/v1/images/generations");
+
+    const payload = await toOpenAIImagesResponse(
+      request,
+      [
+        {
+          generationId: "gen_text",
+          responseText: "The upstream refused to generate this image.",
+          creditsConsumed: 0,
+        },
+      ],
+      "url",
+      123
+    );
+
+    expect(payload).toMatchObject({
+      error: {
+        message: "The upstream refused to generate this image.",
+        code: "image_generation_failed",
+      },
+      generation_id: "gen_text",
+      credits_consumed: 0,
+    });
+  });
 });
 
 describe("external image base64 loading", () => {

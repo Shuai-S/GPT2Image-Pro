@@ -157,7 +157,12 @@ export async function toOpenAIImageData(
 export function getExternalFinalImageOutputs(
   result: Pick<
     ImageGenerationOperationResult,
-    "imageUrl" | "imageOutputs" | "revisedPrompt" | "generationId"
+    | "imageUrl"
+    | "imageOutputs"
+    | "revisedPrompt"
+    | "generationId"
+    | "responseText"
+    | "responseAgent"
   >
 ): ExternalFinalImageOutput[] {
   const outputs = (result.imageOutputs || []).filter(
@@ -221,6 +226,24 @@ export async function toOpenAIImagesResponse(
       return toOpenAIErrorPayload(result.error, options);
     }
     const outputs = getExternalFinalImageOutputs(result);
+    if (outputs.length === 0) {
+      const message =
+        result.responseText?.trim() ||
+        result.responseAgent?.trim() ||
+        "Image generation completed without an image output";
+      const options = {
+        generationId: result.generationId,
+        creditsConsumed: result.creditsConsumed,
+      };
+      if (logContext) {
+        return toLoggedOpenAIErrorPayload(
+          message,
+          { ...logContext, resultIndex: index },
+          options
+        );
+      }
+      return toOpenAIErrorPayload(message, options);
+    }
     for (const output of outputs) {
       data.push(
         await toOpenAIImageData(

@@ -243,7 +243,10 @@ async function toImageBuffer(result: {
   imageUrl?: string;
 }) {
   if (result.imageBase64) {
-    return Buffer.from(result.imageBase64, "base64");
+    const base64 = result.imageBase64.includes(",")
+      ? result.imageBase64.split(",").pop() || result.imageBase64
+      : result.imageBase64;
+    return Buffer.from(base64, "base64");
   }
 
   if (!result.imageUrl) {
@@ -1730,6 +1733,54 @@ async function runQueuedImageGenerationForUser({
   }
 
   if (!result.imageBase64 && !result.imageUrl) {
+    if (!isChatInput) {
+      const message =
+        result.responseText?.trim() ||
+        result.responseAgent?.trim() ||
+        "Image generation completed without an image output";
+      const failureTargetCredits = getFailedGenerationTargetCredits({
+        reason: "generation_error",
+        moderationFailureCredits,
+        moderationOnlyCredits: creditCost.moderationOnlyCredits,
+      });
+      try {
+        await settleChargedCredits(
+          failureTargetCredits,
+          "content-moderation",
+          `${generationId}:missing-image-output`,
+          `Settle missing image output: ${input.prompt.substring(0, 50)}`,
+          {
+            generationId,
+            creditCost,
+            fullRefund: failureTargetCredits === 0,
+            error: message,
+          }
+        );
+      } catch {
+        /* best effort settlement */
+      }
+      await db
+        .update(generation)
+        .set({
+          status: "failed",
+          error: message,
+          creditsConsumed: chargedCredits,
+          metadata: sql`COALESCE(${generation.metadata}, '{}'::json)::jsonb || ${JSON.stringify(
+            {
+              ...buildResponseOutputMetadata(result),
+              missingImageOutput: true,
+            }
+          )}::jsonb`,
+          completedAt: new Date(),
+        })
+        .where(isPendingGeneration(generationId));
+      return {
+        error: message,
+        generationId,
+        creditsConsumed: chargedCredits,
+      };
+    }
+
     let finalChargedCredits = chargedCredits;
     const textChatRoundCount = isChatInput ? getChatRoundCount(result) : 0;
     const targetChatTextCredits = chatRoundCredits * textChatRoundCount;
