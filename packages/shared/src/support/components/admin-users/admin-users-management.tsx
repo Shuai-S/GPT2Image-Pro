@@ -14,6 +14,7 @@ import {
   Shield,
   Unlock,
   UserCheck,
+  UserPlus,
   Users,
   XCircle,
 } from "lucide-react";
@@ -27,11 +28,14 @@ import {
   adminAdjustCreditsAction,
   adminGrantCreditsAction,
   banUserAction,
+  createUserAction,
   getAllUsersAction,
   getUserDetailAction,
   setExternalApiKeyStatusAction,
   setUserCreditsStatusAction,
+  setUserPasswordAction,
   setUserPlanAction,
+  updateUserProfileAction,
   updateUserRoleAction,
 } from "../../actions/admin-users";
 import { Avatar, AvatarFallback, AvatarImage } from "@repo/ui/components/avatar";
@@ -385,6 +389,28 @@ export function AdminUsersManagement({
   const [roleReason, setRoleReason] = useState("");
   const [isSettingRole, setIsSettingRole] = useState(false);
 
+  // 新增用户 Dialog 状态
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createName, setCreateName] = useState("");
+  const [createEmail, setCreateEmail] = useState("");
+  const [createPassword, setCreatePassword] = useState("");
+  const [createRole, setCreateRole] = useState<AppUserRole>("user");
+  const [createReason, setCreateReason] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
+
+  // 编辑资料 Dialog 状态
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileName, setProfileName] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
+  const [profileReason, setProfileReason] = useState("");
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+
+  // 重设密码 Dialog 状态
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [passwordReason, setPasswordReason] = useState("");
+  const [isSettingPassword, setIsSettingPassword] = useState(false);
+
   const totalPages = Math.max(1, Math.ceil(pagination.total / pagination.pageSize));
   const startIndex =
     pagination.total === 0
@@ -510,6 +536,146 @@ export function AdminUsersManagement({
     setTargetRole(userRow.role);
     setRoleReason("");
     setRoleDialogOpen(true);
+  };
+
+  const openCreateDialog = () => {
+    setCreateName("");
+    setCreateEmail("");
+    setCreatePassword("");
+    setCreateRole("user");
+    setCreateReason("");
+    setCreateOpen(true);
+  };
+
+  const openProfileDialog = (userRow: UserRow) => {
+    setSelectedUser(userRow);
+    setProfileName(userRow.name);
+    setProfileEmail(userRow.email);
+    setProfileReason("");
+    setProfileOpen(true);
+  };
+
+  const openPasswordDialog = (userRow: UserRow) => {
+    setSelectedUser(userRow);
+    setNewPassword("");
+    setPasswordReason("");
+    setPasswordOpen(true);
+  };
+
+  const handleCreateUser = async () => {
+    if (!canManageRoles) {
+      toast.error("只有超管可以创建用户");
+      return;
+    }
+    if (!createName.trim() || !createEmail.trim()) {
+      toast.error("请填写用户名和邮箱");
+      return;
+    }
+    if (createPassword.length < 8) {
+      toast.error("密码至少 8 位");
+      return;
+    }
+    if (!createReason.trim()) {
+      toast.error("请填写操作原因");
+      return;
+    }
+    setIsCreating(true);
+    try {
+      const result = await createUserAction({
+        name: createName.trim(),
+        email: createEmail.trim(),
+        password: createPassword,
+        role: createRole,
+        emailVerified: true,
+        reason: createReason.trim(),
+      });
+      if (result?.data) {
+        toast.success(result.data.message);
+        setCreateOpen(false);
+        await loadUsers(1);
+      } else if (result?.serverError) {
+        toast.error(result.serverError);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "创建用户失败");
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    if (!selectedUser) {
+      return;
+    }
+    if (!canManageRoles) {
+      toast.error("只有超管可以编辑用户资料");
+      return;
+    }
+    if (!profileName.trim() || !profileEmail.trim()) {
+      toast.error("用户名和邮箱不能为空");
+      return;
+    }
+    if (!profileReason.trim()) {
+      toast.error("请填写操作原因");
+      return;
+    }
+    setIsSavingProfile(true);
+    try {
+      const result = await updateUserProfileAction({
+        userId: selectedUser.id,
+        name: profileName.trim(),
+        email: profileEmail.trim(),
+        reason: profileReason.trim(),
+      });
+      if (result?.data) {
+        toast.success(result.data.message);
+        setProfileOpen(false);
+        await reloadCurrent();
+      } else if (result?.serverError) {
+        toast.error(result.serverError);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "保存资料失败");
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
+  const handleSetPassword = async () => {
+    if (!selectedUser) {
+      return;
+    }
+    if (!canManageRoles) {
+      toast.error("只有超管可以重设密码");
+      return;
+    }
+    if (newPassword.length < 8) {
+      toast.error("密码至少 8 位");
+      return;
+    }
+    if (!passwordReason.trim()) {
+      toast.error("请填写操作原因");
+      return;
+    }
+    setIsSettingPassword(true);
+    try {
+      const result = await setUserPasswordAction({
+        userId: selectedUser.id,
+        password: newPassword,
+        reason: passwordReason.trim(),
+      });
+      if (result?.data) {
+        toast.success(result.data.message);
+        setPasswordOpen(false);
+        setNewPassword("");
+      } else if (result?.serverError) {
+        toast.error(result.serverError);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "重设密码失败");
+    } finally {
+      setIsSettingPassword(false);
+    }
   };
 
   const handleSearch = (event: React.FormEvent) => {
@@ -778,10 +944,24 @@ export function AdminUsersManagement({
             查询用户、排查积分和生图问题，并记录关键后台操作。
           </p>
         </div>
-        <Button variant="outline" onClick={() => void reloadCurrent()} disabled={isLoading}>
-          <RefreshCw className={`mr-2 h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-          刷新
-        </Button>
+        <div className="flex items-center gap-2">
+          {canManageRoles ? (
+            <Button onClick={openCreateDialog}>
+              <UserPlus className="mr-2 h-4 w-4" />
+              新增用户
+            </Button>
+          ) : null}
+          <Button
+            variant="outline"
+            onClick={() => void reloadCurrent()}
+            disabled={isLoading}
+          >
+            <RefreshCw
+              className={`mr-2 h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
+            />
+            刷新
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -1123,6 +1303,22 @@ export function AdminUsersManagement({
                                   >
                                     <Shield className="h-4 w-4" />
                                     修改角色
+                                  </DropdownMenuItem>
+                                )}
+                                {canManageRoles && (
+                                  <DropdownMenuItem
+                                    onClick={() => openProfileDialog(item)}
+                                  >
+                                    <UserCheck className="h-4 w-4" />
+                                    编辑资料
+                                  </DropdownMenuItem>
+                                )}
+                                {canManageRoles && (
+                                  <DropdownMenuItem
+                                    onClick={() => openPasswordDialog(item)}
+                                  >
+                                    <KeyRound className="h-4 w-4" />
+                                    重设密码
                                   </DropdownMenuItem>
                                 )}
                                 <DropdownMenuSeparator />
@@ -1881,6 +2077,182 @@ export function AdminUsersManagement({
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : null}
               确认
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>新增用户</DialogTitle>
+            <DialogDescription>
+              手动创建账号并设置初始密码，会写入审计日志。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="createName">用户名</Label>
+              <Input
+                id="createName"
+                value={createName}
+                onChange={(event) => setCreateName(event.target.value)}
+                maxLength={60}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="createEmail">绑定邮箱</Label>
+              <Input
+                id="createEmail"
+                type="email"
+                value={createEmail}
+                onChange={(event) => setCreateEmail(event.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="createPassword">初始密码</Label>
+              <Input
+                id="createPassword"
+                type="password"
+                value={createPassword}
+                onChange={(event) => setCreatePassword(event.target.value)}
+                placeholder="至少 8 位"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="createRole">角色</Label>
+              <Select
+                value={createRole}
+                onValueChange={(value) => setCreateRole(value as AppUserRole)}
+              >
+                <SelectTrigger id="createRole">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ROLE_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="createReason">操作原因</Label>
+              <Textarea
+                id="createReason"
+                value={createReason}
+                onChange={(event) => setCreateReason(event.target.value)}
+                placeholder="例如：为客户代开账号"
+                maxLength={300}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={handleCreateUser} disabled={isCreating}>
+              {isCreating ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
+              确认创建
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>编辑用户资料</DialogTitle>
+            <DialogDescription>
+              修改 {selectedUser?.email ?? "用户"} 的用户名或绑定邮箱，会写入审计日志。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="profileName">用户名</Label>
+              <Input
+                id="profileName"
+                value={profileName}
+                onChange={(event) => setProfileName(event.target.value)}
+                maxLength={60}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="profileEmail">绑定邮箱</Label>
+              <Input
+                id="profileEmail"
+                type="email"
+                value={profileEmail}
+                onChange={(event) => setProfileEmail(event.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="profileReason">操作原因</Label>
+              <Textarea
+                id="profileReason"
+                value={profileReason}
+                onChange={(event) => setProfileReason(event.target.value)}
+                placeholder="请填写资料修改原因"
+                maxLength={300}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setProfileOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={handleSaveProfile} disabled={isSavingProfile}>
+              {isSavingProfile ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
+              保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={passwordOpen} onOpenChange={setPasswordOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>重设密码</DialogTitle>
+            <DialogDescription>
+              为 {selectedUser?.email ?? "用户"} 设置新登录密码，会写入审计日志。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="newPassword">新密码</Label>
+              <Input
+                id="newPassword"
+                type="password"
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                placeholder="至少 8 位"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="passwordReason">操作原因</Label>
+              <Textarea
+                id="passwordReason"
+                value={passwordReason}
+                onChange={(event) => setPasswordReason(event.target.value)}
+                placeholder="请填写密码重设原因"
+                maxLength={300}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPasswordOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={handleSetPassword} disabled={isSettingPassword}>
+              {isSettingPassword ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
+              确认重设
             </Button>
           </DialogFooter>
         </DialogContent>
