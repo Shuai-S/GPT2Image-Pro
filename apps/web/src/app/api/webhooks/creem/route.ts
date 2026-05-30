@@ -18,7 +18,11 @@ import { getRuntimeSettingNumber } from "@repo/shared/system-settings";
 import {
   type CreemCheckoutCompletedData,
   type CreemSubscription,
+  buildSubscriptionPeriodKey,
+  computeSubscriptionCreditsToGrant,
   constructRuntimeCreemEvent,
+  getCreemPeriodDays,
+  isYearlyCreemPeriod,
 } from "@repo/shared/payment/creem";
 import { withApiLogging } from "@repo/shared/api-logger";
 import { logger, logError, logEvent } from "@repo/shared/logger";
@@ -517,7 +521,10 @@ async function grantSubscriptionCredits(
   }
 
   // 幂等性检查：同一订阅 + 同一周期只发放一次积分
-  const periodKey = `${sub.id}:${sub.current_period_start_date}`;
+  const periodKey = buildSubscriptionPeriodKey(
+    sub.id,
+    sub.current_period_start_date
+  );
   const [existingBatch] = await db
     .select({ id: creditsBatch.id })
     .from(creditsBatch)
@@ -548,16 +555,17 @@ async function grantSubscriptionCredits(
     return;
   }
 
-  // 判断是否为年付（通过周期长度判断）
-  const periodStart = new Date(sub.current_period_start_date);
+  // 判断是否为年付（通过周期长度判断），并计算应发放积分
   const periodEnd = new Date(sub.current_period_end_date);
-  const periodDays = Math.round(
-    (periodEnd.getTime() - periodStart.getTime()) / (1000 * 60 * 60 * 24)
+  const periodDays = getCreemPeriodDays(
+    sub.current_period_start_date,
+    sub.current_period_end_date
   );
-  const isYearly = periodDays > 60; // 超过60天认为是年付
-
-  // 计算应发放积分：月付发月度积分，年付发12个月积分
-  const creditsToGrant = isYearly ? monthlyCredits * 12 : monthlyCredits;
+  const isYearly = isYearlyCreemPeriod(periodDays);
+  const creditsToGrant = computeSubscriptionCreditsToGrant(
+    monthlyCredits,
+    isYearly
+  );
 
   const fallbackExpiresAt = await getCreditPackExpiresAt();
   const expiresAt = Number.isNaN(periodEnd.getTime())

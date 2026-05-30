@@ -6,6 +6,7 @@
  */
 
 import crypto from "crypto";
+import { z } from "zod";
 import { getRuntimeSettingString } from "../system-settings";
 
 async function getRuntimeCreemApiKey() {
@@ -138,6 +139,145 @@ export interface CreemCheckoutCompletedData {
   metadata?: Record<string, string>;
   /** 模式 */
   mode?: "test" | "live";
+}
+
+// ============================================
+// Webhook 事件运行时校验（Zod）
+// ============================================
+
+/**
+ * Creem 已知的 Webhook 事件类型。
+ *
+ * 与 CreemWebhookEvent.eventType 保持一致；Creem 新增类型时需同步此处，
+ * 未知类型会在 parseCreemWebhookEvent 处被拒绝并记录，避免静默走错分支。
+ */
+const CREEM_WEBHOOK_EVENT_TYPES = [
+  "checkout.completed",
+  "subscription.active",
+  "subscription.canceled",
+  "subscription.renewed",
+  "subscription.paused",
+  "subscription.past_due",
+  "subscription.paid",
+  "subscription.expired",
+] as const;
+
+/**
+ * Webhook 事件体的运行时 schema。
+ *
+ * WHY：Creem 直接在顶层使用 eventType + object，过去仅以 `as CreemWebhookEvent`
+ * 盲转，Creem 改字段或发未预期事件时类型系统无保护（运行时 undefined 解引用
+ * 或静默走错分支）。此处用 Zod 在验签后做结构校验，违反 CLAUDE.md
+ * “校验一切外部输入优先 Zod”。object 用 passthrough 保留未知字段，仅保证它是对象，
+ * 具体变体字段由各 handler 自行判空读取，避免对 Creem 字段演进过度脆弱。
+ */
+const creemWebhookEventSchema = z
+  .object({
+    id: z.string(),
+    eventType: z.enum(CREEM_WEBHOOK_EVENT_TYPES),
+    object: z.object({}).passthrough(),
+    created_at: z.number(),
+  })
+  .passthrough();
+
+/**
+ * 解析并运行时校验 Webhook 事件体。
+ *
+ * @param payload - 已验签的原始请求体（JSON 字符串）
+ * @returns 结构校验通过的事件对象
+ * @throws 当 JSON 非法或结构不符（含未知 eventType）时抛错，由调用方记日志并返回 4xx
+ */
+export function parseCreemWebhookEvent(payload: string): CreemWebhookEvent {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload);
+  } catch {
+    throw new Error("Invalid webhook payload: not valid JSON");
+  }
+
+  const result = creemWebhookEventSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new Error(
+      `Invalid webhook event shape: ${result.error.issues
+        .map((issue) => issue.path.join(".") || "<root>")
+        .join(", ")}`
+    );
+  }
+
+  // schema 已校验 eventType/object/created_at 的运行时形状；object 仅保证是对象，
+  // 其 CreemSubscription / CreemCheckoutCompletedData 变体字段由各 handler 判空读取，
+  // 故经 unknown 收窄回声明类型（运行时已验签 + 结构校验，非裸 as 盲转）。
+  return result.data as unknown as CreemWebhookEvent;
+}
+
+// ============================================
+// Webhook 纯逻辑助手（DB-free，可单测）
+// ============================================
+
+/** 一天的毫秒数 */
+const MS_PER_DAY = 1000 * 60 * 60 * 24;
+
+/**
+ * 订阅周期长度判为年付的阈值（天）。
+ *
+ * WHY：Creem 不直接给出计费间隔，只能用周期长度推断。月付约 30 天、年付约 365 天，
+ * 取 60 天作为分界既能容纳 28/31 天月份，又远低于年付下限，避免边界误判导致少发/多发积分。
+ */
+export const CREEM_YEARLY_PERIOD_DAY_THRESHOLD = 60;
+
+/**
+ * 构造订阅周期幂等键。
+ *
+ * 同一订阅 + 同一周期开始时间只发放一次积分，作为 credits_batch (source_type, source_ref)
+ * 幂等去重的 sourceRef。
+ */
+export function buildSubscriptionPeriodKey(
+  subscriptionId: string,
+  periodStartDate: string
+): string {
+  return `${subscriptionId}:${periodStartDate}`;
+}
+
+/**
+ * 计算订阅周期天数。
+ *
+ * @returns 周期天数（四舍五入）；当日期非法时返回 NaN，交由调用方决定回退。
+ */
+export function getCreemPeriodDays(
+  periodStartDate: string,
+  periodEndDate: string
+): number {
+  const start = new Date(periodStartDate).getTime();
+  const end = new Date(periodEndDate).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end)) {
+    return Number.NaN;
+  }
+  return Math.round((end - start) / MS_PER_DAY);
+}
+
+/**
+ * 依据周期天数判断是否为年付订阅。
+ *
+ * 周期天数非法（NaN）时按月付处理，避免误发 12 倍积分。
+ */
+export function isYearlyCreemPeriod(periodDays: number): boolean {
+  return (
+    Number.isFinite(periodDays) &&
+    periodDays > CREEM_YEARLY_PERIOD_DAY_THRESHOLD
+  );
+}
+
+/**
+ * 计算订阅周期应发放的积分。
+ *
+ * 月付发放月度积分，年付发放 12 个月积分。monthlyCredits 由服务端套餐配置提供，
+ * 此处仅做纯算术，便于 DB-free 单测覆盖年付/月付与边界判定。
+ */
+export function computeSubscriptionCreditsToGrant(
+  monthlyCredits: number,
+  isYearly: boolean
+): number {
+  return isYearly ? monthlyCredits * 12 : monthlyCredits;
 }
 
 // ============================================
@@ -292,7 +432,7 @@ export function constructCreemEvent(
     throw new Error("Invalid webhook signature");
   }
 
-  return JSON.parse(payload) as CreemWebhookEvent;
+  return parseCreemWebhookEvent(payload);
 }
 
 export async function constructRuntimeCreemEvent(
@@ -306,5 +446,5 @@ export async function constructRuntimeCreemEvent(
     throw new Error("Invalid webhook signature");
   }
 
-  return JSON.parse(payload) as CreemWebhookEvent;
+  return parseCreemWebhookEvent(payload);
 }

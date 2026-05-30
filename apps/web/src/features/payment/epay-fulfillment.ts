@@ -43,6 +43,10 @@ interface FulfillEpayPaymentResult {
 
 type EpayFulfillmentSource = "epay-webhook" | "epay-return";
 
+// 进程内去重表：仅为单实例下的最佳努力优化，合并同一订单的并发履约，
+// 避免重复的订阅写入等副作用。跨实例的正确性不依赖此表，而由
+// claimEpayOrderForFulfillment 的原子 UPDATE（pending → success）与
+// credits_batch 唯一约束兜底，多实例部署下此表自然失效但不影响幂等。
 const inFlightFulfillments = new Map<
   string,
   Promise<FulfillEpayPaymentResult>
@@ -59,7 +63,13 @@ async function getCreditPackExpiresAt() {
     : null;
 }
 
-function isExpectedEpayAmount(
+// 网关回传金额与期望金额（均换算为分）做反欺诈比对，阻止低价/篡改金额套取
+// 高价套餐。允许实付不低于期望，且不超出期望 EPAY_AMOUNT_TOLERANCE_CENTS 分，
+// 容忍上游四舍五入/手续费导致的轻微多付；任一侧解析为 NaN 视为不匹配。
+// 导出以便 DB-free 单测锁定该金额门闩。
+const EPAY_AMOUNT_TOLERANCE_CENTS = 10;
+
+export function isExpectedEpayAmount(
   verifyInfo: EpayVerifyResult,
   expectedAmount: number
 ) {
@@ -69,7 +79,10 @@ function isExpectedEpayAmount(
     return false;
   }
 
-  return paidCents >= expectedCents && paidCents <= expectedCents + 10;
+  return (
+    paidCents >= expectedCents &&
+    paidCents <= expectedCents + EPAY_AMOUNT_TOLERANCE_CENTS
+  );
 }
 
 export async function fulfillSuccessfulEpayPayment(
