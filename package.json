@@ -18,5 +18,10 @@
     "turbo": "^2.5.0"
   },
   "packageManager": "pnpm@10.27.0",
+  "pnpm": {
+    "overrides": {
+      "kysely": "0.28.17"
+    }
+  },
   "license": "AGPL-3.0-only"
 }
