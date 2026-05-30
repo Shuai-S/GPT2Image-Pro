@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 
-import { adminAction } from "../../safe-action";
+import { superAdminAction } from "../../safe-action";
 import {
   getAdminSystemSettingsSnapshot,
   importSystemSettingsFromEnv,
@@ -17,14 +17,14 @@ const settingUpdateSchema = z.object({
   clear: z.boolean().optional(),
 });
 
-export const getSystemSettingsAction = adminAction
+export const getSystemSettingsAction = superAdminAction
   .metadata({ action: "system-settings.get" })
   .action(async () => {
     const settings = await getAdminSystemSettingsSnapshot();
     return { settings };
   });
 
-export const updateSystemSettingsAction = adminAction
+export const updateSystemSettingsAction = superAdminAction
   .metadata({ action: "system-settings.update" })
   .schema(
     z.object({
@@ -50,7 +50,7 @@ export const updateSystemSettingsAction = adminAction
     };
   });
 
-export const importSystemSettingsFromEnvAction = adminAction
+export const importSystemSettingsFromEnvAction = superAdminAction
   .metadata({ action: "system-settings.importEnv" })
   .schema(z.object({ overwrite: z.boolean().optional() }).optional())
   .action(async ({ parsedInput, ctx }) => {
@@ -71,7 +71,7 @@ export const importSystemSettingsFromEnvAction = adminAction
     };
   });
 
-export const initializeSystemSettingsDefaultsAction = adminAction
+export const initializeSystemSettingsDefaultsAction = superAdminAction
   .metadata({ action: "system-settings.initializeDefaults" })
   .action(async ({ ctx }) => {
     const initializedKeys = await initializeMissingSystemSettingsDefaults({

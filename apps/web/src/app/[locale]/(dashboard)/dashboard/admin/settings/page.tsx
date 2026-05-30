@@ -4,6 +4,7 @@ import { getLocale } from "next-intl/server";
 import { getUserRoleById } from "@repo/shared/auth/role-server";
 import {
   canAccessAdminArea,
+  canManageUserPermissions,
   canViewImageBackendPool,
 } from "@repo/shared/auth/roles";
 import { getServerSession } from "@repo/shared/auth/server";
@@ -29,5 +30,12 @@ export default async function DashboardAdminSettingsPage() {
   }
   const timeZone = await getAppTimeZone();
 
-  return <AdminSettingsTabs timeZone={timeZone} />;
+  // 系统设置面板可写入 BETTER_AUTH_SECRET 等密钥，必须限制为超管，
+  // 否则普通 admin 可改写认证密钥伪造会话实现账号接管（见审计 S-C1）。
+  return (
+    <AdminSettingsTabs
+      timeZone={timeZone}
+      canManageSystemSettings={canManageUserPermissions(role)}
+    />
+  );
 }
