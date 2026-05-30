@@ -1,5 +1,10 @@
 # Dependabot：自动跟踪依赖与 Action 的安全/版本更新，落实 CLAUDE.md §0.5「依赖安全」。
 # 每周开 PR（受同一套 CI 门禁约束），把升级评审常态化，避免长期堆积安全债。
+#
+# 策略：自动跟进 minor/patch（分组、低风险），但**忽略大版本（semver-major）自动升级**。
+# 原因：首批实践中大版本升级（typescript 6 / fumadocs 15 / lucide 1.x 等）普遍破坏构建，
+# 第三方 Action 已刻意钉在选定大版本的 SHA。大版本升级改由人工在专门窗口评估迁移，
+# 既减少噪音又不丢失补丁/安全更新（major 安全修复仍可手动跟进）。
 version: 2
 updates:
   # 1) npm（pnpm 工作区）：从仓库根递归发现所有 package.json（apps/* 与 packages/*）。
@@ -10,15 +15,24 @@ updates:
     open-pull-requests-limit: 10
     commit-message:
       prefix: "chore(deps)" # 与 Conventional Commits 约定一致（§0.2）
-    # 主版本升级往往含破坏性变更，单独成 PR 便于人工评审；不自动合并。
     groups:
       minor-and-patch:
         update-types: ["minor", "patch"]
+    # 忽略所有依赖的大版本自动升级（破坏性，改人工评估）。
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
-  # 2) GitHub Actions：保持 CI/发布流水线里用到的 Action 版本新且安全。
+  # 2) GitHub Actions：在已钉的大版本内保持 SHA 新鲜（补丁），大版本升级人工决策。
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
     commit-message:
       prefix: "chore(ci)"
+    groups:
+      actions-minor-and-patch:
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
