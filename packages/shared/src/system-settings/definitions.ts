@@ -1396,7 +1396,7 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     key: "RATE_LIMIT_AI_REQUESTS_PER_MINUTE",
     label: "AI 与生图限流（次/分钟）",
     description:
-      "页面生图、图生图、Chat/Agent 以及外接 /v1 图片、Responses、Chat 接口的每分钟请求阈值。配置 Upstash Redis 后生效。",
+      "页面生图、图生图、Chat/Agent 的每分钟请求阈值。外接 /v1 生图接口走套餐并发队列，不受该通用频率限制。",
     category: "general",
     valueType: "number",
     defaultValue: 20,

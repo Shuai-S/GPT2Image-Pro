@@ -3,11 +3,11 @@ import {
   createRateLimitResponse,
   getClientIp,
   getRateLimitHeaders,
-  type RateLimitType,
 } from "@repo/shared/rate-limit";
 import { type NextRequest, NextResponse } from "next/server";
 import createIntlMiddleware from "next-intl/middleware";
 import { routing } from "@/i18n/routing";
+import { getApiRateLimitType } from "./rate-limit-routing";
 
 /**
  * 创建国际化中间件
@@ -15,54 +15,6 @@ import { routing } from "@/i18n/routing";
 const intlMiddleware = createIntlMiddleware(routing);
 const VERSIONED_ASSET_PREFIX_PATTERN =
   /^\/(?:gpt2-assets|next-assets)-[^/]+(\/_next\/.*)$/;
-
-/**
- * API 路由限流配置（白名单模式）
- *
- * 只对敏感接口做限流，其余放行
- * 未匹配到的路由不触发 Redis 调用
- */
-const API_RATE_LIMITS: Array<{ pattern: RegExp; type: RateLimitType }> = [
-  // 认证相关 - 严格限流防暴力破解
-  { pattern: /^\/api\/auth\/sign-in/, type: "auth" },
-  { pattern: /^\/api\/auth\/sign-up/, type: "auth" },
-  { pattern: /^\/api\/auth\/registration-verification/, type: "auth" },
-  { pattern: /^\/api\/auth\/request-password-reset/, type: "auth" },
-  { pattern: /^\/api\/auth\/forget-password/, type: "auth" },
-  { pattern: /^\/api\/auth\/forgot-password/, type: "auth" },
-  { pattern: /^\/api\/auth\/reset-password/, type: "auth" },
-  // 上传相关
-  { pattern: /^\/api\/upload/, type: "upload" },
-  // 页面生图相关
-  { pattern: /^\/api\/images\/generate/, type: "ai" },
-  { pattern: /^\/api\/images\/edit/, type: "ai" },
-  { pattern: /^\/api\/images\/chat(?:\/|$)/, type: "ai" },
-  // OpenAI 兼容外接 API
-  { pattern: /^\/api\/v1\/images\/generations/, type: "ai" },
-  { pattern: /^\/api\/v1\/images\/edits/, type: "ai" },
-  { pattern: /^\/api\/v1\/responses/, type: "ai" },
-  { pattern: /^\/api\/v1\/agents\/images/, type: "ai" },
-  { pattern: /^\/api\/v1\/chat\/completions/, type: "ai" },
-  { pattern: /^\/v1\/images\/generations/, type: "ai" },
-  { pattern: /^\/v1\/images\/edits/, type: "ai" },
-  { pattern: /^\/v1\/responses/, type: "ai" },
-  { pattern: /^\/v1\/agents\/images/, type: "ai" },
-  { pattern: /^\/v1\/chat\/completions/, type: "ai" },
-];
-
-/**
- * 获取 API 路由的限流类型
- *
- * @returns 限流类型，未匹配返回 null（不限流）
- */
-function getApiRateLimitType(pathname: string): RateLimitType | null {
-  for (const { pattern, type } of API_RATE_LIMITS) {
-    if (pattern.test(pathname)) {
-      return type;
-    }
-  }
-  return null;
-}
 
 function setPrivateNoStore(response: NextResponse) {
   response.headers.set(

@@ -41,7 +41,10 @@ async function getGlobalConcurrency() {
 }
 
 function getQueueTimeoutMs() {
-  return getPositiveIntegerEnv("IMAGE_GENERATION_QUEUE_TIMEOUT_MS", 60_000);
+  return getPositiveIntegerEnv(
+    "IMAGE_GENERATION_QUEUE_TIMEOUT_MS",
+    20 * 60_000
+  );
 }
 
 function formatDuration(seconds: number) {
