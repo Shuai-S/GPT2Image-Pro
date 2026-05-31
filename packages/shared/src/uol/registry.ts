@@ -12,7 +12,12 @@
  * - 注册时查重：防止意外覆盖导致行为不确定
  * - DB-free：注册表纯内存，不依赖任何外部状态
  */
-import type { OperationDefinition, OperationDomain } from "./types";
+import type {
+  OperationContext,
+  OperationDefinition,
+  OperationDomain,
+} from "./types";
+import type { Principal } from "./principal";
 
 /** 全局操作注册表 */
 const REGISTRY = new Map<string, OperationDefinition>();
@@ -69,6 +74,52 @@ export function listOperations(filter?: {
     ops = ops.filter((op) => op.destructive === filter.destructive);
   }
   return ops;
+}
+
+/**
+ * 延迟绑定操作的执行体 - Late Binding 机制。
+ *
+ * 用于解决跨包依赖问题：操作定义在 packages/shared（不能导入 apps/web），
+ * 但部分 execute 实现依赖 apps/web 的 service-fn。
+ * apps/web 启动时调用 bindExecute 将真实实现注入已注册的操作。
+ *
+ * @param name - 已注册操作的名称
+ * @param execute - 真实的执行函数实现
+ * @throws 如果操作名未注册则抛出错误（防止拼写错误静默失败）
+ */
+export function bindExecute<TInput, TOutput>(
+  name: string,
+  execute: (
+    input: TInput,
+    principal: Principal,
+    ctx: OperationContext,
+  ) => Promise<TOutput>,
+): void {
+  const def = REGISTRY.get(name);
+  if (!def) {
+    throw new Error(`[UOL] Cannot bind unknown operation: ${name}`);
+  }
+  (def as { execute: typeof execute }).execute = execute;
+}
+
+/**
+ * 检测操作是否已绑定真实实现（非 stub）。
+ *
+ * 通过检查 execute 函数源码中是否包含 "Not yet wired" 判定。
+ * 用于启动时诊断、MCP 路由的 pre-check 等场景。
+ *
+ * @param name - 操作名称
+ * @returns true 表示已绑定真实实现；false 表示仍是 stub 或不存在
+ */
+export function isOperationBound(name: string): boolean {
+  const def = REGISTRY.get(name);
+  if (!def) return false;
+  try {
+    const src = def.execute.toString();
+    return !src.includes("Not yet wired");
+  } catch {
+    return true;
+  }
 }
 
 /** 获取当前注册表中的操作数量 */

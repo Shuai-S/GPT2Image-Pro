@@ -21,7 +21,7 @@
  * - 未知异常：统一包装为 internal_error，防止内部细节泄露
  */
 import { nanoid } from "nanoid";
-import { getOperation } from "./registry";
+import { getOperation, isOperationBound } from "./registry";
 import { assertAccess } from "./access";
 import { OperationError } from "./errors";
 import type { Principal } from "./principal";
@@ -119,7 +119,17 @@ export async function invokeOperation<TOutput = unknown>(
     },
   };
 
-  // 5. 执行业务逻辑
+  // 5. 检查操作是否已绑定真实实现（非 stub）
+  if (!isOperationBound(name)) {
+    throw new OperationError(
+      "not_implemented",
+      `Operation "${name}" is registered but not yet bound to an implementation`,
+      undefined,
+      501,
+    );
+  }
+
+  // 6. 执行业务逻辑
   try {
     const output = await def.execute(input, principal, ctx);
     return output as TOutput;

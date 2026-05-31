@@ -7,6 +7,8 @@ import {
   listOperations,
   getRegistrySize,
   clearRegistry,
+  bindExecute,
+  isOperationBound,
 } from "../registry";
 import type { OperationDefinition } from "../types";
 
@@ -166,6 +168,113 @@ describe("UOL Registry", () => {
       expect(getRegistrySize()).toBe(0);
       expect(getOperation("x")).toBeUndefined();
       expect(getOperation("y")).toBeUndefined();
+    });
+  });
+
+  describe("bindExecute", () => {
+    it("replaces stub execute with real implementation", async () => {
+      defineOperation(
+        makeTestOp({
+          name: "bind.test",
+          execute: async () => {
+            throw new Error("Not yet wired: bind.test");
+          },
+        }),
+      );
+
+      // 绑定前：execute 是 stub
+      const before = getOperation("bind.test");
+      await expect(
+        before!.execute({}, {} as never, {} as never),
+      ).rejects.toThrow("Not yet wired");
+
+      // 绑定真实实现
+      bindExecute("bind.test", async () => ({ ok: true }));
+
+      // 绑定后：execute 返回真实结果
+      const after = getOperation("bind.test");
+      const result = await after!.execute({}, {} as never, {} as never);
+      expect(result).toEqual({ ok: true });
+    });
+
+    it("throws on unknown operation name", () => {
+      expect(() =>
+        bindExecute("nonexistent.op", async () => ({})),
+      ).toThrow("[UOL] Cannot bind unknown operation: nonexistent.op");
+    });
+
+    it("passes input, principal, and ctx to bound function", async () => {
+      defineOperation(
+        makeTestOp({
+          name: "bind.args",
+          execute: async () => {
+            throw new Error("Not yet wired: bind.args");
+          },
+        }),
+      );
+
+      const captured: unknown[] = [];
+      bindExecute("bind.args", async (input, principal, ctx) => {
+        captured.push(input, principal, ctx);
+        return { ok: true };
+      });
+
+      const fakeInput = { foo: "bar" };
+      const fakePrincipal = { type: "system" as const, reason: "test" };
+      const fakeCtx = { requestId: "r1" };
+
+      await getOperation("bind.args")!.execute(
+        fakeInput,
+        fakePrincipal as never,
+        fakeCtx as never,
+      );
+
+      expect(captured[0]).toEqual(fakeInput);
+      expect(captured[1]).toEqual(fakePrincipal);
+      expect(captured[2]).toEqual(fakeCtx);
+    });
+  });
+
+  describe("isOperationBound", () => {
+    it("returns false for unknown operation", () => {
+      expect(isOperationBound("ghost.op")).toBe(false);
+    });
+
+    it("returns false for stub (Not yet wired)", () => {
+      defineOperation(
+        makeTestOp({
+          name: "stub.op",
+          execute: async () => {
+            throw new Error("Not yet wired: stub.op");
+          },
+        }),
+      );
+      expect(isOperationBound("stub.op")).toBe(false);
+    });
+
+    it("returns true for real implementation", () => {
+      defineOperation(
+        makeTestOp({
+          name: "real.op",
+          execute: async () => ({ ok: true }),
+        }),
+      );
+      expect(isOperationBound("real.op")).toBe(true);
+    });
+
+    it("returns true after bindExecute replaces stub", () => {
+      defineOperation(
+        makeTestOp({
+          name: "was-stub.op",
+          execute: async () => {
+            throw new Error("Not yet wired: was-stub.op");
+          },
+        }),
+      );
+      expect(isOperationBound("was-stub.op")).toBe(false);
+
+      bindExecute("was-stub.op", async () => ({ ok: true }));
+      expect(isOperationBound("was-stub.op")).toBe(true);
     });
   });
 });
