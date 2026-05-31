@@ -482,8 +482,10 @@ export const creditsTransaction = pgTable(
   },
   (table) => [
     // 偏唯一索引：source_ref 为空的交易（绝大多数历史/无幂等需求的扣费）不受约束。
-    uniqueIndex("credits_transaction_type_source_ref_unique")
-      .on(table.type, table.sourceRef)
+    // 按 (user_id, type, source_ref) 分桶（迁移 0029）：避免跨用户共用同一 source_ref
+    // 时幂等查询误命中他人交易回放其 amount/metadata（IDOR，审计 S-L1）。
+    uniqueIndex("credits_transaction_user_type_source_ref_unique")
+      .on(table.userId, table.type, table.sourceRef)
       .where(sql`${table.sourceRef} is not null`),
   ]
 );

@@ -486,8 +486,14 @@ export async function consumeCredits(
 
   try {
     return await db.transaction(async (tx) => {
-      // 幂等快路：已存在相同 (consumption, sourceRef) 的交易 → 不重复扣费。
+      // 幂等快路：已存在相同 (userId, consumption, sourceRef) 的交易 → 不重复扣费。
       // 覆盖串行重试场景；并发场景由下方偏唯一索引兜底。
+      // WHY 必须按 userId 归属：sourceRef 派生自服务端随机 generationId，理论上全局
+      // 唯一；但幂等命中会把命中交易的 amount/metadata（consumedBatches）回放给调用方。
+      // 若跨用户碰撞（旧的全局 (type, source_ref) 约束允许同一 sourceRef 仅存在一行，
+      // 一旦被他人占用，本人的合法扣费会误命中他人交易并返回其金额/批次明细，造成
+      // 越权信息泄露且本人实际未扣费）。加 eq(userId) 后只在本人交易内幂等，配合 0029
+      // 收窄到 per-user 偏唯一索引，跨用户相同 sourceRef 互不干扰。
       if (sourceRef) {
         const [existing] = await tx
           .select({
@@ -498,6 +504,7 @@ export async function consumeCredits(
           .from(creditsTransaction)
           .where(
             and(
+              eq(creditsTransaction.userId, userId),
               eq(creditsTransaction.type, "consumption"),
               eq(creditsTransaction.sourceRef, sourceRef)
             )
@@ -661,6 +668,9 @@ export async function consumeCredits(
   } catch (error) {
     // 并发兜底：唯一索引冲突表示已被另一并发请求以相同 sourceRef 扣过 →
     // 重查该交易返回幂等结果，避免双重扣费。
+    // WHY 同样按 userId 归属：0029 后偏唯一索引为 (user_id, type, source_ref)，冲突
+    // 必来自同一用户的并发重复请求，重查须限定本人交易，否则在跨用户碰撞时会回放他人
+    // 金额/批次明细（越权）。与上方快路保持一致。
     if (sourceRef && isUniqueConstraintViolation(error)) {
       const [existing] = await db
         .select({
@@ -671,6 +681,7 @@ export async function consumeCredits(
         .from(creditsTransaction)
         .where(
           and(
+            eq(creditsTransaction.userId, userId),
             eq(creditsTransaction.type, "consumption"),
             eq(creditsTransaction.sourceRef, sourceRef)
           )
