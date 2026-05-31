@@ -25,6 +25,10 @@ import {
   getCreemPeriodDays,
   isYearlyCreemPeriod,
 } from "@repo/shared/payment/creem";
+import {
+  evaluateCreemAmountMatch,
+  shouldGrantAfterAmountCheck,
+} from "@repo/shared/payment/creem-amount";
 import { findRuntimePlanByPriceId } from "@repo/shared/config/payment-runtime";
 import { paymentConfig } from "@repo/shared/config/payment";
 import { withApiLogging } from "@repo/shared/api-logger";
@@ -38,26 +42,12 @@ function getProductId(sub: CreemSubscription): string {
 }
 
 // ============================================
-// 实付金额/币种反欺诈校验（软门闩，DB-free 纯逻辑）
+// 实付金额/币种反欺诈校验（软门闩）
+// 纯逻辑已抽离至 @repo/shared/payment/creem-amount，此处仅保留环境读取与日志适配。
 // ============================================
 
 /**
- * 实付金额比对容差（最小货币单位，分）。
- *
- * WHY：Creem 的 order.amount 以最小货币单位（分）返回，服务端套餐价目以主单位
- * （元/美元）配置。换算后允许实付不低于期望、且不超出期望 + 容差，容忍上游
- * 四舍五入/手续费导致的轻微多付，避免误拒真实支付（参照 epay-fulfillment.ts 的
- * EPAY_AMOUNT_TOLERANCE_CENTS 范式）。
- */
-const CREEM_AMOUNT_TOLERANCE_MINOR_UNITS = 10;
-
-/**
  * 是否对金额/币种不符的支付硬拒（不发放积分）。
- *
- * needsProductDecision：Creem 实际扣费币种与服务端套餐价目（元/美元）之间的权威
- * 映射尚未在配置中落地，static paymentConfig.currency 仅用于站内展示。为避免在配置
- * 不确定时误拒真实支付，默认软门闩：仅 Pino 告警、照常发放。运维核对 Creem 产品价目
- * 与币种映射、确认无误后，可将环境变量 CREEM_WEBHOOK_ENFORCE_AMOUNT 置 true 改硬拒。
  *
  * WHY 读 env 而非 system-settings：system-settings 的 SettingKey 是受约束联合类型，
  * 新增键需改 definitions.ts（本单元不允许触碰），故此处以 env 软开关落地，默认关闭。
@@ -68,164 +58,41 @@ function isCreemAmountEnforced(): boolean {
 }
 
 /**
- * 将主单位价目（元/美元）换算为最小货币单位（分）。
+ * 对 Creem 金额校验结果落地处置（带日志）：返回 true=继续发放，false=拒绝发放。
  *
- * 只接受有限非负数；非法输入返回 NaN，交由调用方按“不可比”处理。四舍五入到分，
- * 避免浮点误差（如 0.1 * 100 = 10.000000000000002）造成的边界误判。
+ * 封装 @repo/shared/payment/creem-amount 的纯函数 shouldGrantAfterAmountCheck，
+ * 在此处追加 Pino 日志输出（纯函数模块不依赖 logger）。
  */
-function creemMajorToMinorUnits(amountMajor: number): number {
-  if (!Number.isFinite(amountMajor) || amountMajor < 0) {
-    return Number.NaN;
-  }
-  return Math.round(amountMajor * 100);
-}
-
-/** 实付金额/币种校验裁决的不匹配原因（不含任何机密，仅用于日志）。 */
-type CreemAmountReason =
-  | "missing-paid-amount"
-  | "missing-expected-amount"
-  | "amount-too-low"
-  | "amount-too-high"
-  | "currency-mismatch";
-
-/**
- * 实付金额/币种校验裁决结果。
- *
- * comparable=false 表示输入缺失或无法解析（order 缺失、amount 非数字、期望价目不可用），
- * 调用方应放行 + 告警，绝不硬拒真实支付。comparable=true 时 match 才有意义。
- */
-interface CreemAmountVerdict {
-  comparable: boolean;
-  match: boolean;
-  reason?: CreemAmountReason;
-  expectedMinorUnits?: number;
-  paidMinorUnits?: number;
-}
-
-/**
- * 比对 Creem 实付金额/币种与服务端期望，给出软门闩裁决（纯逻辑，无副作用）。
- *
- * WHY：webhook 仅经签名校验无法防止 checkout 阶段被篡改的价格/数量套取高价套餐，
- * 须在发放积分前用服务端套餐重算期望金额并与 Creem 实付额比对。本函数只判定，
- * 不决定放行/拒付；信息不可比时返回 comparable=false 由调用方放行 + 告警。
- */
-function evaluateCreemAmountMatch(params: {
-  paidAmountMinorUnits: number | undefined;
-  paidCurrency?: string;
-  expectedAmountMajor: number;
-  expectedCurrency?: string;
-}): CreemAmountVerdict {
-  const { paidAmountMinorUnits, paidCurrency, expectedAmountMajor } = params;
-
-  const expectedMinorUnits = creemMajorToMinorUnits(expectedAmountMajor);
-  if (!Number.isFinite(expectedMinorUnits)) {
-    return {
-      comparable: false,
-      match: false,
-      reason: "missing-expected-amount",
-    };
-  }
-
-  if (
-    paidAmountMinorUnits === undefined ||
-    !Number.isFinite(paidAmountMinorUnits)
-  ) {
-    return {
-      comparable: false,
-      match: false,
-      reason: "missing-paid-amount",
-      expectedMinorUnits,
-    };
-  }
-
-  // 币种比对：仅当配置与实付币种均存在时才比对，缺失任一侧跳过（不可硬拒）。
-  // 大小写不敏感，规避 "usd"/"USD" 误判。
-  const expectedCurrency = params.expectedCurrency?.trim();
-  if (expectedCurrency && paidCurrency) {
-    if (expectedCurrency.toUpperCase() !== paidCurrency.trim().toUpperCase()) {
-      return {
-        comparable: true,
-        match: false,
-        reason: "currency-mismatch",
-        expectedMinorUnits,
-        paidMinorUnits: paidAmountMinorUnits,
-      };
-    }
-  }
-
-  // 允许实付不低于期望、且不超出期望 + 容差。低于期望视为可能的低价套取；
-  // 超出过多视为币种/单位不一致（如把美元当人民币比），均判不匹配。
-  if (paidAmountMinorUnits < expectedMinorUnits) {
-    return {
-      comparable: true,
-      match: false,
-      reason: "amount-too-low",
-      expectedMinorUnits,
-      paidMinorUnits: paidAmountMinorUnits,
-    };
-  }
-  if (
-    paidAmountMinorUnits >
-    expectedMinorUnits + CREEM_AMOUNT_TOLERANCE_MINOR_UNITS
-  ) {
-    return {
-      comparable: true,
-      match: false,
-      reason: "amount-too-high",
-      expectedMinorUnits,
-      paidMinorUnits: paidAmountMinorUnits,
-    };
-  }
-
-  return {
-    comparable: true,
-    match: true,
-    expectedMinorUnits,
-    paidMinorUnits: paidAmountMinorUnits,
-  };
-}
-
-/**
- * 对金额/币种裁决落地处置：返回 true=继续发放，false=拒绝发放。
- *
- * WHY 软门闩：comparable=false（信息缺失/价目未配置）一律放行 + 告警，避免误拒真实
- * 支付；comparable=true 且不匹配时，仅在 CREEM_WEBHOOK_ENFORCE_AMOUNT 开启后才拒绝，
- * 否则照常发放并告警，给运维留出核对 Creem 价目/币种映射的窗口。
- */
-function shouldGrantAfterAmountCheck(
-  verdict: CreemAmountVerdict,
+function shouldGrantWithLogging(
+  amountMatch: import("@repo/shared/payment/creem-amount").CreemAmountMatchResult,
   context: Record<string, unknown>
 ): boolean {
-  if (verdict.match) {
-    return true;
-  }
+  const decision = shouldGrantAfterAmountCheck(
+    amountMatch,
+    isCreemAmountEnforced()
+  );
 
-  if (!verdict.comparable) {
-    // 不可比：价目/币种映射尚未权威落地或上游未给金额，放行 + 告警。
+  if (decision.grant && decision.reason === "not-comparable-grant-with-warning") {
     logger.warn(
-      { ...context, source: "creem-webhook", verdict },
+      { ...context, source: "creem-webhook", amountMatch, decision },
       "Creem amount check skipped (not comparable); granting credits"
     );
-    return true;
-  }
-
-  if (!isCreemAmountEnforced()) {
-    // 软门闩：检测到金额/币种不符，但未开启硬拒，照常发放并告警以便核对。
+  } else if (decision.grant && decision.reason === "mismatch-soft-gate-grant-with-warning") {
     logger.warn(
-      { ...context, source: "creem-webhook", verdict },
+      { ...context, source: "creem-webhook", amountMatch, decision },
       "Creem amount mismatch detected (soft gate, not enforced); granting credits"
     );
-    return true;
+  } else if (!decision.grant) {
+    logError(new Error("Creem paid amount/currency mismatch"), {
+      source: "creem-webhook",
+      stage: "amount-check",
+      amountMatch,
+      decision,
+      ...context,
+    });
   }
 
-  // 硬拒：已确认配置无误并开启强制校验，拒绝发放以阻止低价/篡改套取。
-  logError(new Error("Creem paid amount/currency mismatch"), {
-    source: "creem-webhook",
-    stage: "amount-check",
-    verdict,
-    ...context,
-  });
-  return false;
+  return decision.grant;
 }
 
 async function getCreditPackExpiresAt() {
@@ -442,14 +309,18 @@ async function handleCreditPurchase(
   // 与 Creem 实付额（order.amount，单位分）及 order.currency 比对，阻止 checkout
   // 阶段被篡改的价格/数量套取高价积分包。配置不可比或未开启硬拒时仅告警照常发放。
   const expectedAmount = unitPrice * quantity;
-  const amountVerdict = evaluateCreemAmountMatch({
-    paidAmountMinorUnits: data.order?.amount,
-    paidCurrency: data.order?.currency,
-    expectedAmountMajor: expectedAmount,
-    expectedCurrency: paymentConfig.currency,
-  });
+  const amountMatch = evaluateCreemAmountMatch(
+    {
+      amount: expectedAmount,
+      currency: paymentConfig.currency,
+    },
+    {
+      amount: data.order?.amount ?? Number.NaN,
+      currency: data.order?.currency ?? "",
+    }
+  );
   if (
-    !shouldGrantAfterAmountCheck(amountVerdict, {
+    !shouldGrantWithLogging(amountMatch, {
       stage: "credit-purchase",
       userId,
       packageId,
@@ -799,16 +670,20 @@ async function grantSubscriptionCredits(
       : undefined;
   const productCurrency =
     typeof sub.product === "object" ? sub.product.currency : undefined;
-  const subscriptionAmountVerdict = evaluateCreemAmountMatch({
-    paidAmountMinorUnits: productPriceMinorUnits,
-    paidCurrency: productCurrency,
-    // 年付期望额用 runtimePrice（按 priceId 反查到对应 interval 的金额），
-    // 缺失则不可比 → 放行 + 告警。
-    expectedAmountMajor: runtimePrice?.amount ?? Number.NaN,
-    expectedCurrency: paymentConfig.currency,
-  });
+  const subscriptionAmountMatch = evaluateCreemAmountMatch(
+    {
+      // 年付期望额用 runtimePrice（按 priceId 反查到对应 interval 的金额），
+      // 缺失则不可比 → 放行 + 告警。
+      amount: runtimePrice?.amount ?? Number.NaN,
+      currency: paymentConfig.currency,
+    },
+    {
+      amount: productPriceMinorUnits ?? Number.NaN,
+      currency: productCurrency ?? "",
+    }
+  );
   if (
-    !shouldGrantAfterAmountCheck(subscriptionAmountVerdict, {
+    !shouldGrantWithLogging(subscriptionAmountMatch, {
       stage: "subscription-credits",
       userId,
       subscriptionId: sub.id,

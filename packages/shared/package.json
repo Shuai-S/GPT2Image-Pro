@@ -61,6 +61,7 @@
     "./config/payment-runtime": "./src/config/payment-runtime.ts",
     "./config/subscription-plan": "./src/config/subscription-plan.ts",
     "./payment/creem": "./src/payment/creem.ts",
+    "./payment/creem-amount": "./src/payment/creem-amount.ts",
     "./payment/epay": "./src/payment/epay.ts",
     "./payment/types": "./src/payment/types.ts",
     "./monitoring": "./src/monitoring/index.ts",
