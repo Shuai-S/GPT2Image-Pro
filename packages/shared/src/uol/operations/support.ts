@@ -5,10 +5,20 @@
  * 使用方：UOL registry 全局注册表，经 invokeOperation 网关调用。
  * 关键依赖：registry.ts (defineOperation)、zod (schema 校验)
  *
- * 所有 execute 均为 stub，待后续接线实际 service 函数。
+ * 接线状态：
+ * - 公告查询类（list/count/mark）：已接线至 announcements/actions 导出的纯函数
+ * - 公告管理类（create/update/delete/toggle）：Bound at app level（逻辑内联于 server-action 闭包，含 revalidatePath/auditLog）
+ * - 工单类（全部）：Bound at app level（逻辑内联于 server-action 闭包）
  */
 import { z } from "zod";
 
+import {
+  countUnreadAnnouncementsForUser,
+  listActiveAnnouncementsForUser,
+  listAnnouncementsForAdmin,
+  markAnnouncementIdsReadForUser,
+} from "../../announcements/actions";
+import { getPrincipalUserId } from "../principal";
 import { defineOperation } from "../registry";
 
 // ---------------------------------------------------------------------------
@@ -44,6 +54,7 @@ export const createTicket = defineOperation({
   destructive: false,
   idempotency: { kind: "none" },
   sideEffects: ["email"],
+  // Bound at app level - ticket logic inline in server-action
   execute: async () => {
     throw new Error("Not yet wired: support.createTicket");
   },
@@ -86,6 +97,7 @@ export const getMyTickets = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
+  // Bound at app level - ticket logic inline in server-action
   execute: async () => {
     throw new Error("Not yet wired: support.getMyTickets");
   },
@@ -129,6 +141,7 @@ export const getTicketDetail = defineOperation({
   idempotency: { kind: "natural" },
   sideEffects: ["cache"],
   hasMaintenanceWrite: true,
+  // Bound at app level - ticket logic inline in server-action
   execute: async () => {
     throw new Error("Not yet wired: support.getTicketDetail");
   },
@@ -159,6 +172,7 @@ export const addMessage = defineOperation({
   destructive: false,
   idempotency: { kind: "none" },
   sideEffects: ["email"],
+  // Bound at app level - ticket logic inline in server-action
   execute: async () => {
     throw new Error("Not yet wired: support.addMessage");
   },
@@ -204,6 +218,7 @@ export const getAllTickets = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
+  // Bound at app level - ticket logic inline in server-action
   execute: async () => {
     throw new Error("Not yet wired: support.getAllTickets");
   },
@@ -230,6 +245,7 @@ export const getAdminUnreadCount = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
+  // Bound at app level - ticket logic inline in server-action
   execute: async () => {
     throw new Error("Not yet wired: support.getAdminUnreadCount");
   },
@@ -256,6 +272,7 @@ export const getMyUnreadCount = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
+  // Bound at app level - ticket logic inline in server-action
   execute: async () => {
     throw new Error("Not yet wired: support.getMyUnreadCount");
   },
@@ -302,6 +319,7 @@ export const getAdminTicketDetail = defineOperation({
   idempotency: { kind: "natural" },
   sideEffects: ["cache"],
   hasMaintenanceWrite: true,
+  // Bound at app level - ticket logic inline in server-action
   execute: async () => {
     throw new Error("Not yet wired: support.getAdminTicketDetail");
   },
@@ -331,6 +349,7 @@ export const adminReply = defineOperation({
   destructive: false,
   idempotency: { kind: "none" },
   sideEffects: ["email"],
+  // Bound at app level - ticket logic inline in server-action
   execute: async () => {
     throw new Error("Not yet wired: support.adminReply");
   },
@@ -361,6 +380,7 @@ export const updateTicketStatus = defineOperation({
   destructive: false,
   idempotency: { kind: "none" },
   sideEffects: [],
+  // Bound at app level - ticket logic inline in server-action
   execute: async () => {
     throw new Error("Not yet wired: support.updateTicketStatus");
   },
@@ -375,6 +395,9 @@ export const updateTicketStatus = defineOperation({
  *
  * 权限：protected（登录用户）
  * 只读操作
+ *
+ * 已接线至 listActiveAnnouncementsForUser 服务函数。
+ * 将 DB 行映射为操作输出格式（日期序列化、isRead 判定）。
  */
 export const listAnnouncements = defineOperation({
   name: "support.listAnnouncements",
@@ -403,8 +426,32 @@ export const listAnnouncements = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error("Not yet wired: support.listAnnouncements");
+  execute: async (_input, principal) => {
+    const userId = getPrincipalUserId(principal);
+    if (!userId) {
+      throw new Error("Principal does not have a userId");
+    }
+
+    const rows = await listActiveAnnouncementsForUser(userId);
+
+    // 应用分页（服务函数返回全量，此处做内存分页）
+    const page = _input.page ?? 1;
+    const pageSize = _input.pageSize ?? 50;
+    const total = rows.length;
+    const start = (page - 1) * pageSize;
+    const sliced = rows.slice(start, start + pageSize);
+
+    const announcements = sliced.map((row) => ({
+      id: row.id,
+      title: row.title,
+      content: row.content,
+      publishedAt: (
+        row.publishedAt ?? row.createdAt
+      ).toISOString(),
+      isRead: row.readAt !== null,
+    }));
+
+    return { announcements, total };
   },
 });
 
@@ -413,6 +460,8 @@ export const listAnnouncements = defineOperation({
  *
  * 权限：protected（登录用户）
  * 只读操作
+ *
+ * 已接线至 countUnreadAnnouncementsForUser 服务函数。
  */
 export const countUnreadAnnouncements = defineOperation({
   name: "support.countUnreadAnnouncements",
@@ -429,10 +478,14 @@ export const countUnreadAnnouncements = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error(
-      "Not yet wired: support.countUnreadAnnouncements",
-    );
+  execute: async (_input, principal) => {
+    const userId = getPrincipalUserId(principal);
+    if (!userId) {
+      throw new Error("Principal does not have a userId");
+    }
+
+    const count = await countUnreadAnnouncementsForUser(userId);
+    return { count };
   },
 });
 
@@ -440,6 +493,8 @@ export const countUnreadAnnouncements = defineOperation({
  * support.markAnnouncementRead - 标记单条公告为已读
  *
  * 权限：protected（登录用户）
+ *
+ * 已接线至 markAnnouncementIdsReadForUser 服务函数。
  */
 export const markAnnouncementRead = defineOperation({
   name: "support.markAnnouncementRead",
@@ -458,8 +513,17 @@ export const markAnnouncementRead = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error("Not yet wired: support.markAnnouncementRead");
+  execute: async (input, principal) => {
+    const userId = getPrincipalUserId(principal);
+    if (!userId) {
+      throw new Error("Principal does not have a userId");
+    }
+
+    const marked = await markAnnouncementIdsReadForUser(
+      userId,
+      [input.announcementId],
+    );
+    return { success: marked > 0 };
   },
 });
 
@@ -467,6 +531,9 @@ export const markAnnouncementRead = defineOperation({
  * support.markAllAnnouncementsRead - 标记所有公告为已读
  *
  * 权限：protected（登录用户）
+ *
+ * 已接线至 listActiveAnnouncementsForUser + markAnnouncementIdsReadForUser。
+ * 先获取所有活跃公告 ID，再批量标记已读。
  */
 export const markAllAnnouncementsRead = defineOperation({
   name: "support.markAllAnnouncementsRead",
@@ -484,10 +551,27 @@ export const markAllAnnouncementsRead = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error(
-      "Not yet wired: support.markAllAnnouncementsRead",
+  execute: async (_input, principal) => {
+    const userId = getPrincipalUserId(principal);
+    if (!userId) {
+      throw new Error("Principal does not have a userId");
+    }
+
+    // 获取所有活跃公告中未读的 ID
+    const rows = await listActiveAnnouncementsForUser(userId);
+    const unreadIds = rows
+      .filter((row) => row.readAt === null)
+      .map((row) => row.id);
+
+    if (unreadIds.length === 0) {
+      return { success: true, markedCount: 0 };
+    }
+
+    const markedCount = await markAnnouncementIdsReadForUser(
+      userId,
+      unreadIds,
     );
+    return { success: true, markedCount };
   },
 });
 
@@ -496,6 +580,8 @@ export const markAllAnnouncementsRead = defineOperation({
  *
  * 权限：admin
  * 只读操作
+ *
+ * 已接线至 listAnnouncementsForAdmin 服务函数。
  */
 export const getAdminAnnouncements = defineOperation({
   name: "support.getAdminAnnouncements",
@@ -527,8 +613,35 @@ export const getAdminAnnouncements = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error("Not yet wired: support.getAdminAnnouncements");
+  execute: async (input) => {
+    const rows = await listAnnouncementsForAdmin();
+
+    // 可选按发布状态过滤
+    let filtered = rows;
+    if (input.published !== undefined) {
+      filtered = rows.filter(
+        (row) => row.isPublished === input.published,
+      );
+    }
+
+    // 分页
+    const page = input.page ?? 1;
+    const pageSize = input.pageSize ?? 100;
+    const total = filtered.length;
+    const start = (page - 1) * pageSize;
+    const sliced = filtered.slice(start, start + pageSize);
+
+    const announcements = sliced.map((row) => ({
+      id: row.id,
+      title: row.title,
+      content: row.content,
+      isPublished: row.isPublished,
+      publishedAt: row.publishedAt?.toISOString() ?? null,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    }));
+
+    return { announcements, total };
   },
 });
 
@@ -556,6 +669,7 @@ export const createAnnouncement = defineOperation({
   destructive: false,
   idempotency: { kind: "none" },
   sideEffects: [],
+  // Bound at app level - create logic inline in server-action (includes audit log + revalidatePath)
   execute: async () => {
     throw new Error("Not yet wired: support.createAnnouncement");
   },
@@ -585,6 +699,7 @@ export const updateAnnouncement = defineOperation({
   destructive: false,
   idempotency: { kind: "none" },
   sideEffects: [],
+  // Bound at app level - update logic inline in server-action (includes audit log + revalidatePath)
   execute: async () => {
     throw new Error("Not yet wired: support.updateAnnouncement");
   },
@@ -613,6 +728,7 @@ export const deleteAnnouncement = defineOperation({
   destructive: true,
   idempotency: { kind: "none" },
   sideEffects: [],
+  // Bound at app level - delete logic inline in server-action (includes audit log + revalidatePath)
   execute: async () => {
     throw new Error("Not yet wired: support.deleteAnnouncement");
   },
@@ -643,6 +759,7 @@ export const toggleAnnouncementPublish = defineOperation({
   destructive: false,
   idempotency: { kind: "none" },
   sideEffects: [],
+  // Bound at app level - toggle logic inline in server-action (includes audit log + revalidatePath)
   execute: async () => {
     throw new Error(
       "Not yet wired: support.toggleAnnouncementPublish",

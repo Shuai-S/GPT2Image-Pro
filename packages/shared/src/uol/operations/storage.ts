@@ -8,7 +8,6 @@
  * 关键依赖：../registry（defineOperation）、zod（schema 校验）
  *
  * 注意：
- * - 所有 execute 均为 stub，待后续接入实际 service 层实现。
  * - 本域不涉及扣费，存储操作天然幂等。
  * - local provider 下 getSignedUploadUrl 返回的是 GET 路由（不可 PUT），
  *   预签名直传仅 S3 可用。
@@ -16,6 +15,7 @@
 import { z } from "zod";
 
 import { defineOperation } from "../registry";
+import { getStorageProvider } from "../../storage/providers/index";
 
 // ---------------------------------------------------------------------------
 // 1. storage.getSignedUploadUrl
@@ -43,8 +43,14 @@ export const getSignedUploadUrl = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: ["storage"],
-  execute: async () => {
-    throw new Error("Not yet wired: storage.getSignedUploadUrl");
+  execute: async (input, _principal, _ctx) => {
+    const provider = await getStorageProvider();
+    const url = await provider.getSignedUploadUrl(
+      input.key,
+      input.bucket,
+      input.contentType
+    );
+    return { url, key: input.key };
   },
 });
 
@@ -71,8 +77,10 @@ export const deleteFile = defineOperation({
   destructive: true,
   idempotency: { kind: "natural" },
   sideEffects: ["storage"],
-  execute: async () => {
-    throw new Error("Not yet wired: storage.deleteFile");
+  execute: async (input, _principal, _ctx) => {
+    const provider = await getStorageProvider();
+    await provider.deleteObject(input.key, input.bucket);
+    return { success: true };
   },
 });
 
@@ -102,8 +110,10 @@ export const readObject = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error("Not yet wired: storage.readObject");
+  execute: async (input, _principal, _ctx) => {
+    const provider = await getStorageProvider();
+    const data = await provider.getObject(input.key, input.bucket);
+    return { data, contentType: undefined, contentLength: data.length };
   },
 });
 
@@ -133,8 +143,17 @@ export const createPresignedUpload = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: ["storage"],
-  execute: async () => {
-    throw new Error("Not yet wired: storage.createPresignedUpload");
+  execute: async (input, _principal, _ctx) => {
+    // 文档上传预签名 URL，使用通用存储提供者的 getSignedUploadUrl
+    const provider = await getStorageProvider();
+    const bucket = "documents";
+    const fileKey = `uploads/${Date.now()}-${input.filename}`;
+    const url = await provider.getSignedUploadUrl(
+      fileKey,
+      bucket,
+      input.contentType
+    );
+    return { url, fileKey };
   },
 });
 
@@ -165,8 +184,15 @@ export const putObject = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: ["storage"],
-  execute: async () => {
-    throw new Error("Not yet wired: storage.putObject");
+  execute: async (input, _principal, _ctx) => {
+    const provider = await getStorageProvider();
+    await provider.putObject(
+      input.key,
+      input.bucket,
+      input.data as Buffer,
+      input.contentType ?? "application/octet-stream"
+    );
+    return { success: true, key: input.key };
   },
 });
 
@@ -195,8 +221,10 @@ export const getObject = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error("Not yet wired: storage.getObject");
+  execute: async (input, _principal, _ctx) => {
+    const provider = await getStorageProvider();
+    const data = await provider.getObject(input.key, input.bucket);
+    return { data, contentType: undefined, contentLength: data.length };
   },
 });
 
@@ -224,8 +252,10 @@ export const deleteObject = defineOperation({
   idempotency: { kind: "natural" },
   sideEffects: ["storage"],
   hasMaintenanceWrite: true,
-  execute: async () => {
-    throw new Error("Not yet wired: storage.deleteObject");
+  execute: async (input, _principal, _ctx) => {
+    const provider = await getStorageProvider();
+    await provider.deleteObject(input.key, input.bucket);
+    return { success: true };
   },
 });
 
@@ -254,7 +284,13 @@ export const getSignedReadUrl = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error("Not yet wired: storage.getSignedReadUrl");
+  execute: async (input, _principal, _ctx) => {
+    const provider = await getStorageProvider();
+    const url = await provider.getSignedUrl(
+      input.key,
+      input.bucket,
+      input.expiresIn ?? 3600
+    );
+    return { url };
   },
 });

@@ -7,12 +7,17 @@
  * 使用方：UOL invoke 网关、MCP 适配器、内置 Agent
  * 关键依赖：../registry (defineOperation)、zod (schema)
  *
- * 注意：execute 均为 stub，待实际接线时替换为真实实现。
  * 不依赖 @repo/database 或 apps/web 的任何导入。
  */
 import { z } from "zod";
 
 import { defineOperation } from "../registry";
+import {
+  moderateContent as moderateContentFn,
+  getConfiguredModerationProviders,
+  isContentModerationEnabled,
+  type ModerateContentInput,
+} from "../../moderation/index";
 
 // -- 通用子 schema --
 
@@ -69,8 +74,32 @@ export const moderateContent = defineOperation({
   idempotency: { kind: "natural" },
   sideEffects: ["external-call"],
   processLocalState: false,
-  execute: async () => {
-    throw new Error("Not yet wired: moderation.moderateContent");
+  execute: async (input, _principal, _ctx) => {
+    // Zod schema 是序列化格式（images.data 为 base64 string），
+    // 而 moderateContentFn 期望 ModerateContentInput（images.data 为 Buffer）。
+    // UOL 作为传输边界，此处用 type assertion 桥接。
+    // 使用 Partial 构建后断言，避免 exactOptionalPropertyTypes 冲突。
+    const params = { prompt: input.prompt } as ModerateContentInput;
+    if (input.mode != null) params.mode = input.mode;
+    if (input.userId != null) params.userId = input.userId;
+    if (input.images != null) {
+      params.images =
+        input.images as unknown as NonNullable<ModerateContentInput["images"]>;
+    }
+    if (input.userPlan != null) {
+      params.userPlan =
+        input.userPlan as unknown as NonNullable<ModerateContentInput["userPlan"]>;
+    }
+    if (input.userModerationBlockRiskLevel != null) {
+      params.userModerationBlockRiskLevel =
+        input.userModerationBlockRiskLevel as unknown as NonNullable<
+          ModerateContentInput["userModerationBlockRiskLevel"]
+        >;
+    }
+    if (input.generationId != null) params.generationId = input.generationId;
+    if (input.skipProxy != null) params.skipProxy = input.skipProxy;
+    const result = await moderateContentFn(params);
+    return result;
   },
 });
 
@@ -98,8 +127,9 @@ export const getProviders = defineOperation({
   idempotency: { kind: "natural" },
   sideEffects: [],
   processLocalState: false,
-  execute: async () => {
-    throw new Error("Not yet wired: moderation.getProviders");
+  execute: async (_input, _principal, _ctx) => {
+    const providers = await getConfiguredModerationProviders();
+    return { providers };
   },
 });
 
@@ -125,8 +155,9 @@ export const isEnabled = defineOperation({
   idempotency: { kind: "natural" },
   sideEffects: [],
   processLocalState: false,
-  execute: async () => {
-    throw new Error("Not yet wired: moderation.isEnabled");
+  execute: async (_input, _principal, _ctx) => {
+    const enabled = await isContentModerationEnabled();
+    return { enabled };
   },
 });
 

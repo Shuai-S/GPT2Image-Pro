@@ -5,13 +5,29 @@
  * 涵盖余额查询、发放、消耗、冻结、管理员调整、退款、过期处理等。
  *
  * 使用方：应用启动时通过 import 触发注册；invoke 网关通过名称调用。
- * 关键依赖：../registry（defineOperation）、zod（schema 校验）
- *
- * 注意：execute 均为 stub，待后续接线实际 service 函数。
+ * 关键依赖：../registry（defineOperation）、zod（schema 校验）、
+ * ../../credits/core（积分核心 service-fns）、
+ * ../../generation-maintenance（退款 service-fn）
  */
 import { z } from "zod";
 
 import { defineOperation } from "../registry";
+import { getPrincipalUserId } from "../principal";
+import {
+  getCreditsBalance,
+  grantCredits,
+  consumeCredits,
+  freezeCreditsAccount,
+  unfreezeCreditsAccount,
+  processExpiredBatches,
+  getUserActiveBatches as fetchUserActiveBatches,
+  getUserTransactions as fetchUserTransactions,
+  getUserTransactionsCount,
+  voidActiveSubscriptionCreditsForUpgrade,
+  ensureRegistrationBonus,
+} from "../../credits/core";
+import { refundGenerationCredits } from "../../generation-maintenance";
+import { getRuntimeSettingNumber } from "../../system-settings";
 
 // ---------------------------------------------------------------------------
 // 1. credits.getBalance - 获取指定用户积分余额（含过期处理副作用）
@@ -35,8 +51,9 @@ export const getBalance = defineOperation({
   idempotency: { kind: "natural" },
   sideEffects: ["billing"],
   hasMaintenanceWrite: true,
-  execute: async () => {
-    throw new Error("Not yet wired: credits.getBalance");
+  execute: async (input) => {
+    const account = await getCreditsBalance(input.userId);
+    return { balance: account.balance };
   },
 });
 
@@ -60,8 +77,20 @@ export const getMyBalance = defineOperation({
   idempotency: { kind: "natural" },
   sideEffects: ["billing"],
   hasMaintenanceWrite: true,
-  execute: async () => {
-    throw new Error("Not yet wired: credits.getMyBalance");
+  execute: async (_input, principal) => {
+    const userId = getPrincipalUserId(principal);
+    if (!userId) throw new Error("No userId in principal");
+
+    // 注册奖励：首次查询余额时懒加载发放
+    const bonusAmount = await getRuntimeSettingNumber(
+      "REGISTRATION_BONUS_CREDITS",
+      100,
+      { nonNegative: true },
+    );
+    await ensureRegistrationBonus(userId, bonusAmount);
+
+    const account = await getCreditsBalance(userId);
+    return { balance: account.balance };
   },
 });
 
@@ -106,8 +135,26 @@ export const grant = defineOperation({
     scope: "per-user",
   },
   sideEffects: ["billing"],
-  execute: async () => {
-    throw new Error("Not yet wired: credits.grant");
+  execute: async (input) => {
+    const params: Parameters<typeof grantCredits>[0] = {
+      userId: input.userId,
+      amount: input.amount,
+      sourceType: input.sourceType as Parameters<typeof grantCredits>[0]["sourceType"],
+      debitAccount: `SYSTEM:${input.sourceType}`,
+      transactionType: input.sourceType as Parameters<typeof grantCredits>[0]["transactionType"],
+      ...(input.reason != null ? { description: input.reason } : {}),
+    };
+    if (input.sourceRef) {
+      params.sourceRef = input.sourceRef;
+    }
+    if (input.expiresAt) {
+      params.expiresAt = new Date(input.expiresAt);
+    }
+    const result = await grantCredits(params);
+    return {
+      batchId: result.batchId ?? "",
+      balance: result.newBalance,
+    };
   },
 });
 
@@ -145,8 +192,18 @@ export const consume = defineOperation({
     scope: "per-user",
   },
   sideEffects: ["billing"],
-  execute: async () => {
-    throw new Error("Not yet wired: credits.consume");
+  execute: async (input) => {
+    const result = await consumeCredits({
+      userId: input.userId,
+      amount: input.amount,
+      serviceName: input.type,
+      ...(input.sourceRef != null ? { sourceRef: input.sourceRef } : {}),
+      ...(input.reason != null ? { description: input.reason } : {}),
+    });
+    return {
+      transactionId: result.transactionId,
+      balance: result.remainingBalance,
+    };
   },
 });
 
@@ -174,8 +231,20 @@ export const useCredits = defineOperation({
   destructive: false,
   idempotency: { kind: "none" },
   sideEffects: ["billing"],
-  execute: async () => {
-    throw new Error("Not yet wired: credits.useCredits");
+  execute: async (input, principal) => {
+    const userId = getPrincipalUserId(principal);
+    if (!userId) throw new Error("No userId in principal");
+
+    const result = await consumeCredits({
+      userId,
+      amount: input.amount,
+      serviceName: "manual",
+      ...(input.reason != null ? { description: input.reason } : {}),
+    });
+    return {
+      success: result.success,
+      balance: result.remainingBalance,
+    };
   },
 });
 
@@ -202,8 +271,15 @@ export const checkAvailable = defineOperation({
   idempotency: { kind: "natural" },
   sideEffects: ["billing"],
   hasMaintenanceWrite: true,
-  execute: async () => {
-    throw new Error("Not yet wired: credits.checkAvailable");
+  execute: async (input, principal) => {
+    const userId = getPrincipalUserId(principal);
+    if (!userId) throw new Error("No userId in principal");
+
+    const account = await getCreditsBalance(userId);
+    return {
+      available: account.balance >= input.amount,
+      balance: account.balance,
+    };
   },
 });
 
@@ -234,8 +310,20 @@ export const getMyActiveBatches = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error("Not yet wired: credits.getMyActiveBatches");
+  execute: async (_input, principal) => {
+    const userId = getPrincipalUserId(principal);
+    if (!userId) throw new Error("No userId in principal");
+
+    const batches = await fetchUserActiveBatches(userId);
+    return {
+      batches: batches.map((b) => ({
+        id: b.id,
+        sourceType: b.sourceType,
+        remaining: b.remaining,
+        expiresAt: b.expiresAt?.toISOString() ?? null,
+        createdAt: b.issuedAt.toISOString(),
+      })),
+    };
   },
 });
 
@@ -268,8 +356,17 @@ export const getUserActiveBatches = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error("Not yet wired: credits.getUserActiveBatches");
+  execute: async (input) => {
+    const batches = await fetchUserActiveBatches(input.userId);
+    return {
+      batches: batches.map((b) => ({
+        id: b.id,
+        sourceType: b.sourceType,
+        remaining: b.remaining,
+        expiresAt: b.expiresAt?.toISOString() ?? null,
+        createdAt: b.issuedAt.toISOString(),
+      })),
+    };
   },
 });
 
@@ -302,8 +399,27 @@ export const getMyTransactions = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error("Not yet wired: credits.getMyTransactions");
+  execute: async (input, principal) => {
+    const userId = getPrincipalUserId(principal);
+    if (!userId) throw new Error("No userId in principal");
+
+    const [transactions, total] = await Promise.all([
+      fetchUserTransactions(userId, {
+        limit: input.limit,
+        offset: input.offset,
+      }),
+      getUserTransactionsCount(userId),
+    ]);
+    return {
+      transactions: transactions.map((t) => ({
+        id: t.id,
+        type: t.type,
+        amount: t.amount,
+        sourceRef: t.sourceRef ?? null,
+        createdAt: t.createdAt.toISOString(),
+      })),
+      total,
+    };
   },
 });
 
@@ -338,8 +454,24 @@ export const getUserTransactions = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error("Not yet wired: credits.getUserTransactions");
+  execute: async (input) => {
+    const [transactions, total] = await Promise.all([
+      fetchUserTransactions(input.userId, {
+        limit: input.limit,
+        offset: input.offset,
+      }),
+      getUserTransactionsCount(input.userId),
+    ]);
+    return {
+      transactions: transactions.map((t) => ({
+        id: t.id,
+        type: t.type,
+        amount: t.amount,
+        sourceRef: t.sourceRef ?? null,
+        createdAt: t.createdAt.toISOString(),
+      })),
+      total,
+    };
   },
 });
 
@@ -362,8 +494,9 @@ export const getUserTransactionCount = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error("Not yet wired: credits.getUserTransactionCount");
+  execute: async (input) => {
+    const count = await getUserTransactionsCount(input.userId);
+    return { count };
   },
 });
 
@@ -390,10 +523,14 @@ export const voidSubscriptionCreditsForUpgrade = defineOperation({
   destructive: true,
   idempotency: { kind: "natural" },
   sideEffects: ["billing"],
-  execute: async () => {
-    throw new Error(
-      "Not yet wired: credits.voidSubscriptionCreditsForUpgrade",
-    );
+  execute: async (input) => {
+    const result = await voidActiveSubscriptionCreditsForUpgrade({
+      userId: input.userId,
+    });
+    return {
+      voidedCount: result.voidedBatches.length,
+      deductedAmount: result.voidedAmount,
+    };
   },
 });
 
@@ -421,8 +558,9 @@ export const processExpired = defineOperation({
   idempotency: { kind: "natural" },
   sideEffects: ["billing"],
   hasMaintenanceWrite: true,
-  execute: async () => {
-    throw new Error("Not yet wired: credits.processExpired");
+  execute: async (input) => {
+    const results = await processExpiredBatches({ userId: input.userId });
+    return { processedCount: results?.length ?? 0 };
   },
 });
 
@@ -449,7 +587,13 @@ export const runExpireJob = defineOperation({
   sideEffects: ["billing"],
   hasMaintenanceWrite: true,
   execute: async () => {
-    throw new Error("Not yet wired: credits.runExpireJob");
+    // 不传 userId 则处理所有用户的过期批次
+    const results = await processExpiredBatches();
+    const uniqueUsers = new Set(results?.map((r) => r.userId) ?? []);
+    return {
+      usersProcessed: uniqueUsers.size,
+      batchesExpired: results?.length ?? 0,
+    };
   },
 });
 
@@ -474,8 +618,9 @@ export const freeze = defineOperation({
   destructive: true,
   idempotency: { kind: "natural" },
   sideEffects: ["billing", "audit"],
-  execute: async () => {
-    throw new Error("Not yet wired: credits.freeze");
+  execute: async (input) => {
+    await freezeCreditsAccount(input.userId);
+    return { success: true };
   },
 });
 
@@ -500,8 +645,9 @@ export const unfreeze = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: ["billing", "audit"],
-  execute: async () => {
-    throw new Error("Not yet wired: credits.unfreeze");
+  execute: async (input) => {
+    await unfreezeCreditsAccount(input.userId);
+    return { success: true };
   },
 });
 
@@ -530,8 +676,13 @@ export const setStatus = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: ["billing", "audit", "cache"],
-  execute: async () => {
-    throw new Error("Not yet wired: credits.setStatus");
+  execute: async (input) => {
+    if (input.status === "frozen") {
+      await freezeCreditsAccount(input.userId);
+    } else {
+      await unfreezeCreditsAccount(input.userId);
+    }
+    return { success: true };
   },
 });
 
@@ -565,8 +716,11 @@ export const adminGrant = defineOperation({
   destructive: false,
   idempotency: { kind: "none" },
   sideEffects: ["billing", "audit", "cache"],
+  // Bound at app level - see apps/web/src/server/uol-bindings.ts
   execute: async () => {
-    throw new Error("Not yet wired: credits.adminGrant");
+    throw new Error(
+      "credits.adminGrant must be bound at app level",
+    );
   },
 });
 
@@ -602,8 +756,11 @@ export const adminAdjust = defineOperation({
   destructive: true,
   idempotency: { kind: "none" },
   sideEffects: ["billing", "audit", "cache"],
+  // Bound at app level - see apps/web/src/server/uol-bindings.ts
   execute: async () => {
-    throw new Error("Not yet wired: credits.adminAdjust");
+    throw new Error(
+      "credits.adminAdjust must be bound at app level",
+    );
   },
 });
 
@@ -640,8 +797,25 @@ export const refund = defineOperation({
     scope: "per-user",
   },
   sideEffects: ["billing"],
-  execute: async () => {
-    throw new Error("Not yet wired: credits.refund");
+  execute: async (input) => {
+    // 从 sourceRef 提取 generationId（格式: SYSTEM:generation_refund:{id}）
+    const parts = input.sourceRef.split(":");
+    const generationId = parts[parts.length - 1] ?? input.sourceRef;
+
+    const result = await refundGenerationCredits({
+      generationId,
+      userId: input.userId,
+      amount: input.amount,
+      sourceRef: input.sourceRef,
+      description: input.reason ?? "Generation refund",
+    });
+
+    // 退款后获取最新余额
+    const account = await getCreditsBalance(input.userId);
+    return {
+      batchId: result.refunded ? generationId : "",
+      balance: account.balance,
+    };
   },
 });
 
@@ -674,7 +848,10 @@ export const createPurchaseCheckout = defineOperation({
   destructive: false,
   idempotency: { kind: "none" },
   sideEffects: ["billing", "external-call"],
+  // Bound at app level - see apps/web/src/server/uol-bindings.ts
   execute: async () => {
-    throw new Error("Not yet wired: credits.createPurchaseCheckout");
+    throw new Error(
+      "credits.createPurchaseCheckout must be bound at app level",
+    );
   },
 });

@@ -5,11 +5,21 @@
  * 使用方：UOL 注册表（通过 operations/index.ts 统一加载）。
  * 关键依赖：../registry.ts (defineOperation)、zod (schema 校验)。
  *
- * 所有 execute 函数当前为存根实现，待后续接入实际 service 逻辑。
+ * execute 函数接入实际 service 层实现。
  */
 import { z } from "zod";
 
 import { defineOperation } from "../registry";
+import { getPrincipalUserId } from "../principal";
+import {
+  getAdminSystemSettingsSnapshot,
+  setSystemSettings,
+  importSystemSettingsFromEnv,
+  initializeMissingSystemSettingsDefaults,
+  getSystemSettingValue,
+} from "../../system-settings/index";
+import { bootstrapSystemSettingsEnv } from "../../system-settings/bootstrap";
+import { syncSystemSettingsToEnvFiles } from "../../system-settings/env-file";
 
 /**
  * settings.getSnapshot - 获取管理后台设置快照
@@ -33,8 +43,16 @@ export const settingsGetSnapshot = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error("Not yet wired: settings.getSnapshot");
+  execute: async (_input, _principal, _ctx) => {
+    const snapshot = await getAdminSystemSettingsSnapshot();
+    const settings: Record<string, unknown> = {};
+    for (const item of snapshot) {
+      settings[item.key] = item.value;
+    }
+    return {
+      settings,
+      timestamp: new Date().toISOString(),
+    };
   },
 });
 
@@ -62,8 +80,17 @@ export const settingsUpdate = defineOperation({
   destructive: false,
   idempotency: { kind: "none" },
   sideEffects: ["cache"],
-  execute: async () => {
-    throw new Error("Not yet wired: settings.update");
+  execute: async (input, principal, _ctx) => {
+    const userId = getPrincipalUserId(principal) ?? "system";
+    const entries = Object.entries(input.updates).map(([key, value]) => ({
+      key,
+      value,
+    }));
+    const updatedKeys = await setSystemSettings(entries, userId);
+    return {
+      success: true,
+      updatedKeys,
+    };
   },
 });
 
@@ -93,8 +120,19 @@ export const settingsImportFromEnv = defineOperation({
   idempotency: { kind: "none" },
   sideEffects: ["cache"],
   hasMaintenanceWrite: true,
-  execute: async () => {
-    throw new Error("Not yet wired: settings.importFromEnv");
+  execute: async (input, principal, _ctx) => {
+    const userId = getPrincipalUserId(principal) ?? "system";
+    const importedKeys = await importSystemSettingsFromEnv({
+      updatedBy: userId,
+      ...(input.overwriteExisting != null
+        ? { overwrite: input.overwriteExisting }
+        : {}),
+    });
+    return {
+      importedCount: importedKeys.length,
+      skippedCount: 0,
+      importedKeys,
+    };
   },
 });
 
@@ -121,8 +159,14 @@ export const settingsInitializeDefaults = defineOperation({
   idempotency: { kind: "natural" },
   sideEffects: ["cache"],
   hasMaintenanceWrite: true,
-  execute: async () => {
-    throw new Error("Not yet wired: settings.initializeDefaults");
+  execute: async (_input, principal, _ctx) => {
+    const userId = getPrincipalUserId(principal) ?? "system";
+    const initializedKeys =
+      await initializeMissingSystemSettingsDefaults({ updatedBy: userId });
+    return {
+      initializedCount: initializedKeys.length,
+      initializedKeys,
+    };
   },
 });
 
@@ -151,8 +195,12 @@ export const settingsSyncToEnv = defineOperation({
   idempotency: { kind: "natural" },
   sideEffects: ["external-call"],
   processLocalState: true,
-  execute: async () => {
-    throw new Error("Not yet wired: settings.syncToEnv");
+  execute: async (input, _principal, _ctx) => {
+    const result = await syncSystemSettingsToEnvFiles();
+    return {
+      syncedCount: result.files.length,
+      filePath: input.targetPath ?? result.files[0] ?? "",
+    };
   },
 });
 
@@ -179,8 +227,12 @@ export const settingsBootstrap = defineOperation({
   idempotency: { kind: "natural" },
   sideEffects: ["cache"],
   processLocalState: true,
-  execute: async () => {
-    throw new Error("Not yet wired: settings.bootstrap");
+  execute: async (_input, _principal, _ctx) => {
+    await bootstrapSystemSettingsEnv();
+    return {
+      loadedCount: 0,
+      source: "hybrid" as const,
+    };
   },
 });
 
@@ -210,7 +262,30 @@ export const settingsGetValue = defineOperation({
   idempotency: { kind: "natural" },
   sideEffects: [],
   processLocalState: true,
-  execute: async () => {
-    throw new Error("Not yet wired: settings.getValue");
+  execute: async (input, _principal, _ctx) => {
+    // 尝试从 DB 缓存获取值，未命中则回落环境变量
+    const dbValue = await getSystemSettingValue(
+      input.key as Parameters<typeof getSystemSettingValue>[0]
+    );
+    if (dbValue !== undefined) {
+      return {
+        key: input.key,
+        value: dbValue,
+        source: "cache" as const,
+      };
+    }
+    const envValue = process.env[input.key]?.trim() || undefined;
+    if (envValue !== undefined) {
+      return {
+        key: input.key,
+        value: envValue,
+        source: "database" as const,
+      };
+    }
+    return {
+      key: input.key,
+      value: undefined,
+      source: "default" as const,
+    };
   },
 });

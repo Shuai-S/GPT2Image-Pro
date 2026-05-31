@@ -4,11 +4,28 @@
  * 涵盖订阅/支付相关的所有操作：结账、取消、门户、计划查询、能力快照、
  * 文件大小检查、Webhook 处理等。
  *
- * 所有 execute 函数均为存根，待后续接入实际 service 逻辑。
+ * 使用方：应用启动时通过 import 触发注册；invoke 网关通过名称调用。
+ * 关键依赖：../registry（defineOperation）、zod（schema 校验）、
+ * ../../subscription/services/plan-capabilities（能力矩阵）、
+ * ../../subscription/services/user-plan（用户计划查询）、
+ * ../../subscription/services/upload-limits（上传限制）
  */
 
 import { z } from "zod";
 import { defineOperation } from "../registry";
+import { getPrincipalUserId } from "../principal";
+import {
+  getPlanCapabilitySnapshot,
+  canUsePlanCapability,
+  getPlanLimits,
+  getPlanCapabilityMatrix,
+  type PlanCapabilityKey,
+} from "../../subscription/services/plan-capabilities";
+import {
+  getUserPlan,
+  checkFileSizePrivilege,
+} from "../../subscription/services/user-plan";
+import type { SubscriptionPlan } from "../../config/subscription-plan";
 
 // ============================================
 // 1. subscription.createCheckout
@@ -38,8 +55,11 @@ defineOperation({
   destructive: false,
   idempotency: { kind: "none" },
   sideEffects: ["external-call"],
+  // Bound at app level - see apps/web/src/server/uol-bindings.ts
   execute: async () => {
-    throw new Error("Not yet wired: subscription.createCheckout");
+    throw new Error(
+      "subscription.createCheckout must be bound at app level",
+    );
   },
 });
 
@@ -70,8 +90,11 @@ defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
+  // Bound at app level - see apps/web/src/server/uol-bindings.ts
   execute: async () => {
-    throw new Error("Not yet wired: subscription.getUpgradeQuote");
+    throw new Error(
+      "subscription.getUpgradeQuote must be bound at app level",
+    );
   },
 });
 
@@ -103,8 +126,11 @@ defineOperation({
   destructive: true,
   idempotency: { kind: "natural" },
   sideEffects: ["external-call"],
+  // Bound at app level - see apps/web/src/server/uol-bindings.ts
   execute: async () => {
-    throw new Error("Not yet wired: subscription.cancel");
+    throw new Error(
+      "subscription.cancel must be bound at app level",
+    );
   },
 });
 
@@ -128,8 +154,11 @@ defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: ["external-call"],
+  // Bound at app level - see apps/web/src/server/uol-bindings.ts
   execute: async () => {
-    throw new Error("Not yet wired: subscription.getPortal");
+    throw new Error(
+      "subscription.getPortal must be bound at app level",
+    );
   },
 });
 
@@ -159,8 +188,17 @@ defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error("Not yet wired: subscription.getUserSubscription");
+  execute: async (input) => {
+    const info = await getUserPlan(input.userId);
+    return {
+      plan: info.plan,
+      planName: info.planName,
+      hasActiveSubscription: info.hasActiveSubscription,
+      subscriptionStatus: info.subscriptionStatus,
+      currentPeriodEnd: info.currentPeriodEnd?.toISOString() ?? null,
+      priceId: info.priceId,
+      cancelAtPeriodEnd: info.cancelAtPeriodEnd,
+    };
   },
 });
 
@@ -185,8 +223,12 @@ defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error("Not yet wired: subscription.hasActive");
+  execute: async (input) => {
+    const info = await getUserPlan(input.userId);
+    return {
+      hasActive: info.hasActiveSubscription,
+      plan: info.hasActiveSubscription ? info.plan : undefined,
+    };
   },
 });
 
@@ -215,8 +257,21 @@ defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error("Not yet wired: subscription.getMyPlan");
+  execute: async (_input, principal) => {
+    const userId = getPrincipalUserId(principal);
+    if (!userId) throw new Error("No userId in principal");
+
+    const info = await getUserPlan(userId);
+    const snapshot = await getPlanCapabilitySnapshot(info.plan);
+    return {
+      plan: info.plan,
+      planName: info.planName,
+      capabilities: snapshot as unknown as Record<string, unknown>,
+      hasActiveSubscription: info.hasActiveSubscription,
+      currentPeriodEnd: info.currentPeriodEnd?.toISOString() ?? null,
+      priceId: info.priceId,
+      cancelAtPeriodEnd: info.cancelAtPeriodEnd,
+    };
   },
 });
 
@@ -240,8 +295,9 @@ defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error("Not yet wired: subscription.getUserPlan");
+  execute: async (input) => {
+    const info = await getUserPlan(input.userId);
+    return { plan: info.plan };
   },
 });
 
@@ -268,8 +324,16 @@ defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error("Not yet wired: subscription.checkFileSize");
+  execute: async (input) => {
+    const result = await checkFileSizePrivilege(
+      input.userId,
+      input.fileSizeBytes,
+    );
+    return {
+      allowed: result.allowed,
+      errorMessage: result.errorMessage,
+      upgradeMessage: result.upgradeMessage,
+    };
   },
 });
 
@@ -325,8 +389,39 @@ defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error("Not yet wired: subscription.getCapabilitySnapshot");
+  execute: async (input) => {
+    const snapshot = await getPlanCapabilitySnapshot(
+      input.plan as SubscriptionPlan,
+    );
+    return {
+      plan: snapshot.plan,
+      features: snapshot.features as Record<string, boolean>,
+      limits: {
+        maxFileMb: snapshot.limits.maxFileMb,
+        maxUploadMb: snapshot.limits.maxUploadMb,
+        maxFileSizeBytes: snapshot.limits.maxFileSizeBytes,
+        maxUploadBytes: snapshot.limits.maxUploadBytes,
+        queuePriority: snapshot.limits.queuePriority,
+        imageGenerationConcurrency:
+          snapshot.limits.imageGenerationConcurrency,
+        monthlyCredits: snapshot.limits.monthlyCredits,
+        maxBatchCount: snapshot.limits.maxBatchCount,
+        maxEditImages: snapshot.limits.maxEditImages,
+        maxChatImages: snapshot.limits.maxChatImages,
+        maxChatContextChars: snapshot.limits.maxChatContextChars,
+      },
+      moderation: {
+        defaultBlockRiskLevel:
+          snapshot.moderation.defaultBlockRiskLevel,
+        maxBlockRiskLevel: snapshot.moderation.maxBlockRiskLevel,
+        allowedBlockRiskLevels:
+          snapshot.moderation.allowedBlockRiskLevels,
+      },
+      billing: {
+        chatRoundCredits: snapshot.billing.chatRoundCredits,
+        agentRoundCredits: snapshot.billing.agentRoundCredits,
+      },
+    };
   },
 });
 
@@ -357,8 +452,22 @@ defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error("Not yet wired: subscription.canUseCapability");
+  execute: async (input) => {
+    const allowed = await canUsePlanCapability(
+      input.plan as SubscriptionPlan,
+      input.capability as PlanCapabilityKey,
+    );
+    if (allowed) {
+      return { allowed: true };
+    }
+    // 查找所需最低计划：从能力矩阵获取该能力位要求的最低 plan
+    const matrix = await getPlanCapabilityMatrix();
+    const requiredPlan =
+      matrix.features[input.capability as PlanCapabilityKey];
+    return {
+      allowed: false,
+      requiredPlan: requiredPlan ?? undefined,
+    };
   },
 });
 
@@ -392,8 +501,22 @@ defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error("Not yet wired: subscription.getPlanLimits");
+  execute: async (input) => {
+    const limits = await getPlanLimits(
+      input.plan as SubscriptionPlan,
+    );
+    return {
+      maxFileMb: limits.maxFileMb,
+      maxUploadMb: limits.maxUploadMb,
+      queuePriority: limits.queuePriority,
+      imageGenerationConcurrency:
+        limits.imageGenerationConcurrency,
+      monthlyCredits: limits.monthlyCredits,
+      maxBatchCount: limits.maxBatchCount,
+      maxEditImages: limits.maxEditImages,
+      maxChatImages: limits.maxChatImages,
+      maxChatContextChars: limits.maxChatContextChars,
+    };
   },
 });
 
@@ -420,8 +543,11 @@ defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: ["billing"],
+  // Bound at app level - see apps/web/src/server/uol-bindings.ts
   execute: async () => {
-    throw new Error("Not yet wired: subscription.webhookCreem");
+    throw new Error(
+      "subscription.webhookCreem must be bound at app level",
+    );
   },
 });
 
@@ -448,8 +574,11 @@ defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: ["billing"],
+  // Bound at app level - see apps/web/src/server/uol-bindings.ts
   execute: async () => {
-    throw new Error("Not yet wired: subscription.webhookEpay");
+    throw new Error(
+      "subscription.webhookEpay must be bound at app level",
+    );
   },
 });
 
@@ -481,7 +610,10 @@ defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: ["billing"],
+  // Bound at app level - see apps/web/src/server/uol-bindings.ts
   execute: async () => {
-    throw new Error("Not yet wired: subscription.fulfillEpay");
+    throw new Error(
+      "subscription.fulfillEpay must be bound at app level",
+    );
   },
 });

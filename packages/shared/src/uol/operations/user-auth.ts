@@ -5,10 +5,21 @@
  * 使用方：invoke 网关、MCP 适配器、站内 agent 通过 registry 查询并执行。
  * 关键依赖：../registry（defineOperation）、zod（schema 校验）
  *
- * 注意：所有 execute 函数为 stub，待后续对接实际 service 层。
+ * 接线状态：
+ * - user.bootstrap: 已接线 -> bootstrapSelfUseSuperAdmin (auth/bootstrap-super-admin)
+ * - user.sendVerificationCode: 已接线 -> sendRegistrationVerificationCode (auth/registration-verification)
+ * - user.verifyCode: 已接线 -> verifyRegistrationCode (auth/registration-verification)
+ * - user.getCurrentSession: stub（依赖 next/headers，在 app 层绑定）
+ * - admin 操作（list/getDetail/ban/updateRole/create/updateProfile/setPassword/setUserPlan/setCreditsStatus/setExternalApiKeyStatus）:
+ *   stub（业务逻辑内联于 admin-users.ts server-action 闭包，在 app 层绑定）
  */
 import { z } from "zod";
 
+import { bootstrapSelfUseSuperAdmin as bootstrapSelfUseSuperAdminService } from "../../auth/bootstrap-super-admin";
+import {
+  sendRegistrationVerificationCode as sendRegistrationVerificationCodeService,
+  verifyRegistrationCode as verifyRegistrationCodeService,
+} from "../../auth/registration-verification";
 import { defineOperation } from "../registry";
 
 // ---------------------------------------------------------------------------
@@ -37,6 +48,7 @@ export const listUsers = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
+  // Bound at app level - admin-users.ts server-action logic
   execute: async () => {
     throw new Error("Not yet wired: user.list");
   },
@@ -60,6 +72,7 @@ export const getUserDetail = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
+  // Bound at app level - admin-users.ts server-action logic
   execute: async () => {
     throw new Error("Not yet wired: user.getDetail");
   },
@@ -86,6 +99,7 @@ export const updateUserRole = defineOperation({
   destructive: true,
   idempotency: { kind: "none" },
   sideEffects: ["audit"],
+  // Bound at app level - admin-users.ts server-action logic
   execute: async () => {
     throw new Error("Not yet wired: user.updateRole");
   },
@@ -113,6 +127,7 @@ export const banUser = defineOperation({
   destructive: true,
   idempotency: { kind: "none" },
   sideEffects: ["audit"],
+  // Bound at app level - admin-users.ts server-action logic
   execute: async () => {
     throw new Error("Not yet wired: user.ban");
   },
@@ -139,6 +154,7 @@ export const setUserCreditsStatus = defineOperation({
   destructive: false,
   idempotency: { kind: "none" },
   sideEffects: ["audit"],
+  // Bound at app level - admin-users.ts server-action logic
   execute: async () => {
     throw new Error("Not yet wired: user.setCreditsStatus");
   },
@@ -165,6 +181,7 @@ export const setExternalApiKeyStatus = defineOperation({
   destructive: false,
   idempotency: { kind: "none" },
   sideEffects: ["audit"],
+  // Bound at app level - admin-users.ts server-action logic
   execute: async () => {
     throw new Error("Not yet wired: user.setExternalApiKeyStatus");
   },
@@ -194,6 +211,7 @@ export const createUser = defineOperation({
   destructive: false,
   idempotency: { kind: "none" },
   sideEffects: ["audit"],
+  // Bound at app level - admin-users.ts server-action logic
   execute: async () => {
     throw new Error("Not yet wired: user.create");
   },
@@ -221,6 +239,7 @@ export const updateUserProfile = defineOperation({
   destructive: false,
   idempotency: { kind: "none" },
   sideEffects: ["audit"],
+  // Bound at app level - admin-users.ts server-action logic
   execute: async () => {
     throw new Error("Not yet wired: user.updateProfile");
   },
@@ -247,6 +266,7 @@ export const setUserPassword = defineOperation({
   destructive: true,
   idempotency: { kind: "none" },
   sideEffects: ["audit"],
+  // Bound at app level - admin-users.ts server-action logic
   execute: async () => {
     throw new Error("Not yet wired: user.setPassword");
   },
@@ -273,6 +293,7 @@ export const setUserPlan = defineOperation({
   destructive: false,
   idempotency: { kind: "none" },
   sideEffects: ["audit", "billing"],
+  // Bound at app level - admin-users.ts server-action logic
   execute: async () => {
     throw new Error("Not yet wired: user.setUserPlan");
   },
@@ -297,6 +318,7 @@ export const getCurrentSession = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
+  // Bound at app level - depends on next/headers for cookie-based session
   execute: async () => {
     throw new Error("Not yet wired: user.getCurrentSession");
   },
@@ -322,8 +344,9 @@ export const sendRegistrationVerificationCode = defineOperation({
   destructive: false,
   idempotency: { kind: "none" },
   sideEffects: ["email"],
-  execute: async () => {
-    throw new Error("Not yet wired: user.sendVerificationCode");
+  execute: async (input) => {
+    await sendRegistrationVerificationCodeService(input.email);
+    return { success: true };
   },
 });
 
@@ -348,8 +371,12 @@ export const verifyRegistrationCode = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async () => {
-    throw new Error("Not yet wired: user.verifyCode");
+  execute: async (input) => {
+    const valid = await verifyRegistrationCodeService(
+      input.email,
+      input.code,
+    );
+    return { valid };
   },
 });
 
@@ -380,7 +407,12 @@ export const bootstrapSelfUseSuperAdmin = defineOperation({
     scope: "global",
   },
   sideEffects: ["audit"],
-  execute: async () => {
-    throw new Error("Not yet wired: user.bootstrap");
+  execute: async (_input) => {
+    // 服务内部决定 email/password（忽略 input，使用 LOCAL_SUPER_ADMIN_EMAIL +
+    // 自动生成密码）。input schema 保留以描述语义，实际由 self-use-mode 驱动。
+    await bootstrapSelfUseSuperAdminService();
+    // 服务不返回 userId（void）；此处返回占位值，
+    // 调用方应通过 user.list 或 DB 查实际创建结果。
+    return { userId: "bootstrapped", success: true };
   },
 });
