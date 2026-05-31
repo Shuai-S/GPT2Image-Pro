@@ -222,6 +222,107 @@ describe("setSystemSettings", () => {
     ).rejects.toThrow(/必须是有效数字/);
   });
 
+  it("enforces per-key number range bounds (coerceValue, S-M8)", async () => {
+    // 经济键：价格 min=0.01 拒绝 0 与负数，max=1_000_000 拒绝异常巨大值。
+    await expect(
+      setSystemSettings(
+        [{ key: "PLAN_STARTER_MONTHLY_AMOUNT", value: "0" }],
+        "admin"
+      )
+    ).rejects.toThrow(/不能小于/);
+
+    await expect(
+      setSystemSettings(
+        [{ key: "PLAN_STARTER_MONTHLY_AMOUNT", value: "-5" }],
+        "admin"
+      )
+    ).rejects.toThrow(/不能小于/);
+
+    await expect(
+      setSystemSettings(
+        [{ key: "PLAN_STARTER_MONTHLY_AMOUNT", value: "2000000" }],
+        "admin"
+      )
+    ).rejects.toThrow(/不能大于/);
+
+    // 边界：恰好等于下界/上界应通过（闭区间）。
+    await setSystemSettings(
+      [{ key: "PLAN_STARTER_MONTHLY_AMOUNT", value: "0.01" }],
+      "admin"
+    );
+    expect(store.get("PLAN_STARTER_MONTHLY_AMOUNT")?.value).toBe(0.01);
+
+    await setSystemSettings(
+      [{ key: "PLAN_STARTER_MONTHLY_AMOUNT", value: "1000000" }],
+      "admin"
+    );
+    expect(store.get("PLAN_STARTER_MONTHLY_AMOUNT")?.value).toBe(1_000_000);
+
+    // 正常区间内的值原样写入。
+    await setSystemSettings(
+      [{ key: "PLAN_STARTER_MONTHLY_AMOUNT", value: "20" }],
+      "admin"
+    );
+    expect(store.get("PLAN_STARTER_MONTHLY_AMOUNT")?.value).toBe(20);
+  });
+
+  it("allows registration bonus 0 but rejects negative (coerceValue, S-M8)", async () => {
+    // 注册奖励积分 min=0：允许 0（关闭赠送），拒绝负数（会发负积分）。
+    await setSystemSettings(
+      [{ key: "REGISTRATION_BONUS_CREDITS", value: "0" }],
+      "admin"
+    );
+    expect(store.get("REGISTRATION_BONUS_CREDITS")?.value).toBe(0);
+
+    await expect(
+      setSystemSettings(
+        [{ key: "REGISTRATION_BONUS_CREDITS", value: "-1" }],
+        "admin"
+      )
+    ).rejects.toThrow(/不能小于/);
+  });
+
+  it("rejects non-positive moderation timeout (coerceValue, S-M8)", async () => {
+    // 审核超时 min=1：0 或负数会让审核请求立即超时，破坏 fail-closed/open 语义。
+    await expect(
+      setSystemSettings(
+        [{ key: "CONTENT_MODERATION_PROVIDER_TIMEOUT_MS", value: "0" }],
+        "admin"
+      )
+    ).rejects.toThrow(/不能小于/);
+
+    await setSystemSettings(
+      [{ key: "CONTENT_MODERATION_PROVIDER_TIMEOUT_MS", value: "1" }],
+      "admin"
+    );
+    expect(store.get("CONTENT_MODERATION_PROVIDER_TIMEOUT_MS")?.value).toBe(1);
+  });
+
+  it("blank number input clears the row instead of coercing to 0 (S-M8)", async () => {
+    store.set("PLAN_PRO_MONTHLY_AMOUNT", {
+      key: "PLAN_PRO_MONTHLY_AMOUNT",
+      value: 60,
+    });
+
+    // 空白数值视为清空：删除行回退默认值，且不被 min 范围误判。
+    const changed = await setSystemSettings(
+      [{ key: "PLAN_PRO_MONTHLY_AMOUNT", value: "   " }],
+      "admin"
+    );
+    expect(changed).toEqual(["PLAN_PRO_MONTHLY_AMOUNT"]);
+    expect(store.has("PLAN_PRO_MONTHLY_AMOUNT")).toBe(false);
+    expect(deletedKeys.value).toContain("PLAN_PRO_MONTHLY_AMOUNT");
+  });
+
+  it("number key without declared range keeps coercion unchanged (S-M8)", async () => {
+    // 未声明 min/max 的数值键（如全局并发）行为不变：任意有限数原样写入。
+    await setSystemSettings(
+      [{ key: "IMAGE_GENERATION_GLOBAL_CONCURRENCY", value: "999999" }],
+      "admin"
+    );
+    expect(store.get("IMAGE_GENERATION_GLOBAL_CONCURRENCY")?.value).toBe(999999);
+  });
+
   it("rejects malformed json and value not in select options (coerceValue, C-L25)", async () => {
     await expect(
       setSystemSettings(

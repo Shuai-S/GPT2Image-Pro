@@ -170,6 +170,12 @@ export interface SettingDefinition {
   requiresRestart?: boolean;
   requiresRebuild?: boolean;
   options?: Array<{ label: string; value: string }>;
+  // 仅 valueType === "number" 有意义：经济/安全语义键的业务数值上下界。
+  // 声明后由 coerceValue 在写入时做闭区间钳制（越界即拒绝），未声明的键行为不变。
+  // WHY: S-C1 已把这些键写入收紧为 superAdminAction，但缺数值上下界仍可写入
+  // 负积分/负价格/异常巨大值，造成经济或安全语义破坏；此处补 per-key 范围校验。
+  min?: number;
+  max?: number;
   defaultValue?: unknown;
   exampleValue?: unknown;
 }
@@ -566,6 +572,10 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     description: "Starter 月付价格，单位 CNY。",
     category: "plans",
     valueType: "number",
+    // WHY: 价格必须为正，且设上限拦截误输入的天文数字；读取侧 positive:true 已兜底，
+    // 此处在写入时即拒绝 0/负数/异常巨大值，避免脏配置落库。
+    min: 0.01,
+    max: 1_000_000,
     defaultValue: 20,
   },
   {
@@ -574,6 +584,8 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     description: "Starter 年付价格，单位 CNY。",
     category: "plans",
     valueType: "number",
+    min: 0.01,
+    max: 1_000_000,
     defaultValue: 144,
   },
   {
@@ -582,6 +594,8 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     description: "Pro 月付价格，单位 CNY。",
     category: "plans",
     valueType: "number",
+    min: 0.01,
+    max: 1_000_000,
     defaultValue: 60,
   },
   {
@@ -590,6 +604,8 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     description: "Pro 年付价格，单位 CNY。",
     category: "plans",
     valueType: "number",
+    min: 0.01,
+    max: 1_000_000,
     defaultValue: 432,
   },
   {
@@ -598,6 +614,8 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     description: "Ultra 月付价格，单位 CNY。",
     category: "plans",
     valueType: "number",
+    min: 0.01,
+    max: 1_000_000,
     defaultValue: 200,
   },
   {
@@ -606,6 +624,8 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     description: "Ultra 年付价格，单位 CNY。",
     category: "plans",
     valueType: "number",
+    min: 0.01,
+    max: 1_000_000,
     defaultValue: 1440,
   },
   {
@@ -614,6 +634,8 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     description: "Enterprise 月付价格，单位 CNY。",
     category: "plans",
     valueType: "number",
+    min: 0.01,
+    max: 1_000_000,
     defaultValue: 800,
   },
   {
@@ -622,6 +644,8 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     description: "Enterprise 年付价格，单位 CNY。",
     category: "plans",
     valueType: "number",
+    min: 0.01,
+    max: 1_000_000,
     defaultValue: 5760,
   },
   {
@@ -747,6 +771,10 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     description: "审核代理请求超时时间。",
     category: "moderation",
     valueType: "number",
+    // WHY: 审核超时是安全语义键，必须为正（>=1ms），否则审核请求会立即超时；
+    // fail-closed 时会全量拦截，fail-open 时会全量放行，两种都危险。上限 5 分钟。
+    min: 1,
+    max: 300_000,
     defaultValue: 10000,
   },
   {
@@ -755,6 +783,9 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     description: "直接请求审核服务商的超时时间。",
     category: "moderation",
     valueType: "number",
+    // WHY: 同审核代理超时，直接请求审核服务商的超时同为安全语义键，须为正并设上限。
+    min: 1,
+    max: 300_000,
     defaultValue: 10000,
   },
   {
@@ -1185,6 +1216,10 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     description: "新用户首次进入账户时发放的积分。",
     category: "credits",
     valueType: "number",
+    // WHY: 注册奖励积分允许为 0（关闭赠送），但禁止负数（会发负积分），并设上限
+    // 拦截误填的天文数字，避免一次性发放异常巨量积分造成经济损失。
+    min: 0,
+    max: 1_000_000,
     defaultValue: 100,
   },
   {
@@ -1211,6 +1246,10 @@ export const SYSTEM_SETTING_DEFINITIONS = [
       "不含文本/图片审核成本的 1024x1024 生图基础价格。其他分辨率会在该价格与 4K 基础价格之间按像素数线性推算；低于 1024x1024 按该价格封底。",
     category: "credits",
     valueType: "number",
+    // WHY: 生图基础积分价格直接决定每次扣费，必须为正；上限拦截误填的异常巨大值，
+    // 避免单次扣费失控。
+    min: 0.01,
+    max: 100_000,
     defaultValue: 1.27,
   },
   {
@@ -1220,6 +1259,9 @@ export const SYSTEM_SETTING_DEFINITIONS = [
       "不含文本/图片审核成本的 3840x2160 / 2160x3840 生图基础价格。1024x1024 到 4K 之间按像素数线性推算；高于 4K 按该价格封顶。",
     category: "credits",
     valueType: "number",
+    // WHY: 同 IMAGE_BASE_CREDITS_1024，4K 基础价格须为正并设上限。
+    min: 0.01,
+    max: 100_000,
     defaultValue: 10,
   },
   {

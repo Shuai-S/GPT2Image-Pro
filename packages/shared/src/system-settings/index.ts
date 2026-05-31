@@ -194,9 +194,24 @@ function coerceValue(definition: SettingDefinition, value: unknown) {
   }
 
   if (definition.valueType === "number") {
+    // WHY: 空白数值输入视为清空（删除行，回退默认值），与 string 类型一致；
+    // 否则 Number("") === 0 会被范围校验误判，破坏"清空即重置"的后台 UX。
+    if (typeof value === "string" && !value.trim()) {
+      return "";
+    }
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) {
       throw new Error(`${definition.label} 必须是有效数字`);
+    }
+    // WHY: 经济/安全语义键（积分、价格、审核超时等）在 definitions.ts 声明了业务
+    // 上下界；S-C1 已把写入收紧为 superAdminAction，此处补 per-key 范围闭区间钳制，
+    // 拒绝负积分/负价格/0 超时/异常巨大值等会破坏经济或安全语义的脏值落库。
+    // 未声明 min/max 的键行为不变。
+    if (definition.min !== undefined && numeric < definition.min) {
+      throw new Error(`${definition.label} 不能小于 ${definition.min}`);
+    }
+    if (definition.max !== undefined && numeric > definition.max) {
+      throw new Error(`${definition.label} 不能大于 ${definition.max}`);
     }
     return numeric;
   }
