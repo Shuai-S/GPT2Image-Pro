@@ -276,6 +276,39 @@
 
 ---
 
+## 后端重构为 Go（近期重要计划）
+
+> 将当前 Next.js server 层承载的全部后端逻辑迁移到独立 Go 服务。
+
+### 动机
+
+- Next.js 混合前后端导致后端逻辑分散在 Route Handlers / Server Actions / features 各处，难以独立扩展和维护
+- Go 在并发性能、内存占用、冷启动速度、部署体积方面显著优于 Node.js
+- 独立后端便于水平扩展、独立部署、独立监控，为分布式架构铺路
+- 类型安全和编译期检查天然强于运行时 TypeScript
+
+### 范围
+
+- **迁移目标**：全部 API 路由（v1 handlers）、MCP server、图像生成管线、积分/计费、认证鉴权、Webhook 处理、后端池调度、队列/任务系统
+- **保留 Next.js**：前端渲染（SSR/SSG）、页面路由、Server Components 中纯 UI 数据获取（改为调 Go API）
+- **最终形态**：Next.js 仅负责前端，Go 服务承载全部业务后端，通过内部 HTTP/gRPC 通信
+
+### 技术要点
+
+- Web 框架选型（Gin / Echo / Chi / 标准库 net/http）
+- ORM / DB 层（sqlc / GORM / Bun / 裸 pgx）
+- 认证迁移（Better Auth → 自研 JWT/Session 或 Go 认证库）
+- 现有 Drizzle 迁移脚本兼容（Go 侧用 golang-migrate 或 goose 管理同一 DB schema）
+- UOL 概念在 Go 中的对应实现（Operation Registry + middleware chain）
+- 渐进式迁移：逐个路由从 Next.js 切换到 Go（Nginx 按路径分流），非一次性全切
+
+### 依赖
+
+- 多 app 拆分完成（apps/api 独立后更容易替换为 Go 服务）
+- UOL 全量对接完成（明确全部 operation 边界后再迁移）
+
+---
+
 ## 分布式负载均衡（远期超级计划）
 
 > 从单服务器扩展到多节点分布式架构，避免单点承担全部流量。
