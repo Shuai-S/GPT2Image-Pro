@@ -35,6 +35,14 @@ import {
   refundExternalApiKeyCredits,
 } from "@/features/external-api/quota";
 import {
+  buildGenerationBillingPolicy,
+  getImageSuccessTargetCredits,
+  getInitialGenerationCharge,
+  getModerationFailureCharge,
+  getTextChatSuccessTargetCredits,
+  type GenerationBillingPolicy,
+} from "./billing-policy";
+import {
   detectImageOutputFormatFromBuffer,
   getOutputFormatContentType,
   getOutputFormatExtension,
@@ -949,6 +957,7 @@ function createUpstreamStreamTelemetryTracker(params: {
 function buildBackendExecutionMetadata(params: {
   config: ApiConfig;
   useCredits: boolean;
+  billingPolicy: GenerationBillingPolicy;
 }) {
   const backend = params.config.backend || { type: "platform" as const };
   return {
@@ -967,6 +976,9 @@ function buildBackendExecutionMetadata(params: {
       apiKeyId: backend.apiKeyId,
       billingGroupId: backend.billingGroupId,
       billingMultiplier: backend.billingMultiplier,
+      chargeImageCredits: params.billingPolicy.chargeImageCredits,
+      chargeModerationCredits: params.billingPolicy.chargeModerationCredits,
+      billingMode: params.billingPolicy.mode,
     },
   };
 }
@@ -1162,9 +1174,9 @@ export async function runImageGenerationForUser(
       generationId,
     };
   }
-  if (requestedCount > planCapabilities.limits.imageGenerationConcurrency) {
+  if (requestedCount > planCapabilities.limits.maxBatchCount) {
     return {
-      error: `Image count must be no more than ${planCapabilities.limits.imageGenerationConcurrency}.`,
+      error: `Image count must be no more than ${planCapabilities.limits.maxBatchCount}.`,
       generationId,
     };
   }
@@ -1277,19 +1289,31 @@ export async function runImageGenerationForUser(
         billingMultiplier
       )
     : 0;
-  const initialCreditCharge = isChatInput ? chatRoundCredits : creditsPerImage;
+  const billingPolicy = buildGenerationBillingPolicy({
+    useSiteImageCredits: useCredits,
+    moderationEnabled,
+  });
+  const initialCreditCharge = getInitialGenerationCharge({
+    policy: billingPolicy,
+    isChatInput,
+    chatRoundCredits,
+    creditCost,
+  });
+  const chatModerationOnlyCredits = applyBillingMultiplier(
+    TEXT_MODERATION_ONLY_CREDITS,
+    billingMultiplier
+  );
   const moderationFailureCredits = moderationEnabled
-    ? planCapabilities.features["moderation.onlyFailureSettlement"]
-      ? isChatInput
-        ? Math.min(
-            applyBillingMultiplier(
-              TEXT_MODERATION_ONLY_CREDITS,
-              billingMultiplier
-            ),
-            chatRoundCredits
-          )
-        : creditCost.moderationOnlyCredits
-      : initialCreditCharge
+    ? getModerationFailureCharge({
+        policy: billingPolicy,
+        moderationOnlyFailureSettlement:
+          planCapabilities.features["moderation.onlyFailureSettlement"],
+        isChatInput,
+        chatRoundCredits,
+        chatModerationOnlyCredits,
+        creditCost,
+        initialCreditCharge,
+      })
     : 0;
   let imageModel: string;
   let gptModel: string | undefined;
@@ -1376,6 +1400,7 @@ export async function runImageGenerationForUser(
           imageBasePricing,
           config,
           useCredits,
+          billingPolicy,
           billingMultiplier,
           imageModel,
           gptModel,
@@ -1418,6 +1443,7 @@ async function runQueuedImageGenerationForUser({
   imageBasePricing,
   config,
   useCredits,
+  billingPolicy,
   billingMultiplier,
   imageModel,
   gptModel,
@@ -1447,6 +1473,7 @@ async function runQueuedImageGenerationForUser({
   imageBasePricing: ImageBaseCreditPricing;
   config: Awaited<ReturnType<typeof getEffectiveConfig>>["config"];
   useCredits: boolean;
+  billingPolicy: GenerationBillingPolicy;
   billingMultiplier: number;
   imageModel: string;
   gptModel?: string;
@@ -1457,18 +1484,25 @@ async function runQueuedImageGenerationForUser({
   forceWebBackend: boolean;
 }): Promise<ImageGenerationOperationResult> {
   const startedAt = Date.now();
-  // 纯中转模式：不写 generation 历史、不上传对象存储；仍扣费/审核/退款。
-  // generationId 仍生成，仅作扣费/退款的幂等 sourceRef 前缀。
+  // 纯中转模式只影响历史与对象存储；计费按实际使用的本站资源和审核独立判断。
+  // generationId 仍生成，用作扣费/退款的幂等 sourceRef 前缀。
   const relayOnly = input.relayOnly === true;
   const promptOptimizationMetadata = buildPromptOptimizationMetadata({
     input,
     promptOptimization,
     apiPrompt,
   });
-  const backendMetadata = buildBackendExecutionMetadata({ config, useCredits });
+  const backendMetadata = buildBackendExecutionMetadata({
+    config,
+    useCredits,
+    billingPolicy,
+  });
   const billingMetadata = {
     billingMultiplier,
     billingGroupId: config.backend?.billingGroupId ?? null,
+    chargeImageCredits: billingPolicy.chargeImageCredits,
+    chargeModerationCredits: billingPolicy.chargeModerationCredits,
+    billingMode: billingPolicy.mode,
   };
   const modelMetadata = buildModelMetadata({
     imageModel,
@@ -1495,7 +1529,7 @@ async function runQueuedImageGenerationForUser({
       model: recordModel,
       size,
       status: "pending",
-      creditsConsumed: useCredits ? initialCreditCharge : 0,
+      creditsConsumed: initialCreditCharge,
       storageBucket: bucket,
       metadata:
         input.mode === "edit"
@@ -1515,7 +1549,9 @@ async function runQueuedImageGenerationForUser({
             forceWebBackend,
             creditCost,
             ...billingMetadata,
-            chatRoundCredits,
+            chatRoundCredits: billingPolicy.chargeImageCredits
+              ? chatRoundCredits
+              : 0,
             moderationBlockingEnabled: moderationEnabled,
             moderationFailureCredits,
           }
@@ -1569,7 +1605,7 @@ async function runQueuedImageGenerationForUser({
     sourceRef: string,
     description: string
   ) => {
-    if (!useCredits || amount <= 0) return;
+    if (!billingPolicy.chargesCredits || amount <= 0) return;
     const roundedAmount = roundCreditAmount(amount);
     await refundGenerationCredits({
       generationId,
@@ -1594,7 +1630,7 @@ async function runQueuedImageGenerationForUser({
     metadata?: Record<string, unknown>,
     sourceRef?: string
   ) => {
-    if (!useCredits || amount <= 0) return;
+    if (!billingPolicy.chargesCredits || amount <= 0) return;
     const roundedAmount = roundCreditAmount(amount);
     await reserveExternalApiKeyCredits({
       apiKeyId: input.apiKeyId,
@@ -1633,7 +1669,7 @@ async function runQueuedImageGenerationForUser({
     description: string,
     metadata?: Record<string, unknown>
   ) => {
-    if (!useCredits) return;
+    if (!billingPolicy.chargesCredits) return;
 
     const roundedTarget = roundCreditAmount(Math.max(0, targetCredits));
     const delta = roundCreditAmount(roundedTarget - chargedCredits);
@@ -1658,14 +1694,20 @@ async function runQueuedImageGenerationForUser({
     }
   };
 
-  if (useCredits) {
+  if (initialCreditCharge > 0) {
     try {
       await chargeAdditionalCredits(
         initialCreditCharge,
-        isChatInput ? "chat-input" : "image-generation",
-        isChatInput
-          ? `Chat input: ${input.prompt.substring(0, 50)}`
-          : `Image generation: ${input.prompt.substring(0, 50)}`,
+        billingPolicy.chargeImageCredits
+          ? isChatInput
+            ? "chat-input"
+            : "image-generation"
+          : "content-moderation",
+        billingPolicy.chargeImageCredits
+          ? isChatInput
+            ? `Chat input: ${input.prompt.substring(0, 50)}`
+            : `Image generation: ${input.prompt.substring(0, 50)}`
+          : `Content moderation: ${input.prompt.substring(0, 50)}`,
         {
           generationId,
           mode: input.mode,
@@ -1675,6 +1717,7 @@ async function runQueuedImageGenerationForUser({
           billingGroupId: config.backend?.billingGroupId ?? null,
           initialCredits: initialCreditCharge,
           targetImageCredits: creditsPerImage,
+          billingMode: billingPolicy.mode,
         },
         `${generationId}:charge`
       );
@@ -2214,7 +2257,12 @@ async function runQueuedImageGenerationForUser({
 
     let finalChargedCredits = chargedCredits;
     const textChatRoundCount = isChatInput ? getChatRoundCount(result) : 0;
-    const targetChatTextCredits = chatRoundCredits * textChatRoundCount;
+    const targetChatTextCredits = getTextChatSuccessTargetCredits({
+      policy: billingPolicy,
+      chatRoundCredits,
+      chatRoundCount: textChatRoundCount,
+      creditCost,
+    });
     if (isChatInput) {
       try {
         await settleChargedCredits(
@@ -2266,9 +2314,12 @@ async function runQueuedImageGenerationForUser({
             ...(isChatInput
               ? {
                   chatTextOnlyCharge: {
-                    credits: useCredits ? targetChatTextCredits : 0,
-                    chatRoundCredits: useCredits ? chatRoundCredits : 0,
+                    credits: targetChatTextCredits,
+                    chatRoundCredits: billingPolicy.chargeImageCredits
+                      ? chatRoundCredits
+                      : 0,
                     chatRoundCount: textChatRoundCount,
+                    billingMode: billingPolicy.mode,
                   },
                 }
               : {}),
@@ -2511,9 +2562,14 @@ async function runQueuedImageGenerationForUser({
     0
   );
   const chatRoundCount = isChatInput ? getChatRoundCount(result) : 0;
-  const targetSuccessCredits = isChatInput
-    ? chatRoundCredits * chatRoundCount + actualImageCredits
-    : actualImageCredits;
+  const targetSuccessCredits = getImageSuccessTargetCredits({
+    policy: billingPolicy,
+    isChatInput,
+    chatRoundCredits,
+    chatRoundCount,
+    actualImageCredits,
+    creditCost,
+  });
   try {
     if (isAgentChatInput) {
       await emitAgentOperationEvent(callbacks, {
@@ -2537,10 +2593,14 @@ async function runQueuedImageGenerationForUser({
         requestedCreditCost: creditCost,
         actualCreditCost,
         perOutputCreditCosts,
-        chatRoundCredits: isChatInput ? chatRoundCredits : 0,
+        chatRoundCredits:
+          isChatInput && billingPolicy.chargeImageCredits
+            ? chatRoundCredits
+            : 0,
         chatRoundCount,
         billableImageOutputCount,
         upstreamImageOutputCount,
+        billingMode: billingPolicy.mode,
       }
     );
     if (isAgentChatInput) {

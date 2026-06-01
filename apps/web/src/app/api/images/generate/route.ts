@@ -108,9 +108,9 @@ export const POST = withApiLogging(async (request: NextRequest) => {
       403
     );
   }
-  if (count > planLimits.imageGenerationConcurrency) {
+  if (count > planLimits.maxBatchCount) {
     return errorResponse(
-      `count must be between 1 and ${planLimits.imageGenerationConcurrency}.`
+      `count must be between 1 and ${planLimits.maxBatchCount}.`
     );
   }
 

@@ -1998,12 +1998,8 @@ export function CreatePageClient({
     capabilities.features["promptOptimization.control"];
   const maxEditImages = capabilities.limits.maxEditImages;
   const maxChatImages = capabilities.limits.maxChatImages;
-  // "数量/并发"控件上限 = 套餐生图并发 imageGenerationConcurrency(issue #16)；
-  // 服务端 count 校验(generate/edit/chat 路由与 operations 管线)同样按此值，前后端一致。
-  const concurrencyMax = Math.max(
-    1,
-    capabilities.limits.imageGenerationConcurrency
-  );
+  // 单次生成张数上限由 maxBatchCount 控制；并发由 imageGenerationConcurrency 单独控制。
+  const batchCountMax = Math.max(1, capabilities.limits.maxBatchCount);
   const maxImageBytes =
     uploadLimits.maxFileSizeBytes || DEFAULT_MAX_IMAGE_BYTES;
   const maxEditRequestBytes =
@@ -2195,12 +2191,12 @@ export function CreatePageClient({
     1
   );
   useEffect(() => {
-    setBatchCount((value) => Math.min(value, concurrencyMax));
-    setLineBatchRepeatCount((value) => Math.min(value, concurrencyMax));
-    setEditBatchCount((value) => Math.min(value, concurrencyMax));
+    setBatchCount((value) => Math.min(value, batchCountMax));
+    setLineBatchRepeatCount((value) => Math.min(value, batchCountMax));
+    setEditBatchCount((value) => Math.min(value, batchCountMax));
     // 瀑布流 tier 也钳制到当前套餐允许上限(套餐切换/管理员调整并发时收紧)
     setWaterfallTier((value) => Math.max(1, Math.min(value, waterfallTierLimit)));
-  }, [concurrencyMax, waterfallTierLimit]);
+  }, [batchCountMax, waterfallTierLimit]);
 
   useEffect(() => {
     const parseReferenceMode = (
@@ -6789,7 +6785,7 @@ export function CreatePageClient({
       : isTextSingleGenerating;
     const countValue = isLineMode ? lineBatchRepeatCount : batchCount;
     const setCountValue = (value: number) => {
-      const normalized = Math.min(Math.max(1, value), concurrencyMax);
+      const normalized = Math.min(Math.max(1, value), batchCountMax);
       if (isLineMode) {
         setLineBatchRepeatCount(normalized);
       } else {
@@ -6911,7 +6907,7 @@ export function CreatePageClient({
                 <ConcurrencyNumberInput
                   id={isLineMode ? "line-repeat-count" : "batch-count"}
                   value={countValue}
-                  max={concurrencyMax}
+                  max={batchCountMax}
                   disabled={modeBusy}
                   onChange={setCountValue}
                 />
@@ -8049,7 +8045,7 @@ export function CreatePageClient({
                   <ConcurrencyNumberInput
                     id="edit-batch-count"
                     value={editBatchCount}
-                    max={concurrencyMax}
+                    max={batchCountMax}
                     disabled={isEditing}
                     onChange={setEditBatchCount}
                   />

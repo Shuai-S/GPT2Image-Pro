@@ -831,7 +831,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
 
   let count = 1;
   try {
-    count = getCount(formData, planLimits.imageGenerationConcurrency);
+    count = getCount(formData, planLimits.maxBatchCount);
   } catch (error) {
     return errorResponse(
       error instanceof Error ? error.message : "Invalid count."
