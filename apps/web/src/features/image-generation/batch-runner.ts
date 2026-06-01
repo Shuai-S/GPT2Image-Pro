@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { runImageGenerationForUser } from "./operations";
+import type { runImageGenerationForUser } from "./operations";
 import type { ImageGenerationCallbacks } from "./types";
 
 export type ImageGenerationOperationResult = Awaited<
