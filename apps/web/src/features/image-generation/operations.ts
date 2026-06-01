@@ -66,6 +66,7 @@ import {
 import { isContentSafetyRejection } from "./sla-classification";
 import type {
   ApiConfig,
+  AgentRunEvent,
   ChatHistoryMessage,
   ChatImageParams,
   EditImageParams,
@@ -74,6 +75,7 @@ import type {
   ImageGenerationCallbacks,
   ImageInputFile,
   ModerationBlockRiskLevel,
+  PartialImageResult,
 } from "./types";
 
 type RunImageGenerationInput =
@@ -870,6 +872,79 @@ async function emitAgentOperationEvent(
   });
 }
 
+type UpstreamStreamTelemetry = {
+  startedAt: string;
+  lastEventAt?: string;
+  lastEventElapsedMs?: number;
+  lastEvent?: {
+    kind: string;
+    title: string;
+    status?: string;
+    detail?: string;
+    toolType?: string;
+  };
+  eventCount: number;
+  partialImageCount: number;
+  finalImageCount: number;
+};
+
+function createUpstreamStreamTelemetryTracker(params: {
+  startedAtMs: number;
+  callbacks?: ImageGenerationCallbacks;
+}) {
+  const telemetry: UpstreamStreamTelemetry = {
+    startedAt: new Date(params.startedAtMs).toISOString(),
+    eventCount: 0,
+    partialImageCount: 0,
+    finalImageCount: 0,
+  };
+
+  const recordEvent = (event: AgentRunEvent) => {
+    const now = Date.now();
+    telemetry.eventCount += 1;
+    telemetry.lastEventAt = new Date(now).toISOString();
+    telemetry.lastEventElapsedMs = now - params.startedAtMs;
+    telemetry.lastEvent = {
+      kind: event.kind,
+      title: event.title,
+      status: event.status,
+      detail: event.detail,
+      toolType: event.toolType,
+    };
+  };
+
+  const recordPartialImage = (image: PartialImageResult) => {
+    telemetry.partialImageCount += 1;
+    if (image.final) telemetry.finalImageCount += 1;
+  };
+
+  const callbacks: ImageGenerationCallbacks = {
+    ...params.callbacks,
+    onPartialImage: async (image) => {
+      recordPartialImage(image);
+      await params.callbacks?.onPartialImage?.(image);
+    },
+    onTextDelta: async (delta) => {
+      await params.callbacks?.onTextDelta?.(delta);
+    },
+    onThinkingDelta: async (delta) => {
+      await params.callbacks?.onThinkingDelta?.(delta);
+    },
+    onAgentDelta: async (delta) => {
+      await params.callbacks?.onAgentDelta?.(delta);
+    },
+    onAgentEvent: async (event) => {
+      recordEvent(event);
+      await params.callbacks?.onAgentEvent?.(event);
+    },
+  };
+
+  return {
+    callbacks,
+    snapshot: () => ({ ...telemetry }),
+  };
+}
+
 function buildBackendExecutionMetadata(params: {
   config: ApiConfig;
   useCredits: boolean;
@@ -1401,6 +1476,14 @@ async function runQueuedImageGenerationForUser({
   });
   const inputImagesMetadata = buildInputImagesMetadata(inputImages);
   const isAgentChatInput = input.mode === "chat" && input.agentMode === true;
+  const streamTelemetry = createUpstreamStreamTelemetryTracker({
+    startedAtMs: startedAt,
+    callbacks,
+  });
+  const generationCallbacks = streamTelemetry.callbacks;
+  const buildStreamTelemetryMetadata = () => ({
+    upstreamStream: streamTelemetry.snapshot(),
+  });
 
   // 纯中转：不落生成历史。其余 db.update(generation) 在无行时天然 no-op。
   if (!relayOnly)
@@ -1631,6 +1714,7 @@ async function runQueuedImageGenerationForUser({
           completedAt: new Date(),
           metadata: sql`COALESCE(${generation.metadata}, '{}'::json)::jsonb || ${JSON.stringify(
             withPromptRepairMetadata({
+              ...buildStreamTelemetryMetadata(),
               timeout: {
                 reason: "runtime_timeout",
                 timeoutMs: IMAGE_GENERATION_PENDING_TIMEOUT_MS,
@@ -1798,7 +1882,7 @@ async function runQueuedImageGenerationForUser({
             forceWebBackend,
             requiresResponsesBackend: input.requiresResponsesBackend,
           },
-          callbacks
+          generationCallbacks
         )
       : input.mode === "chat"
         ? await generateChatImage(
@@ -1830,7 +1914,7 @@ async function runQueuedImageGenerationForUser({
               mixWebFirst,
               requiresResponsesBackend: input.requiresResponsesBackend,
             },
-            callbacks
+            generationCallbacks
           )
         : await generateImage(
             config,
@@ -1853,7 +1937,7 @@ async function runQueuedImageGenerationForUser({
               forceWebBackend,
               requiresResponsesBackend: input.requiresResponsesBackend,
             },
-            callbacks
+            generationCallbacks
           );
   };
 
@@ -2030,7 +2114,13 @@ async function runQueuedImageGenerationForUser({
     }
   }
   const metadataWithPromptRepair = (metadata: Record<string, unknown>) =>
-    withPromptRepairMetadata(metadata, repairAttempts);
+    withPromptRepairMetadata(
+      {
+        ...buildStreamTelemetryMetadata(),
+        ...metadata,
+      },
+      repairAttempts
+    );
 
   if (result.error) {
     const failureTargetCredits = getFailedGenerationTargetCredits({

@@ -205,6 +205,27 @@ describe("external final image selection", () => {
   });
 });
 
+describe("external image error payload", () => {
+  it("sanitizes internal database query failures", () => {
+    const payload = toOpenAIErrorPayload(
+      'Failed query: select "id", "api_key" from "image_backend_api"\nparams: true'
+    );
+
+    expect(payload).toMatchObject({
+      error: {
+        message:
+          "Internal backend database error while selecting an image backend. Please retry later.",
+        type: "server_error",
+        code: "internal_backend_error",
+        status: 503,
+      },
+    });
+    expect(payload.error.message).not.toContain("select ");
+    expect(payload.error.message).not.toContain("image_backend_api");
+    expect(payload.error.message).not.toContain("api_key");
+  });
+});
+
 describe("external image base64 loading", () => {
   it("reads local storage URLs directly instead of fetching the public route", async () => {
     storageMocks.getObjectMock.mockResolvedValue(Buffer.from("image-bytes"));

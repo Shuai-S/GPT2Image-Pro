@@ -20,6 +20,7 @@ import { canUsePlanCapability } from "@repo/shared/subscription/services/plan-ca
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import {
   clearSystemSettingsCache,
+  getRuntimeSettingBoolean,
   getRuntimeSettingJson,
   getRuntimeSettingNumber,
   getRuntimeSettingString,
@@ -189,6 +190,8 @@ const OPENAI_MOBILE_RT_CLIENT_ID = "app_LlGpXReQgckcGGUo2JrYvtJK";
 const OPENAI_REFRESH_SCOPES = "openid profile email";
 const AUTO_SUB2API_SYNC_STATE_KEY = "SUB2API_AUTO_SYNC_STATE";
 const AUTO_SUB2API_SYNC_TASKS_KEY = "SUB2API_AUTO_SYNC_TASKS";
+const API_FAILURE_COOLDOWN_ENABLED_KEY =
+  "IMAGE_BACKEND_API_FAILURE_COOLDOWN_ENABLED";
 const DEFAULT_BACKEND_COOLDOWN_MINUTES = 15;
 const MAX_PARSED_RESET_COOLDOWN_DAYS = 14;
 const DEFAULT_UNRECOVERABLE_BACKEND_ERROR_KEYWORDS = [
@@ -930,6 +933,26 @@ async function classifyFailure(
   return {
     status: "active",
     cooldownUntil: cooldownFromMinutes(minutes),
+  };
+}
+
+async function shouldApplyApiFailureCooldown() {
+  return getRuntimeSettingBoolean(API_FAILURE_COOLDOWN_ENABLED_KEY, false);
+}
+
+async function resolveEffectiveFailureForMember(
+  memberType: "api" | "account",
+  failure: {
+    status?: string;
+    cooldownUntil?: Date | null;
+  }
+) {
+  if (memberType !== "api" || (await shouldApplyApiFailureCooldown())) {
+    return failure;
+  }
+  return {
+    status: failure.status === "error" ? failure.status : undefined,
+    cooldownUntil: failure.status === "error" ? failure.cooldownUntil : undefined,
   };
 }
 
@@ -1719,11 +1742,15 @@ export async function reportImageBackendResult(
   const now = new Date();
   const error = truncateError(input.error);
   const failure = input.success ? {} : await classifyFailure(error, input);
+  const effectiveFailure = input.success
+    ? failure
+    : await resolveEffectiveFailureForMember(input.memberType, failure);
   const outcome = {
     success: input.success,
-    status: failure.status,
-    cooldownUntil: failure.cooldownUntil,
-    retryable: !input.success && isClassifiedFailureRecoverable(error, failure),
+    status: effectiveFailure.status,
+    cooldownUntil: effectiveFailure.cooldownUntil,
+    retryable:
+      !input.success && isClassifiedFailureRecoverable(error, effectiveFailure),
     switchable: !input.success && isImageBackendSwitchableError(error),
   };
 
@@ -1742,9 +1769,11 @@ export async function reportImageBackendResult(
             }
           : {
               failCount: sql`${imageBackendApi.failCount} + 1`,
-              ...(failure.status ? { status: failure.status } : {}),
-              ...(failure.cooldownUntil !== undefined
-                ? { cooldownUntil: failure.cooldownUntil }
+              ...(effectiveFailure.status
+                ? { status: effectiveFailure.status }
+                : {}),
+              ...(effectiveFailure.cooldownUntil !== undefined
+                ? { cooldownUntil: effectiveFailure.cooldownUntil }
                 : {}),
               lastError: error,
               lastErrorAt: now,
@@ -1756,9 +1785,9 @@ export async function reportImageBackendResult(
       logWarn("生图 API 后端失败，已更新调度状态", {
         memberType: input.memberType,
         memberId: input.memberId,
-        status: failure.status || "unchanged",
-        cooldownUntil: failure.cooldownUntil
-          ? failure.cooldownUntil.toISOString()
+        status: effectiveFailure.status || "unchanged",
+        cooldownUntil: effectiveFailure.cooldownUntil
+          ? effectiveFailure.cooldownUntil.toISOString()
           : null,
         retryable: outcome.retryable,
         switchable: outcome.switchable,

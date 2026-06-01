@@ -535,6 +535,20 @@ function classifyExternalApiError(message: string) {
   const normalized = message.toLowerCase();
 
   if (
+    normalized.includes("failed query:") ||
+    normalized.includes("failed to connect to database") ||
+    normalized.includes("database connection") ||
+    normalized.includes("connection terminated unexpectedly") ||
+    normalized.includes("terminating connection due to administrator command")
+  ) {
+    return {
+      type: "server_error",
+      code: "internal_backend_error",
+      status: 503,
+    };
+  }
+
+  if (
     normalized.includes("moderation") ||
     normalized.includes("aliyun") ||
     normalized.includes("green-cip") ||
@@ -686,6 +700,20 @@ function classifyExternalApiError(message: string) {
   };
 }
 
+function sanitizeExternalApiErrorMessage(message: string) {
+  const normalized = message.toLowerCase();
+  if (
+    normalized.includes("failed query:") ||
+    normalized.includes("failed to connect to database") ||
+    normalized.includes("database connection") ||
+    normalized.includes("connection terminated unexpectedly") ||
+    normalized.includes("terminating connection due to administrator command")
+  ) {
+    return "Internal backend database error while selecting an image backend. Please retry later.";
+  }
+  return message;
+}
+
 export function toOpenAIErrorPayload(
   message: string,
   options?: ExternalApiErrorOptions
@@ -696,10 +724,11 @@ export function toOpenAIErrorPayload(
     options && "code" in options ? options.code : classification.code;
   const generationId = options?.generationId;
   const creditsConsumed = options?.creditsConsumed;
+  const safeMessage = sanitizeExternalApiErrorMessage(message);
 
   return {
     error: {
-      message,
+      message: safeMessage,
       type: options?.type ?? classification.type,
       code,
       status,

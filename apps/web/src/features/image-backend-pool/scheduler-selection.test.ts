@@ -246,6 +246,7 @@ import {
   reportImageBackendResult,
   resolveImageBackendPoolConfig,
 } from "./service";
+import { getRuntimeSettingBoolean } from "@repo/shared/system-settings";
 
 function makeAccount(index: number) {
   return {
@@ -291,6 +292,9 @@ describe("image backend pool scheduler selection", () => {
     dbMock.state.limitCalls = [];
     dbMock.state.updates = [];
     vi.clearAllMocks();
+    vi.mocked(getRuntimeSettingBoolean).mockImplementation(
+      async (_key: string, fallback = false) => fallback
+    );
   });
 
   it("does not truncate runtime backend candidates at 50", async () => {
@@ -553,6 +557,90 @@ describe("image backend pool scheduler selection", () => {
       cooldownUntil: null,
       lastError: null,
       lastErrorAt: null,
+    });
+  });
+
+  it("does not cool down external API backends after transient failures by default", async () => {
+    await reportImageBackendResult({
+      memberType: "api",
+      memberId: "api-1",
+      success: false,
+      error: "HTTP 429 Too many requests",
+      retryAfterSeconds: 60,
+    });
+
+    const update = dbMock.state.updates.find(
+      (item) => item.tableName === "image_backend_api"
+    );
+    expect(update?.values).toMatchObject({
+      lastError: "HTTP 429 Too many requests",
+      lastErrorAt: expect.any(Date),
+    });
+    expect(update?.values).not.toHaveProperty("status");
+    expect(update?.values).not.toHaveProperty("cooldownUntil");
+  });
+
+  it("can cool down external API backends when explicitly enabled", async () => {
+    vi.mocked(getRuntimeSettingBoolean).mockImplementation(
+      async (key: string, fallback = false) =>
+        key === "IMAGE_BACKEND_API_FAILURE_COOLDOWN_ENABLED" ? true : fallback
+    );
+
+    await reportImageBackendResult({
+      memberType: "api",
+      memberId: "api-1",
+      success: false,
+      error: "HTTP 429 Too many requests",
+      retryAfterSeconds: 60,
+    });
+
+    const update = dbMock.state.updates.find(
+      (item) => item.tableName === "image_backend_api"
+    );
+    expect(update?.values).toMatchObject({
+      status: "active",
+      cooldownUntil: expect.any(Date),
+      lastError: "HTTP 429 Too many requests",
+      lastErrorAt: expect.any(Date),
+    });
+  });
+
+  it("still marks external API backends as error for unrecoverable failures", async () => {
+    await reportImageBackendResult({
+      memberType: "api",
+      memberId: "api-1",
+      success: false,
+      error: "invalid api key authentication failed",
+    });
+
+    const update = dbMock.state.updates.find(
+      (item) => item.tableName === "image_backend_api"
+    );
+    expect(update?.values).toMatchObject({
+      status: "error",
+      cooldownUntil: null,
+      lastError: "invalid api key authentication failed",
+      lastErrorAt: expect.any(Date),
+    });
+  });
+
+  it("keeps account backend cooldown behavior unchanged", async () => {
+    await reportImageBackendResult({
+      memberType: "account",
+      memberId: "acct-1",
+      success: false,
+      error: "HTTP 429 Too many requests",
+      retryAfterSeconds: 60,
+    });
+
+    const update = dbMock.state.updates.find(
+      (item) => item.tableName === "image_backend_account"
+    );
+    expect(update?.values).toMatchObject({
+      status: "active",
+      cooldownUntil: expect.any(Date),
+      lastError: "HTTP 429 Too many requests",
+      lastErrorAt: expect.any(Date),
     });
   });
 });

@@ -19,10 +19,52 @@
 
 - 每次前端构建必须更换 `NEXT_PUBLIC_ASSET_PREFIX`，不要复用旧前缀。
 - `NEXT_PUBLIC_ASSET_PREFIX` 必须写在 `apps/web/.env.local`，这是 Next 构建实际读取的文件。
+- 如果本次包含数据库 schema 变更，必须先执行并验证迁移，再切任何公网实例；不要让新代码打到旧 schema，也不要让公网请求打到半更新实例。
+- 切换公网实例前先摘流或切到备用实例；确认新实例健康后再切回，避免部署窗口内 `/v1/*` 请求命中正在重启的进程。
 - release 不能复制 `storage`，否则会把用户生成图复制进 release，目录可能膨胀到几十 GB。
 - release 不能排除 `apps/web/.next/standalone/node_modules`，否则 standalone 启动会报 `Cannot find module 'next'`。
 - Nginx 静态 alias 不会读 release 目录，必须单独同步 `apps/web/.next/static` 到 `/var/www/your-domain.example/_next/static/`。
 - systemd 有 drop-in 覆盖路径，必须改 drop-in，不要只看主 unit。
+
+## 上线前检查
+
+每次上线先判断是否需要数据库迁移：
+
+```bash
+git diff --name-only HEAD~1..HEAD | rg 'packages/database|drizzle|schema|migrations'
+```
+
+如果有 schema 或 migration 变更，先在当前生产数据库执行迁移：
+
+```bash
+PATH=/home/user1/.nvm/versions/node/v24.15.0/bin:$PATH pnpm --filter @repo/database db:migrate
+```
+
+迁移后至少做一次只读校验，确认关键表字段存在：
+
+```bash
+set -a; . apps/web/.env.local; set +a
+pnpm --dir apps/web exec node - <<'NODE'
+const { Client } = require("pg");
+const client = new Client({ connectionString: process.env.DATABASE_URL });
+(async () => {
+  await client.connect();
+  const result = await client.query(`
+    select column_name
+    from information_schema.columns
+    where table_schema = 'public' and table_name = 'image_backend_api'
+    order by ordinal_position
+  `);
+  console.log(result.rows.map((row) => row.column_name).join("\n"));
+  await client.end();
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+NODE
+```
+
+如果迁移失败，停止部署，不要构建和切服务。
 
 ## 标准部署流程
 
@@ -120,9 +162,37 @@ rsync -a --delete \
 
 注意：先同步静态资源，再切服务。否则 Cloudflare 可能缓存新版 chunk 的 404。
 
-### 7. 切 3308 公网服务
+### 7. 摘流公网实例
 
-当前公网 upstream 是 `3308`，先切它：
+切公网实例前先把 Nginx upstream 临时切到备用端口，或者确认备用端口已经运行上一版健康服务。不要直接重启当前承载公网流量的实例。
+
+检查当前 upstream：
+
+```bash
+sudo nginx -T 2>/dev/null | sed -n '/upstream gpt2image_pool/,/}/p'
+```
+
+如果 3307 是健康旧版，可临时只保留 3307：
+
+```nginx
+upstream gpt2image_pool {
+    server 127.0.0.1:3307;
+}
+```
+
+然后验证并 reload：
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+curl -s http://127.0.0.1:3307/zh | head
+```
+
+这样重启 3308 时，公网请求不会打到正在停止/启动的进程。
+
+### 8. 切 3308 公网服务
+
+3308 摘流后再切到新 release：
 
 ```bash
 sudo python3 - <<'PY'
@@ -154,7 +224,22 @@ systemctl is-active gpt2image-3308-nopending.service
 journalctl -u gpt2image-3308-nopending.service --since "2 minutes ago" --no-pager
 ```
 
-### 8. 切 3303 主服务
+启动后先本机健康检查，不要立刻回切公网：
+
+```bash
+curl -s http://127.0.0.1:3308/zh | rg -o '/gpt2-assets-[^"<> ]+' | head
+curl -s http://127.0.0.1:3308/api/health 2>/dev/null || true
+journalctl -u gpt2image-3308-nopending.service --since "2 minutes ago" --no-pager | rg -i 'error|failed|exception|failed query' || true
+```
+
+确认健康后再把 Nginx upstream 切回 3308，或恢复 AB upstream：
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+### 9. 切 3303 主服务
 
 `3303` 当前主要用于旁路验证和保留一份同版本服务，也要切到同一 release：
 
@@ -175,7 +260,7 @@ sudo systemctl restart gpt2image-web.service
 systemctl is-active gpt2image-web.service
 ```
 
-### 9. 验证
+### 10. 验证
 
 确认进程运行目录：
 
@@ -213,6 +298,40 @@ curl -k -I https://your-domain.example/<asset-prefix>/_next/static/chunks/<chunk
 journalctl -u gpt2image-3308-nopending.service --since "5 minutes ago" --no-pager
 journalctl -u gpt2image-web.service --since "5 minutes ago" --no-pager
 ```
+
+特别检查部署窗口内是否出现内部 DB/schema 错误：
+
+```bash
+journalctl -u gpt2image-3308-nopending.service -u gpt2image-web.service \
+  --since "10 minutes ago" --no-pager \
+  | rg -i 'Failed query|column .* does not exist|relation .* does not exist|schema|migration'
+```
+
+如果出现上述错误，立即回滚到旧 release，并检查迁移是否执行在正确的 `DATABASE_URL` 上。
+
+## 事故记录：2026-05-31 `Failed query`
+
+`2026-05-31 11:21-11:30 UTC` 部署窗口内出现 71 次外接 API 失败，集中在：
+
+- `/v1/images/edits`：59 次
+- `/v1/images/generations`：11 次
+- `/v1/chat/completions`：1 次
+
+错误形态：
+
+```text
+Failed query: select ... from "image_backend_api" ...
+```
+
+同一窗口存在服务重启和 SIGKILL：
+
+```text
+gpt2image-3308-nopending.service: State 'stop-sigterm' timed out. Killing.
+systemctl restart gpt2image-3308-nopending.service
+systemctl restart gpt2image-web.service
+```
+
+结论：部署期间请求命中半更新/重启中的实例，或应用代码与数据库 schema 短暂不一致。后续必须先迁移并验证 DB，再摘流切实例，最后回切公网。
 
 ## 回滚
 
