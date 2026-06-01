@@ -1,4 +1,5 @@
 import { logWarn } from "@repo/shared/logger";
+import { generateSignedImageUrl } from "@repo/shared/storage/signed-url";
 import type { ImageGenerationOperationResult } from "@/features/image-generation/operations";
 import { isContentSafetyRejection } from "@/features/image-generation/sla-classification";
 import type { GeneratedImageOutput } from "@/features/image-generation/types";
@@ -109,6 +110,13 @@ function parseLocalStorageImageUrl(
 
 export function getPublicImageUrl(request: Request, imageUrl?: string) {
   if (!imageUrl) return undefined;
+  const storageReference = parseLocalStorageImageUrl(request, imageUrl);
+  if (storageReference) {
+    return new URL(
+      generateSignedImageUrl(storageReference.bucket, storageReference.key),
+      getRequestBaseUrl(request)
+    ).toString();
+  }
   if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
     return imageUrl;
   }

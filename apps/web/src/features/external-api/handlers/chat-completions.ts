@@ -30,6 +30,7 @@ import {
   normalizeOutputCompression,
   normalizeOutputFormat,
 } from "@/features/image-generation/output-format";
+import { uploadTemporaryImageUrls } from "@/features/image-generation/request-utils";
 import {
   DEFAULT_IMAGE_SIZE,
   getImageModel,
@@ -151,6 +152,8 @@ async function imageUrlToInputFile(params: {
   imageUrl: string;
   index: number;
   maxImageBytes: number;
+  userId?: string;
+  requestId?: string;
 }) {
   if (params.imageUrl.startsWith("data:image/")) {
     const file = parseDataImageUrl(params.imageUrl);
@@ -188,11 +191,24 @@ async function imageUrlToInputFile(params: {
     }
   );
 
+  const file = new File(
+    [data],
+    `chat-completion-input-image-${params.index + 1}`,
+    { type }
+  );
+  const uploaded = params.userId
+    ? await uploadTemporaryImageUrls(params.userId, params.requestId || "chat", [
+        file,
+      ])
+    : undefined;
+
   return {
     data,
     name: `chat-completion-input-image-${params.index + 1}`,
     type,
-    url: params.imageUrl,
+    url: uploaded?.[0]?.url || params.imageUrl,
+    storageBucket: uploaded?.[0]?.bucket,
+    storageKey: uploaded?.[0]?.key,
   } satisfies ImageInputFile;
 }
 
@@ -200,6 +216,8 @@ async function inputImageUrlsToFiles(params: {
   imageUrls: readonly string[];
   maxImageBytes: number;
   maxRequestBytes: number;
+  userId?: string;
+  requestId?: string;
 }) {
   const files = await Promise.all(
     params.imageUrls.map((imageUrl, index) =>
@@ -207,6 +225,8 @@ async function inputImageUrlsToFiles(params: {
         imageUrl,
         index,
         maxImageBytes: params.maxImageBytes,
+        userId: params.userId,
+        requestId: params.requestId,
       })
     )
   );
@@ -384,6 +404,7 @@ export const postExternalChatCompletions = withApiLogging(
     }
 
     const limits = await getPlanLimits(plan.plan);
+    const id = completionId();
     const count = parsed.data.n || 1;
     if (
       count > 1 &&
@@ -407,6 +428,8 @@ export const postExternalChatCompletions = withApiLogging(
         imageUrls: promptImageUrls,
         maxImageBytes: limits.maxFileMb * 1024 * 1024,
         maxRequestBytes: limits.maxUploadMb * 1024 * 1024,
+        userId: auth.userId,
+        requestId: id,
       });
     } catch (error) {
       return openAIImageError(
@@ -473,7 +496,6 @@ export const postExternalChatCompletions = withApiLogging(
         parsed.data.requires_responses_backend,
       agentMode: false,
     };
-    const id = completionId();
     const created = nowSeconds();
 
     if (useStreamResponse) {

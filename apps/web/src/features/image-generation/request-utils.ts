@@ -17,6 +17,21 @@ export type TemporaryUploadedImage = {
   url: string;
 };
 
+export async function getImagePublicBaseUrl() {
+  return (
+    (await getRuntimeSettingString("CONTENT_MODERATION_PUBLIC_BASE_URL")) ||
+    (await getRuntimeSettingString("NEXT_PUBLIC_APP_URL")) ||
+    (await getRuntimeSettingString("BETTER_AUTH_URL")) ||
+    ""
+  ).replace(/\/$/, "");
+}
+
+function toAbsoluteImageUrl(url: string, publicBaseUrl: string) {
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  if (!publicBaseUrl) return url;
+  return `${publicBaseUrl}${url.startsWith("/") ? "" : "/"}${url}`;
+}
+
 export function formatMegabytes(bytes: number) {
   return `${bytes / 1024 / 1024}MB`;
 }
@@ -87,10 +102,7 @@ export async function uploadTemporaryImageUrls(
   if (files.length === 0) return undefined;
 
   try {
-    const publicBaseUrl =
-      (await getRuntimeSettingString("CONTENT_MODERATION_PUBLIC_BASE_URL")) ||
-      (await getRuntimeSettingString("NEXT_PUBLIC_APP_URL")) ||
-      (await getRuntimeSettingString("BETTER_AUTH_URL"));
+    const publicBaseUrl = await getImagePublicBaseUrl();
     if (
       !(await getRuntimeSettingString("STORAGE_ENDPOINT")) &&
       !publicBaseUrl
@@ -127,9 +139,7 @@ export async function uploadTemporaryImageUrls(
         return {
           bucket,
           key,
-          url: url.startsWith("http")
-            ? url
-            : `${publicBaseUrl?.replace(/\/$/, "")}${url}`,
+          url: toAbsoluteImageUrl(url, publicBaseUrl),
         };
       })
     );

@@ -14,6 +14,7 @@ import {
   moderateContent,
 } from "@repo/shared/moderation";
 import { getStorageProvider } from "@repo/shared/storage/providers";
+import { generateSignedImageUrl } from "@repo/shared/storage/signed-url";
 import {
   getPlanCapabilitySnapshot,
   getPlanQueueSettings,
@@ -274,7 +275,7 @@ export type ImageGenerationOperationResult = {
 };
 
 async function getStoredImageUrl(bucket: string, storageKey: string) {
-  return `/api/storage/${bucket}/${storageKey}`;
+  return generateSignedImageUrl(bucket, storageKey);
 }
 
 async function toImageBuffer(result: {

@@ -37,7 +37,10 @@ import {
   getImageModel,
   validateImageSize,
 } from "@/features/image-generation/resolution";
-import { DEFAULT_MAX_IMAGE_BYTES } from "@/features/image-generation/request-utils";
+import {
+  DEFAULT_MAX_IMAGE_BYTES,
+  uploadTemporaryImageUrls,
+} from "@/features/image-generation/request-utils";
 import type {
   ChatGptWebConversationState,
   ChatHistoryMessage,
@@ -456,7 +459,8 @@ function parseDataImageUrl(url: string): ImageInputFile | null {
 
 async function imageUrlToInputFile(
   imageUrl: string,
-  index: number
+  index: number,
+  options?: { userId?: string; requestId?: string }
 ): Promise<ImageInputFile | null> {
   if (imageUrl.startsWith("data:image/")) {
     return parseDataImageUrl(imageUrl);
@@ -480,17 +484,31 @@ async function imageUrlToInputFile(
       throw new Error("Input image exceeds the 25MB limit.");
     }
   );
+  const file = new File([data], `response-input-image-${index + 1}`, { type });
+  const uploaded = options?.userId
+    ? await uploadTemporaryImageUrls(options.userId, options.requestId || "responses", [
+        file,
+      ])
+    : undefined;
+
   return {
     data,
     name: `response-input-image-${index + 1}`,
     type,
-    url: imageUrl,
+    url: uploaded?.[0]?.url || imageUrl,
+    storageBucket: uploaded?.[0]?.bucket,
+    storageKey: uploaded?.[0]?.key,
   };
 }
 
-async function inputImageUrlsToFiles(imageUrls: string[]) {
+async function inputImageUrlsToFiles(
+  imageUrls: string[],
+  options?: { userId?: string; requestId?: string }
+) {
   const files = await Promise.all(
-    imageUrls.map((imageUrl, index) => imageUrlToInputFile(imageUrl, index))
+    imageUrls.map((imageUrl, index) =>
+      imageUrlToInputFile(imageUrl, index, options)
+    )
   );
   return files.filter((file): file is ImageInputFile => Boolean(file));
 }
@@ -712,10 +730,14 @@ export const postExternalResponses = withApiLogging(
     );
     const preferredBackendMemberId =
       previousContinuation?.webConversation?.accountId;
+    const requestId = responseId("resp");
 
     let images: ImageInputFile[] = [];
     try {
-      images = await inputImageUrlsToFiles(promptImageUrls);
+      images = await inputImageUrlsToFiles(promptImageUrls, {
+        userId: auth.userId,
+        requestId,
+      });
     } catch (error) {
       return openAIImageError(
         error instanceof Error ? error.message : "Failed to load input image"
@@ -751,8 +773,6 @@ export const postExternalResponses = withApiLogging(
       stream: undefined,
       rawResponsesBody: parsed.data,
     };
-
-    const requestId = responseId("resp");
 
     if (wantsImageStreamResponse(request, parsed.data.stream)) {
       return createExternalImageStreamResponse(async (emit) => {

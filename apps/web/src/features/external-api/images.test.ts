@@ -5,6 +5,7 @@ import {
   createJsonKeepAliveResponse,
   getExternalFinalImageOutputs,
   getImageBase64,
+  getPublicImageUrl,
   IMAGE_JSON_KEEP_ALIVE_INITIAL_WAIT_MS,
   toExternalErrorStreamData,
   toExternalGenerationUsage,
@@ -37,6 +38,7 @@ beforeEach(() => {
   storageMocks.getObjectMock.mockReset();
   storageMocks.getStorageProviderMock.mockClear();
   vi.unstubAllGlobals();
+  vi.stubEnv("BETTER_AUTH_SECRET", "test-storage-signing-secret");
 });
 
 describe("external image stream response", () => {
@@ -146,13 +148,37 @@ describe("external final image selection", () => {
       created: 123,
       data: [
         {
-          url: "https://example.com/api/storage/generations/final.png",
           revised_prompt: "final prompt",
         },
       ],
       generation_id: "gen_1",
       credits_consumed: 1,
     });
+    expect("data" in payload).toBe(true);
+    if (!("data" in payload)) throw new Error("expected image response data");
+    const url = new URL(payload.data[0]!.url!);
+    expect(url.origin).toBe("https://example.com");
+    expect(url.pathname).toBe("/api/storage/generations/final.png");
+    expect(url.searchParams.get("sig")).toMatch(/^[a-f0-9]{64}$/);
+    expect(Number(url.searchParams.get("exp"))).toBeGreaterThan(
+      Math.floor(Date.now() / 1000)
+    );
+  });
+
+  it("signs same-origin absolute storage URLs before returning them to API clients", () => {
+    const request = new Request("https://example.com/v1/images/edits");
+    const publicUrl = getPublicImageUrl(
+      request,
+      "https://example.com/api/storage/generations/user/out.png"
+    );
+
+    const url = new URL(publicUrl!);
+    expect(url.origin).toBe("https://example.com");
+    expect(url.pathname).toBe("/api/storage/generations/user/out.png");
+    expect(url.searchParams.get("sig")).toMatch(/^[a-f0-9]{64}$/);
+    expect(Number(url.searchParams.get("exp"))).toBeGreaterThan(
+      Math.floor(Date.now() / 1000)
+    );
   });
 
   it("falls back to the stored primary image when only draft outputs exist", () => {
