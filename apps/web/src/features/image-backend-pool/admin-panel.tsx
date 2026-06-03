@@ -163,6 +163,7 @@ type Api = {
   isEnabled: boolean;
   alwaysActive: boolean;
   priority: number;
+  concurrency: number;
   status: string;
   successCount: number;
   failCount: number;
@@ -728,6 +729,7 @@ export function ImageBackendPoolAdminPanel({
     isEnabled: true,
     alwaysActive: false,
     priority: 50,
+    concurrency: 10,
   });
   const [bulkAccountForm, setBulkAccountForm] = useState<BulkAccountForm>({
     selectionGroupId: "all",
@@ -1002,6 +1004,7 @@ export function ImageBackendPoolAdminPanel({
       isEnabled: true,
       alwaysActive: false,
       priority: 50,
+      concurrency: 10,
     });
 
   const resetManualImportForm = () => {
@@ -1134,6 +1137,7 @@ export function ImageBackendPoolAdminPanel({
       isEnabled: api.isEnabled,
       alwaysActive: api.alwaysActive,
       priority: api.priority,
+      concurrency: api.concurrency,
     });
   };
 
@@ -3264,7 +3268,27 @@ export function ImageBackendPoolAdminPanel({
                   }
                 />
                 <p className="text-xs text-muted-foreground">
-                  数字越小越先调度；API 直透后端当前按并发权重 1 参与负载比较。
+                  数字越小越先调度；同优先级下再按并发数（负载权重）比较负载。
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <Label>并发数</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={apiForm.concurrency}
+                  onChange={(event) =>
+                    setApiForm((current) => ({
+                      ...current,
+                      concurrency: Number(event.target.value),
+                    }))
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  单后端最大同时在飞请求数（1-100）。同时也是同优先级下的负载权重：
+                  值越大越能分到更多请求。整池可并发数 = 各后端并发数之和；后端少时
+                  务必调大，否则高并发会被挡成「无可用账号或 API」。
                 </p>
               </div>
               <div className="flex items-center justify-between rounded-md border p-3">
@@ -3373,7 +3397,7 @@ export function ImageBackendPoolAdminPanel({
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
                       {api.baseUrl} · {groupName(groups, api.groupId)} · 优先级{" "}
-                      {api.priority} · 并发权重 1 ·{" "}
+                      {api.priority} · 并发数 {api.concurrency} ·{" "}
                       {formatDate(api.lastUsedAt, timeZone)}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">

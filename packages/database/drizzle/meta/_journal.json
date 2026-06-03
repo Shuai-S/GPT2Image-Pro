@@ -232,6 +232,13 @@
       "when": 1780400360000,
       "tag": "0032_image_backend_api_always_active",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1780400420000,
+      "tag": "0033_image_backend_api_concurrency",
+      "breakpoints": true
     }
   ]
 }

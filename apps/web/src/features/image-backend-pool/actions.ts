@@ -529,6 +529,7 @@ export const saveImageBackendApiAction = withImageBackendPoolAdminAction(
       isEnabled: z.boolean().default(true),
       alwaysActive: z.boolean().default(false),
       priority: z.coerce.number().int().min(0).max(10000).default(50),
+      concurrency: z.coerce.number().int().min(1).max(100).default(10),
       status: z.string().trim().max(80).optional(),
     })
   )
@@ -548,6 +549,7 @@ export const saveImageBackendApiAction = withImageBackendPoolAdminAction(
       isEnabled: parsedInput.isEnabled,
       alwaysActive: parsedInput.alwaysActive,
       priority: parsedInput.priority,
+      concurrency: parsedInput.concurrency,
       status: parsedInput.status || "active",
     });
     return { success: true, id };

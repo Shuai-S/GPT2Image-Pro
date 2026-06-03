@@ -882,6 +882,9 @@ export const imageBackendApi = pgTable("image_backend_api", {
   // 调度器置 error 排除（失败仍记录 lastError，但始终留在候选里）。
   alwaysActive: boolean("always_active").notNull().default(false),
   priority: integer("priority").notNull().default(50),
+  // 单后端最大在飞并发（与账号一致）。默认 10：API 中转通常可并发，过低会在高
+  // 并发下把请求挡成"无可用账号或 API"。
+  concurrency: integer("concurrency").notNull().default(10),
   successCount: integer("success_count").notNull().default(0),
   failCount: integer("fail_count").notNull().default(0),
   status: text("status").notNull().default("active"),
