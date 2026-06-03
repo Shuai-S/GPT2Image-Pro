@@ -85,9 +85,9 @@ describe("fetchPublicImage", () => {
       });
     });
 
-    await expect(
-      fetchPublicImage("https://1.1.1.1/image.png")
-    ).rejects.toThrow("Too many redirects");
+    await expect(fetchPublicImage("https://1.1.1.1/image.png")).rejects.toThrow(
+      "Too many redirects"
+    );
   });
 
   it("returns the final response for a public URL", async () => {
