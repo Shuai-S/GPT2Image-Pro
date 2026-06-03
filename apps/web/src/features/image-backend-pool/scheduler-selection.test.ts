@@ -58,6 +58,7 @@ const schemaMock = vi.hoisted(() => {
       "alwaysActive",
       "priority",
       "concurrency",
+      "failureCooldownEnabled",
       "successCount",
       "failCount",
       "status",
@@ -1080,11 +1081,11 @@ describe("image backend pool scheduler selection", () => {
     expect(update?.values).not.toHaveProperty("cooldownUntil");
   });
 
-  it("can cool down external API backends when explicitly enabled", async () => {
-    vi.mocked(getRuntimeSettingBoolean).mockImplementation(
-      async (key: string, fallback = false) =>
-        key === "IMAGE_BACKEND_API_FAILURE_COOLDOWN_ENABLED" ? true : fallback
-    );
+  it("cools down external API backends when the per-backend toggle is on", async () => {
+    // 每后端开关(failureCooldownEnabled)取代旧全局 flag。
+    dbMock.state.apis = [
+      { id: "api-1", groupId: "group-a", failureCooldownEnabled: true },
+    ];
 
     await reportImageBackendResult({
       memberType: "api",
@@ -1122,6 +1123,59 @@ describe("image backend pool scheduler selection", () => {
       lastError: "invalid api key authentication failed",
       lastErrorAt: expect.any(Date),
     });
+  });
+
+  it.each([
+    ["Upstream Responses API returned HTTP 500: 没有可用token | invalid_request_error"],
+    ["Upstream Responses API returned HTTP 502: HTML response body. Check ..."],
+  ])("marks dead-relay errors as error (sticky out): %s", async (errText) => {
+    await reportImageBackendResult({
+      memberType: "api",
+      memberId: "api-1",
+      success: false,
+      error: errText,
+    });
+
+    const update = dbMock.state.updates.find(
+      (item) => item.tableName === "image_backend_api"
+    );
+    expect(update?.values).toMatchObject({ status: "error", cooldownUntil: null });
+  });
+
+  it("keeps an errored API out: a later success does not reactivate it", async () => {
+    dbMock.state.apis = [
+      { id: "api-1", groupId: "group-a", status: "error", alwaysActive: false },
+    ];
+
+    await reportImageBackendResult({
+      memberType: "api",
+      memberId: "api-1",
+      success: true,
+    });
+
+    const update = dbMock.state.updates.find(
+      (item) => item.tableName === "image_backend_api"
+    );
+    // 粘性：成功只记 successCount，不把 status 翻回 active、不清 error。
+    expect(update?.values).not.toHaveProperty("status");
+    expect(update?.values).not.toHaveProperty("lastError");
+  });
+
+  it("always_active errored API still reactivates on success", async () => {
+    dbMock.state.apis = [
+      { id: "api-1", groupId: "group-a", status: "error", alwaysActive: true },
+    ];
+
+    await reportImageBackendResult({
+      memberType: "api",
+      memberId: "api-1",
+      success: true,
+    });
+
+    const update = dbMock.state.updates.find(
+      (item) => item.tableName === "image_backend_api"
+    );
+    expect(update?.values).toMatchObject({ status: "active", lastError: null });
   });
 
   it("keeps account backend cooldown behavior unchanged", async () => {

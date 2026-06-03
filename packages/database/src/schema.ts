@@ -885,6 +885,11 @@ export const imageBackendApi = pgTable("image_backend_api", {
   // 单后端最大在飞并发（与账号一致）。默认 10：API 中转通常可并发，过低会在高
   // 并发下把请求挡成"无可用账号或 API"。
   concurrency: integer("concurrency").notNull().default(10),
+  // 失败是否进入冷却（每后端独立，取代旧的全局 IMAGE_BACKEND_API_FAILURE_COOLDOWN_ENABLED）。
+  // 关闭（默认）时：瞬时/可恢复失败不冷却也不改状态；仅确定性错误置 error 踢出。
+  failureCooldownEnabled: boolean("failure_cooldown_enabled")
+    .notNull()
+    .default(false),
   successCount: integer("success_count").notNull().default(0),
   failCount: integer("fail_count").notNull().default(0),
   status: text("status").notNull().default("active"),

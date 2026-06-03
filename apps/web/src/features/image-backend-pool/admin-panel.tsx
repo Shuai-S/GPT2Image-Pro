@@ -162,6 +162,7 @@ type Api = {
   contentSafetyEnabled: boolean;
   isEnabled: boolean;
   alwaysActive: boolean;
+  failureCooldownEnabled: boolean;
   priority: number;
   concurrency: number;
   status: string;
@@ -728,6 +729,7 @@ export function ImageBackendPoolAdminPanel({
     contentSafetyEnabled: true,
     isEnabled: true,
     alwaysActive: false,
+    failureCooldownEnabled: false,
     priority: 50,
     concurrency: 10,
   });
@@ -1003,6 +1005,7 @@ export function ImageBackendPoolAdminPanel({
       contentSafetyEnabled: true,
       isEnabled: true,
       alwaysActive: false,
+      failureCooldownEnabled: false,
       priority: 50,
       concurrency: 10,
     });
@@ -1136,6 +1139,7 @@ export function ImageBackendPoolAdminPanel({
       contentSafetyEnabled: api.contentSafetyEnabled,
       isEnabled: api.isEnabled,
       alwaysActive: api.alwaysActive,
+      failureCooldownEnabled: api.failureCooldownEnabled,
       priority: api.priority,
       concurrency: api.concurrency,
     });
@@ -3329,6 +3333,25 @@ export function ImageBackendPoolAdminPanel({
                     setApiForm((current) => ({
                       ...current,
                       alwaysActive: checked,
+                    }))
+                  }
+                />
+              </div>
+              <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+                <div>
+                  <Label>失败进入冷却</Label>
+                  <p className="text-xs text-muted-foreground">
+                    开启后该 API 的瞬时/可恢复失败（5xx、超时、限流等）会进入定时
+                    冷却、暂时下线，到点自动恢复。关闭（默认）则不冷却，只有确定性
+                    错误（凭证废、缺图像工具、中转坏）会被踢出。常驻开启时本项无效。
+                  </p>
+                </div>
+                <Switch
+                  checked={apiForm.failureCooldownEnabled}
+                  onCheckedChange={(checked) =>
+                    setApiForm((current) => ({
+                      ...current,
+                      failureCooldownEnabled: checked,
                     }))
                   }
                 />

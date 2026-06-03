@@ -23,7 +23,6 @@ import { canUsePlanCapability } from "@repo/shared/subscription/services/plan-ca
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import {
   clearSystemSettingsCache,
-  getRuntimeSettingBoolean,
   getRuntimeSettingJson,
   getRuntimeSettingNumber,
   getRuntimeSettingString,
@@ -248,8 +247,6 @@ const OPENAI_MOBILE_RT_CLIENT_ID = "app_LlGpXReQgckcGGUo2JrYvtJK";
 const OPENAI_REFRESH_SCOPES = "openid profile email";
 const AUTO_SUB2API_SYNC_STATE_KEY = "SUB2API_AUTO_SYNC_STATE";
 const AUTO_SUB2API_SYNC_TASKS_KEY = "SUB2API_AUTO_SYNC_TASKS";
-const API_FAILURE_COOLDOWN_ENABLED_KEY =
-  "IMAGE_BACKEND_API_FAILURE_COOLDOWN_ENABLED";
 const DEFAULT_BACKEND_COOLDOWN_MINUTES = 15;
 const MAX_PARSED_RESET_COOLDOWN_DAYS = 14;
 const BACKEND_SCHEDULER_EWMA_ALPHA = 0.2;
@@ -1181,6 +1178,23 @@ export function isMissingImageToolBackendError(error?: string | null) {
   );
 }
 
+/**
+ * 识别"中转本身坏掉/不可用"的确定性错误，按用户判定升级为 error（粘性下线）。
+ *
+ * - "没有可用token"：中转无上游额度/令牌（如 sub2api 中转池空）。
+ * - "html response body"：端点返回 HTML（源站宕机/网关错误页/baseUrl 配错），
+ *   非 OpenAI 兼容 JSON。
+ * 这类不会自愈，应踢出轮换直到管理员处理（测活/重新启用/常驻）。
+ */
+function isDeadRelayBackendError(error?: string | null) {
+  const normalized = (error || "").toLowerCase();
+  return (
+    normalized.includes("没有可用token") ||
+    normalized.includes("没有可用 token") ||
+    normalized.includes("html response body")
+  );
+}
+
 function isUserRequestBackendError(error?: string | null) {
   // 缺图像工具是后端能力问题（非用户内容拒绝）：放行去走"可切换 + 标记 error"，
   // 否则会被下方 isApologyRefusal 误判成用户拒绝而当场失败、不切换。
@@ -1499,6 +1513,10 @@ async function classifyFailure(
   if (isMissingImageToolBackendError(error)) {
     return { status: "error", cooldownUntil: null };
   }
+  // 中转坏掉（无 token / 返回 HTML）：确定性不可用，按用户判定升级为 error 踢出。
+  if (isDeadRelayBackendError(error)) {
+    return { status: "error", cooldownUntil: null };
+  }
   if (
     (await isUnrecoverableBackendError(error)) ||
     isInvalidBackendCredentialError(error)
@@ -1585,18 +1603,22 @@ async function classifyFailure(
   };
 }
 
-async function shouldApplyApiFailureCooldown() {
-  return getRuntimeSettingBoolean(API_FAILURE_COOLDOWN_ENABLED_KEY, false);
-}
-
-async function resolveEffectiveFailureForMember(
+/**
+ * 把分类结果按"该后端是否启用失败冷却"收敛。
+ *
+ * 账号永远按分类结果走。API 后端由各自的 `failureCooldownEnabled` 决定（取代旧
+ * 的全局开关）：关闭时丢弃一切冷却/限流结果，仅保留确定性 `error`（不可恢复/
+ * 凭证废/缺图像工具/中转坏）。
+ */
+function resolveEffectiveFailureForMember(
   memberType: "api" | "account",
   failure: {
     status?: string;
     cooldownUntil?: Date | null;
-  }
+  },
+  apiFailureCooldownEnabled: boolean
 ) {
-  if (memberType !== "api" || (await shouldApplyApiFailureCooldown())) {
+  if (memberType !== "api" || apiFailureCooldownEnabled) {
     return failure;
   }
   return {
@@ -2581,47 +2603,64 @@ export async function reportImageBackendResult(
   const now = new Date();
   const error = truncateError(input.error);
   const failure = input.success ? {} : await classifyFailure(error, input);
-  const effectiveFailure = input.success
-    ? failure
-    : await resolveEffectiveFailureForMember(input.memberType, failure);
-  const outcome = {
-    success: input.success,
-    status: effectiveFailure.status,
-    cooldownUntil: effectiveFailure.cooldownUntil,
-    retryable:
-      !input.success && isClassifiedFailureRecoverable(error, effectiveFailure),
-    switchable: !input.success && isImageBackendSwitchableError(error),
-  };
 
   if (input.memberType === "api") {
     const [api] = await db
       .select({
         metadata: imageBackendApi.metadata,
         alwaysActive: imageBackendApi.alwaysActive,
+        status: imageBackendApi.status,
+        failureCooldownEnabled: imageBackendApi.failureCooldownEnabled,
       })
       .from(imageBackendApi)
       .where(eq(imageBackendApi.id, input.memberId))
       .limit(1);
+    const alwaysActive = api?.alwaysActive ?? false;
+    const effectiveFailure = input.success
+      ? failure
+      : resolveEffectiveFailureForMember(
+          "api",
+          failure,
+          api?.failureCooldownEnabled ?? false
+        );
+    const outcome = {
+      success: input.success,
+      status: effectiveFailure.status,
+      cooldownUntil: effectiveFailure.cooldownUntil,
+      retryable:
+        !input.success &&
+        isClassifiedFailureRecoverable(error, effectiveFailure),
+      switchable: !input.success && isImageBackendSwitchableError(error),
+    };
     const metadata = nextSchedulerMetadataAfterResult(
       api?.metadata,
       input,
       now
     );
     // always_active：遇错也不下线——失败时不改 status、不进冷却（仅记 lastError/failCount）。
-    const apiFailure = api?.alwaysActive ? {} : effectiveFailure;
+    const apiFailure = alwaysActive ? {} : effectiveFailure;
+    // error 粘性：非常驻后端一旦被置 error，成功不再复活它（高并发下成功多来自
+    // 早已在飞的兄弟请求）。只由 测活/手动重新启用/编辑保存/常驻 清除 error。
+    const stickyError = api?.status === "error" && !alwaysActive;
     await db
       .update(imageBackendApi)
       .set(
         input.success
-          ? {
-              successCount: sql`${imageBackendApi.successCount} + 1`,
-              metadata,
-              status: "active",
-              lastError: null,
-              lastErrorAt: null,
-              cooldownUntil: null,
-              updatedAt: now,
-            }
+          ? stickyError
+            ? {
+                successCount: sql`${imageBackendApi.successCount} + 1`,
+                metadata,
+                updatedAt: now,
+              }
+            : {
+                successCount: sql`${imageBackendApi.successCount} + 1`,
+                metadata,
+                status: "active",
+                lastError: null,
+                lastErrorAt: null,
+                cooldownUntil: null,
+                updatedAt: now,
+              }
           : {
               failCount: sql`${imageBackendApi.failCount} + 1`,
               metadata,
@@ -2650,6 +2689,18 @@ export async function reportImageBackendResult(
     }
     return outcome;
   }
+
+  const effectiveFailure = input.success
+    ? failure
+    : resolveEffectiveFailureForMember("account", failure, false);
+  const outcome = {
+    success: input.success,
+    status: effectiveFailure.status,
+    cooldownUntil: effectiveFailure.cooldownUntil,
+    retryable:
+      !input.success && isClassifiedFailureRecoverable(error, effectiveFailure),
+    switchable: !input.success && isImageBackendSwitchableError(error),
+  };
 
   const [account] = await db
     .select({
@@ -6060,6 +6111,7 @@ type UpsertApiInput = {
   contentSafetyEnabled: boolean;
   isEnabled: boolean;
   alwaysActive: boolean;
+  failureCooldownEnabled: boolean;
   priority: number;
   concurrency: number;
   status?: string;
@@ -6080,6 +6132,7 @@ export async function upsertImageBackendApi(input: UpsertApiInput) {
     contentSafetyEnabled: input.contentSafetyEnabled,
     isEnabled: input.isEnabled,
     alwaysActive: input.alwaysActive,
+    failureCooldownEnabled: input.failureCooldownEnabled,
     priority: input.priority,
     concurrency: Math.max(1, Math.min(100, input.concurrency)),
     status: input.status || "active",
@@ -6120,7 +6173,19 @@ export async function setImageBackendApiEnabled(input: {
 }): Promise<void> {
   await db
     .update(imageBackendApi)
-    .set({ isEnabled: input.isEnabled, updatedAt: new Date() })
+    .set({
+      isEnabled: input.isEnabled,
+      // 重新启用＝给次机会：清掉 error/冷却，让粘性 error 的后端回到候选。
+      ...(input.isEnabled
+        ? {
+            status: "active",
+            cooldownUntil: null,
+            lastError: null,
+            lastErrorAt: null,
+          }
+        : {}),
+      updatedAt: new Date(),
+    })
     .where(eq(imageBackendApi.id, input.id));
 }
 
@@ -6378,6 +6443,7 @@ export async function listAdminImageBackendPool() {
       contentSafetyEnabled: imageBackendApi.contentSafetyEnabled,
       isEnabled: imageBackendApi.isEnabled,
       alwaysActive: imageBackendApi.alwaysActive,
+      failureCooldownEnabled: imageBackendApi.failureCooldownEnabled,
       priority: imageBackendApi.priority,
       concurrency: imageBackendApi.concurrency,
       status: imageBackendApi.status,
