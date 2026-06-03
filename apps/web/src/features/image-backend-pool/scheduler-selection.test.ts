@@ -542,6 +542,38 @@ describe("image backend pool scheduler selection", () => {
     expect(third).toBeNull();
   });
 
+  it("keeps an always_active API selectable even when its concurrency is saturated", async () => {
+    const baseApi = {
+      id: "api-aa",
+      groupId: "group-a",
+      name: "Always Active",
+      baseUrl: "https://api.example.test/v1",
+      apiKey: "key",
+      model: null,
+      interfaceMode: "responses",
+      chatCompletionsUpstreamMode: "responses",
+      imageUpstreamMode: "responses",
+      useStream: false,
+      contentSafetyEnabled: true,
+      priority: 1,
+      concurrency: 1,
+      lastUsedAt: null,
+      createdAt: new Date(2026, 0, 1),
+    };
+    dbMock.state.accounts = [];
+    dbMock.state.apis = [{ ...baseApi, alwaysActive: true }];
+
+    // 并发上限为 1 且租约不释放，但 always_active 不受饱和限制：连续三次仍选中它。
+    // （对照：普通后端在"reserves backend capacity"用例里第二次即耗尽返回 null。）
+    for (let index = 0; index < 3; index += 1) {
+      const result = await resolveImageBackendPoolConfig({
+        userId: "user-a",
+        requestKind: "image_generation",
+      });
+      expect(result?.memberId).toBe("api-aa");
+    }
+  });
+
   it("round-robins across equal healthy accounts instead of filling high-concurrency accounts first", async () => {
     dbMock.state.accounts = Array.from({ length: 10 }, (_, index) => ({
       ...makeAccount(index + 1),

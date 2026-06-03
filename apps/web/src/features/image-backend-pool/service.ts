@@ -137,6 +137,7 @@ type PoolMember =
       contentSafetyEnabled: boolean;
       priority: number;
       concurrency: number;
+      alwaysActive: boolean;
       leaseId?: string;
       leasePersisted?: boolean;
       leaseTouchedMember?: boolean;
@@ -815,6 +816,9 @@ function backendHealthPenalty(member: PoolMember) {
 }
 
 function hasBackendCapacity(member: PoolMember) {
+  // always_active 的 API 视为"始终可用"：连并发饱和也不跳过，避免少量后端在高
+  // 并发下被并发上限挡成"无可用账号或 API"。上游若扛不住会自行报错并触发切换。
+  if (member.type === "api" && member.alwaysActive) return true;
   return backendInflightCount(member) < backendConcurrency(member);
 }
 
@@ -908,7 +912,12 @@ async function acquirePoolMemberInflightLease(
           )
         );
       const activeCount = Number(activeLeaseCount?.value || 0);
-      if (activeCount >= backendConcurrency(member)) return "full";
+      // always_active 的 API 不受并发上限限制（与 hasBackendCapacity 的放行一致），
+      // 否则高并发下仍会被 DB 持久租约计数挡成 "full"。
+      const alwaysActiveApi = member.type === "api" && member.alwaysActive;
+      if (!alwaysActiveApi && activeCount >= backendConcurrency(member)) {
+        return "full";
+      }
       await tx.insert(imageBackendInflightLease).values({
         id: leaseId,
         memberType: member.type,
@@ -2085,6 +2094,7 @@ async function selectPoolMember(
               contentSafetyEnabled: row.contentSafetyEnabled,
               priority: row.priority,
               concurrency: 1,
+              alwaysActive: row.alwaysActive,
               lastUsedAt: row.lastUsedAt,
               lastAcquiredAt: row.lastAcquiredAt,
               createdAt: row.createdAt,
