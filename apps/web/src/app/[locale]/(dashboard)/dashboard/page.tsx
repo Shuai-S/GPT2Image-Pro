@@ -16,7 +16,7 @@ import { Coins, Image as ImageIcon, ImagePlus } from "lucide-react";
 import { headers } from "next/headers";
 import { getLocale } from "next-intl/server";
 import { redirect } from "next/navigation";
-import { ImagePricingChartCard } from "@/features/dashboard/components/image-pricing-chart-card";
+import { ImagePricingChartCardLazy } from "@/features/dashboard/components/image-pricing-chart-card-lazy";
 import {
   getUserImageBackendPreference,
   listImageBackendGroupOptions,
@@ -169,7 +169,7 @@ export default async function DashboardPage() {
           </Card>
         </div>
 
-        <ImagePricingChartCard
+        <ImagePricingChartCardLazy
           billing={{
             agentRoundCredits: capabilities.billing.agentRoundCredits,
             chatRoundCredits: capabilities.billing.chatRoundCredits,

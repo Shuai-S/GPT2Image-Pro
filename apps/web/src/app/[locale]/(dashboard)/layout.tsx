@@ -1,7 +1,7 @@
-import {
-  DashboardMainWrapper,
-  DashboardSidebar,
-} from "@/features/dashboard/components";
+// 直接从各模块导入(不经 barrel index.ts):barrel re-export 多个卡片组件,经它导入会把
+// 这些组件及其依赖一并拖进每页必载的公共 bundle(tree-shaking 被 barrel 破坏)。
+import { DashboardMainWrapper } from "@/features/dashboard/components/main-wrapper";
+import { DashboardSidebar } from "@/features/dashboard/components/sidebar";
 import { SidebarProvider } from "@/features/dashboard/context";
 import { CreateRuntimeProvider } from "@/features/image-generation/create-runtime-store";
 import { getUserRoleById } from "@repo/shared/auth/role-server";
