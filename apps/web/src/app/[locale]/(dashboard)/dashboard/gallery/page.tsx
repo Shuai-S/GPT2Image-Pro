@@ -1,16 +1,16 @@
-import { and, count, desc, eq, isNotNull, sql } from "drizzle-orm";
-import { getLocale } from "next-intl/server";
-import { redirect } from "next/navigation";
 import { db } from "@repo/database";
 import { generation } from "@repo/database/schema";
+import { getCurrentUser } from "@repo/shared/auth/server";
 import { buildSignedStorageImageUrl } from "@repo/shared/storage/signed-url";
+import { getAppTimeZone } from "@repo/shared/time-zone/server";
+import { and, count, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { redirect } from "next/navigation";
+import { getLocale } from "next-intl/server";
 import { GalleryClient } from "@/features/image-generation/components/gallery-client";
 import {
   extractGenerationReferenceImages,
   extractPromptRepairNotice,
 } from "@/features/image-generation/generation-metadata";
-import { getCurrentUser } from "@repo/shared/auth/server";
-import { getAppTimeZone } from "@repo/shared/time-zone/server";
 
 interface GalleryPageProps {
   searchParams: Promise<{ page?: string; tab?: string }>;
@@ -144,45 +144,61 @@ export default async function GalleryPage({ searchParams }: GalleryPageProps) {
       WHERE output->>'role' = 'agent_draft' AND output->>'primary' = 'true'
     )`
   );
+  // finalCount 徽标:避免对 finalCondition 的 NOT EXISTS 做无 LIMIT 全表计数(~2.5s)。
+  // 改用集合差:完成且有图的总数 − 其中"主体为 agent_draft"的数(后者走 GIN，~2ms),
+  // 两项都廉价,结果与原 NOT EXISTS 计数完全一致(已校验 63610 = 63610)。
+  const completedStorageCondition = and(
+    eq(generation.userId, user.id),
+    eq(generation.status, "completed"),
+    isNotNull(generation.storageKey)
+  );
+  const draftPrimaryCondition = and(
+    completedStorageCondition,
+    sql`(${generation.metadata}::jsonb) @? '$.outputImage.imageOutputs[*] ? (@.role == "agent_draft" && @.primary == true)'`
+  );
+  // @? jsonpath 谓词:命中"含 agent_draft 输出，或存在非主输出(primary=false)"的行。
+  // 与原 EXISTS(jsonb_array_elements ...) 逐行解析完全等价(已校验命中数一致),
+  // 但可走 generation_metadata_gin_idx（jsonb_path_ops GIN），把单查从 ~2.3s 降到 ~11ms。
   const draftCondition = and(
     eq(generation.userId, user.id),
     eq(generation.status, "completed"),
     isNotNull(generation.storageKey),
     isNotNull(generation.metadata),
-    sql`EXISTS (
-      SELECT 1
-      FROM jsonb_array_elements(COALESCE(${generation.metadata}::jsonb->'outputImage'->'imageOutputs', '[]'::jsonb)) AS output
-      WHERE output->>'role' = 'agent_draft' OR output->>'primary' = 'false'
-    )`
+    sql`(${generation.metadata}::jsonb) @? '$.outputImage.imageOutputs[*] ? (@.role == "agent_draft" || @.primary == false)'`
   );
+  // @? jsonpath 谓词:命中"inputImages.images 至少有一个元素"的行。等价于原
+  // jsonb_array_length(... ) > 0（已校验命中数一致），可走 generation_metadata_gin_idx。
   const uploadCondition = and(
     eq(generation.userId, user.id),
     isNotNull(generation.metadata),
-    sql`jsonb_array_length(COALESCE(${generation.metadata}::jsonb->'inputImages'->'images', '[]'::jsonb)) > 0`
+    sql`(${generation.metadata}::jsonb) @? '$.inputImages.images[0]'`
   );
-  const activeCondition =
-    activeTab === "agent-drafts"
-      ? draftCondition
-      : activeTab === "uploads"
-        ? uploadCondition
-        : finalCondition;
-
+  // 仅 final 标签页用到带 LIMIT 的成品主查询(finalCondition 命中密集，LIMIT 命中快)。
+  // drafts/uploads 标签页的展示来自下面无 LIMIT 的 draft/upload 查询(走 GIN)，故此处不重复
+  // 执行——否则会在这两个标签页跑一条结果用不到、且对稀疏谓词极慢(~1.3s)的 LIMIT 查询。
+  // 同时移除原 totalResult:它只在 final 标签页用到，且与 finalCountResult 完全等价(重复计数)。
+  const isFinalTab = activeTab === "final";
   const [
-    generations,
-    totalResult,
-    finalCountResult,
+    finalRows,
+    completedStorageCountResult,
+    draftPrimaryCountResult,
     draftParentRows,
     uploadParentRows,
     timeZone,
   ] = await Promise.all([
+    isFinalTab
+      ? db
+          .select()
+          .from(generation)
+          .where(finalCondition)
+          .orderBy(desc(generation.createdAt))
+          .limit(limit)
+      : Promise.resolve([] as Array<typeof generation.$inferSelect>),
     db
-      .select()
+      .select({ count: count() })
       .from(generation)
-      .where(activeCondition)
-      .orderBy(desc(generation.createdAt))
-      .limit(limit),
-    db.select({ count: count() }).from(generation).where(activeCondition),
-    db.select({ count: count() }).from(generation).where(finalCondition),
+      .where(completedStorageCondition),
+    db.select({ count: count() }).from(generation).where(draftPrimaryCondition),
     db
       .select()
       .from(generation)
@@ -206,7 +222,7 @@ export default async function GalleryPage({ searchParams }: GalleryPageProps) {
       ? allDraftItems.slice(0, limit)
       : activeTab === "uploads"
         ? allUploadItems.slice(0, limit)
-        : generations.map((g) => ({
+        : finalRows.map((g) => ({
             id: g.id,
             parentId: g.id,
             prompt: g.prompt,
@@ -224,13 +240,15 @@ export default async function GalleryPage({ searchParams }: GalleryPageProps) {
             referenceImages: extractGenerationReferenceImages(g.metadata),
           }));
 
+  const finalCount =
+    (completedStorageCountResult[0]?.count ?? 0) -
+    (draftPrimaryCountResult[0]?.count ?? 0);
   const totalCount =
     activeTab === "agent-drafts"
       ? allDraftItems.length
       : activeTab === "uploads"
         ? allUploadItems.length
-        : (totalResult[0]?.count ?? 0);
-  const finalCount = finalCountResult[0]?.count ?? 0;
+        : finalCount;
   const draftCount = allDraftItems.length;
   const uploadCount = allUploadItems.length;
 

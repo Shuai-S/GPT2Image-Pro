@@ -246,6 +246,20 @@
       "when": 1780400480000,
       "tag": "0034_image_backend_api_failure_cooldown",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1780400540000,
+      "tag": "0035_generation_read_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1780400600000,
+      "tag": "0036_credits_transaction_user_created_at_idx",
+      "breakpoints": true
     }
   ]
 }

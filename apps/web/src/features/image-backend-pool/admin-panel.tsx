@@ -57,7 +57,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { useAction } from "next-safe-action/hooks";
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { SubscriptionPlan } from "@repo/shared/config/subscription-plan";
 import { formatDateInTimeZone } from "@repo/shared/time-zone";
@@ -851,37 +851,48 @@ export function ImageBackendPoolAdminPanel({
     [accounts, selectedAccountIdSet]
   );
   const accountSummary = useMemo(() => summarizeAccounts(accounts), [accounts]);
-  const filteredAccounts = useMemo(
+  // 预建搜索索引:每个账号的可搜文本只在 [accounts, groups] 变化时构建一次,避免每次按键都对
+  // 全部账号重建 ~15 字段拼接串 + groupNames 查找(原为每次按键 O(accounts × groups))。
+  const accountSearchIndex = useMemo(
     () =>
-      accounts.filter((account) => {
-        const groupMatches =
-          bulkAccountForm.selectionGroupId === "all" ||
-          (bulkAccountForm.selectionGroupId === "default"
-            ? accountGroupIds(account).length === 0
-            : accountGroupIds(account).includes(
-                bulkAccountForm.selectionGroupId
-              ));
-        const modeMatches =
-          bulkAccountForm.selectionMode === "all" ||
-          account.implementationMode === bulkAccountForm.selectionMode;
-        const statusMatches = accountMatchesStatusFilter(
-          account,
-          bulkAccountForm.statusFilter
-        );
-        const query = bulkAccountForm.search.trim().toLowerCase();
-        const searchMatches =
-          !query || accountSearchText(account, groups).includes(query);
-        return groupMatches && modeMatches && statusMatches && searchMatches;
-      }),
-    [
-      accounts,
-      bulkAccountForm.selectionGroupId,
-      bulkAccountForm.selectionMode,
-      bulkAccountForm.statusFilter,
-      bulkAccountForm.search,
-      groups,
-    ]
+      new Map(
+        accounts.map((account) => [
+          account.id,
+          accountSearchText(account, groups),
+        ])
+      ),
+    [accounts, groups]
   );
+  // 输入即时响应,过滤用延迟值降优先级(React 并发,天然防抖):大量账号下连续输入不再每个
+  // 字符都重算整张过滤表。
+  const deferredSearch = useDeferredValue(bulkAccountForm.search);
+  const filteredAccounts = useMemo(() => {
+    const query = deferredSearch.trim().toLowerCase();
+    return accounts.filter((account) => {
+      const groupMatches =
+        bulkAccountForm.selectionGroupId === "all" ||
+        (bulkAccountForm.selectionGroupId === "default"
+          ? accountGroupIds(account).length === 0
+          : accountGroupIds(account).includes(bulkAccountForm.selectionGroupId));
+      const modeMatches =
+        bulkAccountForm.selectionMode === "all" ||
+        account.implementationMode === bulkAccountForm.selectionMode;
+      const statusMatches = accountMatchesStatusFilter(
+        account,
+        bulkAccountForm.statusFilter
+      );
+      const searchMatches =
+        !query || (accountSearchIndex.get(account.id) ?? "").includes(query);
+      return groupMatches && modeMatches && statusMatches && searchMatches;
+    });
+  }, [
+    accounts,
+    bulkAccountForm.selectionGroupId,
+    bulkAccountForm.selectionMode,
+    bulkAccountForm.statusFilter,
+    deferredSearch,
+    accountSearchIndex,
+  ]);
   const accountPageSize = Math.max(10, bulkAccountForm.pageSize || 20);
   const accountFilterKey = [
     bulkAccountForm.selectionGroupId,

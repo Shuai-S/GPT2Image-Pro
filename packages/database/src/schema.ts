@@ -487,6 +487,12 @@ export const creditsTransaction = pgTable(
     uniqueIndex("credits_transaction_user_type_source_ref_unique")
       .on(table.userId, table.type, table.sourceRef)
       .where(sql`${table.sourceRef} is not null`),
+    // 账单/用量页与管理员用户详情:'WHERE user_id=? ORDER BY created_at DESC' 的有序索引,
+    // 替代此前对 141MB 表的顺序扫(迁移 0036)。
+    index("credits_transaction_user_id_created_at_idx").on(
+      table.userId,
+      table.createdAt
+    ),
   ]
 );
 
@@ -1109,7 +1115,15 @@ export const generation = pgTable("generation", {
   metadata: json("metadata").$type<Record<string, unknown>>(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   completedAt: timestamp("completed_at"),
-});
+}, (table) => [
+  // 画廊/历史/计数与每次读触发的 pending 过期维护扫描:在 686MB 的 generation 表上,
+  // 把按 user / status 维度的查询从顺序扫转为有序索引扫描(迁移 0035)。
+  index("generation_user_id_created_at_idx").on(table.userId, table.createdAt),
+  index("generation_status_created_at_idx").on(table.status, table.createdAt),
+  // 另有 generation_metadata_gin_idx —— metadata 的 jsonb_path_ops GIN 表达式索引,
+  // 加速画廊 draft/upload 的 @? jsonpath 过滤。表达式索引以迁移 0035 的 SQL 为准
+  // (Drizzle 对 (metadata::jsonb) 这类表达式索引声明支持不稳定,故此处仅注释登记)。
+]);
 
 export type Generation = typeof generation.$inferSelect;
 export type NewGeneration = typeof generation.$inferInsert;
