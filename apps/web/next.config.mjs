@@ -41,6 +41,9 @@ const nextConfig = {
     // standalone(运行时会 Cannot find module 'ag-psd')。外置后 Next 会把它及其依赖
     // (base64-js/pako)一并拷入 standalone node_modules。
     "ag-psd",
+    // PSD 导出抠图引擎(原生模块,自带各平台预编译 .node):同理外置,避免被打进
+    // server bundle;Next 会把它拷入 standalone node_modules。
+    "onnxruntime-node",
   ],
 };
 

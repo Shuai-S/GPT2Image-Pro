@@ -1,20 +1,21 @@
 /**
  * PSD 导出服务端编排(策略 A:整图 + 按需补层)。
  *
- * 职责:基于一张已生成的底图,按图层计划逐层产出位图——底图作背景层、(可选)用图像编辑
- * 把主体抠成透明层、每个附加元素透明单独生成一层——再用 assembleLayeredPsd 组装为真·分层
+ * 职责:基于一张已生成的底图,按图层计划逐层产出位图——底图作背景层、(可选)对底图抠图得到
+ * 透明主体层、每个附加元素不透明生成后抠图得到透明层——再用 assembleLayeredPsd 组装为真·分层
  * PSD,存入与底图同一存储桶,返回签名下载链接。
+ *
+ * WHY 抠图而非"透明生成":实际生图后端(gpt-image-2)不支持 background=transparent(400),
+ * 故透明由服务端 ISNet 抠图(matte.ts)实现。主体层直接抠底图,像素级精确且不额外生成/扣费。
  *
  * 使用方:apps/web 的 server action / UOL image.exportPsd 接线(Phase 2)。
  *
- * 计费:每个"新增图层"(抠主体的 edit、每个元素的 generate)都走 runImageGenerationForUser
- * 的内置幂等扣费;底图复用不收费,PSD 组装本身不收费。故本函数不额外调用 consumeCredits,
- * 仅汇总各次生成实际扣费返回。
+ * 计费:仅"元素层"走一次普通(不透明)generate、按 runImageGenerationForUser 内置幂等扣费;
+ * 底图复用与主体抠图都不收费,PSD 组装、抠图本身也不收费。汇总各次生成实际扣费返回。
  *
  * 已知限制(v1):
- * - 主体抠层是"重绘"而非像素级抠图,与底图未必逐像素对齐(后续可换真·抠图模型);
- * - 非幂等:重复调用会重新生成并再次扣费,依赖传输层/UI 防重复提交;
- * - 中途某层生成失败会抛错,已完成的层已扣费(v1 不做整单回滚)。
+ * - 非幂等:重复调用会重新生成元素并再次扣费,依赖传输层/UI 防重复提交;
+ * - 中途某元素生成失败会抛错,已完成的元素已扣费(v1 不做整单回滚)。
  */
 import { nanoid } from "nanoid";
 import sharp from "sharp";
@@ -26,12 +27,8 @@ import {
 } from "@/features/image-generation/operations";
 import { getGenerationById } from "@/features/image-generation/queries";
 import { type PsdLayerInput, assembleLayeredPsd } from "./assembler";
+import { removeBackground } from "./matte";
 import { type PsdElementSpec, planPsdLayers } from "./plan";
-
-/** 抠主体的固定提示词:保持主体外观、其余透明。 */
-const ISOLATE_SUBJECT_PROMPT =
-  "Isolate the main subject onto a fully transparent background. " +
-  "Keep the subject's exact appearance and position; remove everything else.";
 
 /** PSD 签名下载链接有效期(秒)。 */
 const PSD_SIGNED_URL_TTL_SECONDS = 7200;
@@ -106,7 +103,18 @@ export async function exportLayeredPsdForUser(
     ...(input.elements ? { elements: input.elements } : {}),
   });
 
-  // 3. 逐层产出位图;非底图层统一缩放到画布尺寸(透明留边),保证组装对齐、避免合成越界。
+  // 非底图层统一缩放到画布尺寸(透明留边),保证组装对齐、避免合成越界。
+  const fitToCanvas = (png: Buffer) =>
+    sharp(png)
+      .ensureAlpha()
+      .resize(width, height, {
+        fit: "contain",
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      })
+      .png()
+      .toBuffer();
+
+  // 3. 逐层产出位图。
   const layers: PsdLayerInput[] = [];
   let creditsConsumed = 0;
 
@@ -116,51 +124,30 @@ export async function exportLayeredPsdForUser(
       continue;
     }
 
-    const result =
-      job.role === "subject"
-        ? await runImageGenerationForUser({
-            mode: "edit",
-            userId: input.userId,
-            prompt: ISOLATE_SUBJECT_PROMPT,
-            images: [
-              {
-                data: baseBytes,
-                name: "base.png",
-                type: "image/png",
-                storageKey: base.storageKey,
-                storageBucket: bucket,
-              },
-            ],
-            background: "transparent",
-            outputFormat: "png",
-            size: sizeParam,
-            n: 1,
-          })
-        : await runImageGenerationForUser({
-            mode: "generate",
-            userId: input.userId,
-            prompt: job.prompt,
-            background: "transparent",
-            outputFormat: "png",
-            size: sizeParam,
-            n: 1,
-          });
+    if (job.role === "subject") {
+      // 主体层 = 对底图抠图(像素级精确,不生成、不扣费)。
+      const cut = await removeBackground(baseBytes);
+      layers.push({ name: job.name, image: await fitToCanvas(cut) });
+      continue;
+    }
 
+    // 元素层 = 不透明生成(走内置扣费)→ 抠掉背景 → 透明叠层。
+    const result = await runImageGenerationForUser({
+      mode: "generate",
+      userId: input.userId,
+      prompt: job.prompt,
+      outputFormat: "png",
+      size: sizeParam,
+      n: 1,
+    });
     if (result.error || !result.generationId) {
       throw new Error(result.error || "图层生成失败");
     }
     creditsConsumed += result.creditsConsumed ?? 0;
 
     const rawLayer = await loadGenerationImageBytes(result, storage);
-    const normalized = await sharp(rawLayer)
-      .ensureAlpha()
-      .resize(width, height, {
-        fit: "contain",
-        background: { r: 0, g: 0, b: 0, alpha: 0 },
-      })
-      .png()
-      .toBuffer();
-    layers.push({ name: job.name, image: normalized });
+    const cut = await removeBackground(rawLayer);
+    layers.push({ name: job.name, image: await fitToCanvas(cut) });
   }
 
   // 4. 组装分层 PSD。

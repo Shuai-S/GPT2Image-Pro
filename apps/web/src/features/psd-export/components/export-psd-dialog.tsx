@@ -136,9 +136,21 @@ export function ExportPsdDialog({ generationId }: { generationId: string }) {
 
             <p className="text-xs text-muted-foreground">
               {copy(
-                "Each new layer runs one generation and is billed like a normal image. Subject isolation is a re-render and may not pixel-match the base.",
-                "每个新增图层走一次普通出图扣费;主体抠层为重绘,可能与底图不完全对齐。"
+                "Each extra element runs one generation and is billed like a normal image. The subject layer is cut from the base image (pixel-accurate, no extra charge).",
+                "每个附加元素走一次普通出图扣费;主体层由底图抠图得到(像素级精确,不额外收费)。"
               )}
+            </p>
+            <p className="text-[11px] leading-relaxed text-muted-foreground/70">
+              {copy("Background removal: ISNet model (", "抠图采用 ISNet 模型(")}
+              <a
+                href="https://github.com/xuebinqin/DIS"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline"
+              >
+                xuebinqin/DIS
+              </a>
+              {copy(", MIT) via onnxruntime.", ",MIT 许可),引擎 onnxruntime。")}
             </p>
 
             {hasErrored && (
