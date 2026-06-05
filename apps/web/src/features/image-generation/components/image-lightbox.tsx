@@ -23,6 +23,7 @@ import { type PointerEvent, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { deleteGenerationAction } from "@/features/image-generation/actions";
 import type { GenerationCreditDetails } from "@/features/image-generation/credit-calculation-details";
+import { ExportPsdDialog } from "@/features/psd-export/components/export-psd-dialog";
 import { writePendingReferenceHandoff } from "@/features/image-generation/reference-handoff";
 
 export interface LightboxReferenceImage {
@@ -616,6 +617,7 @@ export function ImageLightbox({
                       {copy("Download", "下载")}
                     </a>
                   </Button>
+                  <ExportPsdDialog generationId={generation.id} />
                 </>
               )}
               {onDelete && (

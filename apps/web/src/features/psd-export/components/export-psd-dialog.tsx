@@ -1,0 +1,184 @@
+"use client";
+
+/**
+ * 「导出 PSD」弹窗。
+ *
+ * 挂在出图详情(image-lightbox)里:基于当前 generation,让用户选择是否把主体单独成层、
+ * 添加若干透明元素层,触发 exportPsdAction,成功后给出 .psd 签名下载链接。
+ *
+ * 自包含、最小侵入:不依赖外部状态,locale 自取。每个新增图层会触发一次普通出图扣费。
+ */
+import { Button } from "@repo/ui/components/button";
+import { Checkbox } from "@repo/ui/components/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@repo/ui/components/dialog";
+import { Input } from "@repo/ui/components/input";
+import { Label } from "@repo/ui/components/label";
+import { Download, Layers, Loader2, Plus, X } from "lucide-react";
+import { useLocale } from "next-intl";
+import { useAction } from "next-safe-action/hooks";
+import { useState } from "react";
+import { exportPsdAction } from "../actions";
+import { MAX_PSD_EXTRA_LAYERS } from "../plan";
+
+type ElementField = { id: string; value: string };
+
+function newField(): ElementField {
+  return { id: crypto.randomUUID(), value: "" };
+}
+
+export function ExportPsdDialog({ generationId }: { generationId: string }) {
+  const locale = useLocale();
+  const copy = (en: string, zh: string) => (locale === "zh" ? zh : en);
+
+  const [open, setOpen] = useState(false);
+  const [isolateSubject, setIsolateSubject] = useState(true);
+  const [fields, setFields] = useState<ElementField[]>([]);
+
+  const { execute, result, isExecuting, hasErrored, reset } =
+    useAction(exportPsdAction);
+  const data = result?.data;
+
+  const filledElements = fields
+    .map((f) => f.value.trim())
+    .filter((v) => v.length > 0);
+  const extraCount = (isolateSubject ? 1 : 0) + filledElements.length;
+  const atLimit = extraCount >= MAX_PSD_EXTRA_LAYERS;
+
+  function updateField(id: string, value: string) {
+    setFields((prev) => prev.map((f) => (f.id === id ? { ...f, value } : f)));
+  }
+  function removeField(id: string) {
+    setFields((prev) => prev.filter((f) => f.id !== id));
+  }
+
+  function handleExport() {
+    execute({
+      generationId,
+      isolateSubject,
+      ...(filledElements.length
+        ? { elements: filledElements.map((prompt) => ({ prompt })) }
+        : {}),
+    });
+  }
+
+  return (
+    <>
+      <Button
+        variant="outline"
+        className="w-full justify-center"
+        onClick={() => setOpen(true)}
+      >
+        <Layers className="mr-2 h-4 w-4" />
+        {copy("Export PSD", "导出 PSD")}
+      </Button>
+
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (!next) reset();
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogTitle>{copy("Export layered PSD", "导出分层 PSD")}</DialogTitle>
+
+          <div className="space-y-4">
+            <label className="flex cursor-pointer items-center gap-2">
+              <Checkbox
+                checked={isolateSubject}
+                onCheckedChange={(v) => setIsolateSubject(v === true)}
+              />
+              <span className="text-sm">
+                {copy("Subject as a separate layer", "把主体单独成一层")}
+              </span>
+            </label>
+
+            <div className="space-y-2">
+              <Label className="text-sm">
+                {copy("Extra element layers", "附加元素图层")}
+              </Label>
+              {fields.map((field) => (
+                <div key={field.id} className="flex gap-2">
+                  <Input
+                    value={field.value}
+                    onChange={(e) => updateField(field.id, e.target.value)}
+                    placeholder={copy(
+                      "Describe an element (transparent layer)",
+                      "描述一个元素(透明生成为一层)"
+                    )}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => removeField(field.id)}
+                    aria-label={copy("Remove", "移除")}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setFields((prev) => [...prev, newField()])}
+                disabled={atLimit}
+              >
+                <Plus className="mr-1 h-4 w-4" />
+                {copy("Add element", "添加元素")}
+              </Button>
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              {copy(
+                "Each new layer runs one generation and is billed like a normal image. Subject isolation is a re-render and may not pixel-match the base.",
+                "每个新增图层走一次普通出图扣费;主体抠层为重绘,可能与底图不完全对齐。"
+              )}
+            </p>
+
+            {hasErrored && (
+              <p className="text-sm text-destructive">
+                {copy("Export failed, please try again.", "导出失败,请重试。")}
+              </p>
+            )}
+
+            {data?.psdSignedUrl ? (
+              <Button asChild className="w-full justify-center">
+                <a
+                  href={data.psdSignedUrl}
+                  download={`gpt2image-${generationId}.psd`}
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  {copy(
+                    `Download PSD (${data.layerCount} layers)`,
+                    `下载 PSD(${data.layerCount} 层)`
+                  )}
+                </a>
+              </Button>
+            ) : (
+              <Button
+                className="w-full justify-center"
+                onClick={handleExport}
+                disabled={isExecuting}
+              >
+                {isExecuting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    {copy("Generating layers…", "正在生成图层…")}
+                  </>
+                ) : (
+                  copy("Export", "开始导出")
+                )}
+              </Button>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
