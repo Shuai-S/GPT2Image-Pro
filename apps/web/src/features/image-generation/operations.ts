@@ -76,6 +76,10 @@ import {
   repairModerationBlockedPromptWithResponses,
 } from "./service";
 import { isContentSafetyRejection } from "./sla-classification";
+import {
+  applyTransparentMatte,
+  isTransparentUnsupportedError,
+} from "./transparent-fallback";
 import type {
   ApiConfig,
   AgentRunEvent,
@@ -1958,7 +1962,7 @@ async function runQueuedImageGenerationForUser({
     }
   };
 
-  const runGenerationAttempt = async () => {
+  const attemptGeneration = async (background: typeof input.background) => {
     const commonSignal = AbortSignal.timeout(
       IMAGE_GENERATION_PENDING_TIMEOUT_MS
     );
@@ -1981,7 +1985,7 @@ async function runQueuedImageGenerationForUser({
             moderation: input.moderation,
             outputFormat: input.outputFormat,
             outputCompression: input.outputCompression,
-            background: input.background,
+            background,
             mixWebFirst,
             forceWebBackend,
             requiresResponsesBackend: input.requiresResponsesBackend,
@@ -2036,13 +2040,30 @@ async function runQueuedImageGenerationForUser({
               moderation: input.moderation,
               outputFormat: input.outputFormat,
               outputCompression: input.outputCompression,
-              background: input.background,
+              background,
               mixWebFirst,
               forceWebBackend,
               requiresResponsesBackend: input.requiresResponsesBackend,
             },
             generationCallbacks
           );
+  };
+
+  // 透明背景回退:先直接传 transparent;若后端不支持(400),同一 generationId 内不透明
+  // 重试 + 服务端 ISNet 抠图得到透明结果(不额外扣费)。chat 模式不涉及 background。
+  const runGenerationAttempt = async () => {
+    if (input.background !== "transparent" || input.mode === "chat") {
+      return attemptGeneration(input.background);
+    }
+    try {
+      return await attemptGeneration(input.background);
+    } catch (error) {
+      if (!isTransparentUnsupportedError(error)) {
+        throw error;
+      }
+      const opaque = await attemptGeneration(undefined);
+      return applyTransparentMatte(opaque);
+    }
   };
 
   while (true) {
