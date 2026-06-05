@@ -3965,7 +3965,7 @@ type Sub2ApiAccountRow = {
   row_data: Record<string, unknown> | null;
 };
 
-type Sub2ApiTokenAccount = {
+export type Sub2ApiTokenAccount = {
   sourceId: string;
   name: string | null;
   email: string | null;
@@ -4366,10 +4366,9 @@ function isSub2ApiErrorStatus(status?: string | null) {
     normalized === "auth-error" ||
     normalized === "auth_failed" ||
     normalized === "auth-failed" ||
-    normalized === "deactivated" ||
+    // 终态封禁/删除仍算上游错误(账号确实不可用,非临时暂停);
+    // disabled/inactive/deactivated 属"上游停用"(enable 轴),不在此判错、不同步。
     normalized === "deleted" ||
-    normalized === "disabled" ||
-    normalized === "inactive" ||
     normalized === "banned"
   );
 }
@@ -4389,7 +4388,10 @@ function buildSub2ApiHealthMessage(account: Sub2ApiTokenAccount) {
   return compactSub2ApiErrorParts(parts);
 }
 
-async function getSub2ApiHealthOverride(account: Sub2ApiTokenAccount): Promise<{
+// 导出供单测:验证"上游 enable/可调度态不同步、仅同步错误/限流"的健康映射。
+export async function getSub2ApiHealthOverride(
+  account: Sub2ApiTokenAccount
+): Promise<{
   // 同步只回写"健康/可用性",绝不产生 disabled 状态、也不回写 isEnabled——
   // 启用/停用是本站管理员的本地控制,不随上游(Sub2API)同步。
   status: "active" | "limited" | "error" | null;
@@ -4412,20 +4414,10 @@ async function getSub2ApiHealthOverride(account: Sub2ApiTokenAccount): Promise<{
     account.sourceTempUnschedulableUntil
   );
 
-  if (
-    account.sourceStatus?.trim().toLowerCase() === "disabled" ||
-    account.sourceStatus?.trim().toLowerCase() === "inactive"
-  ) {
-    // 上游把账号标记 disabled/inactive:仅作为"错误"健康态把它踢出轮换(上游不可
-    // 调度,路由过去必失败),但不同步成 disabled 状态、不回写 isEnabled。启停由本站
-    // 管理员控制;上游恢复(下次同步返回 status:null)即自愈为 active。
-    return {
-      status: "error",
-      cooldownUntil: account.sourceCooldownUntil,
-      lastError: message || "Sub2API 标记账号不可调度",
-    };
-  }
-
+  // 上游"启用/可调度"属于 enable 轴(本站管理员自控),不作为健康信号同步:
+  // disabled/inactive/schedulable=false 一律不在此处判态,落到末尾 status:null,
+  // 由本地 isEnabled 决定是否参与轮换;真不可用会经实际请求失败被打成 error/limited。
+  // 这里只同步两件真实健康信号:上游错误(凭据失效/封禁/明确 error)与限流。
   if (isInvalidBackendCredentialError(combined)) {
     return {
       status: "error",
@@ -4502,15 +4494,7 @@ async function getSub2ApiHealthOverride(account: Sub2ApiTokenAccount): Promise<{
     };
   }
 
-  if (account.sourceSchedulable === false) {
-    // 同上:不可调度只作为错误踢出轮换,不同步 disabled 状态、不回写 isEnabled。
-    return {
-      status: "error",
-      cooldownUntil: account.sourceCooldownUntil,
-      lastError: message || "Sub2API 标记账号不可调度",
-    };
-  }
-
+  // schedulable=false 属于 enable 轴,不同步(见函数开头说明);落到 status:null。
   return {
     status: null,
   };
