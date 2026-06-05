@@ -1,3 +1,6 @@
+// fumadocs CSS 仅文章正文的 .prose 排版需要,就近在本页引入(不要放进营销布局,
+// 否则它会污染首页等所有营销页、压垮 Header 响应式导航)。
+import "fumadocs-ui/style.css";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ArticleJsonLd, BreadcrumbJsonLd } from "@/components/seo/json-ld";

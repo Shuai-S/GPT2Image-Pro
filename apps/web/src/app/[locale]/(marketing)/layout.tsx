@@ -1,7 +1,8 @@
-// fumadocs-ui/style.css 此前在 root layout 全局引入、污染所有 authed 页(每页 +78KB CSS);
-// 现仅在用到它的地方引入。营销组的 blog/[slug]、legal/[slug] 用 .prose 排版正文,其样式
-// 由这块 CSS 提供(未装 @tailwindcss/typography),故在营销布局引入以覆盖这两页。
-import "fumadocs-ui/style.css";
+// 注意:不要在本布局引入 fumadocs-ui/style.css。它自带一套 @layer utilities(含
+// .hidden{display:none}),作为第二个样式表加载时会按层叠顺序压过本 app 的 .md:flex/
+// .md:inline-flex,导致整个营销组(含首页)Header 的 `hidden md:flex` 导航与按钮在所有
+// 宽度被永久 display:none。fumadocs CSS 只有 blog/[slug]、legal/[slug] 的 .prose 需要,
+// 故下沉到这两个页面各自引入,避免污染首页等无关页面。
 import { Footer, Header } from "@/features/marketing/components";
 
 export default function MarketingLayout({
