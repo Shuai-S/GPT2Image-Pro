@@ -37,7 +37,6 @@ import {
   type SubscriptionPlan,
 } from "../../config/subscription-plan";
 import { PRICE_IDS } from "../../config/payment";
-import { CREDIT_CONFIG_DEFAULTS } from "../../credits/config";
 import {
   consumeCredits,
   freezeCreditsAccount,
@@ -46,10 +45,13 @@ import {
   unfreezeCreditsAccount,
 } from "../../credits/core";
 import { expireStalePendingGenerations } from "../../generation-maintenance";
-import { adminAction, superAdminAction } from "../../safe-action";
+import {
+  ActionUserError,
+  adminAction,
+  superAdminAction,
+} from "../../safe-action";
 import { buildSignedStorageImageUrl } from "../../storage/signed-url";
 import { getUserPlan } from "../../subscription/services/user-plan";
-import { getRuntimeSettingNumber } from "../../system-settings";
 import { randomUUID } from "node:crypto";
 // 密码哈希链路：与 bootstrap-super-admin.ts 完全一致，写入 account.password，禁止明文/自造哈希
 import { hashPassword } from "better-auth/crypto";
@@ -144,24 +146,13 @@ const grantCreditsSchema = userIdSchema.extend({
   reason: reasonSchema,
 });
 
-const adjustCreditsSchema = userIdSchema
-  .extend({
-    mode: z.enum(["deduct", "set"]),
-    amount: z
-      .number()
-      .min(0, "积分数量不能小于0")
-      .max(1000000, "单次最多调整100万积分"),
-    reason: reasonSchema,
-  })
-  .superRefine((data, ctx) => {
-    if (data.mode === "deduct" && data.amount <= 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["amount"],
-        message: "扣减积分必须大于0",
-      });
-    }
-  });
+const adjustCreditsSchema = userIdSchema.extend({
+  amount: z
+    .number()
+    .positive("扣减积分必须大于0")
+    .max(1000000, "单次最多扣减100万积分"),
+  reason: reasonSchema,
+});
 
 const setCreditsStatusSchema = userIdSchema.extend({
   status: z.enum(["active", "frozen"]),
@@ -306,7 +297,10 @@ function getMonthlyPriceIdForPlan(plan: Exclude<SubscriptionPlan, "free">) {
   };
   const priceId = priceIdMap[plan]?.trim();
   if (!priceId) {
-    throw new Error(`套餐 ${plan} 未配置月付 Price ID，无法手动切换`);
+    // 用 ActionUserError 让提示原样透传前端(否则生产环境被统一替换成"服务器错误")。
+    throw new ActionUserError(
+      `套餐「${plan}」尚未配置月付 Price ID,请先在系统设置中为该套餐配置价格后再切换。`
+    );
   }
   return priceId;
 }
@@ -778,21 +772,15 @@ export const adminGrantCreditsAction = withAdminUsersAction("grantCredits")
   .schema(grantCreditsSchema)
   .action(async ({ parsedInput: data, ctx }) => {
     const targetUser = await getUserBasicOrThrow(data.userId);
-    // 防单管理员自助铸币：禁止给自己发放积分（见 S-H5）。
-    if (data.userId === ctx.userId) {
-      throw new Error("不能为自己发放积分");
+    // 防普通管理员自助铸币(S-H5);超管为最高信任层级,允许给自己充值。
+    if (data.userId === ctx.userId && ctx.role !== "super_admin") {
+      throw new ActionUserError("不能为自己发放积分");
     }
     // 目标权限护栏：普通 admin 不得向管理员及超管账户发放积分。
     assertCanActOnTarget(ctx.role, targetUser.role, "积分发放");
 
-    const expiryDays = await getRuntimeSettingNumber(
-      "FREE_CREDITS_EXPIRY_DAYS",
-      CREDIT_CONFIG_DEFAULTS.freeCreditsExpiryDays,
-      { positive: true }
-    );
-    const expiresAt = expiryDays
-      ? new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000)
-      : null;
+    // 管理员手动充值的积分长期有效、不设过期(与系统赠送的免费积分区分)。
+    const expiresAt = null;
 
     const result = await grantCredits({
       userId: data.userId,
@@ -817,7 +805,7 @@ export const adminGrantCreditsAction = withAdminUsersAction("grantCredits")
         amount: data.amount,
         batchId: result.batchId,
         transactionId: result.transactionId,
-        expiresAt: expiresAt?.toISOString() ?? null,
+        expiresAt: null,
       },
     });
 
@@ -835,99 +823,34 @@ export const adminAdjustCreditsAction = withSuperAdminUsersAction(
   .action(async ({ parsedInput: data, ctx }) => {
     await getUserBasicOrThrow(data.userId);
 
+    // 仅支持"扣减"(已去掉"覆盖余额"路径):从用户积分批次按 FIFO 扣除指定数量。
     const amount = normalizeAdminCreditAmount(data.amount);
     const before = await getCreditsBalance(data.userId);
     const beforeBalance = normalizeAdminCreditAmount(before.balance);
-    const adjustment =
-      data.mode === "set" ? normalizeAdminCreditAmount(amount - beforeBalance) : -amount;
-    let operationResult: Record<string, unknown> | null = null;
 
-    if (data.mode === "deduct" && amount > beforeBalance) {
-      throw new Error(
-        `用户余额不足，当前余额 ${beforeBalance}，无法扣减 ${amount}`
+    if (amount > beforeBalance) {
+      throw new ActionUserError(
+        `用户余额不足,当前余额 ${beforeBalance},无法扣减 ${amount}`
       );
     }
 
-    if (data.mode === "set" && adjustment === 0) {
-      await writeAdminAuditLog({
+    const consumeResult = await consumeCredits({
+      userId: data.userId,
+      amount,
+      serviceName: "admin_credit_adjustment",
+      description: `超管手动扣减积分: ${data.reason}`,
+      metadata: {
         adminUserId: ctx.userId,
-        targetUserId: data.userId,
-        action: "credits.override.noop",
         reason: data.reason,
-        before: { balance: beforeBalance },
-        after: { balance: beforeBalance },
-        metadata: {
-          requestedBalance: amount,
-        },
-      });
-      return {
-        message: `用户余额已是 ${amount} 积分，无需调整`,
-        balance: beforeBalance,
-      };
-    }
-
-    if (adjustment > 0) {
-      const expiryDays = await getRuntimeSettingNumber(
-        "FREE_CREDITS_EXPIRY_DAYS",
-        CREDIT_CONFIG_DEFAULTS.freeCreditsExpiryDays,
-        { positive: true }
-      );
-      const expiresAt = expiryDays
-        ? new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000)
-        : null;
-      const grantResult = await grantCredits({
-        userId: data.userId,
-        amount: adjustment,
-        sourceType: "bonus",
-        debitAccount: `ADMIN:${ctx.userId}`,
-        transactionType: "admin_grant",
-        expiresAt,
-        description: `超管覆盖积分补差: ${data.reason}`,
-        metadata: {
-          adminUserId: ctx.userId,
-          reason: data.reason,
-          mode: data.mode,
-          requestedBalance: amount,
-          previousBalance: beforeBalance,
-        },
-      });
-      operationResult = {
-        type: "grant",
-        ...grantResult,
-      };
-    } else {
-      const consumeResult = await consumeCredits({
-        userId: data.userId,
-        amount: Math.abs(adjustment),
-        serviceName: "admin_credit_adjustment",
-        description:
-          data.mode === "deduct"
-            ? `超管手动扣减积分: ${data.reason}`
-            : `超管覆盖积分扣差: ${data.reason}`,
-        metadata: {
-          adminUserId: ctx.userId,
-          reason: data.reason,
-          mode: data.mode,
-          requestedBalance: data.mode === "set" ? amount : undefined,
-          previousBalance: beforeBalance,
-        },
-      });
-      operationResult = {
-        type: "consume",
-        success: consumeResult.success,
-        consumedAmount: consumeResult.consumedAmount,
-        remainingBalance: consumeResult.remainingBalance,
-        transactionId: consumeResult.transactionId,
-        consumedBatches: consumeResult.consumedBatches,
-      };
-    }
+        previousBalance: beforeBalance,
+      },
+    });
 
     const after = await getCreditsBalance(data.userId);
-    const action = data.mode === "deduct" ? "credits.deduct" : "credits.override";
     await writeAdminAuditLog({
       adminUserId: ctx.userId,
       targetUserId: data.userId,
-      action,
+      action: "credits.deduct",
       reason: data.reason,
       before: {
         balance: beforeBalance,
@@ -938,28 +861,24 @@ export const adminAdjustCreditsAction = withSuperAdminUsersAction(
         status: after.status,
       },
       metadata: {
-        mode: data.mode,
         amount,
-        adjustment,
-        operationResult,
+        operationResult: {
+          type: "consume",
+          success: consumeResult.success,
+          consumedAmount: consumeResult.consumedAmount,
+          remainingBalance: consumeResult.remainingBalance,
+          transactionId: consumeResult.transactionId,
+          consumedBatches: consumeResult.consumedBatches,
+        },
       },
     });
 
     revalidatePath("/dashboard/users");
     return {
-      message:
-        data.mode === "deduct"
-          ? `已扣减 ${amount} 积分`
-          : `已覆盖余额为 ${formatNumberForMessage(amount)} 积分`,
+      message: `已扣减 ${amount} 积分`,
       balance: after.balance,
     };
   });
-
-function formatNumberForMessage(value: number) {
-  return new Intl.NumberFormat("zh-CN", {
-    maximumFractionDigits: 2,
-  }).format(value);
-}
 
 export const setUserPlanAction = withSuperAdminUsersAction("setUserPlan")
   .schema(setUserPlanSchema)

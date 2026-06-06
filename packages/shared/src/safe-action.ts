@@ -33,6 +33,17 @@ class ActionBannedError extends Error {
 }
 
 /**
+ * 面向用户的已知错误:用于校验类/可预期失败(如套餐未配置、余额不足),其 message 即便在生产环境
+ * 也原样回传前端展示,而不是被统一替换成"服务器错误"。仅放可安全展示给用户的提示,勿带内部细节。
+ */
+export class ActionUserError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ActionUserError";
+  }
+}
+
+/**
  * 基础 Action 客户端
  *
  * 用于创建不需要认证的 Server Actions
@@ -47,7 +58,11 @@ const baseActionClient = createSafeActionClient({
    * - 生产环境下隐藏具体错误信息
    */
   handleServerError(error) {
-    if (error instanceof ActionAuthError || error instanceof ActionBannedError) {
+    if (
+      error instanceof ActionAuthError ||
+      error instanceof ActionBannedError ||
+      error instanceof ActionUserError
+    ) {
       return error.message;
     }
 

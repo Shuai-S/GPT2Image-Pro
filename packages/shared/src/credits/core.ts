@@ -564,10 +564,12 @@ export async function consumeCredits(
               or(isNull(creditsBatch.expiresAt), gt(creditsBatch.expiresAt, now))
             )
           )
+          // 扣减顺序:最快到期的批次先扣(在过期作废前尽量用掉),无到期(永久)批次最后扣;
+          // 同到期时间再按来源优先级(bonus→subscription→purchase),最后按发放时间。
           .orderBy(
-            creditBatchSourcePriorityOrder(),
             creditBatchExpiryOrder(),
             asc(creditsBatch.expiresAt),
+            creditBatchSourcePriorityOrder(),
             asc(creditsBatch.issuedAt)
           )
           .limit(1);

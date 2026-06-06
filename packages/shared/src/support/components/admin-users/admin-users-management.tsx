@@ -356,8 +356,6 @@ export function AdminUsersManagement({
   const [isGranting, setIsGranting] = useState(false);
 
   const [creditAdjustOpen, setCreditAdjustOpen] = useState(false);
-  const [creditAdjustMode, setCreditAdjustMode] =
-    useState<"deduct" | "set">("deduct");
   const [creditAdjustAmount, setCreditAdjustAmount] = useState("");
   const [creditAdjustReason, setCreditAdjustReason] = useState("");
   const [isAdjustingCredits, setIsAdjustingCredits] = useState(false);
@@ -491,13 +489,9 @@ export function AdminUsersManagement({
     setGrantOpen(true);
   };
 
-  const openCreditAdjustDialog = (
-    userRow: UserRow,
-    mode: "deduct" | "set"
-  ) => {
+  const openCreditAdjustDialog = (userRow: UserRow) => {
     setSelectedUser(userRow);
-    setCreditAdjustMode(mode);
-    setCreditAdjustAmount(mode === "set" ? String(userRow.creditsBalance) : "");
+    setCreditAdjustAmount("");
     setCreditAdjustReason("");
     setCreditAdjustOpen(true);
   };
@@ -740,7 +734,7 @@ export function AdminUsersManagement({
       toast.error("请输入有效的积分数量");
       return;
     }
-    if (creditAdjustMode === "deduct" && amount <= 0) {
+    if (amount <= 0) {
       toast.error("扣减积分必须大于 0");
       return;
     }
@@ -752,7 +746,6 @@ export function AdminUsersManagement({
     try {
       const result = await adminAdjustCreditsAction({
         userId: selectedUser.id,
-        mode: creditAdjustMode,
         amount,
         reason: creditAdjustReason.trim(),
       });
@@ -1266,19 +1259,11 @@ export function AdminUsersManagement({
                                   <>
                                     <DropdownMenuItem
                                       onClick={() =>
-                                        openCreditAdjustDialog(item, "deduct")
+                                        openCreditAdjustDialog(item)
                                       }
                                     >
                                       <CreditCard className="h-4 w-4" />
                                       减积分
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onClick={() =>
-                                        openCreditAdjustDialog(item, "set")
-                                      }
-                                    >
-                                      <Coins className="h-4 w-4" />
-                                      覆盖积分
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
                                       onClick={() => openPlanDialog(item)}
@@ -1454,18 +1439,9 @@ export function AdminUsersManagement({
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() =>
-                        openCreditAdjustDialog(selectedUser, "deduct")
-                      }
+                      onClick={() => openCreditAdjustDialog(selectedUser)}
                     >
                       减积分
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => openCreditAdjustDialog(selectedUser, "set")}
-                    >
-                      覆盖积分
                     </Button>
                     <Button
                       size="sm"
@@ -1824,29 +1800,23 @@ export function AdminUsersManagement({
       <Dialog open={creditAdjustOpen} onOpenChange={setCreditAdjustOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>
-              {creditAdjustMode === "deduct" ? "扣减积分" : "覆盖积分余额"}
-            </DialogTitle>
+            <DialogTitle>扣减积分</DialogTitle>
             <DialogDescription>
               目标用户：{selectedUser?.email ?? "-"}。
-              {creditAdjustMode === "deduct"
-                ? "将按有效积分批次 FIFO 扣减，并写入消费流水。"
-                : "会按当前余额自动补差或扣差，并写入审计日志。"}
+              将按有效积分批次(最快到期优先)扣减，并写入消费流水。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
               当前余额：{formatCredits(selectedUser?.creditsBalance ?? 0)}。
-              覆盖余额不会发放套餐积分；如果需要额外赠送，请使用加积分。
+              如需额外赠送积分，请使用加积分。
             </div>
             <div className="space-y-2">
-              <Label htmlFor="creditAdjustAmount">
-                {creditAdjustMode === "deduct" ? "扣减数量" : "目标余额"}
-              </Label>
+              <Label htmlFor="creditAdjustAmount">扣减数量</Label>
               <Input
                 id="creditAdjustAmount"
                 type="number"
-                min={creditAdjustMode === "deduct" ? 0.01 : 0}
+                min={0.01}
                 max={1000000}
                 step={0.01}
                 value={creditAdjustAmount}
