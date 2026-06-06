@@ -1,8 +1,9 @@
-FROM node:22-alpine AS base
+# 基础镜像用 glibc(debian slim)而非 alpine(musl):onnxruntime-node 只有 glibc 预编译,
+# musl 上 ISNet 抠图(PSD 导出 / 透明回退)会加载失败;glibc 下 sharp/onnxruntime 预编译均可用。
+FROM node:22-slim AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable && corepack prepare pnpm@10.27.0 --activate
-RUN apk add --no-cache libc6-compat
 
 # --- Prune monorepo for web app ---
 FROM base AS pruner
@@ -58,20 +59,31 @@ ENV BETTER_AUTH_URL=$BETTER_AUTH_URL
 RUN pnpm turbo build --filter=@repo/web
 
 # --- Runner ---
-FROM node:22-alpine AS runner
+FROM node:22-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV LOCAL_STORAGE_PATH=/app/storage
 ENV NEXT_PUBLIC_GENERATIONS_BUCKET_NAME=generations
 ENV NEXT_PUBLIC_AVATARS_BUCKET_NAME=avatars
+# ISNet 模型在 standalone 的 apps/web/models 下;容器 cwd=/app(CMD 跑 apps/web/server.js),
+# 不显式指定的话 matte.ts 会按 cwd/models 找不到,故指向实际路径。
+ENV ISNET_MODEL_PATH=/app/apps/web/models/isnet.onnx
 
-RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 nextjs
+RUN groupadd --system --gid 1001 nodejs && \
+    useradd --system --uid 1001 --gid nodejs nextjs
 
 COPY --from=builder /app/apps/web/.next/standalone ./
 COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder /app/apps/web/public ./apps/web/public
+# Next 只 trace onnxruntime 的 .node 绑定,不 trace 它 dlopen 的 libonnxruntime.so.1(37MB);
+# standalone 里缺这个 .so,运行时 ISNet 会崩。从 builder 的完整 node_modules 补拷进来。
+COPY --from=builder \
+    /app/node_modules/.pnpm/onnxruntime-node@1.26.0/node_modules/onnxruntime-node/bin/napi-v6/linux/x64/libonnxruntime.so.1 \
+    ./node_modules/.pnpm/onnxruntime-node@1.26.0/node_modules/onnxruntime-node/bin/napi-v6/linux/x64/libonnxruntime.so.1
+# 显式补拷 ISNet 模型:next.config 未配 outputFileTracingIncludes,不保证 standalone 一定带上,
+# 故从源码直接拷,确保镜像内 ISNET_MODEL_PATH 指向的文件存在。
+COPY --from=builder /app/apps/web/models/isnet.onnx ./apps/web/models/isnet.onnx
 
 RUN mkdir -p /app/storage /app/.gpt2image /app/apps/web/.next/cache && \
     chown -R nextjs:nodejs /app/storage /app/.gpt2image /app/apps/web/.next
