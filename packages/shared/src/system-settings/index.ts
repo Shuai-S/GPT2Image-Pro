@@ -303,6 +303,24 @@ export async function importSystemSettingsFromEnv(options?: {
     });
 
   clearSystemSettingsCache();
+
+  // 同步进 process.env:同步读取器(getProcessSettingString,如邮件 SMTP/Resend、鉴权配置)只看
+  // process.env,而 process.env 仅在启动时由 bootstrap 从 DB 灌入。若保存后不同步,后台改完邮件/
+  // 配置要重启容器才生效(否则一直读旧值、SMTP 配了仍退回 resend、发码 400)。这里写回当前进程的
+  // process.env,使改动即时生效、无需重启(单实例部署如 docker compose)。
+  for (const { key, value } of values) {
+    if (value === null || value === undefined || value === "") {
+      delete process.env[key];
+      continue;
+    }
+    process.env[key] =
+      typeof value === "string"
+        ? value.trim()
+        : typeof value === "object"
+          ? JSON.stringify(value)
+          : String(value);
+  }
+
   return values.map((value) => value.key);
 }
 

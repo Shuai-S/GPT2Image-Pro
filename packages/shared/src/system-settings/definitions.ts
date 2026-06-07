@@ -466,10 +466,11 @@ export const SYSTEM_SETTING_DEFINITIONS = [
   {
     key: "PAYMENT_PROVIDER",
     label: "支付通道",
-    description: "选择 Creem 或易支付。",
+    description: "选择 Creem 或易支付;自用模式可选「不启用」。",
     category: "payment",
     valueType: "select",
     options: [
+      { label: "不启用(自用)", value: "none" },
       { label: "Creem", value: "creem" },
       { label: "易支付", value: "epay" },
     ],
@@ -478,10 +479,11 @@ export const SYSTEM_SETTING_DEFINITIONS = [
   {
     key: "NEXT_PUBLIC_PAYMENT_PROVIDER",
     label: "前端支付通道",
-    description: "前端展示用支付通道，应与支付通道保持一致。",
+    description: "前端展示用支付通道，应与支付通道保持一致;自用模式可选「不启用」。",
     category: "payment",
     valueType: "select",
     options: [
+      { label: "不启用(自用)", value: "none" },
       { label: "Creem", value: "creem" },
       { label: "易支付", value: "epay" },
     ],

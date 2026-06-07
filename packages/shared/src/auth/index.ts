@@ -62,12 +62,23 @@ export const auth = betterAuth({
   baseURL: settingValue("BETTER_AUTH_URL", "http://localhost:3000"),
 
   /**
-   * 信任的来源
-   * 允许从这些来源发起认证请求
+   * 信任的来源(CSRF / 登录来源校验)
+   *
+   * 必须用【运行时可读】的 env:`NEXT_PUBLIC_*` 会被 Next 在构建期内联成固定值,运行时改它无效
+   * (反代后默认仍是 localhost、域名对不上 → 浏览器 Origin=反代域名不被信任 → 登录失败)。
+   * 故改用运行时读取的 `BETTER_AUTH_URL`,并支持用逗号分隔的 `BETTER_AUTH_TRUSTED_ORIGINS` 追加
+   * 额外来源(如反代域名、多个域名)。部署在反代后:把这两个设成实际访问域名即可。
    */
-  trustedOrigins: [
-    settingValue("NEXT_PUBLIC_APP_URL", "http://localhost:3000"),
-  ].filter(Boolean),
+  trustedOrigins: Array.from(
+    new Set(
+      [
+        settingValue("BETTER_AUTH_URL", "http://localhost:3000"),
+        ...settingValue("BETTER_AUTH_TRUSTED_ORIGINS")
+          .split(",")
+          .map((origin) => origin.trim()),
+      ].filter(Boolean)
+    )
+  ),
 
   /**
    * 数据库配置

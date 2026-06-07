@@ -2,6 +2,19 @@
 
 本文件记录各发布版本的变更。版本格式 `v<MAJOR>.<MINOR>.<PATCH>`。
 
+## v0.5.1 (2026-06-07)
+
+修复 Docker / 反代部署的一批登录、配置与镜像问题(issue #18 评论反馈)。
+
+### 修复
+
+- **反代后无法登录**:`trustedOrigins` 原用 `NEXT_PUBLIC_APP_URL`(被 Next 构建期内联成固定值,运行时改无效、默认 `localhost`),反代域名不被信任 → 登录 / 登出 / 改密均失败。改用运行时可读的 `BETTER_AUTH_URL`,并新增 `BETTER_AUTH_TRUSTED_ORIGINS`(逗号分隔)追加额外受信域名(反代 / 多域名部署填实际访问域名即可)。
+- **后台改配置必须重启容器才生效**:系统设置只在启动时由 bootstrap 灌入 `process.env`,而邮件 / 鉴权等同步读取器只读 `process.env`,保存后未同步 → 改邮件配置不生效、SMTP 已配仍退回 Resend、发码 400。修复:保存设置时同步写回当前进程 `process.env`,即时生效、无需重启(单实例部署)。
+- **关闭自用模式保存失败("支付模式值不对")**:支付通道 `select` 选项缺少自用部署默认的 `none` 值。新增「不启用(自用)」选项,自用模式可正常保存。
+- **Docker 镜像 ISNet 抠图(PSD 导出 / 透明回退)无法运行**:基础镜像由 alpine(musl)改为 `node:22-slim`(glibc,onnxruntime-node 仅 glibc 预编译),补拷 Next 未 trace 的 `libonnxruntime.so.1` 与 ISNet 模型,并设 `ISNET_MODEL_PATH`。
+
+> 注:登出失败、改密"密码错误"、注册"邮箱已被使用"多为上述反代 / 邮件问题的连带症状,随之修复;图库筛选(日期 / 提示词)为功能需求,后续版本提供。
+
 ## v0.5.0 (2026-06-06)
 
 新增「打散元素生成 PSD」(生成式分层 PSD 导出);Agent 多轮更稳;创作页与图片加载性能、若干积分/后台/支付/部署修复。
