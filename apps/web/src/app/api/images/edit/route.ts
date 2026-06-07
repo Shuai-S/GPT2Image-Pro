@@ -242,6 +242,12 @@ export const POST = withApiLogging(async (request: NextRequest) => {
   ) {
     return errorResponse("Invalid background.");
   }
+  // 透明背景抠图回退显式开关(issue #27)。
+  const transparentMatte = getOptionalBoolean(
+    formData,
+    "transparentMatte",
+    "transparent_matte"
+  );
   let count = 1;
   try {
     count = getCount(formData, "count", planLimits.maxBatchCount);
@@ -358,6 +364,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
           outputFormat,
           outputCompression,
           background,
+          transparentMatte,
           n: 1,
           mixWebFirst: requiresResponsesBackend ? false : mixWebFirst,
           requiresResponsesBackend,

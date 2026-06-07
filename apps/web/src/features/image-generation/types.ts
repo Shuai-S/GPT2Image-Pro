@@ -19,6 +19,9 @@ export interface GenerateImageParams {
   mixWebFirst?: boolean;
   forceWebBackend?: boolean;
   requiresResponsesBackend?: boolean;
+  /** 透明背景抠图回退(显式开关,issue #27):仅 true 且 background=transparent 时,后端不支持
+   * 透明则"不透明重生成 + 服务端 ISNet 抠图"得到透明结果;不开则透明直接透传、不支持即返回真实错误。 */
+  transparentMatte?: boolean;
   /** 审核改写重试:显式 false 时本次失败不自动改写提示词重试,直接返回真实错误(issue #24)。 */
   moderationPromptRepair?: boolean;
 }
@@ -170,6 +173,9 @@ export interface EditImageParams {
   mixWebFirst?: boolean;
   forceWebBackend?: boolean;
   requiresResponsesBackend?: boolean;
+  /** 透明背景抠图回退(显式开关,issue #27):仅 true 且 background=transparent 时,后端不支持
+   * 透明则"不透明重生成 + 服务端 ISNet 抠图"得到透明结果;不开则透明直接透传、不支持即返回真实错误。 */
+  transparentMatte?: boolean;
   /** 审核改写重试:显式 false 时本次失败不自动改写提示词重试,直接返回真实错误(issue #24)。 */
   moderationPromptRepair?: boolean;
 }
@@ -207,6 +213,9 @@ export interface ChatImageParams {
   chatCompletionsUpstreamMode?: "responses" | "chat_completions";
   mixWebFirst?: boolean;
   requiresResponsesBackend?: boolean;
+  /** 透明背景抠图回退(显式开关,issue #27):仅 true 且 background=transparent 时,后端不支持
+   * 透明则"不透明重生成 + 服务端 ISNet 抠图"得到透明结果;不开则透明直接透传、不支持即返回真实错误。 */
+  transparentMatte?: boolean;
   /** 审核改写重试:显式 false 时本次失败不自动改写提示词重试,直接返回真实错误(issue #24)。 */
   moderationPromptRepair?: boolean;
 }

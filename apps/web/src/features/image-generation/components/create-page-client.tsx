@@ -2195,6 +2195,13 @@ export function CreatePageClient({
     "background",
     "auto"
   );
+  // 透明背景抠图回退显式开关(issue #27):仅 background=transparent 时有意义。开启后若后端
+  // 不支持透明,则不透明重生成 + 服务端 ISNet 抠图;不开则透明直接透传、不支持即返回真实错误。
+  // 仅文生图/图生图/chat/瀑布流可用,agent 模式不提供(UI 隐藏 + 后端忽略)。
+  const [transparentMatte, setTransparentMatte] = useCreateRuntimeState(
+    "transparentMatte",
+    false
+  );
   const [outputCompression, setOutputCompression] = useCreateRuntimeState(
     "outputCompression",
     100
@@ -3141,6 +3148,37 @@ export function CreatePageClient({
     </Select>
   );
 
+  // 透明抠图回退开关:仅当背景选为 transparent 时出现。开启后会经服务端 ISNet 抠图链路
+  // (issue #27)。agent 模式不调用此处(不渲染)。
+  const renderTransparentMatteToggle = (params: {
+    id: string;
+    disabled?: boolean;
+  }) => {
+    if (background !== "transparent") return null;
+    return (
+      <label
+        htmlFor={params.id}
+        className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
+          transparentMatte
+            ? "border-primary bg-primary/10 text-primary"
+            : "border-primary/40 bg-primary/5 text-foreground"
+        }`}
+        title={copy(
+          "Transparent matte fallback: if the backend does not support transparent output, regenerate opaque then matte it server-side (ISNet) to deliver a transparent PNG. When off, transparent is passed through and an unsupported backend returns a real error.",
+          "透明抠图回退:若后端不支持透明输出,则不透明重生成后用服务端 ISNet 抠图得到透明 PNG。关闭时透明直接透传,后端不支持即返回真实错误。"
+        )}
+      >
+        <Checkbox
+          id={params.id}
+          checked={transparentMatte}
+          onCheckedChange={(checked) => setTransparentMatte(checked === true)}
+          disabled={params.disabled}
+        />
+        {copy("Matte fallback", "透明抠图回退")}
+      </label>
+    );
+  };
+
   const renderReferenceMentionMenu = (params: {
     open: boolean;
     options: ImageReferenceMentionOption[];
@@ -3565,6 +3603,10 @@ export function CreatePageClient({
       formData.append("moderation", moderation);
       formData.append("output_format", outputFormat);
       formData.append("background", background);
+      // 透明抠图回退仅 chat/瀑布流可用,agent 不传(issue #27)。
+      if (!agentMode && background === "transparent" && transparentMatte) {
+        formData.append("transparent_matte", "true");
+      }
       if (outputFormat !== "png") {
         formData.append("output_compression", String(outputCompression));
       }
@@ -5277,6 +5319,12 @@ export function CreatePageClient({
               })}
             </div>
           )}
+          {!isWebOnlyBackend &&
+            activeMode !== "agent" &&
+            renderTransparentMatteToggle({
+              id: "chat-transparent-matte",
+              disabled: isChatGenerating || chatMixWebFirstActive,
+            })}
           <Button
             type="button"
             variant="outline"
@@ -6190,6 +6238,9 @@ export function CreatePageClient({
         moderation,
         output_format: outputFormat,
         background,
+        ...(background === "transparent" && transparentMatte
+          ? { transparent_matte: true }
+          : {}),
         ...(outputFormat !== "png"
           ? { output_compression: outputCompression }
           : {}),
@@ -6360,6 +6411,10 @@ export function CreatePageClient({
     formData.append("moderation", moderation);
     formData.append("output_format", outputFormat);
     formData.append("background", background);
+    // 透明抠图回退显式开关(issue #27)。
+    if (background === "transparent" && transparentMatte) {
+      formData.append("transparent_matte", "true");
+    }
     if (outputFormat !== "png") {
       formData.append("output_compression", String(outputCompression));
     }
@@ -7133,6 +7188,10 @@ export function CreatePageClient({
                   </label>
                   {renderBackgroundSelect({
                     id: `image-background-${mode}`,
+                    disabled: modeBusy || disableResponsesOnlyControls,
+                  })}
+                  {renderTransparentMatteToggle({
+                    id: `image-transparent-matte-${mode}`,
                     disabled: modeBusy || disableResponsesOnlyControls,
                   })}
                 </div>
@@ -8062,6 +8121,10 @@ export function CreatePageClient({
                         id: "edit-background",
                         disabled: isEditing || editMixWebFirstActive,
                       })}
+                      {renderTransparentMatteToggle({
+                        id: "edit-transparent-matte",
+                        disabled: isEditing || editMixWebFirstActive,
+                      })}
                     </div>
 
                     <div
@@ -8824,6 +8887,11 @@ export function CreatePageClient({
                     })}
                   </div>
                 )}
+                {!isWebOnlyBackend &&
+                  renderTransparentMatteToggle({
+                    id: "batch-transparent-matte",
+                    disabled: isBatchActive || chatMixWebFirstActive,
+                  })}
               </div>
               <div className="flex flex-wrap items-center justify-end gap-3">
                 {promptOptimizationField(

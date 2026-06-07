@@ -2067,10 +2067,16 @@ async function runQueuedImageGenerationForUser({
           );
   };
 
-  // 透明背景回退:先直接传 transparent;若后端不支持(400),同一 generationId 内不透明
-  // 重试 + 服务端 ISNet 抠图得到透明结果(不额外扣费)。chat 模式不涉及 background。
+  // 透明背景抠图回退(显式开关,issue #27):仅当请求显式 transparentMatte=true 且 background=transparent
+  // 时,后端不支持透明(400)则在同一 generationId 内不透明重生成 + 服务端 ISNet 抠图得到透明结果
+  // (不额外扣费)。覆盖文生图/图生图/chat/瀑布流;agent(chat+agentMode)除外。未开启则透明直接透传,
+  // 不支持时返回真实错误(不再自动回退)。
+  const transparentMatteEnabled =
+    input.background === "transparent" &&
+    input.transparentMatte === true &&
+    !(input.mode === "chat" && input.agentMode === true);
   const runGenerationAttempt = async () => {
-    if (input.background !== "transparent" || input.mode === "chat") {
+    if (!transparentMatteEnabled) {
       return attemptGeneration(input.background);
     }
     try {
