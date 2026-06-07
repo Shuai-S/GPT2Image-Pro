@@ -92,6 +92,8 @@ const JSON_SCALAR_FIELDS = [
   "output_format",
   "output_compression",
   "background",
+  "transparentMatte",
+  "transparent_matte",
   "n",
   "response_format",
   "model",
@@ -620,6 +622,12 @@ export const postExternalImageEdits = withApiLogging(
     if (backgroundValue && !background) {
       return openAIImageError("Invalid background.");
     }
+    // 透明背景抠图回退显式开关(issue #27)。
+    const transparentMatte = getOptionalBoolean(
+      formData,
+      "transparentMatte",
+      "transparent_matte"
+    );
 
     let count = 1;
     try {
@@ -768,6 +776,7 @@ export const postExternalImageEdits = withApiLogging(
             outputFormat,
             outputCompression,
             background,
+            transparentMatte,
             n: 1,
             forceWebBackend,
             images: await buildImages(),

@@ -848,6 +848,12 @@ export const POST = withApiLogging(async (request: NextRequest) => {
   ) {
     return errorResponse("Invalid background.");
   }
+  // 透明背景抠图回退显式开关(issue #27):chat/瀑布流可用,agent 由下游忽略。
+  const transparentMatte = getOptionalBoolean(
+    formData,
+    "transparentMatte",
+    "transparent_matte"
+  );
 
   const thinkingValue = getText(formData, "thinking") || "low";
   if (!VALID_THINKING.has(thinkingValue as ThinkingLevel)) {
@@ -937,6 +943,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
           outputFormat,
           outputCompression,
           background,
+          transparentMatte,
           stream: useStreamResponse,
           thinking,
           agentMode,

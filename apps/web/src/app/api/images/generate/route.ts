@@ -52,6 +52,8 @@ const generateImageSchema = z.object({
   output_format: z.enum(["png", "jpeg", "webp"]).optional(),
   outputFormat: z.enum(["png", "jpeg", "webp"]).optional(),
   background: z.enum(["transparent", "opaque", "auto"]).optional(),
+  transparentMatte: z.boolean().optional(),
+  transparent_matte: z.boolean().optional(),
   output_compression: z.number().int().min(0).max(100).optional(),
   outputCompression: z.number().int().min(0).max(100).optional(),
   mixWebFirst: z.boolean().optional(),
@@ -131,6 +133,8 @@ export const POST = withApiLogging(async (request: NextRequest) => {
       parsed.data.output_format || parsed.data.outputFormat
     ),
     background: parsed.data.background,
+    transparentMatte:
+      parsed.data.transparentMatte ?? parsed.data.transparent_matte,
     outputCompression: normalizeOutputCompression(
       parsed.data.output_compression ?? parsed.data.outputCompression
     ),

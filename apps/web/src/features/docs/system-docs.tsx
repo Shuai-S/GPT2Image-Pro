@@ -818,7 +818,13 @@ curl https://your-domain.example/v1/images/task_... \\
               name: "background",
               requirement: "可选",
               description:
-                "transparent、opaque、auto。透明背景需要命中的上游模型支持，通常还需要 output_format 为 png 或 webp；不支持的模型会返回类似 “Transparent background is not supported for this model” 的 400 错误。无法确认支持时建议使用 auto 或 opaque。",
+                "transparent、opaque、auto。透明背景需要命中的上游模型支持，通常还需要 output_format 为 png 或 webp；不支持的模型会返回类似 “Transparent background is not supported for this model” 的 400 错误。若希望在不支持的后端也拿到透明结果，可同时传 transparent_matte=true（见下一项）。无法确认支持时建议使用 auto 或 opaque。",
+            },
+            {
+              name: "transparent_matte",
+              requirement: "可选",
+              description:
+                "默认 false。仅当 background=transparent 且显式设为 true 时生效：若命中的后端不支持透明而返回 400，则自动改为不透明重新生成，再在服务端用 ISNet 抠图得到透明 PNG。关闭时透明请求直接透传，后端不支持即返回真实 400 错误。注意只对单张生成/编辑/对话生效，不含 agent 分层模式。",
             },
             {
               name: "stream",
@@ -1101,7 +1107,13 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
               name: "background",
               requirement: "可选",
               description:
-                "transparent、opaque、auto。透明背景需要命中的上游模型支持，通常还需要 output_format 为 png 或 webp；不支持的模型会返回类似 “Transparent background is not supported for this model” 的 400 错误。无法确认支持时建议使用 auto 或 opaque。",
+                "transparent、opaque、auto。透明背景需要命中的上游模型支持，通常还需要 output_format 为 png 或 webp；不支持的模型会返回类似 “Transparent background is not supported for this model” 的 400 错误。若希望在不支持的后端也拿到透明结果，可同时传 transparent_matte=true（见下一项）。无法确认支持时建议使用 auto 或 opaque。",
+            },
+            {
+              name: "transparent_matte",
+              requirement: "可选",
+              description:
+                "默认 false。仅当 background=transparent 且显式设为 true 时生效：若命中的后端不支持透明而返回 400，则自动改为不透明重新生成，再在服务端用 ISNet 抠图得到透明 PNG。关闭时透明请求直接透传，后端不支持即返回真实 400 错误。注意只对单张生成/编辑/对话生效，不含 agent 分层模式。",
             },
             {
               name: "stream",
@@ -2527,7 +2539,13 @@ curl https://your-domain.example/v1/images/task_... \\
               name: "background",
               requirement: "Optional",
               description:
-                "transparent, opaque, or auto. Transparent backgrounds require support from the selected upstream model and usually require png or webp output. Unsupported models may return a 400 error such as “Transparent background is not supported for this model”. Use auto or opaque when support is unknown.",
+                "transparent, opaque, or auto. Transparent backgrounds require support from the selected upstream model and usually require png or webp output. Unsupported models may return a 400 error such as “Transparent background is not supported for this model”. To still get a transparent result on an unsupported backend, also pass transparent_matte=true (see next field). Use auto or opaque when support is unknown.",
+            },
+            {
+              name: "transparent_matte",
+              requirement: "Optional",
+              description:
+                "Defaults to false. Only takes effect when background=transparent and explicitly set to true: if the selected backend rejects transparent with a 400, the request is regenerated opaque and matted server-side (ISNet) into a transparent PNG. When off, transparent is passed through and an unsupported backend returns the real 400 error. Applies to single image generation/edit/chat only, not the agent layered mode.",
             },
             {
               name: "stream",
@@ -2813,7 +2831,13 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
               name: "background",
               requirement: "Optional",
               description:
-                "transparent, opaque, or auto. Transparent backgrounds require support from the selected upstream model and usually require png or webp output. Unsupported models may return a 400 error such as “Transparent background is not supported for this model”. Use auto or opaque when support is unknown.",
+                "transparent, opaque, or auto. Transparent backgrounds require support from the selected upstream model and usually require png or webp output. Unsupported models may return a 400 error such as “Transparent background is not supported for this model”. To still get a transparent result on an unsupported backend, also pass transparent_matte=true (see next field). Use auto or opaque when support is unknown.",
+            },
+            {
+              name: "transparent_matte",
+              requirement: "Optional",
+              description:
+                "Defaults to false. Only takes effect when background=transparent and explicitly set to true: if the selected backend rejects transparent with a 400, the request is regenerated opaque and matted server-side (ISNet) into a transparent PNG. When off, transparent is passed through and an unsupported backend returns the real 400 error. Applies to single image generation/edit/chat only, not the agent layered mode.",
             },
             {
               name: "stream",

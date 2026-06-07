@@ -814,10 +814,14 @@ function ImageSizeDialog({
                   </Button>
                   {customRatioOpen && (
                     <div className="space-y-2 rounded-xl border border-border bg-background p-3">
-                      <label className="text-xs font-medium text-muted-foreground">
+                      <label
+                        htmlFor="create-custom-ratio"
+                        className="text-xs font-medium text-muted-foreground"
+                      >
                         {copy("Custom ratio", "输入自定义比例")}
                       </label>
                       <Input
+                        id="create-custom-ratio"
                         value={customRatio}
                         onChange={(event) => setCustomRatio(event.target.value)}
                         placeholder="16:9"
@@ -842,10 +846,14 @@ function ImageSizeDialog({
                   </h3>
                   <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">
+                      <label
+                        htmlFor="create-custom-width"
+                        className="text-xs font-medium text-muted-foreground"
+                      >
                         {copy("Width", "宽度")}
                       </label>
                       <Input
+                        id="create-custom-width"
                         type="number"
                         min={256}
                         max={MAX_IMAGE_DIMENSION}
@@ -858,10 +866,14 @@ function ImageSizeDialog({
                     </div>
                     <div className="pb-2 text-muted-foreground">x</div>
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">
+                      <label
+                        htmlFor="create-custom-height"
+                        className="text-xs font-medium text-muted-foreground"
+                      >
                         {copy("Height", "高度")}
                       </label>
                       <Input
+                        id="create-custom-height"
                         type="number"
                         min={256}
                         max={MAX_IMAGE_DIMENSION}
@@ -911,11 +923,13 @@ function ImageSizeDialog({
 
           {showMixRouting && (
             <label
+              htmlFor="create-mix-web-first"
               className={`flex items-start gap-3 rounded-2xl border border-border bg-muted/20 p-4 text-xs leading-5 text-muted-foreground ${
                 mixRoutingAvailable ? "cursor-pointer" : "cursor-not-allowed"
               }`}
             >
               <Checkbox
+                id="create-mix-web-first"
                 checked={effectiveMixWebFirst}
                 onCheckedChange={(checked) => setMixWebFirst(checked === true)}
                 disabled={!mixRoutingAvailable}
@@ -2195,6 +2209,13 @@ export function CreatePageClient({
     "background",
     "auto"
   );
+  // 透明背景抠图回退显式开关(issue #27):仅 background=transparent 时有意义。开启后若后端
+  // 不支持透明,则不透明重生成 + 服务端 ISNet 抠图;不开则透明直接透传、不支持即返回真实错误。
+  // 仅文生图/图生图/chat/瀑布流可用,agent 模式不提供(UI 隐藏 + 后端忽略)。
+  const [transparentMatte, setTransparentMatte] = useCreateRuntimeState(
+    "transparentMatte",
+    false
+  );
   const [outputCompression, setOutputCompression] = useCreateRuntimeState(
     "outputCompression",
     100
@@ -3141,6 +3162,37 @@ export function CreatePageClient({
     </Select>
   );
 
+  // 透明抠图回退开关:仅当背景选为 transparent 时出现。开启后会经服务端 ISNet 抠图链路
+  // (issue #27)。agent 模式不调用此处(不渲染)。
+  const renderTransparentMatteToggle = (params: {
+    id: string;
+    disabled?: boolean;
+  }) => {
+    if (background !== "transparent") return null;
+    return (
+      <label
+        htmlFor={params.id}
+        className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
+          transparentMatte
+            ? "border-primary bg-primary/10 text-primary"
+            : "border-primary/40 bg-primary/5 text-foreground"
+        }`}
+        title={copy(
+          "Transparent matte fallback: if the backend does not support transparent output, regenerate opaque then matte it server-side (ISNet) to deliver a transparent PNG. When off, transparent is passed through and an unsupported backend returns a real error.",
+          "透明抠图回退:若后端不支持透明输出,则不透明重生成后用服务端 ISNet 抠图得到透明 PNG。关闭时透明直接透传,后端不支持即返回真实错误。"
+        )}
+      >
+        <Checkbox
+          id={params.id}
+          checked={transparentMatte}
+          onCheckedChange={(checked) => setTransparentMatte(checked === true)}
+          disabled={params.disabled}
+        />
+        {copy("Matte fallback", "透明抠图回退")}
+      </label>
+    );
+  };
+
   const renderReferenceMentionMenu = (params: {
     open: boolean;
     options: ImageReferenceMentionOption[];
@@ -3565,6 +3617,10 @@ export function CreatePageClient({
       formData.append("moderation", moderation);
       formData.append("output_format", outputFormat);
       formData.append("background", background);
+      // 透明抠图回退仅 chat/瀑布流可用,agent 不传(issue #27)。
+      if (!agentMode && background === "transparent" && transparentMatte) {
+        formData.append("transparent_matte", "true");
+      }
       if (outputFormat !== "png") {
         formData.append("output_compression", String(outputCompression));
       }
@@ -5040,6 +5096,7 @@ export function CreatePageClient({
         <div className="mt-2 space-y-1 border-t border-border pt-2">
           {task.events.slice(-3).map((event, index) => (
             <div
+              // biome-ignore lint/suspicious/noArrayIndexKey: 事件为追加型日志、仅取末3条且不重排,index 与状态组合作 key 安全
               key={`${task.key}-event-${event.status || ""}-${index}`}
               className="flex items-center gap-2 text-[11px] text-muted-foreground"
             >
@@ -5111,6 +5168,7 @@ export function CreatePageClient({
                 <div className="mt-3 space-y-1 border-t border-border pt-2">
                   {round.notes.map((note, noteIndex) => (
                     <p
+                      // biome-ignore lint/suspicious/noArrayIndexKey: round notes 为追加型、不重排,noteIndex 作 key 安全
                       key={`${round.key}-note-${noteIndex}`}
                       className="whitespace-pre-wrap break-words text-[11px] leading-relaxed text-muted-foreground"
                     >
@@ -5277,6 +5335,12 @@ export function CreatePageClient({
               })}
             </div>
           )}
+          {!isWebOnlyBackend &&
+            activeMode !== "agent" &&
+            renderTransparentMatteToggle({
+              id: "chat-transparent-matte",
+              disabled: isChatGenerating || chatMixWebFirstActive,
+            })}
           <Button
             type="button"
             variant="outline"
@@ -6190,6 +6254,9 @@ export function CreatePageClient({
         moderation,
         output_format: outputFormat,
         background,
+        ...(background === "transparent" && transparentMatte
+          ? { transparent_matte: true }
+          : {}),
         ...(outputFormat !== "png"
           ? { output_compression: outputCompression }
           : {}),
@@ -6360,6 +6427,10 @@ export function CreatePageClient({
     formData.append("moderation", moderation);
     formData.append("output_format", outputFormat);
     formData.append("background", background);
+    // 透明抠图回退显式开关(issue #27)。
+    if (background === "transparent" && transparentMatte) {
+      formData.append("transparent_matte", "true");
+    }
     if (outputFormat !== "png") {
       formData.append("output_compression", String(outputCompression));
     }
@@ -6712,7 +6783,7 @@ export function CreatePageClient({
     }, "image/png");
   };
 
-  const useResultAsReference = async (sourceResult = result) => {
+  const applyResultAsReference = async (sourceResult = result) => {
     if (!sourceResult?.imageUrl) return;
 
     try {
@@ -7135,6 +7206,10 @@ export function CreatePageClient({
                     id: `image-background-${mode}`,
                     disabled: modeBusy || disableResponsesOnlyControls,
                   })}
+                  {renderTransparentMatteToggle({
+                    id: `image-transparent-matte-${mode}`,
+                    disabled: modeBusy || disableResponsesOnlyControls,
+                  })}
                 </div>
                 <div className="space-y-1.5">
                   <label
@@ -7316,7 +7391,7 @@ export function CreatePageClient({
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => useResultAsReference(modeResult)}
+                  onClick={() => applyResultAsReference(modeResult)}
                 >
                   <RefreshCcw className="mr-2 h-4 w-4" />
                   {copy("Edit this", "编辑这张")}
@@ -8060,6 +8135,10 @@ export function CreatePageClient({
                       </label>
                       {renderBackgroundSelect({
                         id: "edit-background",
+                        disabled: isEditing || editMixWebFirstActive,
+                      })}
+                      {renderTransparentMatteToggle({
+                        id: "edit-transparent-matte",
                         disabled: isEditing || editMixWebFirstActive,
                       })}
                     </div>
@@ -8824,6 +8903,11 @@ export function CreatePageClient({
                     })}
                   </div>
                 )}
+                {!isWebOnlyBackend &&
+                  renderTransparentMatteToggle({
+                    id: "batch-transparent-matte",
+                    disabled: isBatchActive || chatMixWebFirstActive,
+                  })}
               </div>
               <div className="flex flex-wrap items-center justify-end gap-3">
                 {promptOptimizationField(

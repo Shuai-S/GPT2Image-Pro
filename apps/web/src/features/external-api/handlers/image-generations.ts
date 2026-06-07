@@ -75,6 +75,10 @@ const externalImageGenerationSchema = z.object({
   output_format: z.enum(["png", "jpeg", "webp"]).optional(),
   output_compression: z.number().int().min(0).max(100).optional(),
   background: z.enum(["transparent", "opaque", "auto"]).optional(),
+  // 透明背景抠图回退显式开关(issue #27):true 且 background=transparent 时,后端不支持透明则
+  // 服务端 ISNet 抠图得到透明结果;不传则透明直接透传、不支持即返回真实错误。
+  transparentMatte: z.boolean().optional(),
+  transparent_matte: z.boolean().optional(),
   force_web: z.boolean().optional(),
   forceWeb: z.boolean().optional(),
   web_first: z.boolean().optional(),
@@ -236,6 +240,8 @@ export const postExternalImageGenerations = withApiLogging(
       }
     }
     const background = parsed.data.background;
+    const transparentMatte =
+      parsed.data.transparentMatte ?? parsed.data.transparent_matte;
 
     const input = {
       mode: "generate" as const,
@@ -260,6 +266,7 @@ export const postExternalImageGenerations = withApiLogging(
         parsed.data.output_compression
       ),
       background,
+      transparentMatte,
       forceWebBackend:
         parsed.data.web_first ??
         parsed.data.webFirst ??

@@ -95,6 +95,9 @@ const chatCompletionSchema = z
       .optional(),
     output_format: z.enum(["png", "jpeg", "webp"]).optional(),
     output_compression: z.number().int().min(0).max(100).optional(),
+    background: z.enum(["transparent", "opaque", "auto"]).optional(),
+    transparentMatte: z.boolean().optional(),
+    transparent_matte: z.boolean().optional(),
     promptOptimization: z.boolean().optional(),
     prompt_optimization: z.boolean().optional(),
     imageModel: z.string().optional(),
@@ -481,6 +484,10 @@ export const postExternalChatCompletions = withApiLogging(
       outputCompression: normalizeOutputCompression(
         parsed.data.output_compression
       ),
+      background: parsed.data.background,
+      // 透明背景抠图回退显式开关(issue #27);chat 模式(agentMode:false)适用。
+      transparentMatte:
+        parsed.data.transparentMatte ?? parsed.data.transparent_matte,
       thinking: normalizeThinking(
         parsed.data.thinking || parsed.data.reasoning?.effort
       ),
