@@ -33,6 +33,7 @@ import {
   refreshImageBackendAccountsInfo,
   runSub2ApiManualSync,
   runSub2ApiAutoSyncTaskNow,
+  setImageBackendAccountAlwaysActive,
   setImageBackendApiAlwaysActive,
   setImageBackendApiEnabled,
   setSub2ApiAutoSyncTaskEnabled,
@@ -294,6 +295,7 @@ export const saveImageBackendAccountAction = withImageBackendPoolAdminAction(
       model: z.string().trim().max(120).optional(),
       contentSafetyEnabled: z.boolean().default(true),
       isEnabled: z.boolean().default(true),
+      alwaysActive: z.boolean().default(false),
       priority: z.coerce.number().int().min(0).max(10000).default(50),
       concurrency: z.coerce.number().int().min(1).max(100).default(1),
       status: z.string().trim().max(80).optional(),
@@ -312,6 +314,7 @@ export const saveImageBackendAccountAction = withImageBackendPoolAdminAction(
       model: parsedInput.model || null,
       contentSafetyEnabled: parsedInput.contentSafetyEnabled,
       isEnabled: parsedInput.isEnabled,
+      alwaysActive: parsedInput.alwaysActive,
       priority: parsedInput.priority,
       concurrency: parsedInput.concurrency,
       status: parsedInput.status || "active",
@@ -590,6 +593,19 @@ export const setImageBackendApiAlwaysActiveAction =
     )
     .action(async ({ parsedInput }) => {
       await setImageBackendApiAlwaysActive(parsedInput);
+      return { success: true };
+    });
+
+export const setImageBackendAccountAlwaysActiveAction =
+  withImageBackendPoolAdminAction("setAccountAlwaysActive")
+    .schema(
+      z.object({
+        id: z.string().trim().min(1),
+        alwaysActive: z.boolean(),
+      })
+    )
+    .action(async ({ parsedInput }) => {
+      await setImageBackendAccountAlwaysActive(parsedInput);
       return { success: true };
     });
 

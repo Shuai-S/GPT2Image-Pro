@@ -1197,4 +1197,27 @@ describe("image backend pool scheduler selection", () => {
       lastErrorAt: expect.any(Date),
     });
   });
+
+  it("always_active account does not cooldown or change status on failure", async () => {
+    dbMock.state.accounts = [{ ...makeAccount(1), alwaysActive: true }];
+
+    await reportImageBackendResult({
+      memberType: "account",
+      memberId: "acct-1",
+      success: false,
+      error: "HTTP 429 Too many requests",
+      retryAfterSeconds: 60,
+    });
+
+    const update = dbMock.state.updates.find(
+      (item) => item.tableName === "image_backend_account"
+    );
+    // 常驻账号:失败只记 failCount/lastError,不改 status、不进冷却。
+    expect(update?.values).not.toHaveProperty("status");
+    expect(update?.values).not.toHaveProperty("cooldownUntil");
+    expect(update?.values).toMatchObject({
+      lastError: "HTTP 429 Too many requests",
+      lastErrorAt: expect.any(Date),
+    });
+  });
 });

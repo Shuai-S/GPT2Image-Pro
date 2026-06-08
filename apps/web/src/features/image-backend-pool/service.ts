@@ -2026,14 +2026,20 @@ async function selectPoolMember(
   const accountBaseWhere = and(
     eq(imageBackendAccount.isEnabled, true),
     accountBackendFilter,
-    isBackendAvailableStatus(
-      imageBackendAccount.status,
-      imageBackendAccount.cooldownUntil,
-      now
-    ),
+    // always_active 的账号无视 status/cooldown 始终入选；其余维持原"健康且未冷却"判定。
     or(
-      sql`${imageBackendAccount.cooldownUntil} IS NULL`,
-      sql`${imageBackendAccount.cooldownUntil} <= ${now}`
+      eq(imageBackendAccount.alwaysActive, true),
+      and(
+        isBackendAvailableStatus(
+          imageBackendAccount.status,
+          imageBackendAccount.cooldownUntil,
+          now
+        ),
+        or(
+          sql`${imageBackendAccount.cooldownUntil} IS NULL`,
+          sql`${imageBackendAccount.cooldownUntil} <= ${now}`
+        )
+      )
     )
   );
   const accountRowsPromise = groupIds.length
@@ -2787,10 +2793,14 @@ export async function reportImageBackendResult(
     .select({
       implementationMode: imageBackendAccount.implementationMode,
       metadata: imageBackendAccount.metadata,
+      alwaysActive: imageBackendAccount.alwaysActive,
     })
     .from(imageBackendAccount)
     .where(eq(imageBackendAccount.id, input.memberId))
     .limit(1);
+  const alwaysActive = account?.alwaysActive ?? false;
+  // always_active：遇错也不下线——失败时不改 status、不进冷却（仅记 lastError/failCount）。
+  const accountFailure = alwaysActive ? {} : failure;
   const backend = normalizeAccountBackend(account?.implementationMode);
   const webSuccess =
     input.success && backend === "web"
@@ -2818,9 +2828,9 @@ export async function reportImageBackendResult(
         : {
             failCount: sql`${imageBackendAccount.failCount} + 1`,
             metadata,
-            ...(failure.status ? { status: failure.status } : {}),
-            ...(failure.cooldownUntil !== undefined
-              ? { cooldownUntil: failure.cooldownUntil }
+            ...(accountFailure.status ? { status: accountFailure.status } : {}),
+            ...(accountFailure.cooldownUntil !== undefined
+              ? { cooldownUntil: accountFailure.cooldownUntil }
               : {}),
             lastError: error,
             lastErrorAt: now,
@@ -3237,6 +3247,7 @@ type UpsertAccountInput = {
   model?: string | null;
   contentSafetyEnabled: boolean;
   isEnabled: boolean;
+  alwaysActive?: boolean;
   priority: number;
   concurrency: number;
   status?: string;
@@ -3345,6 +3356,9 @@ export async function upsertImageBackendAccount(input: UpsertAccountInput) {
     model: input.model || null,
     contentSafetyEnabled: input.contentSafetyEnabled,
     isEnabled: input.isEnabled,
+    ...(input.alwaysActive !== undefined
+      ? { alwaysActive: input.alwaysActive }
+      : {}),
     priority: input.priority,
     concurrency: input.concurrency,
     status: input.status || "active",
@@ -6304,6 +6318,31 @@ export async function setImageBackendApiAlwaysActive(input: {
     .where(eq(imageBackendApi.id, input.id));
 }
 
+/**
+ * 设置一个账号后端的"遇错仍可用（always_active）"开关。语义与
+ * setImageBackendApiAlwaysActive 一致:开启后(且 isEnabled 为真)该账号无视
+ * status/cooldown 始终入选、失败不进冷却、不被置 error;开启时顺手清掉当前
+ * error/cooldown 让它立即回到候选。
+ *
+ * @param input.id 目标 imageBackendAccount 行 id。
+ * @param input.alwaysActive 目标开关态。
+ */
+export async function setImageBackendAccountAlwaysActive(input: {
+  id: string;
+  alwaysActive: boolean;
+}): Promise<void> {
+  await db
+    .update(imageBackendAccount)
+    .set({
+      alwaysActive: input.alwaysActive,
+      ...(input.alwaysActive
+        ? { status: "active", cooldownUntil: null }
+        : {}),
+      updatedAt: new Date(),
+    })
+    .where(eq(imageBackendAccount.id, input.id));
+}
+
 /** 将测活失败结果格式化为中文，写入 lastError 供后台展示。 */
 function describeImageHealthFailure(result: ImageApiHealthResult): string {
   switch (result.status) {
@@ -6480,6 +6519,7 @@ export async function listAdminImageBackendPool() {
       model: imageBackendAccount.model,
       contentSafetyEnabled: imageBackendAccount.contentSafetyEnabled,
       isEnabled: imageBackendAccount.isEnabled,
+      alwaysActive: imageBackendAccount.alwaysActive,
       priority: imageBackendAccount.priority,
       concurrency: imageBackendAccount.concurrency,
       status: imageBackendAccount.status,

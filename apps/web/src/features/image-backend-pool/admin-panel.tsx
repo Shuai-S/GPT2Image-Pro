@@ -82,6 +82,7 @@ import {
   saveImageBackendAccountAction,
   saveImageBackendApiAction,
   saveImageBackendGroupAction,
+  setImageBackendAccountAlwaysActiveAction,
   setImageBackendApiAlwaysActiveAction,
   setImageBackendApiEnabledAction,
   setSub2ApiAutoSyncTaskEnabledAction,
@@ -123,6 +124,7 @@ type Account = {
   model: string | null;
   contentSafetyEnabled: boolean;
   isEnabled: boolean;
+  alwaysActive: boolean;
   priority: number;
   concurrency: number;
   status: string;
@@ -712,6 +714,7 @@ export function ImageBackendPoolAdminPanel({
     model: "",
     contentSafetyEnabled: true,
     isEnabled: true,
+    alwaysActive: false,
     priority: 50,
     concurrency: 1,
   });
@@ -997,6 +1000,7 @@ export function ImageBackendPoolAdminPanel({
       model: "",
       contentSafetyEnabled: true,
       isEnabled: true,
+      alwaysActive: false,
       priority: 50,
       concurrency: 1,
     });
@@ -1100,6 +1104,7 @@ export function ImageBackendPoolAdminPanel({
       model: account.model || "",
       contentSafetyEnabled: account.contentSafetyEnabled,
       isEnabled: account.isEnabled,
+      alwaysActive: account.alwaysActive,
       priority: account.priority,
       concurrency: account.concurrency,
     });
@@ -1327,6 +1332,18 @@ export function ImageBackendPoolAdminPanel({
       onError: ({ error }) =>
         toast.error(error.serverError || "更新「遇错仍可用」失败"),
     });
+
+  const {
+    execute: setAccountAlwaysActive,
+    isPending: isSettingAccountAlwaysActive,
+  } = useAction(setImageBackendAccountAlwaysActiveAction, {
+    onSuccess: () => {
+      toast.success("已更新「遇错仍可用」设置");
+      reload();
+    },
+    onError: ({ error }) =>
+      toast.error(error.serverError || "更新「遇错仍可用」失败"),
+  });
 
   // 测活：记录正在测试的成员 id，仅该行显示加载态；结果按状态提示并刷新列表。
   const [testingApiId, setTestingApiId] = useState<string | null>(null);
@@ -2449,6 +2466,24 @@ export function ImageBackendPoolAdminPanel({
                   }
                 />
               </div>
+              <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+                <div>
+                  <Label>遇错仍保持可用（永不冷却）</Label>
+                  <p className="text-xs text-muted-foreground">
+                    开启后该账号不会因失败被自动下线或冷却，始终参与调度；失败仍会
+                    记录并切换到其他后端。需与「是否启用」同时开启才生效。
+                  </p>
+                </div>
+                <Switch
+                  checked={accountForm.alwaysActive}
+                  onCheckedChange={(checked) =>
+                    setAccountForm((current) => ({
+                      ...current,
+                      alwaysActive: checked,
+                    }))
+                  }
+                />
+              </div>
               <Button
                 className="w-full"
                 onClick={() =>
@@ -3068,6 +3103,9 @@ export function ImageBackendPoolAdminPanel({
                       {isCoolingDown(account.cooldownUntil) && (
                         <Badge variant="secondary">冷却中</Badge>
                       )}
+                      {account.alwaysActive && (
+                        <Badge variant="outline">遇错常驻</Badge>
+                      )}
                       {!account.isEnabled && (
                         <Badge variant="secondary">停用</Badge>
                       )}
@@ -3130,6 +3168,23 @@ export function ImageBackendPoolAdminPanel({
                     )}
                     {!readOnly && (
                       <>
+                        <Button
+                          variant={
+                            account.alwaysActive ? "secondary" : "outline"
+                          }
+                          size="sm"
+                          disabled={isSettingAccountAlwaysActive}
+                          onClick={() =>
+                            setAccountAlwaysActive({
+                              id: account.id,
+                              alwaysActive: !account.alwaysActive,
+                            })
+                          }
+                          title="开启后该账号遇错也不下线、永不冷却，始终参与调度"
+                        >
+                          <InfinityIcon className="mr-2 h-4 w-4" />
+                          {account.alwaysActive ? "取消常驻" : "遇错常驻"}
+                        </Button>
                         <Button
                           variant="outline"
                           size="sm"

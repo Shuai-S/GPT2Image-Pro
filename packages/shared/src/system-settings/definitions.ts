@@ -114,7 +114,6 @@ export type SettingKey =
   | "IMAGE_BACKEND_USAGE_LIMIT_COOLDOWN_MINUTES"
   | "IMAGE_BACKEND_UNSUPPORTED_MODEL_COOLDOWN_MINUTES"
   | "IMAGE_BACKEND_TEMPORARY_ERROR_COOLDOWN_MINUTES"
-  | "IMAGE_BACKEND_API_FAILURE_COOLDOWN_ENABLED"
   | "IMAGE_BACKEND_UNRECOVERABLE_ERROR_KEYWORDS"
   | "SUB2API_POSTGRES_URL"
   | "SUB2API_POSTGRES_SYNC_LIMIT"
@@ -1044,15 +1043,6 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     category: "models",
     valueType: "number",
     defaultValue: 15,
-  },
-  {
-    key: "IMAGE_BACKEND_API_FAILURE_COOLDOWN_ENABLED",
-    label: "外接 API 失败冷却",
-    description:
-      "启用后，用户自接的外部 API 池遇到限流、上游 5xx、超时等失败时会按后端冷却规则暂时跳过。关闭时仍记录失败和错误，但不写入冷却状态；无效密钥等不可恢复错误仍会标记为错误。账号池不受此开关影响。默认关闭。",
-    category: "models",
-    valueType: "boolean",
-    defaultValue: false,
   },
   {
     key: "IMAGE_BACKEND_UNRECOVERABLE_ERROR_KEYWORDS",

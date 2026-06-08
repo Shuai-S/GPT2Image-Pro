@@ -824,6 +824,10 @@ export const imageBackendAccount = pgTable(
     model: text("model"),
     contentSafetyEnabled: boolean("content_safety_enabled").notNull().default(true),
     isEnabled: boolean("is_enabled").notNull().default(true),
+    // 遇错也始终可用：与 isEnabled 同时为真时，该账号永不进入冷却、不因失败被
+    // 调度器置 error 排除（失败仍记录 lastError/failCount，但始终留在候选里）。
+    // 与 imageBackendApi.alwaysActive 语义一致。
+    alwaysActive: boolean("always_active").notNull().default(false),
     priority: integer("priority").notNull().default(50),
     concurrency: integer("concurrency").notNull().default(1),
     successCount: integer("success_count").notNull().default(0),
