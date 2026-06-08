@@ -42,6 +42,10 @@ const schemaMock = vi.hoisted(() => {
       "accountId",
       "groupId",
     ]),
+    imageBackendApiGroup: table("image_backend_api_group", [
+      "apiId",
+      "groupId",
+    ]),
     imageBackendApi: table("image_backend_api", [
       "id",
       "groupId",
@@ -1176,6 +1180,81 @@ describe("image backend pool scheduler selection", () => {
       (item) => item.tableName === "image_backend_api"
     );
     expect(update?.values).toMatchObject({ status: "active", lastError: null });
+  });
+
+  it("selects a multi-group API from each of its groups", async () => {
+    // 同一个 API 经 image_backend_api_group 同时挂在 group-a 与 group-b 两个分组。
+    // 分别以两个分组为活动分组发起请求，都应能选中该 API，且 result.groupId 命中
+    // 当前活动分组（matchedGroupId）。镜像账号多分组：DB-free 下 innerJoin 为 no-op，
+    // 故由 matchedGroupId 表征本次命中的分组。
+    dbMock.state.groups = [
+      {
+        id: "group-a",
+        name: "Group A",
+        description: null,
+        isEnabled: true,
+        isDefault: true,
+        isUserSelectable: true,
+        contentSafetyEnabled: null,
+        priority: 1,
+        metadata: { backendType: "mixed" },
+        createdAt: new Date(2026, 0, 1),
+        updatedAt: new Date(2026, 0, 1),
+      },
+      {
+        id: "group-b",
+        name: "Group B",
+        description: null,
+        isEnabled: true,
+        isDefault: false,
+        isUserSelectable: true,
+        contentSafetyEnabled: null,
+        priority: 2,
+        metadata: { backendType: "mixed" },
+        createdAt: new Date(2026, 0, 2),
+        updatedAt: new Date(2026, 0, 2),
+      },
+    ];
+    dbMock.state.accounts = [];
+    const baseApi = {
+      id: "api-multi",
+      groupId: "group-a",
+      name: "Multi-group API",
+      baseUrl: "https://api.example.test/v1",
+      apiKey: "key",
+      model: null,
+      interfaceMode: "mixed",
+      chatCompletionsUpstreamMode: "responses",
+      imageUpstreamMode: "images",
+      useStream: false,
+      contentSafetyEnabled: true,
+      alwaysActive: false,
+      priority: 1,
+      concurrency: 10,
+      lastUsedAt: null,
+      lastAcquiredAt: null,
+      createdAt: new Date(2026, 0, 1),
+      metadata: null,
+    };
+
+    dbMock.state.apis = [{ ...baseApi, matchedGroupId: "group-a" }];
+    const fromGroupA = await resolveImageBackendPoolConfig({
+      userId: "user-a",
+      requestKind: "image_generation",
+    });
+    expect(fromGroupA?.memberType).toBe("api");
+    expect(fromGroupA?.memberId).toBe("api-multi");
+    expect(fromGroupA?.groupId).toBe("group-a");
+
+    dbMock.state.userPreferences = [{ userId: "user-a", groupId: "group-b" }];
+    dbMock.state.apis = [{ ...baseApi, matchedGroupId: "group-b" }];
+    const fromGroupB = await resolveImageBackendPoolConfig({
+      userId: "user-a",
+      requestKind: "image_generation",
+    });
+    expect(fromGroupB?.memberType).toBe("api");
+    expect(fromGroupB?.memberId).toBe("api-multi");
+    expect(fromGroupB?.groupId).toBe("group-b");
   });
 
   it("keeps account backend cooldown behavior unchanged", async () => {

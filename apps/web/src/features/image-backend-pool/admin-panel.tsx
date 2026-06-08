@@ -155,6 +155,7 @@ type Account = {
 type Api = {
   id: string;
   groupId: string | null;
+  groupIds: string[];
   name: string;
   baseUrl: string;
   model: string | null;
@@ -421,6 +422,12 @@ function accountGroupIds(account: Account) {
   const groupIds = normalizeAccountGroupIds(account.groupIds);
   if (groupIds.length) return groupIds;
   return account.groupId ? [account.groupId] : [];
+}
+
+function apiGroupIds(api: Api) {
+  const groupIds = normalizeAccountGroupIds(api.groupIds);
+  if (groupIds.length) return groupIds;
+  return api.groupId ? [api.groupId] : [];
 }
 
 function groupNames(groups: Group[], groupIds: string[]) {
@@ -721,6 +728,7 @@ export function ImageBackendPoolAdminPanel({
   const [apiForm, setApiForm] = useState({
     id: "",
     groupId: "default",
+    groupIds: [] as string[],
     name: "",
     baseUrl: "",
     apiKey: "",
@@ -1009,6 +1017,7 @@ export function ImageBackendPoolAdminPanel({
     setApiForm({
       id: "",
       groupId: "default",
+      groupIds: [],
       name: "",
       baseUrl: "",
       apiKey: "",
@@ -1124,6 +1133,20 @@ export function ImageBackendPoolAdminPanel({
     });
   };
 
+  const toggleApiFormGroup = (groupId: string, checked: boolean) => {
+    setApiForm((current) => {
+      const currentGroupIds = normalizeAccountGroupIds(current.groupIds);
+      const nextGroupIds = checked
+        ? normalizeAccountGroupIds([...currentGroupIds, groupId])
+        : currentGroupIds.filter((id) => id !== groupId);
+      return {
+        ...current,
+        groupIds: nextGroupIds,
+        groupId: nextGroupIds[0] || "default",
+      };
+    });
+  };
+
   const toggleAccountSelection = (accountId: string, checked: boolean) => {
     setSelectedAccountIds((current) =>
       checked
@@ -1141,9 +1164,11 @@ export function ImageBackendPoolAdminPanel({
   };
 
   const editApi = (api: Api) => {
+    const selectedGroupIds = apiGroupIds(api);
     setApiForm({
       id: api.id,
-      groupId: api.groupId || "default",
+      groupId: selectedGroupIds[0] || "default",
+      groupIds: selectedGroupIds,
       name: api.name,
       baseUrl: api.baseUrl,
       apiKey: "",
@@ -3259,23 +3284,36 @@ export function ImageBackendPoolAdminPanel({
                   }))
                 }
               />
-              <Select
-                value={apiForm.groupId}
-                onValueChange={(value) =>
-                  setApiForm((current) => ({ ...current, groupId: value }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {groupOptions.map((group) => (
-                    <SelectItem key={group.id} value={group.id}>
-                      {group.name}
-                    </SelectItem>
+              <div className="space-y-2 rounded-md border p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <Label>所属分组</Label>
+                  <span className="text-xs text-muted-foreground">可多选</span>
+                </div>
+                <div className="grid max-h-40 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                  {groups.map((group) => (
+                    <Label
+                      key={group.id}
+                      className="flex min-h-9 items-center gap-2 rounded-md border px-2 text-sm"
+                    >
+                      <Checkbox
+                        checked={apiForm.groupIds.includes(group.id)}
+                        onCheckedChange={(checked) =>
+                          toggleApiFormGroup(group.id, Boolean(checked))
+                        }
+                      />
+                      <span className="truncate">{group.name}</span>
+                    </Label>
                   ))}
-                </SelectContent>
-              </Select>
+                  {!groups.length && (
+                    <p className="text-xs text-muted-foreground">
+                      还没有可选分组。
+                    </p>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  取消全部分组即为未分组；同一 API 可同时被多个分组调度。
+                </p>
+              </div>
               <Input
                 placeholder="默认模型，可选"
                 value={apiForm.model}
@@ -3478,7 +3516,13 @@ export function ImageBackendPoolAdminPanel({
               </div>
               <Button
                 className="w-full"
-                onClick={() => saveApi(apiForm)}
+                onClick={() =>
+                  saveApi({
+                    ...apiForm,
+                    groupId: apiForm.groupIds[0] || "default",
+                    groupIds: apiForm.groupIds,
+                  })
+                }
                 disabled={
                   isSavingApi ||
                   !apiForm.name ||
@@ -3539,7 +3583,8 @@ export function ImageBackendPoolAdminPanel({
                       )}
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      {api.baseUrl} · {groupName(groups, api.groupId)} · 优先级{" "}
+                      {api.baseUrl} · {groupNames(groups, apiGroupIds(api))} ·{" "}
+                      优先级{" "}
                       {api.priority} · 最大并发数 {api.concurrency} ·{" "}
                       {formatDate(api.lastUsedAt, timeZone)}
                     </p>

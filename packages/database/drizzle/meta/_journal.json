@@ -267,6 +267,13 @@
       "when": 1780400660000,
       "tag": "0037_image_backend_account_always_active",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1780400661000,
+      "tag": "0038_image_backend_api_groups",
+      "breakpoints": true
     }
   ]
 }

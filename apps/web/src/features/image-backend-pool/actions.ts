@@ -528,6 +528,7 @@ export const saveImageBackendApiAction = withImageBackendPoolAdminAction(
     z.object({
       id: z.string().trim().optional(),
       groupId: nullableGroupIdSchema,
+      groupIds: z.array(z.string().trim().min(1)).max(100).optional(),
       name: z.string().trim().min(1).max(120),
       baseUrl: z.string().trim().url(),
       apiKey: z.string().trim().optional(),
@@ -550,6 +551,7 @@ export const saveImageBackendApiAction = withImageBackendPoolAdminAction(
     const id = await upsertImageBackendApi({
       id: parsedInput.id,
       groupId: parsedInput.groupId,
+      groupIds: parsedInput.groupIds,
       name: parsedInput.name,
       baseUrl: parsedInput.baseUrl,
       apiKey: parsedInput.apiKey || undefined,

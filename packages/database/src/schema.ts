@@ -913,6 +913,30 @@ export const imageBackendApi = pgTable("image_backend_api", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// 外接 API 后端与分组的多对多关系（镜像 imageBackendAccountGroup）。
+// imageBackendApi.groupId 保留为主分组/向后兼容；本表承载全部分组成员关系，
+// 让同一个 API 后端可同时被多个分组调度。
+export const imageBackendApiGroup = pgTable(
+  "image_backend_api_group",
+  {
+    id: text("id").primaryKey(),
+    apiId: text("api_id")
+      .notNull()
+      .references(() => imageBackendApi.id, { onDelete: "cascade" }),
+    groupId: text("group_id")
+      .notNull()
+      .references(() => imageBackendGroup.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("image_backend_api_group_api_group_unique").on(
+      table.apiId,
+      table.groupId
+    ),
+    index("image_backend_api_group_group_idx").on(table.groupId),
+  ]
+);
+
 export const imageBackendInflightLease = pgTable(
   "image_backend_inflight_lease",
   {
@@ -1025,6 +1049,9 @@ export type NewImageBackendAccountGroup =
   typeof imageBackendAccountGroup.$inferInsert;
 export type ImageBackendApi = typeof imageBackendApi.$inferSelect;
 export type NewImageBackendApi = typeof imageBackendApi.$inferInsert;
+export type ImageBackendApiGroup = typeof imageBackendApiGroup.$inferSelect;
+export type NewImageBackendApiGroup =
+  typeof imageBackendApiGroup.$inferInsert;
 export type ImageBackendInflightLease =
   typeof imageBackendInflightLease.$inferSelect;
 export type NewImageBackendInflightLease =

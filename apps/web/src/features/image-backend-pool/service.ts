@@ -5,6 +5,7 @@ import {
   imageBackendAccount,
   imageBackendAccountGroup,
   imageBackendApi,
+  imageBackendApiGroup,
   imageBackendGroup,
   imageBackendInflightLease,
   imageBackendSchedulerMetric,
@@ -123,6 +124,7 @@ type PoolMember =
       type: "api";
       id: string;
       groupId: string | null;
+      groupIds: string[];
       groupMetadata: Record<string, unknown> | null;
       groupContentSafetyEnabled: boolean | null;
       name: string;
@@ -2010,11 +2012,6 @@ async function selectPoolMember(
     : accountBackendPreferenceMode === "mixed-only"
       ? undefined
       : accountBackendPreference;
-  const apiGroupFilter = groupIds.length
-    ? inArray(imageBackendApi.groupId, groupIds)
-    : groupId
-      ? eq(imageBackendApi.groupId, groupId)
-      : sql`true`;
   const requiredAccountBackend =
     requestKind === "responses"
       ? "responses"
@@ -2105,38 +2102,101 @@ async function selectPoolMember(
           asc(imageBackendAccount.lastUsedAt),
           asc(imageBackendAccount.createdAt)
         );
-
-  const [apiRows, accountRows] = await Promise.all([
-    db
-      .select()
-      .from(imageBackendApi)
-      .where(
-        and(
-          eq(imageBackendApi.isEnabled, true),
-          apiGroupFilter,
-          // always_active 的 API 无视 status/cooldown 始终入选；其余维持原"健康且
-          // 未冷却"判定。
-          or(
-            eq(imageBackendApi.alwaysActive, true),
-            and(
-              isBackendAvailableStatus(
-                imageBackendApi.status,
-                imageBackendApi.cooldownUntil,
-                now
-              ),
-              or(
-                sql`${imageBackendApi.cooldownUntil} IS NULL`,
-                sql`${imageBackendApi.cooldownUntil} <= ${now}`
-              )
-            )
-          )
+  const apiBaseWhere = and(
+    eq(imageBackendApi.isEnabled, true),
+    // always_active 的 API 无视 status/cooldown 始终入选；其余维持原"健康且
+    // 未冷却"判定。
+    or(
+      eq(imageBackendApi.alwaysActive, true),
+      and(
+        isBackendAvailableStatus(
+          imageBackendApi.status,
+          imageBackendApi.cooldownUntil,
+          now
+        ),
+        or(
+          sql`${imageBackendApi.cooldownUntil} IS NULL`,
+          sql`${imageBackendApi.cooldownUntil} <= ${now}`
         )
       )
-      .orderBy(
-        asc(imageBackendApi.priority),
-        asc(imageBackendApi.lastUsedAt),
-        asc(imageBackendApi.createdAt)
-      ),
+    )
+  );
+  // groupIds 命中时经 imageBackendApiGroup join 取出该 API 所属的全部分组，
+  // matchedGroupId 为本次命中的分组（供下游分组上下文解析）；未指定分组时退回
+  // 主分组 groupId（matchedGroupId 直接取自 imageBackendApi.groupId）。
+  const apiRowsPromise = groupIds.length
+    ? db
+        .select({
+          matchedGroupId: imageBackendApiGroup.groupId,
+          id: imageBackendApi.id,
+          groupId: imageBackendApi.groupId,
+          name: imageBackendApi.name,
+          baseUrl: imageBackendApi.baseUrl,
+          apiKey: imageBackendApi.apiKey,
+          model: imageBackendApi.model,
+          interfaceMode: imageBackendApi.interfaceMode,
+          chatCompletionsUpstreamMode:
+            imageBackendApi.chatCompletionsUpstreamMode,
+          imageUpstreamMode: imageBackendApi.imageUpstreamMode,
+          useStream: imageBackendApi.useStream,
+          contentSafetyEnabled: imageBackendApi.contentSafetyEnabled,
+          priority: imageBackendApi.priority,
+          concurrency: imageBackendApi.concurrency,
+          lastUsedAt: imageBackendApi.lastUsedAt,
+          lastAcquiredAt: imageBackendApi.lastAcquiredAt,
+          createdAt: imageBackendApi.createdAt,
+          metadata: imageBackendApi.metadata,
+        })
+        .from(imageBackendApi)
+        .innerJoin(
+          imageBackendApiGroup,
+          eq(imageBackendApiGroup.apiId, imageBackendApi.id)
+        )
+        .where(
+          and(apiBaseWhere, inArray(imageBackendApiGroup.groupId, groupIds))
+        )
+        .orderBy(
+          asc(imageBackendApi.priority),
+          asc(imageBackendApi.lastUsedAt),
+          asc(imageBackendApi.createdAt)
+        )
+    : db
+        .select({
+          matchedGroupId: imageBackendApi.groupId,
+          id: imageBackendApi.id,
+          groupId: imageBackendApi.groupId,
+          name: imageBackendApi.name,
+          baseUrl: imageBackendApi.baseUrl,
+          apiKey: imageBackendApi.apiKey,
+          model: imageBackendApi.model,
+          interfaceMode: imageBackendApi.interfaceMode,
+          chatCompletionsUpstreamMode:
+            imageBackendApi.chatCompletionsUpstreamMode,
+          imageUpstreamMode: imageBackendApi.imageUpstreamMode,
+          useStream: imageBackendApi.useStream,
+          contentSafetyEnabled: imageBackendApi.contentSafetyEnabled,
+          priority: imageBackendApi.priority,
+          concurrency: imageBackendApi.concurrency,
+          lastUsedAt: imageBackendApi.lastUsedAt,
+          lastAcquiredAt: imageBackendApi.lastAcquiredAt,
+          createdAt: imageBackendApi.createdAt,
+          metadata: imageBackendApi.metadata,
+        })
+        .from(imageBackendApi)
+        .where(
+          and(
+            apiBaseWhere,
+            groupId ? eq(imageBackendApi.groupId, groupId) : sql`true`
+          )
+        )
+        .orderBy(
+          asc(imageBackendApi.priority),
+          asc(imageBackendApi.lastUsedAt),
+          asc(imageBackendApi.createdAt)
+        );
+
+  const [apiRows, accountRows] = await Promise.all([
+    apiRowsPromise,
     accountRowsPromise,
   ]);
 
@@ -2145,7 +2205,10 @@ async function selectPoolMember(
       ? []
       : apiRows
           .filter((row) => {
-            const context = row.groupId ? contextMap.get(row.groupId) : null;
+            const matchedGroupId = row.matchedGroupId || row.groupId;
+            const context = matchedGroupId
+              ? contextMap.get(matchedGroupId)
+              : null;
             const metadata = context?.metadata ?? groupMetadata;
             const effectiveRequestKind = requestKind || "image_generation";
             const requiresResponsesEndpoint =
@@ -2167,11 +2230,18 @@ async function selectPoolMember(
             );
           })
           .map((row) => {
-            const context = row.groupId ? contextMap.get(row.groupId) : null;
+            const matchedGroupId = row.matchedGroupId || row.groupId;
+            const context = matchedGroupId
+              ? contextMap.get(matchedGroupId)
+              : null;
             return {
               type: "api",
               id: row.id,
-              groupId: row.groupId,
+              groupId: matchedGroupId,
+              groupIds: normalizeAccountGroupIds([
+                row.groupId,
+                row.matchedGroupId,
+              ]),
               groupMetadata: context?.metadata ?? groupMetadata ?? null,
               groupContentSafetyEnabled:
                 context?.contentSafetyEnabled ??
@@ -6203,6 +6273,8 @@ export async function refreshStaleWebBackendAccounts(options?: {
 type UpsertApiInput = {
   id?: string;
   groupId?: string | null;
+  groupIds?: string[] | null;
+  mergeGroupIds?: boolean;
   name: string;
   baseUrl: string;
   apiKey?: string;
@@ -6220,9 +6292,50 @@ type UpsertApiInput = {
   status?: string;
 };
 
+// 同步一个 API 直透后端在 image_backend_api_group 中的分组成员关系。
+// 镜像 setImageBackendAccountGroups:replace 为真时先删后插全量替换,为假时仅追加;
+// 主键 `${apiId}:${groupId}` + onConflictDoNothing 保证幂等、并发重复插入不报错。
+async function setImageBackendApiGroups(input: {
+  apiId: string;
+  groupIds: string[];
+  replace: boolean;
+}) {
+  const groupIds = normalizeAccountGroupIds(input.groupIds);
+  if (input.replace) {
+    await db
+      .delete(imageBackendApiGroup)
+      .where(eq(imageBackendApiGroup.apiId, input.apiId));
+  }
+  if (!groupIds.length) return;
+
+  await db
+    .insert(imageBackendApiGroup)
+    .values(
+      groupIds.map((groupId) => ({
+        id: `${input.apiId}:${groupId}`,
+        apiId: input.apiId,
+        groupId,
+      }))
+    )
+    .onConflictDoNothing();
+}
+
 export async function upsertImageBackendApi(input: UpsertApiInput) {
-  const update = {
-    groupId: input.groupId || null,
+  // groupIds 为多分组真相,primaryGroupId 保留为主分组/向后兼容(取首个分组)。
+  const groupIds = accountGroupIdsFromInput(input);
+  const primaryGroupId = groupIds[0] || null;
+  let existingPrimaryGroupId: string | null | undefined;
+
+  if (input.id) {
+    const [existingApi] = await db
+      .select({ groupId: imageBackendApi.groupId })
+      .from(imageBackendApi)
+      .where(eq(imageBackendApi.id, input.id))
+      .limit(1);
+    existingPrimaryGroupId = existingApi?.groupId ?? null;
+  }
+
+  const updateBase = {
     name: input.name,
     baseUrl: stripTrailingSlash(input.baseUrl),
     model: input.model || null,
@@ -6243,10 +6356,22 @@ export async function upsertImageBackendApi(input: UpsertApiInput) {
   };
 
   if (input.id) {
+    // 合并模式保留既有主分组,否则以本次首个分组为主分组。
+    const update = {
+      ...updateBase,
+      groupId: input.mergeGroupIds
+        ? existingPrimaryGroupId || primaryGroupId
+        : primaryGroupId,
+    };
     await db
       .update(imageBackendApi)
       .set(input.apiKey ? { ...update, apiKey: input.apiKey } : update)
       .where(eq(imageBackendApi.id, input.id));
+    await setImageBackendApiGroups({
+      apiId: input.id,
+      groupIds,
+      replace: !input.mergeGroupIds,
+    });
     return input.id;
   }
 
@@ -6255,10 +6380,19 @@ export async function upsertImageBackendApi(input: UpsertApiInput) {
   }
 
   const id = nanoid();
+  const update = {
+    ...updateBase,
+    groupId: primaryGroupId,
+  };
   await db.insert(imageBackendApi).values({
     id,
     ...update,
     apiKey: input.apiKey,
+  });
+  await setImageBackendApiGroups({
+    apiId: id,
+    groupIds,
+    replace: true,
   });
   return id;
 }
@@ -6482,9 +6616,9 @@ export async function listAdminImageBackendPool() {
     .from(imageBackendAccountGroup)
     .groupBy(imageBackendAccountGroup.groupId);
   const apiCounts = await db
-    .select({ groupId: imageBackendApi.groupId, value: count() })
-    .from(imageBackendApi)
-    .groupBy(imageBackendApi.groupId);
+    .select({ groupId: imageBackendApiGroup.groupId, value: count() })
+    .from(imageBackendApiGroup)
+    .groupBy(imageBackendApiGroup.groupId);
   const accountCountMap = new Map(
     accountCounts.map((item) => [item.groupId, Number(item.value)])
   );
@@ -6586,6 +6720,26 @@ export async function listAdminImageBackendPool() {
     })
     .from(imageBackendApi)
     .orderBy(asc(imageBackendApi.priority), desc(imageBackendApi.createdAt));
+  const apiGroupRows = apis.length
+    ? await db
+        .select({
+          apiId: imageBackendApiGroup.apiId,
+          groupId: imageBackendApiGroup.groupId,
+        })
+        .from(imageBackendApiGroup)
+        .where(
+          inArray(
+            imageBackendApiGroup.apiId,
+            apis.map((api) => api.id)
+          )
+        )
+    : [];
+  const apiGroupIdMap = new Map<string, string[]>();
+  for (const row of apiGroupRows) {
+    const current = apiGroupIdMap.get(row.apiId) || [];
+    current.push(row.groupId);
+    apiGroupIdMap.set(row.apiId, current);
+  }
 
   return {
     groups: summaries,
@@ -6595,6 +6749,11 @@ export async function listAdminImageBackendPool() {
         accountGroupIdMap.get(account.id) ||
         normalizeAccountGroupIds(account.groupId ? [account.groupId] : []),
     })),
-    apis,
+    apis: apis.map((api) => ({
+      ...api,
+      groupIds:
+        apiGroupIdMap.get(api.id) ||
+        normalizeAccountGroupIds(api.groupId ? [api.groupId] : []),
+    })),
   };
 }

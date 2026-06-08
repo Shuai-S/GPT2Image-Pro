@@ -288,6 +288,7 @@ export const saveApi = defineOperation({
   input: z.object({
     id: z.string().optional(),
     groupId: z.string().nullable().optional(),
+    groupIds: z.array(z.string()).optional(),
     name: z.string().optional(),
     baseUrl: z.string().optional(),
     apiKey: z.string().optional(),
