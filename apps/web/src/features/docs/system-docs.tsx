@@ -1395,10 +1395,29 @@ data: {"type":"agent.completed","generation_id":"...","generationId":"...","agen
                 "Agent 接口一次只跑一个任务；传入时必须为 1。需要多任务请并发调用接口。",
             },
             {
-              name: "size / quality / moderation / output_format / output_compression / background / transparent_matte / promptRepair",
+              name: "size / quality / moderation / output_format / output_compression",
               requirement: "可选",
               description:
-                "同 image 接口，作为 Agent 内 image_generation 工具运行参数；其中 transparent_matte 抠图回退不含 agent 分层模式，promptRepair=false 时关闭审核改写重试、审核失败直接返回真实错误。",
+                "同 image 接口，作为 Agent 内 image_generation 工具运行参数。",
+            },
+            {
+              name: "background",
+              requirement: "可选",
+              description:
+                "transparent、opaque、auto。与 /v1/images/generations 同义。",
+            },
+            {
+              name: "transparent_matte",
+              requirement: "可选",
+              description:
+                "默认 false。后端不支持透明返回 400 时自动改不透明重绘并用 ISNet 抠图得到透明 PNG；注意 agent 分层模式下不生效。详见 /v1/images/generations 说明。",
+            },
+            {
+              name: "promptRepair / prompt_repair",
+              requirement: "可选",
+              custom: true,
+              description:
+                "本站扩展：审核改写重试开关。false 时审核失败直接返回真实错误，不自动改写提示词重试。",
             },
             {
               name: "thinking",
