@@ -7,8 +7,8 @@
 
 <p align="center">
   <a href="https://github.com/MeowFree/GPT2Image-Pro/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/MeowFree/GPT2Image-Pro?style=social" /></a>
-  <a href="https://github.com/MeowFree/GPT2Image-Pro/blob/dev/LICENSE"><img alt="License" src="https://img.shields.io/github/license/MeowFree/GPT2Image-Pro" /></a>
-  <a href="https://github.com/MeowFree/GPT2Image-Pro/releases"><img alt="Release" src="https://img.shields.io/github/v/release/MeowFree/GPT2Image-Pro?include_prereleases" /></a>
+  <a href="https://github.com/MeowFree/GPT2Image-Pro/blob/dev/LICENSE"><img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0-green" /></a>
+  <a href="https://github.com/MeowFree/GPT2Image-Pro/releases"><img alt="Release" src="https://img.shields.io/badge/Release-v0.5.1-blue" /></a>
   <img alt="Next.js" src="https://img.shields.io/badge/Next.js-16-black?logo=nextdotjs" />
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" />
   <img alt="Docker" src="https://img.shields.io/badge/Docker-GHCR-2496ED?logo=docker&logoColor=white" />
