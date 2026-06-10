@@ -9,8 +9,11 @@ import { getStorageProvider } from "./storage/providers";
 import { getRuntimeSettingNumber } from "./system-settings";
 
 export const IMAGE_GENERATION_PENDING_TIMEOUT_MS = 20 * 60 * 1000;
+// 文案须与 generation_error 结算行为一致：退生成费、保留已发生的审核费
+// (getFailedGenerationTargetCredits 对 generation_error 保留 moderationOnlyCredits)，
+// 不能笼统地说 "credits were refunded"。
 export const IMAGE_GENERATION_TIMEOUT_ERROR =
-  "Image generation timed out after 20 minutes. Generation credits were refunded.";
+  "Image generation timed out after 20 minutes. The image generation fee was refunded; any moderation fee already incurred was retained.";
 export const GENERATION_IMAGE_RETENTION_HOURS_SETTING_KEY =
   "GENERATION_IMAGE_RETENTION_HOURS";
 
