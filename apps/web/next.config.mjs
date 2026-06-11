@@ -20,6 +20,19 @@ const nextConfig = {
   },
   // Enable standalone output for Docker deployment
   output: "standalone",
+  // Next 只 trace onnxruntime-node 的 .node 绑定,不 trace 它运行时 dlopen 的
+  // libonnxruntime.so.1(37MB)。standalone 缺它时不只 ISNet 抠图坏:凡 action
+  // chunk 引到抠图模块的路由(dashboard/创作页),模块求值即抛错,该路由全部
+  // server action 500(2026-06-11 事故:前端积分/套餐被静默回退成 0/免费版)。
+  // 此处显式 trace 进 standalone,Docker 与裸机部署都不再需要手工补拷;
+  // ISNet 模型同理显式声明,不依赖隐式 trace。版本号用通配,升级 onnxruntime
+  // 后无需改这里。
+  outputFileTracingIncludes: {
+    "/*": [
+      "../../node_modules/.pnpm/onnxruntime-node@*/node_modules/onnxruntime-node/bin/napi-v6/linux/x64/**",
+      "./models/isnet.onnx",
+    ],
+  },
   experimental: {
     proxyClientMaxBodySize: "200mb",
     serverActions: {
