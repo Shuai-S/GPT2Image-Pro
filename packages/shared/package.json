@@ -76,7 +76,10 @@
     "./mcp/user-config": "./src/mcp/user-config.ts",
     "./mcp/user-auth": "./src/mcp/user-auth.ts",
     "./mcp/user-tool-factory": "./src/mcp/user-tool-factory.ts",
-    "./mcp/user-key-actions": "./src/mcp/user-key-actions.ts"
+    "./mcp/user-key-actions": "./src/mcp/user-key-actions.ts",
+    "./external-api/safe-image-fetch": "./src/external-api/safe-image-fetch.ts",
+    "./external-api/quota": "./src/external-api/quota.ts",
+    "./external-api/quota-math": "./src/external-api/quota-math.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",

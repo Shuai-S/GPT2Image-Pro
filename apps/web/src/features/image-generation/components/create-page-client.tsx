@@ -75,7 +75,7 @@ import {
   normalizeReferenceFetchUrl,
   type ReferenceHandoffMode,
 } from "@/features/image-generation/reference-handoff";
-import type { ImageBackendGroupBackendType } from "@/features/image-backend-pool/types";
+import type { ImageBackendGroupBackendType } from "@repo/image-generation/image-backend/types";
 import {
   agentEventToImageUrl,
   appendAgentRunEvent,
@@ -83,7 +83,7 @@ import {
   createOptimisticAgentRoundEvents,
   normalizeAgentEvent,
   type AgentTaskCard,
-} from "../agent-round-cards";
+} from "@repo/image-generation/agent-round-cards";
 import {
   AUTO_IMAGE_SIZE,
   DEFAULT_IMAGE_MODEL,
@@ -101,7 +101,7 @@ import {
   parseImageSize,
   roundUpCreditAmount,
   validateImageSize,
-} from "../resolution";
+} from "@repo/image-generation/resolution";
 import { ImageLightbox, type LightboxGeneration } from "./image-lightbox";
 
 type RecentGeneration = {

@@ -23,8 +23,8 @@ import {
   Testimonials,
   UseCasesSection,
 } from "@/features/marketing/components";
-import { getRuntimeImageBaseCreditPricing } from "@/features/image-generation/pricing-settings";
-import { getRecentGenerationSlaStats } from "@/features/image-generation/sla";
+import { getRuntimeImageBaseCreditPricing } from "@repo/image-generation/pricing-settings";
+import { getRecentGenerationSlaStats } from "@repo/image-generation/sla";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;

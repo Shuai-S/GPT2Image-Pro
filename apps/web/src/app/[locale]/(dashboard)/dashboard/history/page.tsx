@@ -5,12 +5,12 @@ import { db } from "@repo/database";
 import { generation } from "@repo/database/schema";
 import { buildSignedStorageImageUrl } from "@repo/shared/storage/signed-url";
 import { HistoryClient } from "@/features/image-generation/components/history-client";
-import { extractGenerationCreditDetails } from "@/features/image-generation/credit-calculation-details";
+import { extractGenerationCreditDetails } from "@repo/image-generation/credit-calculation-details";
 import { hasLayeredMeta } from "@/features/psd-export/layered-meta";
 import {
   extractGenerationReferenceImages,
   extractPromptRepairNotice,
-} from "@/features/image-generation/generation-metadata";
+} from "@repo/image-generation/generation-metadata";
 import { getCurrentUser } from "@repo/shared/auth/server";
 import { getAppTimeZone } from "@repo/shared/time-zone/server";
 

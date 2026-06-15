@@ -22,7 +22,7 @@ import { useAction } from "next-safe-action/hooks";
 import { type PointerEvent, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { deleteGenerationAction } from "@/features/image-generation/actions";
-import type { GenerationCreditDetails } from "@/features/image-generation/credit-calculation-details";
+import type { GenerationCreditDetails } from "@repo/image-generation/credit-calculation-details";
 import { ExportPsdDialog } from "@/features/psd-export/components/export-psd-dialog";
 import { writePendingReferenceHandoff } from "@/features/image-generation/reference-handoff";
 

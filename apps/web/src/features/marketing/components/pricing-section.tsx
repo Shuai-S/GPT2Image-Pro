@@ -36,7 +36,7 @@ import {
   REFERENCE_CREDIT_PRICE_CNY,
   TEXT_MODERATION_PRICE_CNY,
   type ImageBaseCreditPricing,
-} from "@/features/image-generation/resolution";
+} from "@repo/image-generation/resolution";
 import { PlanInterval } from "@/features/payment/types";
 import { useRouter } from "@/i18n/routing";
 

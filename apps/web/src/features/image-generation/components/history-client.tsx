@@ -32,7 +32,7 @@ const ImageLightbox = dynamic(
     ),
   { ssr: false }
 );
-import type { GenerationCreditDetails } from "@/features/image-generation/credit-calculation-details";
+import type { GenerationCreditDetails } from "@repo/image-generation/credit-calculation-details";
 
 export interface HistoryGeneration {
   id: string;

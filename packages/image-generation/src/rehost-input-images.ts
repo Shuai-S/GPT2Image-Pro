@@ -26,7 +26,7 @@ import { getRuntimeSettingString } from "@repo/shared/system-settings";
 import {
   fetchPublicImage,
   readResponseBytesWithLimit,
-} from "../external-api/safe-image-fetch";
+} from "@repo/shared/external-api/safe-image-fetch";
 import {
   DEFAULT_MAX_IMAGE_BYTES,
   getImagePublicBaseUrl,

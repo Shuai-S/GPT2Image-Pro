@@ -3,9 +3,9 @@ import {
   buildPublicImageUrl,
   parseStorageImageUrl,
 } from "@repo/shared/storage/signed-url";
-import type { ImageGenerationOperationResult } from "@/features/image-generation/operations";
-import { isContentSafetyRejection } from "@/features/image-generation/sla-classification";
-import type { GeneratedImageOutput } from "@/features/image-generation/types";
+import type { ImageGenerationOperationResult } from "@repo/image-generation/operations";
+import { isContentSafetyRejection } from "@repo/image-generation/sla-classification";
+import type { GeneratedImageOutput } from "@repo/image-generation/types";
 
 type OpenAIImageData = {
   url?: string;

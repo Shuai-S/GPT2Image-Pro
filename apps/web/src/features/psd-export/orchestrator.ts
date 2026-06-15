@@ -12,7 +12,7 @@
 import { buildSignedStorageImageUrl } from "@repo/shared/storage";
 import { getStorageProvider } from "@repo/shared/storage/providers";
 import { nanoid } from "nanoid";
-import { getGenerationById } from "@/features/image-generation/queries";
+import { getGenerationById } from "@repo/image-generation/queries";
 import { assembleLayeredPsd, type LayerSpec } from "./assemble-layers";
 import { readLayeredMeta } from "./layered-meta";
 

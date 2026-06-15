@@ -10,19 +10,19 @@ import { z } from "zod";
 import {
   firstBatchError,
   runBatchImageGeneration,
-} from "@/features/image-generation/batch-runner";
-import { runImageGenerationForUser } from "@/features/image-generation/operations";
+} from "@repo/image-generation/batch-runner";
+import { runImageGenerationForUser } from "@repo/image-generation/operations";
 import {
   normalizeOutputCompression,
   normalizeOutputFormat,
-} from "@/features/image-generation/output-format";
+} from "@repo/image-generation/output-format";
 import {
   DEFAULT_IMAGE_SIZE,
   IMAGE_PROMPT_MAX_CHARACTERS,
   IMAGE_PROMPT_TOO_LONG_MESSAGE,
   validateImageSize,
-} from "@/features/image-generation/resolution";
-import { createImageStreamResponse } from "@/features/image-generation/streaming";
+} from "@repo/image-generation/resolution";
+import { createImageStreamResponse } from "@repo/image-generation/streaming";
 
 const generateImageSchema = z.object({
   prompt: z

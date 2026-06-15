@@ -441,7 +441,7 @@ vi.mock("@repo/shared/system-settings", () => ({
   getRuntimeSettingString: vi.fn(async () => ""),
 }));
 
-vi.mock("@/features/image-generation/chatgpt-web", () => ({
+vi.mock("../chatgpt-web", () => ({
   getChatGptWebAccountInfo: vi.fn(),
 }));
 

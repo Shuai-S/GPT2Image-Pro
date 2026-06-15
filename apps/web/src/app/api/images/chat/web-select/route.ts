@@ -6,7 +6,7 @@ import { and, eq, or, sql } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { selectChatGptWebImageCandidate } from "@/features/image-generation/chatgpt-web";
+import { selectChatGptWebImageCandidate } from "@repo/image-generation/chatgpt-web";
 
 const selectSchema = z.object({
   generationId: z.string().min(1).max(128),

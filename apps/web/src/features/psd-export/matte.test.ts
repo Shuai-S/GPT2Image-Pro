@@ -1,6 +1,6 @@
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
-import { removeBackground } from "./matte";
+import { removeBackground } from "@repo/image-generation/matte";
 
 // 合成测试图:纯蓝背景 + 中心红色实心圆。验证抠图输出带 alpha、背景透明、前景保留。
 // 注:纯色块上 saliency 模型边缘会有少量噪点,故阈值取宽松值。

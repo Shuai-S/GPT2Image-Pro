@@ -1,4 +1,4 @@
-import type { ChatHistoryMessage } from "@/features/image-generation/types";
+import type { ChatHistoryMessage } from "@repo/image-generation/types";
 
 export type ChatCompletionTextPart = {
   type: "text";

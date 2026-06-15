@@ -12,13 +12,13 @@ import { getLocale } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { CreatePageClient } from "@/features/image-generation/components/create-page-client";
 import { hasLayeredMeta } from "@/features/psd-export/layered-meta";
-import { getRuntimeImageBaseCreditPricing } from "@/features/image-generation/pricing-settings";
-import { getUserRecentGenerations } from "@/features/image-generation/queries";
-import { getUserApiConfig } from "@/features/image-generation/service";
+import { getRuntimeImageBaseCreditPricing } from "@repo/image-generation/pricing-settings";
+import { getUserRecentGenerations } from "@repo/image-generation/queries";
+import { getUserApiConfig } from "@repo/image-generation/service";
 import {
   getUserImageBackendPreference,
   listSelectableImageBackendGroups,
-} from "@/features/image-backend-pool/service";
+} from "@repo/image-generation/image-backend/service";
 
 const DEFAULT_FORCE_WEB_MIN_PIXELS = 660_000;
 const DEFAULT_FORCE_WEB_MAX_PIXELS = 2_000_000;

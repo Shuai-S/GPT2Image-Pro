@@ -15,7 +15,7 @@ import { authenticateExternalApiRequest } from "@/features/external-api/auth";
 import {
   fetchPublicImage,
   readResponseBytesWithLimit,
-} from "@/features/external-api/safe-image-fetch";
+} from "@repo/shared/external-api/safe-image-fetch";
 import {
   createExternalImageStreamResponse,
   createJsonKeepAliveResponse,
@@ -27,21 +27,21 @@ import {
   wantsImageStreamResponse,
 } from "@/features/external-api/images";
 import { isExternalResponsesImageModelAllowed } from "@/features/external-api/models";
-import { runImageGenerationForUser } from "@/features/image-generation/operations";
-import { bindImageBackendStickyMember } from "@/features/image-backend-pool/service";
+import { runImageGenerationForUser } from "@repo/image-generation/operations";
+import { bindImageBackendStickyMember } from "@repo/image-generation/image-backend/service";
 import {
   normalizeOutputCompression,
   normalizeOutputFormat,
-} from "@/features/image-generation/output-format";
+} from "@repo/image-generation/output-format";
 import {
   DEFAULT_IMAGE_SIZE,
   getImageModel,
   validateImageSize,
-} from "@/features/image-generation/resolution";
+} from "@repo/image-generation/resolution";
 import {
   DEFAULT_MAX_IMAGE_BYTES,
   uploadTemporaryImageUrls,
-} from "@/features/image-generation/request-utils";
+} from "@repo/image-generation/request-utils";
 import type {
   ChatGptWebConversationState,
   ChatHistoryMessage,
@@ -51,7 +51,7 @@ import type {
   ImageQuality,
   StickyBackendMemberState,
   ThinkingLevel,
-} from "@/features/image-generation/types";
+} from "@repo/image-generation/types";
 
 type ImageGenerationResult = Awaited<
   ReturnType<typeof runImageGenerationForUser>

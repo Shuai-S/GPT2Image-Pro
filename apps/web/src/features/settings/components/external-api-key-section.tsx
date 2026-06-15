@@ -47,7 +47,7 @@ import {
   updateExternalApiKeyQuota,
   updateExternalApiKeyRelay,
 } from "../actions";
-import type { ImageBackendGroupBackendType } from "@/features/image-backend-pool/types";
+import type { ImageBackendGroupBackendType } from "@repo/image-generation/image-backend/types";
 
 type ImageBackendGroupOption = {
   id: string;

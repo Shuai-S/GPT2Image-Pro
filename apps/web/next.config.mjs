@@ -40,7 +40,12 @@ const nextConfig = {
     },
   },
   // Transpile monorepo packages
-  transpilePackages: ["@repo/ui", "@repo/database", "@repo/shared"],
+  transpilePackages: [
+    "@repo/ui",
+    "@repo/database",
+    "@repo/shared",
+    "@repo/image-generation",
+  ],
   // Exclude packages with webpack-specific syntax from server bundling
   serverExternalPackages: [
     "anki-apkg-export",

@@ -20,11 +20,11 @@ import { ImagePricingChartCardLazy } from "@/features/dashboard/components/image
 import {
   getUserImageBackendPreference,
   listImageBackendGroupOptions,
-} from "@/features/image-backend-pool/service";
+} from "@repo/image-generation/image-backend/service";
 import { RecentCreationsClient } from "@/features/image-generation/components/recent-creations-client";
 import { hasLayeredMeta } from "@/features/psd-export/layered-meta";
-import { getRuntimeImageBaseCreditPricing } from "@/features/image-generation/pricing-settings";
-import { getImageBaseCreditPricing } from "@/features/image-generation/resolution";
+import { getRuntimeImageBaseCreditPricing } from "@repo/image-generation/pricing-settings";
+import { getImageBaseCreditPricing } from "@repo/image-generation/resolution";
 import { Link } from "@/i18n/routing";
 import { getPlanCapabilitySnapshot } from "@repo/shared/subscription/services/plan-capabilities";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";

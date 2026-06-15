@@ -36,7 +36,7 @@ const backendPoolMock = vi.hoisted(() => {
   };
 });
 
-vi.mock("@/features/image-backend-pool/service", () => backendPoolMock);
+vi.mock("./image-backend/service", () => backendPoolMock);
 
 vi.mock("./chatgpt-web", () => ({
   generateImageWithChatGptWeb: vi.fn(async () => ({ error: "terminated" })),

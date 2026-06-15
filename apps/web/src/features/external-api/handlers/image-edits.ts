@@ -35,15 +35,15 @@ import {
 import {
   fetchPublicImage,
   readResponseBytesWithLimit,
-} from "@/features/external-api/safe-image-fetch";
-import { runBatchImageGeneration } from "@/features/image-generation/batch-runner";
-import { runImageGenerationForUser } from "@/features/image-generation/operations";
+} from "@repo/shared/external-api/safe-image-fetch";
+import { runBatchImageGeneration } from "@repo/image-generation/batch-runner";
+import { runImageGenerationForUser } from "@repo/image-generation/operations";
 import {
   normalizeImageBackground,
   normalizeOutputCompression,
   normalizeOutputFormat,
   VALID_OUTPUT_FORMATS,
-} from "@/features/image-generation/output-format";
+} from "@repo/image-generation/output-format";
 import {
   DEFAULT_MAX_IMAGE_BYTES,
   filesToImageInputs,
@@ -51,20 +51,20 @@ import {
   getTotalUploadSize,
   uploadModerationImages,
   validateImageFile,
-} from "@/features/image-generation/request-utils";
+} from "@repo/image-generation/request-utils";
 import {
   getImageModel,
   IMAGE_PROMPT_MAX_CHARACTERS,
   IMAGE_PROMPT_TOO_LONG_MESSAGE,
   validateImageSize,
-} from "@/features/image-generation/resolution";
+} from "@repo/image-generation/resolution";
 import type {
   ImageModeration,
   ImageOutputFormat,
   ImageQuality,
   PartialImageResult,
   ThinkingLevel,
-} from "@/features/image-generation/types";
+} from "@repo/image-generation/types";
 
 const VALID_QUALITIES = new Set<ImageQuality>([
   "auto",

@@ -5,11 +5,11 @@ export {
   getUserGenerations,
   getUserGenerationsCount,
   getUserRecentGenerations,
-} from "./queries";
-export { generateImage, getEffectiveConfig, getUserApiConfig } from "./service";
+} from "@repo/image-generation/queries";
+export { generateImage, getEffectiveConfig, getUserApiConfig } from "@repo/image-generation/service";
 export type {
   ApiConfig,
   GenerateImageParams,
   GenerateImageResult,
   GenerationRecord,
-} from "./types";
+} from "@repo/image-generation/types";

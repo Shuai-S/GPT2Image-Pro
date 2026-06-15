@@ -5,7 +5,7 @@ import { protectedAction } from "@repo/shared/safe-action";
 import { buildSignedStorageImageUrl } from "@repo/shared/storage";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import { getGenerationById } from "@/features/image-generation/queries";
+import { getGenerationById } from "@repo/image-generation/queries";
 import { readLayeredMeta } from "./layered-meta";
 import { exportLayeredPsdForUser } from "./orchestrator";
 

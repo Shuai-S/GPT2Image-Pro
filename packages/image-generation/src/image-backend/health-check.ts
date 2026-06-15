@@ -11,7 +11,7 @@
  *
  * 使用方：image-backend-pool 的后台 API 测活；settings 的用户自配 API 测活。
  */
-import type { ApiConfig } from "@/features/image-generation/types";
+import type { ApiConfig } from "../types";
 
 import type {
   ChatCompletionsUpstreamMode,
@@ -188,7 +188,7 @@ export async function checkImageBackendApiHealth(
   try {
     // 动态导入打破 image-backend-pool/service ⇄ image-generation/service 的静态环依赖。
     const { generateImage } = await import(
-      "@/features/image-generation/service"
+      "../service"
     );
     const result = await generateImage(config, {
       prompt: HEALTH_CHECK_PROMPT,

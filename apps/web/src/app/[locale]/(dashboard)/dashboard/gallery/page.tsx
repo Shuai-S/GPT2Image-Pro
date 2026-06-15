@@ -10,7 +10,7 @@ import { GalleryClient } from "@/features/image-generation/components/gallery-cl
 import {
   extractGenerationReferenceImages,
   extractPromptRepairNotice,
-} from "@/features/image-generation/generation-metadata";
+} from "@repo/image-generation/generation-metadata";
 import { hasLayeredMeta } from "@/features/psd-export/layered-meta";
 
 interface GalleryPageProps {

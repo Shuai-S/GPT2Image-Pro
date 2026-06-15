@@ -24,27 +24,27 @@ import {
 import {
   fetchPublicImage,
   readResponseBytesWithLimit,
-} from "@/features/external-api/safe-image-fetch";
-import { runImageGenerationForUser } from "@/features/image-generation/operations";
+} from "@repo/shared/external-api/safe-image-fetch";
+import { runImageGenerationForUser } from "@repo/image-generation/operations";
 import {
   normalizeOutputCompression,
   normalizeOutputFormat,
   VALID_OUTPUT_FORMATS,
-} from "@/features/image-generation/output-format";
+} from "@repo/image-generation/output-format";
 import {
   filesToImageInputs,
   formatMegabytes,
   getTotalUploadSize,
   uploadTemporaryImageUrls,
   validateImageFile,
-} from "@/features/image-generation/request-utils";
+} from "@repo/image-generation/request-utils";
 import {
   DEFAULT_IMAGE_SIZE,
   IMAGE_PROMPT_MAX_CHARACTERS,
   IMAGE_PROMPT_TOO_LONG_MESSAGE,
   isImageModel,
   validateImageSize,
-} from "@/features/image-generation/resolution";
+} from "@repo/image-generation/resolution";
 import type {
   AgentRunEvent,
   ChatHistoryMessage,
@@ -57,7 +57,7 @@ import type {
   ResponsesPreviousResponseState,
   StickyBackendMemberState,
   ThinkingLevel,
-} from "@/features/image-generation/types";
+} from "@repo/image-generation/types";
 
 const VALID_QUALITIES = new Set<ImageQuality>([
   "auto",

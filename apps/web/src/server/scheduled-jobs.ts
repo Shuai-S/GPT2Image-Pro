@@ -8,7 +8,7 @@ import { getRuntimeSettingNumber } from "@repo/shared/system-settings";
 import {
   refreshStaleWebBackendAccounts,
   runAutoSub2ApiAccessTokenSync,
-} from "@/features/image-backend-pool/service";
+} from "@repo/image-generation/image-backend/service";
 import {
   buildCreditsExpireResponse,
   summarizeExpiredPendingGenerations,

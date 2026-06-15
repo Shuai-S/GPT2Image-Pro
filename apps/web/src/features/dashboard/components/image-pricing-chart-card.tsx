@@ -30,7 +30,7 @@ import {
   TEXT_MODERATION_PRICE_CNY,
   IMAGE_MODERATION_PRICE_CNY,
   type ImageBaseCreditPricing,
-} from "@/features/image-generation/resolution";
+} from "@repo/image-generation/resolution";
 
 type ImagePricingChartCardProps = {
   billing: {

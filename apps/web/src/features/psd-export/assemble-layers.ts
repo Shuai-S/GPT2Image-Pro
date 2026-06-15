@@ -17,7 +17,7 @@
  */
 import { writePsdBuffer } from "ag-psd";
 import sharp from "sharp";
-import { removeBackground } from "./matte";
+import { removeBackground } from "@repo/image-generation/matte";
 
 /** 不透明覆盖率(alpha>200 的像素占比),用于判断 ISNet 是否把某层抠到近乎全空。 */
 async function opaqueRatio(image: Buffer): Promise<number> {

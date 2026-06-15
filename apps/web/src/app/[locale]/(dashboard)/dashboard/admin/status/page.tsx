@@ -40,8 +40,8 @@ import {
   AUTO_IMAGE_SIZE,
   IMAGE_1K_BASE_EDGE,
   normalizeValidImageSize,
-} from "@/features/image-generation/resolution";
-import { classifyGenerationError } from "@/features/image-generation/sla";
+} from "@repo/image-generation/resolution";
+import { classifyGenerationError } from "@repo/image-generation/sla";
 import { GLOBAL_STATUS_CACHE_TAG } from "./cache-tag";
 import { RefreshStatusButton } from "./refresh-status-button";
 

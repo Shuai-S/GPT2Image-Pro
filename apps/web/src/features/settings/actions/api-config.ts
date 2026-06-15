@@ -10,7 +10,7 @@ import { protectedAction } from "@repo/shared/safe-action";
 import { canUsePlanCapability } from "@repo/shared/subscription/services/plan-capabilities";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 
-import { checkImageBackendApiHealth } from "@/features/image-backend-pool/health-check";
+import { checkImageBackendApiHealth } from "@repo/image-generation/image-backend/health-check";
 
 /**
  * 检查 URL 是否指向私有/内部网络地址

@@ -45,7 +45,7 @@ import {
   upsertImageBackendAccount,
   upsertImageBackendApi,
   upsertImageBackendGroup,
-} from "./service";
+} from "@repo/image-generation/image-backend/service";
 
 const nullableGroupIdSchema = z
   .string()

@@ -12,29 +12,29 @@ import { type NextRequest, NextResponse } from "next/server";
 import {
   firstBatchError,
   runBatchImageGeneration,
-} from "@/features/image-generation/batch-runner";
-import { runImageGenerationForUser } from "@/features/image-generation/operations";
+} from "@repo/image-generation/batch-runner";
+import { runImageGenerationForUser } from "@repo/image-generation/operations";
 import {
   normalizeImageBackground,
   normalizeOutputCompression,
   normalizeOutputFormat,
   VALID_IMAGE_BACKGROUNDS,
   VALID_OUTPUT_FORMATS,
-} from "@/features/image-generation/output-format";
+} from "@repo/image-generation/output-format";
 import {
   filesToImageInputs,
   formatMegabytes,
   getTotalUploadSize,
   uploadTemporaryImageUrls,
   validateImageFile,
-} from "@/features/image-generation/request-utils";
+} from "@repo/image-generation/request-utils";
 import {
   DEFAULT_IMAGE_SIZE,
   IMAGE_PROMPT_MAX_CHARACTERS,
   IMAGE_PROMPT_TOO_LONG_MESSAGE,
   validateImageSize,
-} from "@/features/image-generation/resolution";
-import { createImageStreamResponse } from "@/features/image-generation/streaming";
+} from "@repo/image-generation/resolution";
+import { createImageStreamResponse } from "@repo/image-generation/streaming";
 import type {
   ChatHistoryMessage,
   ImageBackground,
@@ -44,7 +44,7 @@ import type {
   ResponsesInputFile,
   StickyBackendMemberState,
   ThinkingLevel,
-} from "@/features/image-generation/types";
+} from "@repo/image-generation/types";
 
 const VALID_QUALITIES = new Set<ImageQuality>([
   "auto",

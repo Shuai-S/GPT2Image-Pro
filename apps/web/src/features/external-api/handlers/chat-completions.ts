@@ -12,7 +12,7 @@ import { authenticateExternalApiRequest } from "@/features/external-api/auth";
 import {
   fetchPublicImage,
   readResponseBytesWithLimit,
-} from "@/features/external-api/safe-image-fetch";
+} from "@repo/shared/external-api/safe-image-fetch";
 import {
   createExternalImageStreamResponse,
   createJsonKeepAliveResponse,
@@ -25,19 +25,19 @@ import {
   toLoggedOpenAIErrorPayload,
   wantsImageStreamResponse,
 } from "@/features/external-api/images";
-import { runBatchImageGeneration } from "@/features/image-generation/batch-runner";
-import { runImageGenerationForUser } from "@/features/image-generation/operations";
+import { runBatchImageGeneration } from "@repo/image-generation/batch-runner";
+import { runImageGenerationForUser } from "@repo/image-generation/operations";
 import {
   normalizeOutputCompression,
   normalizeOutputFormat,
-} from "@/features/image-generation/output-format";
-import { uploadTemporaryImageUrls } from "@/features/image-generation/request-utils";
+} from "@repo/image-generation/output-format";
+import { uploadTemporaryImageUrls } from "@repo/image-generation/request-utils";
 import {
   DEFAULT_IMAGE_SIZE,
   getImageModel,
   isImageModel,
   validateImageSize,
-} from "@/features/image-generation/resolution";
+} from "@repo/image-generation/resolution";
 import type {
   ImageInputFile,
   ImageModeration,
@@ -45,7 +45,7 @@ import type {
   ImageQuality,
   PartialImageResult,
   ThinkingLevel,
-} from "@/features/image-generation/types";
+} from "@repo/image-generation/types";
 
 import {
   buildChatCompletionAssistantContent,

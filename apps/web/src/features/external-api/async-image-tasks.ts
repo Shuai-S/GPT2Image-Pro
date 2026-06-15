@@ -3,7 +3,7 @@ import { logError } from "@repo/shared/logger";
 import {
   assertPublicCallbackUrl,
   fetchPublicCallback,
-} from "./safe-image-fetch";
+} from "@repo/shared/external-api/safe-image-fetch";
 
 type AsyncImageTaskStatus = "processing" | "completed" | "failed";
 

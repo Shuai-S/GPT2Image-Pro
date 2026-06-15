@@ -48,9 +48,9 @@ import { Pool } from "pg";
 import {
   type ChatGptWebAccountInfo,
   getChatGptWebAccountInfo,
-} from "@/features/image-generation/chatgpt-web";
-import { isContentSafetyRejection } from "@/features/image-generation/sla-classification";
-import type { ApiConfig } from "@/features/image-generation/types";
+} from "../chatgpt-web";
+import { isContentSafetyRejection } from "../sla-classification";
+import type { ApiConfig } from "../types";
 
 import {
   imageBackendApiInterfaceAllowsRequest,

@@ -19,7 +19,7 @@ import {
   getSelectableImageBackendGroupsAction,
   setUserImageBackendPreferenceAction,
 } from "./actions";
-import type { ImageBackendGroupBackendType } from "./types";
+import type { ImageBackendGroupBackendType } from "@repo/image-generation/image-backend/types";
 
 type GroupOption = {
   id: string;

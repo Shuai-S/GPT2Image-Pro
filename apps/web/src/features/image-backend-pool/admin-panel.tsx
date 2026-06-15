@@ -90,12 +90,12 @@ import {
   testImageBackendApiAction,
   updateSub2ApiAutoSyncTaskOptionsAction,
 } from "./actions";
-import { parseImportTokensText } from "./import-token-parser";
+import { parseImportTokensText } from "@repo/image-generation/image-backend/import-token-parser";
 import type {
   ImageBackendApiInterfaceMode,
   ImageBackendGroupBackendType,
   ImagesUpstreamMode,
-} from "./types";
+} from "@repo/image-generation/image-backend/types";
 
 type Group = {
   id: string;

@@ -174,9 +174,9 @@ export async function fetchPublicCallback(
       // 使用 DNS-pinning fetch 防止 rebinding 攻击
       response = await fetchWithDnsPin(parsed.href, {
         method: "POST",
-        headers: init.headers,
+        ...(init.headers ? { headers: init.headers } : {}),
         body: init.body,
-        signal: init.signal,
+        ...(init.signal ? { signal: init.signal } : {}),
       });
     } catch (err) {
       if (err instanceof SsrfBlockedError) {
@@ -289,8 +289,8 @@ export async function fetchPublicImage(
         // 使用 DNS-pinning fetch 防止 rebinding 攻击
         response = await fetchWithDnsPin(parsed.href, {
           method: "GET",
-          headers: init.headers,
-          signal: init.signal,
+          ...(init.headers ? { headers: init.headers } : {}),
+          ...(init.signal ? { signal: init.signal } : {}),
         });
       } catch (err) {
         if (err instanceof SsrfBlockedError) {

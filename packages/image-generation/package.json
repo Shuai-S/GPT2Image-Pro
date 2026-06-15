@@ -1,0 +1,73 @@
+{
+  "name": "@repo/image-generation",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./operations": "./src/operations.ts",
+    "./service": "./src/service.ts",
+    "./types": "./src/types.ts",
+    "./batch-runner": "./src/batch-runner.ts",
+    "./streaming": "./src/streaming.ts",
+    "./resolution": "./src/resolution.ts",
+    "./output-format": "./src/output-format.ts",
+    "./sla": "./src/sla.ts",
+    "./sla-classification": "./src/sla-classification.ts",
+    "./billing-policy": "./src/billing-policy.ts",
+    "./pricing-settings": "./src/pricing-settings.ts",
+    "./generation-metadata": "./src/generation-metadata.ts",
+    "./queue": "./src/queue.ts",
+    "./agent-tools": "./src/agent-tools.ts",
+    "./agent-round-cards": "./src/agent-round-cards.ts",
+    "./chatgpt-web": "./src/chatgpt-web.ts",
+    "./input-image-url": "./src/input-image-url.ts",
+    "./openai-prompt-cache": "./src/openai-prompt-cache.ts",
+    "./credit-calculation-details": "./src/credit-calculation-details.ts",
+    "./queries": "./src/queries.ts",
+    "./rehost-input-images": "./src/rehost-input-images.ts",
+    "./request-utils": "./src/request-utils.ts",
+    "./responses-image": "./src/responses-image.ts",
+    "./responses-native-state": "./src/responses-native-state.ts",
+    "./responses-output": "./src/responses-output.ts",
+    "./responses-request-normalizer": "./src/responses-request-normalizer.ts",
+    "./responses-usage": "./src/responses-usage.ts",
+    "./retry-metadata": "./src/retry-metadata.ts",
+    "./transparent-fallback": "./src/transparent-fallback.ts",
+    "./web-history-references": "./src/web-history-references.ts",
+    "./image-backend/service": "./src/image-backend/service.ts",
+    "./image-backend/types": "./src/image-backend/types.ts",
+    "./image-backend/health-check": "./src/image-backend/health-check.ts",
+    "./image-backend/api-interface-mode": "./src/image-backend/api-interface-mode.ts",
+    "./image-backend/group-billing": "./src/image-backend/group-billing.ts",
+    "./image-backend/import-token-parser": "./src/image-backend/import-token-parser.ts",
+    "./image-backend/scheduler-selection": "./src/image-backend/scheduler-selection.ts",
+    "./matte": "./src/matte.ts"
+  },
+  "scripts": {
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@repo/database": "workspace:*",
+    "@repo/shared": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "nanoid": "^5.1.11",
+    "pg": "^8.21.0",
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "sharp": ">=0.33.0",
+    "ag-psd": ">=30.0.0",
+    "onnxruntime-node": ">=1.20.0"
+  },
+  "peerDependenciesMeta": {
+    "sharp": { "optional": true },
+    "ag-psd": { "optional": true },
+    "onnxruntime-node": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/pg": "^8.15.4",
+    "vitest": "^4.1.7",
+    "typescript": "^5.8.3"
+  }
+}

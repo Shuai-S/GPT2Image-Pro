@@ -17,6 +17,7 @@
     "@hookform/resolvers": "^5.4.0",
     "@next/third-parties": "^16.2.7",
     "@repo/database": "workspace:*",
+    "@repo/image-generation": "workspace:*",
     "@repo/shared": "workspace:*",
     "@repo/ui": "workspace:*",
     "@sentry/nextjs": "^10.56.0",

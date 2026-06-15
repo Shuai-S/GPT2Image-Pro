@@ -16,8 +16,8 @@ import {
   getRuntimeSettingString,
 } from "@repo/shared/system-settings";
 import { eq } from "drizzle-orm";
-import { assertPublicApiBaseUrl } from "@/features/external-api/safe-image-fetch";
-import { imageBackendApiUsesResponsesEndpoint } from "@/features/image-backend-pool/api-interface-mode";
+import { assertPublicApiBaseUrl } from "@repo/shared/external-api/safe-image-fetch";
+import { imageBackendApiUsesResponsesEndpoint } from "./image-backend/api-interface-mode";
 import {
   acquireImageBackendInflight,
   bindImageBackendStickyMember,
@@ -28,12 +28,12 @@ import {
   releaseImageBackendInflightLease,
   reportImageBackendResult,
   resolveImageBackendPoolConfig,
-} from "@/features/image-backend-pool/service";
+} from "./image-backend/service";
 import type {
   ImageBackendAccountBackend,
   ImageBackendPreferenceMode,
   ImageBackendRequestKind,
-} from "@/features/image-backend-pool/types";
+} from "./image-backend/types";
 import {
   AGENT_CONTINUE_INSTRUCTIONS,
   createDefaultAgentAdditionalTools,

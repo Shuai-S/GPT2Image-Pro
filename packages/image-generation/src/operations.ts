@@ -31,12 +31,12 @@ import { nanoid } from "nanoid";
 import {
   ImageBackendPoolUnavailableError,
   releaseImageBackendInflightLease,
-} from "@/features/image-backend-pool/service";
-import type { ImageBackendRequestKind } from "@/features/image-backend-pool/types";
+} from "./image-backend/service";
+import type { ImageBackendRequestKind } from "./image-backend/types";
 import {
   reserveExternalApiKeyCredits,
   refundExternalApiKeyCredits,
-} from "@/features/external-api/quota";
+} from "@repo/shared/external-api/quota";
 import {
   buildGenerationBillingPolicy,
   getImageSuccessTargetCredits,

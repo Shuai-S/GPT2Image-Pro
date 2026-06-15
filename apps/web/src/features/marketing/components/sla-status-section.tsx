@@ -5,7 +5,7 @@ import { Eye, Loader2, X } from "lucide-react";
 import { useAction } from "next-safe-action/hooks";
 import { useState } from "react";
 import { toast } from "sonner";
-import type { GenerationSlaStats } from "@/features/image-generation/sla";
+import type { GenerationSlaStats } from "@repo/image-generation/sla";
 import { updateMarketingSlaStatusVisibilityAction } from "@/features/marketing/actions/sla-status";
 
 function formatPercent(value: number) {

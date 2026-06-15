@@ -31,20 +31,20 @@ import {
   toOpenAIImagesResponse,
   wantsImageStreamResponse,
 } from "@/features/external-api/images";
-import { runBatchImageGeneration } from "@/features/image-generation/batch-runner";
-import { runImageGenerationForUser } from "@/features/image-generation/operations";
+import { runBatchImageGeneration } from "@repo/image-generation/batch-runner";
+import { runImageGenerationForUser } from "@repo/image-generation/operations";
 import {
   normalizeOutputCompression,
   normalizeOutputFormat,
-} from "@/features/image-generation/output-format";
+} from "@repo/image-generation/output-format";
 import {
   DEFAULT_IMAGE_SIZE,
   getImageModel,
   IMAGE_PROMPT_MAX_CHARACTERS,
   IMAGE_PROMPT_TOO_LONG_MESSAGE,
   validateImageSize,
-} from "@/features/image-generation/resolution";
-import type { PartialImageResult } from "@/features/image-generation/types";
+} from "@repo/image-generation/resolution";
+import type { PartialImageResult } from "@repo/image-generation/types";
 
 const externalImageGenerationSchema = z.object({
   prompt: z

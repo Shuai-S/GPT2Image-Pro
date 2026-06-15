@@ -9,8 +9,8 @@ import { db } from "@repo/database";
 import { externalApiKey } from "@repo/database/schema";
 import {
   normalizeExternalApiKeyCreditLimit,
-} from "@/features/external-api/quota";
-import { listImageBackendGroupOptions } from "@/features/image-backend-pool/service";
+} from "@repo/shared/external-api/quota";
+import { listImageBackendGroupOptions } from "@repo/image-generation/image-backend/service";
 import { protectedAction } from "@repo/shared/safe-action";
 import {
   canUsePlanCapability,

@@ -24,7 +24,7 @@ vi.mock("@repo/shared/storage/providers", () => ({
 
 vi.mock("@repo/shared/logger", () => logMock);
 
-vi.mock("../external-api/safe-image-fetch", () => ({
+vi.mock("@repo/shared/external-api/safe-image-fetch", () => ({
   fetchPublicImage: fetchMocks.fetchPublicImage,
   // readResponseBytesWithLimit 走真实实现，直接读 Response 字节。
   readResponseBytesWithLimit: async (response: Response) =>

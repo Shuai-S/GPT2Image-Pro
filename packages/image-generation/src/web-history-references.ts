@@ -1,5 +1,5 @@
 import path from "node:path";
-import { fetchPublicImage } from "../external-api/safe-image-fetch";
+import { fetchPublicImage } from "@repo/shared/external-api/safe-image-fetch";
 import type { ChatHistoryMessage, ImageInputFile } from "./types";
 
 // 远程历史图片下载的正文大小上限（25MB），防止伪造 content-length 的 OOM DoS。

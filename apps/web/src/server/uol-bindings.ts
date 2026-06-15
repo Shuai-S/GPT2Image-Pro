@@ -21,9 +21,9 @@ import "@repo/shared/uol/operations";
 import { bindExecute } from "@repo/shared/uol";
 import type { Principal, OperationContext } from "@repo/shared/uol";
 
-import { runImageGenerationForUser } from "@/features/image-generation/operations";
-import type { ImageQuality } from "@/features/image-generation/types";
-import { listAdminImageBackendPool } from "@/features/image-backend-pool/service";
+import { runImageGenerationForUser } from "@repo/image-generation/operations";
+import type { ImageQuality } from "@repo/image-generation/types";
+import { listAdminImageBackendPool } from "@repo/image-generation/image-backend/service";
 
 // ---------------------------------------------------------------------------
 // image-generation 域
