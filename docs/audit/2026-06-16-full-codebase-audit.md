@@ -370,21 +370,21 @@
 
 ## 建议修复优先级
 
-### P0: Critical（立即修复）
+### P0: Critical（立即修复） -- 已修复 (974badb)
 
-| 编号 | 问题 | 文件 | 理由 |
+| 编号 | 问题 | 文件 | 状态 |
 |------|------|------|------|
-| 1 | creditsConsumed 在存储错误路径永远无法写入 DB | `operations.ts` L2559-2601 | 数据完整性 Bug，影响所有存储失败的生成记录，用户历史页面显示错误积分消耗值 |
-| 2 | Admin 积分发放缺少 sourceRef，无幂等保护 | `admin-users.ts` L785-797 | 财务安全问题，可导致重复发放积分 |
+| 1 | creditsConsumed 在存储错误路径永远无法写入 DB | `operations.ts` | 已修复：合并两次 UPDATE 为单次 |
+| 2 | Admin 积分发放缺少 sourceRef，无幂等保护 | `admin-users.ts` | 已修复：添加确定性 sourceRef |
 
-### P1: High（本 Sprint 修复）
+### P1: High（本 Sprint 修复） -- 已修复 (974badb)
 
-| 编号 | 问题 | 文件 | 理由 |
+| 编号 | 问题 | 文件 | 状态 |
 |------|------|------|------|
-| 3 | Gallery 页面无 LIMIT 查询 | `gallery/page.tsx` L203-213 | 对高频用户造成严重性能退化 |
-| 4 | Admin 状态页 7 万行加载至内存 | `admin/status/page.tsx` L1358-1375 | 缓存失效时阻塞请求，270MB GC 压力 |
-| 5 | subscription 表缺少 userId 索引 | `schema.ts` L240-253 | 图片生成热路径上的全表扫描 |
-| 6 | Creem webhook subscription.active 排序竞态 | `creem/route.ts` L388-429 | 用户付款但无积分的财务风险 |
+| 3 | Gallery 页面无 LIMIT 查询 | `gallery/page.tsx` | 已修复：添加 .limit() + 独立 COUNT |
+| 4 | Admin 状态页 7 万行加载至内存 | `admin/status/page.tsx` | 已修复：添加 .limit(10000) |
+| 5 | subscription 表缺少 userId 索引 | migration 0039 | 已修复：复合索引 (user_id, updated_at DESC) |
+| 6 | Creem webhook subscription.active 排序竞态 | `creem/route.ts` | 已修复：checkout.completed 也调用 grantSubscriptionCredits |
 
 ### P2: Medium（下 Sprint 计划）
 
