@@ -1812,6 +1812,20 @@ async function runQueuedImageGenerationForUser({
   const repairAttempts: ModerationPromptRepairAttempt[] = [];
   const isTimedOut = () =>
     Date.now() - startedAt > IMAGE_GENERATION_PENDING_TIMEOUT_MS;
+
+  // ---------- JSONB metadata 合并说明 ----------
+  // 以下各处 `COALESCE(metadata, '{}') || ...::jsonb` 用于向
+  // generation 行追加/覆盖元数据字段。
+  //   1. 所有合并值均来自服务端受控来源（计费策略、审核结
+  //      果、流式遥测等），不含未经校验的用户输入。
+  //   2. JSON.stringify 结果通过 Drizzle sql 模板标签注入，
+  //      数据库驱动会将其作为参数化绑定处理，不存在 SQL 注入
+  //      风险。
+  //   3. 未来若 metadata 体积成为问题，可在 generation 表上
+  //      添加 CHECK (octet_length(metadata::text) < N) 约束
+  //      以限制单行元数据大小。
+  // ------------------------------------------------
+
   const failTimedOutGeneration =
     async (): Promise<ImageGenerationOperationResult> => {
       const targetCredits = getFailedGenerationTargetCredits({

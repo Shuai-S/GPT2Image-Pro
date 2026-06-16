@@ -194,20 +194,15 @@ export class AccountFrozenError extends Error {
 /**
  * 确保用户有积分账户
  *
- * 如果账户不存在则创建
+ * 如果账户不存在则创建。
+ * 使用 INSERT ... ON CONFLICT (userId) DO NOTHING 避免并发调用时
+ * 先查后插的 TOCTOU 竞态：两个并发请求可能同时通过 SELECT 空检查，
+ * 导致其中一个 INSERT 因 userId 唯一约束而失败返回 500。
+ * 改为无条件 INSERT + 冲突忽略后再 SELECT，保证幂等且无竞态。
  */
 export async function ensureCreditsBalance(userId: string) {
-  const [existing] = await db
-    .select()
-    .from(creditsBalance)
-    .where(eq(creditsBalance.userId, userId))
-    .limit(1);
-
-  if (existing) {
-    return existing;
-  }
-
-  const [newBalance] = await db
+  // 先尝试插入，冲突（userId 已存在）时静默忽略，避免 TOCTOU 竞态
+  await db
     .insert(creditsBalance)
     .values({
       id: crypto.randomUUID(),
@@ -217,13 +212,20 @@ export async function ensureCreditsBalance(userId: string) {
       totalSpent: 0,
       status: "active",
     })
-    .returning();
+    .onConflictDoNothing();
 
-  if (!newBalance) {
+  // 无论是新插入还是冲突忽略，此处一定能查到记录
+  const [balance] = await db
+    .select()
+    .from(creditsBalance)
+    .where(eq(creditsBalance.userId, userId))
+    .limit(1);
+
+  if (!balance) {
     throw new Error("创建积分账户失败");
   }
 
-  return newBalance;
+  return balance;
 }
 
 /**

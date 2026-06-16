@@ -1,3 +1,7 @@
+// MDX 内容在构建时编译为 React 组件，视为可信代码。
+// 仅从代码仓库加载内容文件，不接受用户提交。
+// 如需 UGC 内容，须改用 markdown-only 渲染器（无 JSX 能力）。
+
 import {
   defineCollections,
   defineDocs,

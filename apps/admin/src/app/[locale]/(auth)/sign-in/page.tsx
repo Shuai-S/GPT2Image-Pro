@@ -28,8 +28,11 @@ import { Input } from "@repo/ui/components/input";
 import { Label } from "@repo/ui/components/label";
 
 // 管理员认证客户端（指向当前 admin 应用的 /api/auth）
+// 优先使用环境变量注入的认证地址，避免依赖 window.location.origin 推断
 const adminAuthClient = createAuthClient({
-  baseURL: typeof window !== "undefined" ? window.location.origin : "",
+  baseURL:
+    process.env.NEXT_PUBLIC_ADMIN_AUTH_URL ||
+    (typeof window !== "undefined" ? window.location.origin : ""),
 });
 
 export default function AdminSignInPage() {

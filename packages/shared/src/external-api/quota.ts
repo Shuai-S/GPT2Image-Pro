@@ -67,6 +67,8 @@ export async function reserveExternalApiKeyCredits(params: {
   const amount = roundQuotaCredits(params.amount);
   if (amount <= 0) return;
 
+  // 配额扣减使用 PostgreSQL 条件 UPDATE（WHERE creditsUsed + cost <= creditLimit），
+  // 行级锁保证原子性。高并发下不会超额，但可能产生不必要的竞争重试。
   const [updated] = await db
     .update(externalApiKey)
     .set({

@@ -138,11 +138,17 @@ const banUserSchema = userIdSchema.extend({
   reason: z.string().trim().max(300).optional(),
 });
 
+// 积分发放上限：单次最多 1,000,000（100 万）积分，超出拒绝。
+// Zod 层面兜底校验，action 层面亦有 superAdminAction 权限门控。
+const GRANT_CREDITS_MAX = 1_000_000;
 const grantCreditsSchema = userIdSchema.extend({
   amount: z
     .number()
     .positive("积分数量必须大于0")
-    .max(100000, "单次最多充值10万积分"),
+    .max(
+      GRANT_CREDITS_MAX,
+      `单次最多充值${GRANT_CREDITS_MAX.toLocaleString()}积分`
+    ),
   reason: reasonSchema,
 });
 
@@ -776,15 +782,16 @@ export const banUserAction = withAdminUsersAction("banUser")
     };
   });
 
-export const adminGrantCreditsAction = withAdminUsersAction("grantCredits")
+// 积分发放操作提升为 superAdminAction（原为 adminAction）。
+// 原因：积分发放属于高敏财务操作，普通 admin 不应拥有"凭空铸币"能力，
+// 仅 super_admin 可执行。同时增加单次上限 1,000,000 积分的 Zod 校验兜底。
+export const adminGrantCreditsAction = withSuperAdminUsersAction(
+  "grantCredits"
+)
   .schema(grantCreditsSchema)
   .action(async ({ parsedInput: data, ctx }) => {
     const targetUser = await getUserBasicOrThrow(data.userId);
-    // 防普通管理员自助铸币(S-H5);超管为最高信任层级,允许给自己充值。
-    if (data.userId === ctx.userId && ctx.role !== "super_admin") {
-      throw new ActionUserError("不能为自己发放积分");
-    }
-    // 目标权限护栏：普通 admin 不得向管理员及超管账户发放积分。
+    // 目标权限护栏：不得向权限等级不低于自己的账户发放积分。
     assertCanActOnTarget(ctx.role, targetUser.role, "积分发放");
 
     // 管理员手动充值的积分长期有效、不设过期(与系统赠送的免费积分区分)。

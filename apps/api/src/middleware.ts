@@ -48,9 +48,30 @@ function setCorsHeaders(
   return response;
 }
 
+/**
+ * 判断请求路径是否为 cron job 路由（/api/jobs/*）
+ */
+function isCronJobRoute(pathname: string): boolean {
+  return pathname.startsWith("/api/jobs/");
+}
+
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const origin = request.headers.get("origin");
+
+  // 纵深防御：cron job 端点的 GET 请求也须携带 Authorization 头，
+  // 防止未认证访问泄露元数据。各路由处理器内部有独立的 CRON_SECRET
+  // 校验，此处仅作为额外的防护层拦截无凭据请求。
+  if (
+    isCronJobRoute(pathname) &&
+    request.method === "GET" &&
+    !request.headers.get("authorization")
+  ) {
+    return NextResponse.json(
+      { error: "Unauthorized" },
+      { status: 401 },
+    );
+  }
 
   // 非 API 路由直接透传
   if (!isApiRoute(pathname)) {

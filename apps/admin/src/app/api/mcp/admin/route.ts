@@ -125,18 +125,50 @@ interface McpRateBucket {
 const mcpRateBuckets = new Map<string, McpRateBucket>();
 
 /**
- * MCP 专用内存限流检查。
- * MCP 端点统一使用 "mcp_admin" 为标识前缀，
- * 按来源 IP（或固定标识）做每分钟限流。
+ * 从请求头中提取客户端 IP 地址。
+ *
+ * 优先级：X-Forwarded-For 最左侧 IP > X-Real-IP > 兜底 "unknown"。
+ * X-Forwarded-For 可能包含多个逗号分隔的 IP，最左侧为原始客户端。
+ *
+ * @param request - 原始 HTTP 请求
+ * @returns 客户端 IP 字符串
  */
-function checkMcpRateLimit(perMinLimit: number): boolean {
+function getClientIp(request: Request): string {
+  const xff = request.headers.get("x-forwarded-for");
+  if (xff) {
+    // X-Forwarded-For 格式：client, proxy1, proxy2
+    const firstIp = xff.split(",")[0]?.trim();
+    if (firstIp) return firstIp;
+  }
+
+  const xRealIp = request.headers.get("x-real-ip");
+  if (xRealIp) return xRealIp.trim();
+
+  return "unknown";
+}
+
+/**
+ * MCP 专用内存限流检查（按客户端 IP）。
+ *
+ * 每个 IP 独立计数，防止单个来源耗尽全局配额影响其他合法客户端。
+ * 使用滑动窗口：每分钟重置计数器。
+ * 定期清理过期桶，防止内存泄漏（桶数量上限 10000）。
+ *
+ * @param clientIp - 客户端 IP 地址
+ * @param perMinLimit - 每分钟每 IP 允许的最大请求数
+ * @returns true 表示未超限，false 表示已超限
+ */
+function checkMcpRateLimit(
+  clientIp: string,
+  perMinLimit: number,
+): boolean {
   const now = Date.now();
-  const key = "mcp_admin_global";
+  const key = `mcp_admin_ip:${clientIp}`;
   const bucket = mcpRateBuckets.get(key);
 
   if (!bucket || bucket.resetAt <= now) {
-    // 清理过期桶
-    if (mcpRateBuckets.size > 1000) {
+    // 清理过期桶，防止长时间运行后内存泄漏
+    if (mcpRateBuckets.size > 10_000) {
       for (const [k, v] of mcpRateBuckets) {
         if (v.resetAt <= now) mcpRateBuckets.delete(k);
       }
@@ -162,9 +194,10 @@ export async function POST(request: Request) {
     );
   }
 
-  // 2. 限流检查
+  // 2. 按客户端 IP 限流检查
+  const clientIp = getClientIp(request);
   const rateLimit = getMcpRateLimitPerMin();
-  if (!checkMcpRateLimit(rateLimit)) {
+  if (!checkMcpRateLimit(clientIp, rateLimit)) {
     return NextResponse.json(
       jsonRpcError(null, JSONRPC_RATE_LIMITED, "Rate limit exceeded"),
       { status: 429 },

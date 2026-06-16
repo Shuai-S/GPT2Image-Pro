@@ -17,12 +17,28 @@ import sharp from "sharp";
 /** ISNet 输入边长。 */
 const MODEL_INPUT = 1024;
 
-/** 模型文件路径:优先 env,否则相对运行目录的 models/isnet.onnx(standalone 与 dev 一致)。 */
+/**
+ * 模型文件路径:优先 env,否则相对运行目录的 models/isnet.onnx(standalone 与 dev 一致)。
+ *
+ * 安全校验:解析后路径必须为 .onnx 且不含 ".."，防止路径穿越加载任意文件。
+ */
 function modelPath(): string {
-  return (
+  const raw =
     process.env.ISNET_MODEL_PATH?.trim() ||
-    path.join(process.cwd(), "models", "isnet.onnx")
-  );
+    path.join(process.cwd(), "models", "isnet.onnx");
+  const resolved = path.resolve(raw);
+  if (!resolved.endsWith(".onnx")) {
+    throw new Error(
+      "ISNET_MODEL_PATH must point to an .onnx file"
+    );
+  }
+  // 解析后仍含 ".." 说明路径穿越未被消除（如符号链接场景）
+  if (resolved.includes("..")) {
+    throw new Error(
+      "ISNET_MODEL_PATH must not contain '..'"
+    );
+  }
+  return resolved;
 }
 
 let sessionPromise: Promise<ort.InferenceSession> | null = null;

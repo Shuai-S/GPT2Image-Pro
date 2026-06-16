@@ -573,39 +573,42 @@ async function handleSubscriptionPaused(sub: CreemSubscription) {
 
 /**
  * 创建或更新订阅记录
+ *
+ * 使用 Drizzle onConflictDoUpdate 基于 subscription_id 唯一约束实现原子 upsert，
+ * 消除先前 SELECT-then-INSERT/UPDATE 模式在并发 webhook 下的竞态窗口
+ * （两个事件同时 SELECT 为空 -> 双 INSERT 报唯一冲突）。
  */
 async function createOrUpdateSubscription(
   userId: string,
   sub: CreemSubscription
 ) {
-  const [existingSub] = await db
-    .select()
-    .from(subscription)
-    .where(eq(subscription.userId, userId))
-    .limit(1);
+  const now = new Date();
 
-  const subscriptionData = {
-    subscriptionId: sub.id,
-    priceId: getProductId(sub),
-    status: sub.status,
-    currentPeriodStart: new Date(sub.current_period_start_date),
-    currentPeriodEnd: new Date(sub.current_period_end_date),
-    cancelAtPeriodEnd: sub.cancel_at_period_end,
-    updatedAt: new Date(),
-  };
-
-  if (existingSub) {
-    await db
-      .update(subscription)
-      .set(subscriptionData)
-      .where(eq(subscription.userId, userId));
-  } else {
-    await db.insert(subscription).values({
+  await db
+    .insert(subscription)
+    .values({
       id: crypto.randomUUID(),
       userId,
-      ...subscriptionData,
+      subscriptionId: sub.id,
+      priceId: getProductId(sub),
+      status: sub.status,
+      currentPeriodStart: new Date(sub.current_period_start_date),
+      currentPeriodEnd: new Date(sub.current_period_end_date),
+      cancelAtPeriodEnd: sub.cancel_at_period_end,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: subscription.subscriptionId,
+      set: {
+        priceId: getProductId(sub),
+        status: sub.status,
+        currentPeriodStart: new Date(sub.current_period_start_date),
+        currentPeriodEnd: new Date(sub.current_period_end_date),
+        cancelAtPeriodEnd: sub.cancel_at_period_end,
+        updatedAt: now,
+      },
     });
-  }
 
   logger.info({ userId }, "Subscription created/updated");
 }
@@ -638,6 +641,26 @@ async function grantSubscriptionCredits(
   sub: CreemSubscription,
   billingReason: "subscription_create" | "subscription_cycle"
 ) {
+  // 订阅状态校验：仅在订阅处于 active 或 trialing 状态时发放积分。
+  // canceled / past_due / paused 状态的订阅不应获得积分，防止已取消或
+  // 欠费的订阅仍被误发放（例如 Creem 事件乱序或延迟投递时）。
+  const grantableStatuses: CreemSubscription["status"][] = [
+    "active",
+    "trialing",
+  ];
+  if (!grantableStatuses.includes(sub.status)) {
+    logger.info(
+      {
+        subscriptionId: sub.id,
+        status: sub.status,
+        userId,
+        billingReason,
+      },
+      "Skipping credit grant: subscription status is not active/trialing"
+    );
+    return;
+  }
+
   const priceId = getProductId(sub);
   const planType = getPlanFromPriceId(priceId);
 

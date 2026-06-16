@@ -22,7 +22,20 @@ export const POST = withApiLogging(async () => {
   return NextResponse.json(await runImageMaintenanceJob());
 });
 
+/**
+ * GET /api/jobs/images/expire-pending
+ *
+ * 健康检查端点。需通过 CRON_SECRET 鉴权，防止未认证访问泄露端点元数据。
+ */
 export const GET = withApiLogging(async () => {
+  const headersList = await headers();
+  if (!validateCronSecret(headersList.get("authorization"))) {
+    return NextResponse.json(
+      { error: "Unauthorized" },
+      { status: 401 },
+    );
+  }
+
   return NextResponse.json({
     status: "ok",
     endpoint: "/api/jobs/images/expire-pending",

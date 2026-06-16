@@ -3,6 +3,15 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db } from "@repo/database";
 import * as schema from "@repo/database/schema";
 
+// 运行时检查：管理员认证密钥必须独立配置，不得与用户侧共享
+if (!process.env.ADMIN_BETTER_AUTH_SECRET) {
+  console.warn(
+    "[admin-auth] ADMIN_BETTER_AUTH_SECRET 未设置。" +
+      "管理员认证将无法正常工作。" +
+      "此密钥必须独立于 BETTER_AUTH_SECRET 单独配置。"
+  );
+}
+
 /**
  * 管理员独立 Better Auth 实例
  *
@@ -14,7 +23,7 @@ import * as schema from "@repo/database/schema";
  * - drizzle adapter 的 schema 映射：key 仍为 Better Auth 内部模型名 (user/session/account/verification)，
  *   value 为实际的 admin_* drizzle table 对象。adapter 内部通过 key 查找对应 table 对象，
  *   然后直接传给 drizzle-orm 的 insert/select/update/delete，drizzle 从 pgTable() 声明解析实际 SQL 表名。
- * - 独立 secret (ADMIN_BETTER_AUTH_SECRET)，回退到 BETTER_AUTH_SECRET。
+ * - 独立 secret (ADMIN_BETTER_AUTH_SECRET)，必须单独配置，不回退到共享密钥。
  * - 独立 baseURL (ADMIN_AUTH_URL)，默认 http://localhost:3001。
  */
 export const adminAuth = betterAuth({
@@ -27,11 +36,9 @@ export const adminAuth = betterAuth({
 
   /**
    * 独立密钥
-   * 优先使用 ADMIN_BETTER_AUTH_SECRET，回退到共享的 BETTER_AUTH_SECRET
+   * 必须单独设置 ADMIN_BETTER_AUTH_SECRET，不得与用户侧共享密钥
    */
-  secret:
-    process.env.ADMIN_BETTER_AUTH_SECRET ||
-    process.env.BETTER_AUTH_SECRET,
+  secret: process.env.ADMIN_BETTER_AUTH_SECRET,
 
   /**
    * 数据库配置

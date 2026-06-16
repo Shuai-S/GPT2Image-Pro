@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 import { type NextRequest, NextResponse } from "next/server";
 import { withApiLogging } from "@repo/shared/api-logger";
 import { auth } from "@repo/shared/auth";
+import { logError } from "@repo/shared/logger";
 import { validateUploadRequest } from "./validation";
 
 /**
@@ -76,7 +77,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
       expiresIn: 3600,
     });
   } catch (error) {
-    console.error("Error creating presigned URL:", error);
+    logError(error, { context: "presigned-url-creation" });
     return NextResponse.json(
       { error: "Failed to create upload URL" },
       { status: 500 }

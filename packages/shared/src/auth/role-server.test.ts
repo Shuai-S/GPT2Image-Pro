@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// 守护审计 C-M25：getUserRoleById 含本地超管自动提权后门
-// （role==='admin' 且 email===LOCAL_SUPER_ADMIN_EMAIL 时升 super_admin）。
+// 守护审计 C-M25/P3-23：getUserRoleById 含本地超管自动提权后门
+// （isSelfUseModeEnabled() + role==='admin' + email===LOCAL_SUPER_ADMIN_EMAIL
+// 三重条件满足时升 super_admin）。
 // 该函数是 adminAction/superAdminAction/checkAdmin 取角色的唯一入口（授权链根），
-// 提权条件须严格——误改邮箱常量/去掉 role 前置/改模糊匹配都会成提权后门，
-// 故对提权分支与各非提权分支均断言，并断言提权确实落库。
+// 提权条件须严格——误改邮箱常量/去掉 role 前置/改模糊匹配/去掉自用模式守卫
+// 都会成提权后门，故对提权分支与各非提权分支均断言，并断言提权确实落库。
 
 const state = vi.hoisted(() => ({
   userRows: [] as Array<{ email: string | null; role: string | null }>,
@@ -40,6 +41,20 @@ vi.mock("drizzle-orm", () => ({
   eq: vi.fn(() => ({})),
 }));
 
+// 默认自用模式启用；个别用例覆盖为 false 以测试守卫。
+const selfUseModeEnabled = vi.hoisted(() => ({ value: true }));
+
+vi.mock("./self-use-mode", async (importOriginal) => {
+  const orig =
+    await importOriginal<typeof import("./self-use-mode")>();
+  return {
+    ...orig,
+    isSelfUseModeEnabled: vi.fn(
+      async () => selfUseModeEnabled.value
+    ),
+  };
+});
+
 describe("getUserRoleById", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -47,6 +62,7 @@ describe("getUserRoleById", () => {
     updateCalls.length = 0;
     dbMock.select.mockClear();
     dbMock.update.mockClear();
+    selfUseModeEnabled.value = true;
   });
 
   it("把本地超管邮箱的 admin 自动提升为 super_admin 并落库", async () => {
@@ -82,6 +98,17 @@ describe("getUserRoleById", () => {
 
   it("邮箱非本地超管即便角色是 admin 也不提权", async () => {
     state.userRows = [{ email: "someone@gmail.com", role: "admin" }];
+
+    const { getUserRoleById } = await import("./role-server");
+    const role = await getUserRoleById("user-1");
+
+    expect(role).toBe("admin");
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it("自用模式关闭时即便条件满足也不提权", async () => {
+    selfUseModeEnabled.value = false;
+    state.userRows = [{ email: "admin@gpt2image.local", role: "admin" }];
 
     const { getUserRoleById } = await import("./role-server");
     const role = await getUserRoleById("user-1");

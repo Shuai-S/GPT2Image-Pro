@@ -88,7 +88,8 @@ const responseSchema = z.object({
   model: z.string().optional(),
   input: z.union([z.string(), z.array(responseInputMessageSchema)]),
   previous_response_id: z.string().optional(),
-  prompt_cache_key: z.string().optional(),
+  // 限制 JSONB 键长度，防止超大键值写入 jsonb 列导致查询退化
+  prompt_cache_key: z.string().max(256).optional(),
   tools: z.array(z.object({ type: z.string() }).passthrough()).optional(),
   tool_choice: z.unknown().optional(),
   stream: z.boolean().optional(),

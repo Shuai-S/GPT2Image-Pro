@@ -34,13 +34,18 @@ export function isPublicBucket(bucket: string): boolean {
 
 /**
  * 获取签名密钥。
- * 使用 BETTER_AUTH_SECRET，与 auth 系统共享密钥以避免引入新环境变量。
+ * 优先使用 STORAGE_SIGNING_SECRET，回退到 BETTER_AUTH_SECRET。
+ * 生产环境建议配置独立的 STORAGE_SIGNING_SECRET，与认证密钥隔离，
+ * 避免认证密钥轮换时影响已签发的存储 URL。
  */
 function getSigningSecret(): string {
-  const secret = process.env.BETTER_AUTH_SECRET;
+  const secret =
+    process.env.STORAGE_SIGNING_SECRET ||
+    process.env.BETTER_AUTH_SECRET;
   if (!secret) {
     throw new Error(
-      "BETTER_AUTH_SECRET is required for storage URL signing"
+      "STORAGE_SIGNING_SECRET or BETTER_AUTH_SECRET is required" +
+        " for storage URL signing"
     );
   }
   return secret;

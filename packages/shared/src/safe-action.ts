@@ -72,12 +72,10 @@ const baseActionClient = createSafeActionClient({
     // Sentry 上报（未配置时自动跳过）
     captureError(error, { source: "server-action" });
 
-    // 生产环境返回通用错误信息
-    if (process.env.NODE_ENV === "production") {
-      return "服务器错误，请稍后重试";
-    }
-
-    return error.message;
+    // 生产环境返回通用错误信息，避免内部细节泄露到客户端 toast
+    return process.env.NODE_ENV === "production"
+      ? "操作失败，请稍后重试"
+      : error.message;
   },
 });
 

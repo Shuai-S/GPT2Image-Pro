@@ -105,7 +105,8 @@ ENV NEXT_PUBLIC_AVATARS_BUCKET_NAME=avatars
 ENV ISNET_MODEL_PATH=/app/apps/web/models/isnet.onnx
 
 # 安装 PM2（多进程管理）
-RUN npm install -g pm2
+# P3-22: 锁定版本号防止供应链攻击，避免自动拉取被投毒的新版本
+RUN npm install -g pm2@5.4.3
 
 RUN groupadd --system --gid 1001 nodejs && \
     useradd --system --uid 1001 --gid nodejs nextjs
