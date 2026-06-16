@@ -34,12 +34,14 @@
 - Dependabot 已忽略 semver-major（npm + actions）；major 升级人工评估
 - **kysely 被 pnpm override 钉在 0.28.17**（根 package.json）：better-auth 1.6 放宽 peer 让 kysely 浮到 0.29，而 0.29 把迁移导出迁到 `kysely/migration` 子路径、随 better-auth 打包的 kysely-adapter 仍从根导入 → next build 编译炸。待上游修复后移除（见 docs/TODO.md）
 
-## 多平台分割（进行中）
+## 多平台分割（已完成主体，分支 feat/multi-app-split）
 
-- **分支 `feat/multi-app-split`**：4-app 拆分（web/admin/api/platform）
-- **Phase 0 完成**（a2376e5, faf8845）：packages/image-generation 创建（30+核心文件+image-backend-pool服务层），external-api 核心+scheduled-jobs 提升到共享包
-- Phase 1 进行中：apps/platform 脚手架+营销/文档迁移
-- 详见 [计划文件](../docs/plan/) 和 [TODO.md](TODO.md)
+- **Phase 0**: packages/image-generation 创建（47 核心文件+image-backend-pool 服务层），external-api/scheduled-jobs 提升到共享包
+- **Phase 1**: apps/platform 创建（port 3003），营销/文档/博客/PSEO 迁移（81 文件）
+- **Phase 2**: apps/api 创建（port 3002），v1 API/webhooks/cron/MCP-user/storage 迁移（46 文件）
+- **Phase 3**: apps/admin 创建（port 3001），独立 Better Auth（migration 0040），admin 路由迁移（54 文件）
+- **Phase 4**: PM2 + Nginx + Dockerfile.multi + CI 更新
+- 待合并 dev 前需完整 CI 验证
 
 ## 关键架构事实
 
