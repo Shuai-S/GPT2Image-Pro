@@ -1,3 +1,4 @@
+import { fetchPublicImage } from "@repo/shared/external-api/safe-image-fetch";
 import { logWarn } from "@repo/shared/logger";
 import {
   buildPublicImageUrl,
@@ -108,11 +109,13 @@ export async function getImageBase64(request: Request, imageUrl?: string) {
   const authorization = firstParty
     ? request.headers.get("authorization")
     : null;
-  // 仅在需要转发授权时附带 headers；否则用单参 fetch(url)，
+  // 仅在需要转发授权时附带 headers；否则用 fetchPublicImage(url)，
   // 避免向上游第三方传出任何（哪怕是 undefined 的）请求头。
+  // SSRF 防护：非第一方 URL 使用 fetchPublicImage 校验目标地址，
+  // 阻断内网/回环/元数据端点访问，防止 SSRF 攻击。
   const response = authorization
     ? await fetch(url, { headers: { Authorization: authorization } })
-    : await fetch(url);
+    : await fetchPublicImage(url);
   if (!response.ok) {
     throw new Error(`Failed to load generated image: ${response.status}`);
   }

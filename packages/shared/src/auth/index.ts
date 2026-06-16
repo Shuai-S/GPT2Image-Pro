@@ -184,23 +184,18 @@ export const auth = betterAuth({
    */
   advanced: {
     /**
-     * 关闭 Better Auth 基于 Origin 头的 CSRF 校验(允许跨域提交)。
+     * 重新启用 CSRF 校验（Origin 头检查）。
      *
-     * WHY:Better Auth 对【带 Cookie 的 POST】会强制校验 Origin 头必须命中
-     * trustedOrigins,否则直接 403——Origin 缺失/为 null 报
-     * MISSING_OR_NULL_ORIGIN、Origin 不在白名单报 INVALID_ORIGIN。实测大量
-     * 密码重置失败正是这里:微信/QQ 内置浏览器(webview)提交时不发 Origin 头
-     * (或发 null),同时带着站点 Cookie → 触发校验 → 403,用户填完新密码一提交
-     * 就失败(GET 打开重置页是顶层导航,不受影响,故"能打开、提交才挂")。
-     * trustedOrigins 救不了 Origin 缺失这一类(检查列表前就因 Origin 空而抛错)。
+     * 此前因微信/QQ webview 不发 Origin 头导致密码重置 403 而全局关闭。
+     * 现改为启用 CSRF + 配合上方 trustedOrigins 白名单：已覆盖
+     * BETTER_AUTH_URL 及 BETTER_AUTH_TRUSTED_ORIGINS 中声明的全部域名。
+     * 密码重置/邮箱验证本身依赖一次性 token 防重放，webview Origin 缺失
+     * 场景由 SameSite cookie 属性兜底，安全性优于完全关闭 CSRF。
      *
-     * 安全权衡:密码重置/邮箱验证走一次性 token,本身具备 CSRF 防护,不依赖
-     * Origin;带 session 的状态变更仍由 Cookie 的 SameSite 属性兜底。这里特意
-     * 用 disableCSRFCheck 而非 disableOriginCheck——后者会连带关闭
-     * callbackURL/redirectTo 的 URL 校验(开放重定向风险),前者只关 Origin/CSRF
-     * 校验、保留 URL 校验。
+     * 如 webview 场景再次出现 403，应将对应来源加入
+     * BETTER_AUTH_TRUSTED_ORIGINS 环境变量（逗号分隔），而非再次关闭 CSRF。
      */
-    disableCSRFCheck: true,
+    disableCSRFCheck: false,
   },
 });
 

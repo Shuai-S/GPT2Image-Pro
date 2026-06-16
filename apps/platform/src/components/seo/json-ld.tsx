@@ -14,12 +14,18 @@ type LocaleType = "en" | "zh";
 
 /**
  * Generic JSON-LD script injector
+ *
+ * 将结构化数据安全注入 <script type="application/ld+json">。
+ * 对序列化结果中的 "<" 字符进行转义（<），防止恶意数据通过
+ * </script> 标签提前闭合脚本块实施 XSS 注入。
  */
 function JsonLdScript({ data }: { data: object }) {
+  // 转义 < 为 Unicode 转义序列，防止 </script> 注入
+  const safeJson = JSON.stringify(data).replace(/</g, "\\u003c");
   return (
     <script
       type="application/ld+json"
-      dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }}
+      dangerouslySetInnerHTML={{ __html: safeJson }}
     />
   );
 }

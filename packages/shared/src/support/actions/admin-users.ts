@@ -108,7 +108,7 @@ const planFilterSchema = z.enum([
 
 const listUsersSchema = z
   .object({
-    query: z.string().trim().optional(),
+    query: z.string().trim().max(100).optional(),
     page: z.number().int().min(1).default(1),
     pageSize: z.number().int().min(10).max(100).default(20),
     status: userStatusSchema.default("all"),
@@ -309,11 +309,19 @@ function normalizeAdminCreditAmount(amount: number) {
   return Math.round((amount + Number.EPSILON) * 100) / 100;
 }
 
+/**
+ * 转义 SQL LIKE 通配符，防止用户输入 %、_、\ 导致模糊匹配范围失控。
+ * 在包裹 %...% 之前调用，确保输入中的特殊字符被当作字面值匹配。
+ */
+function escapeLikePattern(pattern: string): string {
+  return pattern.replace(/[%_\\]/g, "\\$&");
+}
+
 function buildUserFilters(input: ReturnType<typeof normalizeListInput>) {
   const filters = [];
 
   if (input.query) {
-    const query = `%${input.query}%`;
+    const query = `%${escapeLikePattern(input.query)}%`;
     filters.push(
       or(
         ilike(user.id, query),
@@ -840,10 +848,15 @@ export const adminAdjustCreditsAction = withSuperAdminUsersAction(
       );
     }
 
+    // 幂等键：admin_deduct:{操作者}:{目标用户}:{时间戳}，防止因网络重试
+    // 导致同一次手动扣减操作被重复执行。每次扣减操作的时间戳唯一，
+    // 保证不同操作不会被误判为重复；同一请求的重试则被幂等键拦截。
+    const sourceRef = `admin_deduct:${ctx.userId}:${data.userId}:${Date.now()}`;
     const consumeResult = await consumeCredits({
       userId: data.userId,
       amount,
       serviceName: "admin_credit_adjustment",
+      sourceRef,
       description: `超管手动扣减积分: ${data.reason}`,
       metadata: {
         adminUserId: ctx.userId,
@@ -970,7 +983,14 @@ export const setUserCreditsStatusAction = withAdminUsersAction(
 )
   .schema(setCreditsStatusSchema)
   .action(async ({ parsedInput: data, ctx }) => {
-    await getUserBasicOrThrow(data.userId);
+    const targetUser = await getUserBasicOrThrow(data.userId);
+    // 目标权限护栏：禁止普通 admin 冻结/解冻管理员及超管的积分账户，
+    // 否则低权限管理员可通过冻结积分间接瘫痪高权限账户（见 S-H5）。
+    assertCanActOnTarget(
+      ctx.role,
+      targetUser.role,
+      data.status === "frozen" ? "积分冻结" : "积分解冻"
+    );
 
     const [before] = await db
       .select()
@@ -1038,6 +1058,15 @@ export const setExternalApiKeyStatusAction = withAdminUsersAction(
     if (!apiKey) {
       throw new Error("API Key 不存在");
     }
+
+    // 目标权限护栏：根据 API Key 所属用户的角色进行权限校验，
+    // 禁止普通 admin 启用/禁用管理员及超管的 API Key（见 S-H5）。
+    const targetUser = await getUserBasicOrThrow(apiKey.userId);
+    assertCanActOnTarget(
+      ctx.role,
+      targetUser.role,
+      data.isActive ? "启用 API Key" : "禁用 API Key"
+    );
 
     await db
       .update(externalApiKey)

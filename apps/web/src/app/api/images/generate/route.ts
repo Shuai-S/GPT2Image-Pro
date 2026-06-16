@@ -1,5 +1,6 @@
 import { withApiLogging } from "@repo/shared/api-logger";
 import { auth } from "@repo/shared/auth";
+import { logError } from "@repo/shared/logger";
 import {
   canUsePlanCapability,
   getPlanLimits,
@@ -71,10 +72,13 @@ function wantsStreamResponse(request: NextRequest, stream?: boolean) {
   return request.headers.get("accept")?.includes("text/event-stream") ?? false;
 }
 
+/**
+ * 图像生成失败的兜底响应。将内部错误详情写入日志，
+ * 对外只返回通用错误信息，防止泄露后端实现细节。
+ */
 function generationErrorResponse(error: unknown) {
-  return errorResponse(
-    error instanceof Error ? error.message : "Failed to generate image."
-  );
+  logError(error, { source: "api-images-generate" });
+  return errorResponse("Failed to generate image.");
 }
 
 export const POST = withApiLogging(async (request: NextRequest) => {

@@ -230,12 +230,21 @@ export const CREEM_YEARLY_PERIOD_DAY_THRESHOLD = 60;
  *
  * 同一订阅 + 同一周期开始时间只发放一次积分，作为 credits_batch (source_type, source_ref)
  * 幂等去重的 sourceRef。
+ *
+ * 将 periodStartDate 归一化为 UTC 日期字符串（YYYY-MM-DD），消除同一日期因
+ * 时区偏移或毫秒精度差异（如 "2025-01-01T00:00:00Z" vs "2025-01-01T00:00:00.000Z"
+ * vs "2024-12-31T16:00:00-08:00"）产生不同幂等键，导致同一周期重复发放积分的风险。
  */
 export function buildSubscriptionPeriodKey(
   subscriptionId: string,
   periodStartDate: string
 ): string {
-  return `${subscriptionId}:${periodStartDate}`;
+  const d = new Date(periodStartDate);
+  // 日期非法时回退到原始字符串，避免生成无意义的 "NaN-NaN-NaN" 键
+  const normalizedDate = Number.isNaN(d.getTime())
+    ? periodStartDate
+    : d.toISOString().slice(0, 10);
+  return `${subscriptionId}:${normalizedDate}`;
 }
 
 /**

@@ -15,6 +15,8 @@ module.exports = {
     {
       name: "web",
       script: "apps/web/server.js",
+      // 主应用内存上限，超出后 PM2 自动重启进程
+      max_memory_restart: "1G",
       env: {
         PORT: 3000,
         HOSTNAME: "0.0.0.0",
@@ -23,6 +25,8 @@ module.exports = {
     {
       name: "admin",
       script: "apps/admin/server.js",
+      // 管理后台流量较低，内存上限适当收紧
+      max_memory_restart: "512M",
       env: {
         PORT: 3001,
         HOSTNAME: "0.0.0.0",
@@ -31,6 +35,8 @@ module.exports = {
     {
       name: "api",
       script: "apps/api/server.js",
+      // API 服务需处理图像生成请求，内存上限与主应用一致
+      max_memory_restart: "1G",
       env: {
         PORT: 3002,
         HOSTNAME: "0.0.0.0",
@@ -39,6 +45,8 @@ module.exports = {
     {
       name: "platform",
       script: "apps/platform/server.js",
+      // 营销/文档站为纯静态内容，内存占用最低
+      max_memory_restart: "256M",
       env: {
         PORT: 3003,
         HOSTNAME: "0.0.0.0",

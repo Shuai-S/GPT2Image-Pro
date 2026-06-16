@@ -14,6 +14,7 @@ import {
   moderateContent,
 } from "@repo/shared/moderation";
 import { getStorageProvider } from "@repo/shared/storage/providers";
+import { fetchPublicImage } from "@repo/shared/external-api/safe-image-fetch";
 import { buildSignedStorageImageUrl } from "@repo/shared/storage/signed-url";
 import {
   getPlanCapabilitySnapshot,
@@ -328,7 +329,9 @@ async function toImageBuffer(result: {
     throw new Error("Missing image data");
   }
 
-  const response = await fetch(result.imageUrl);
+  // SSRF 防护：imageUrl 可能来自上游第三方，使用 fetchPublicImage
+  // 校验目标地址并阻断内网/回环/元数据端点访问，防止 SSRF 攻击。
+  const response = await fetchPublicImage(result.imageUrl);
   if (!response.ok) {
     throw new Error(`Failed to download image: ${response.status}`);
   }

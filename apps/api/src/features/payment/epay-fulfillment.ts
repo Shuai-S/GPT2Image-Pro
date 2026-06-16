@@ -75,6 +75,13 @@ export function isExpectedEpayAmount(
 ) {
   const expectedCents = moneyToCents(expectedAmount);
   const paidCents = moneyToCents(verifyInfo.money);
+  // 显式 NaN 防护：moneyToCents 对非法输入（空字符串、非数字字符等）可能
+  // 返回 NaN，NaN 参与任何比较运算均为 false，会导致此函数错误地返回 false
+  // 但不提供明确的拒绝原因。此处先行拦截，与后续 isFinite 检查形成双保险，
+  // 确保 NaN 不会穿透到金额比对逻辑中造成静默拒绝或意外放行。
+  if (Number.isNaN(expectedCents) || Number.isNaN(paidCents)) {
+    return false;
+  }
   if (!Number.isFinite(expectedCents) || !Number.isFinite(paidCents)) {
     return false;
   }

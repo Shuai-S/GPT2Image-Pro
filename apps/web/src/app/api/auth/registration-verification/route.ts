@@ -1,5 +1,6 @@
 import { withApiLogging } from "@repo/shared/api-logger";
 import { sendRegistrationVerificationCode } from "@repo/shared/auth/registration-verification";
+import { logError } from "@repo/shared/logger";
 import { type NextRequest, NextResponse } from "next/server";
 
 async function handlePost(request: NextRequest) {
@@ -11,12 +12,11 @@ async function handlePost(request: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Failed to send verification code";
-
-    return NextResponse.json({ error: message }, { status: 400 });
+    logError(error, { source: "registration-verification" });
+    return NextResponse.json(
+      { error: "Failed to send verification code" },
+      { status: 400 }
+    );
   }
 }
 

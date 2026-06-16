@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { withApiLogging } from "@repo/shared/api-logger";
 import { auth } from "@repo/shared/auth";
+import { logError } from "@repo/shared/logger";
 import {
   canUsePlanCapability,
   getPlanLimits,
@@ -449,8 +450,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
       }
     }
   } catch (error) {
-    return errorResponse(
-      error instanceof Error ? error.message : "Failed to edit image."
-    );
+    logError(error, { source: "api-images-edit" });
+    return errorResponse("Failed to edit image.");
   }
 });

@@ -17,6 +17,7 @@
     "./auth/bootstrap-super-admin": "./src/auth/bootstrap-super-admin.ts",
     "./auth/registration-verification": "./src/auth/registration-verification.ts",
     "./safe-action": "./src/safe-action.ts",
+    "./admin-safe-action": "./src/admin-safe-action.ts",
     "./logger": "./src/logger/index.ts",
     "./rate-limit": "./src/rate-limit/index.ts",
     "./api-logger": "./src/api-logger.ts",

@@ -49,12 +49,20 @@ function getProductId(sub: CreemSubscription): string {
 /**
  * 是否对金额/币种不符的支付硬拒（不发放积分）。
  *
+ * 安全默认值：默认开启硬拒（true）。金额不符的支付不应发放积分，
+ * 否则攻击者可伪造低价 checkout 套取高价积分包。仅当运营方明确
+ * 设置环境变量为关闭值时才降级为软门闩（仅告警不拒绝）。
+ *
  * WHY 读 env 而非 system-settings：system-settings 的 SettingKey 是受约束联合类型，
- * 新增键需改 definitions.ts（本单元不允许触碰），故此处以 env 软开关落地，默认关闭。
+ * 新增键需改 definitions.ts（本单元不允许触碰），故此处以 env 软开关落地。
  */
 function isCreemAmountEnforced(): boolean {
   const raw = process.env.CREEM_WEBHOOK_ENFORCE_AMOUNT?.trim().toLowerCase();
-  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+  // 仅当显式设置为关闭值时才关闭硬拒，否则默认硬拒保护积分安全
+  if (raw === "0" || raw === "false" || raw === "no" || raw === "off") {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -130,10 +138,33 @@ export const POST = withApiLogging(async (req: Request) => {
     // 验证 Webhook 签名并解析事件
     event = await constructRuntimeCreemEvent(body, signature);
   } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : "Unknown error";
     logError(err, { source: "creem-webhook", stage: "signature" });
     return NextResponse.json(
-      { error: `Webhook Error: ${errorMessage}` },
+      { error: "Webhook signature verification failed" },
+      { status: 400 }
+    );
+  }
+
+  // 事件重放保护：拒绝时间戳过旧的 webhook 事件，防止攻击者截获历史
+  // 签名有效的事件后重放以触发重复发放。created_at 为 Creem 事件创建时间
+  // （Unix 毫秒），超过 5 分钟视为过期。幂等键是最终防线，此处作为纵深防御
+  // 在入口处尽早拦截，减少不必要的数据库查询与日志噪声。
+  const WEBHOOK_MAX_AGE_MS = 5 * 60 * 1000;
+  const eventAge = Date.now() - event.created_at;
+  if (eventAge > WEBHOOK_MAX_AGE_MS) {
+    logger.warn(
+      {
+        source: "creem-webhook",
+        stage: "replay-protection",
+        eventId: event.id,
+        eventType: event.eventType,
+        createdAt: event.created_at,
+        ageMs: eventAge,
+      },
+      "Rejected stale webhook event (older than 5 minutes)"
+    );
+    return NextResponse.json(
+      { error: "Event too old" },
       { status: 400 }
     );
   }

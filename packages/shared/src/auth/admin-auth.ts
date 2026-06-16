@@ -50,23 +50,34 @@ export const adminAuth = betterAuth({
   /**
    * 仅支持邮箱/密码登录
    * 管理员不开放社交登录，降低攻击面
+   *
+   * 安全策略：
+   * - disableSignUp: 禁止通过 API 注册管理员账户，管理员只能通过数据库或种子脚本创建
+   * - rateLimit: 限制每 IP 每 60 秒最多 5 次登录尝试，防止暴力破解
    */
   emailAndPassword: {
     enabled: true,
+    disableSignUp: true,
+    rateLimit: {
+      window: 60,
+      max: 5,
+    },
   },
 
   /**
    * 会话配置
+   *
+   * 安全策略：
+   * - expiresIn 24h: 管理员会话缩短至 24 小时，降低令牌泄露后的风险窗口
+   * - updateAge 4h: 每 4 小时强制刷新会话，及时同步权限变更
+   * - cookieCache 禁用: 确保每次请求都查询数据库验证会话有效性，
+   *   防止已撤销的会话因缓存继续生效
    */
   session: {
-    // 会话过期时间: 7 天
-    expiresIn: 7 * 24 * 60 * 60,
-    // 刷新阈值: 1 天
-    updateAge: 24 * 60 * 60,
-    // 启用 cookie 缓存，减少数据库查询
+    expiresIn: 24 * 60 * 60,
+    updateAge: 4 * 60 * 60,
     cookieCache: {
-      enabled: true,
-      maxAge: 5 * 60, // 5 分钟
+      enabled: false,
     },
   },
 

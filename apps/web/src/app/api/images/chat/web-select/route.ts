@@ -2,6 +2,7 @@ import { db } from "@repo/database";
 import { generation, imageBackendAccount } from "@repo/database/schema";
 import { withApiLogging } from "@repo/shared/api-logger";
 import { auth } from "@repo/shared/auth";
+import { logError } from "@repo/shared/logger";
 import { and, eq, or, sql } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -174,9 +175,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
       .where(eq(generation.id, row.id));
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return jsonError(
-      error instanceof Error ? error.message : "Failed to sync Web selection",
-      502
-    );
+    logError(error, { source: "api-images-web-select" });
+    return jsonError("Failed to sync Web selection", 502);
   }
 });

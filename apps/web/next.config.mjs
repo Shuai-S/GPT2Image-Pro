@@ -12,9 +12,38 @@ const withMDX = createMDX();
  */
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
+/**
+ * 安全响应头（CSP 等）
+ *
+ * Content-Security-Policy：限制资源加载来源，缓解 XSS / 数据注入攻击。
+ * - script-src 保留 'unsafe-inline' 和 'unsafe-eval' 以兼容 Next.js 运行时。
+ * - img-src 允许 data: / blob: / https: 用于图像预览与远程图片加载。
+ * - frame-ancestors 'none' 禁止被嵌入 iframe，防止点击劫持。
+ */
+const securityHeaders = [
+  {
+    key: "Content-Security-Policy",
+    value: [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob: https:",
+      "font-src 'self' data:",
+      "connect-src 'self' https:",
+      "frame-ancestors 'none'",
+    ].join("; "),
+  },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "X-Frame-Options", value: "SAMEORIGIN" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+];
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   assetPrefix: process.env.NEXT_PUBLIC_ASSET_PREFIX || "",
+  async headers() {
+    return [{ source: "/:path*", headers: securityHeaders }];
+  },
   images: {
     minimumCacheTTL: 2_592_000,
   },
@@ -34,9 +63,11 @@ const nextConfig = {
     ],
   },
   experimental: {
-    proxyClientMaxBodySize: "200mb",
+    // 大文件上传走预签名 URL（presigned URL），Server Action 无需承载原始文件；
+    // 50MB 足以覆盖 base64 编码后的常规请求体，同时降低滥用风险。
+    proxyClientMaxBodySize: "50mb",
     serverActions: {
-      bodySizeLimit: "200mb",
+      bodySizeLimit: "50mb",
     },
   },
   // Transpile monorepo packages

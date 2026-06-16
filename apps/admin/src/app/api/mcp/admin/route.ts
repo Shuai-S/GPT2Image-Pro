@@ -335,7 +335,11 @@ async function handleToolsCall(
       return NextResponse.json(
         jsonRpcError(id, JSONRPC_OPERATION_ERROR, err.message, {
           code: err.code,
-          details: err.details,
+          // 生产环境不暴露内部错误详情，防止信息泄露
+          details:
+            process.env.NODE_ENV === "production"
+              ? undefined
+              : err.details,
         }),
       );
     }

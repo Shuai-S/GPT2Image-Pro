@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { withApiLogging } from "@repo/shared/api-logger";
 import { auth } from "@repo/shared/auth";
+import { logError } from "@repo/shared/logger";
 import { buildPublicImageUrl } from "@repo/shared/storage/signed-url";
 import {
   canUsePlanCapability,
@@ -1030,8 +1031,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
       error: firstBatchError(results)?.error,
     });
   } catch (error) {
-    return errorResponse(
-      error instanceof Error ? error.message : "Failed to generate image."
-    );
+    logError(error, { source: "api-images-chat" });
+    return errorResponse("Failed to generate image.");
   }
 });
