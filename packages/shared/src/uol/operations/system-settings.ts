@@ -12,6 +12,11 @@ import { z } from "zod";
 import { defineOperation } from "../registry";
 import { getPrincipalUserId } from "../principal";
 import {
+  destroyGenerationPhotosByMaxCount,
+  shouldRunMaxCountCleanupOnSettingsChange,
+} from "../../generation-maintenance";
+import { logError } from "../../logger";
+import {
   getAdminSystemSettingsSnapshot,
   setSystemSettings,
   importSystemSettingsFromEnv,
@@ -87,6 +92,23 @@ export const settingsUpdate = defineOperation({
       value,
     }));
     const updatedKeys = await setSystemSettings(entries, userId);
+
+    // 启用"按最大张数"清理时立即后台执行一次，与 server action 行为一致（共用谓词）。
+    // WHY: fire-and-forget + catch 记日志，不阻塞 operation 返回；批量上限与幂等
+    // WHERE 由清理函数自身兜底，与定时任务并发安全。
+    if (
+      shouldRunMaxCountCleanupOnSettingsChange(
+        updatedKeys,
+        input.updates.GENERATION_IMAGE_RETENTION_MODE
+      )
+    ) {
+      void destroyGenerationPhotosByMaxCount().catch((error) => {
+        logError(error, {
+          source: "uol.settings-update.enable-max-count-cleanup",
+        });
+      });
+    }
+
     return {
       success: true,
       updatedKeys,

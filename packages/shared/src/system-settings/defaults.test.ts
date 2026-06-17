@@ -30,7 +30,10 @@ const dbMock = vi.hoisted(() => {
   const selectBuilder = {
     from: vi.fn(() => selectBuilder),
     where: vi.fn(async () => readRows()),
-    then: vi.fn((resolve, reject) => Promise.resolve(readRows()).then(resolve, reject)),
+    // biome-ignore lint/suspicious/noThenProperty: 故意实现 thenable，模拟 drizzle 查询构造器被 await 时的行为
+    then: vi.fn((resolve, reject) =>
+      Promise.resolve(readRows()).then(resolve, reject)
+    ),
   };
   const insertBuilder = {
     values: vi.fn((values: StoredSetting | StoredSetting[]) => {
@@ -121,6 +124,8 @@ describe("system setting default initialization", () => {
     expect(initializedKeys).toContain("MARKETING_SLA_STATUS_ENABLED");
     expect(initializedKeys).toContain("SELF_USE_MODE_ENABLED");
     expect(initializedKeys).toContain("GENERATION_IMAGE_RETENTION_HOURS");
+    expect(initializedKeys).toContain("GENERATION_IMAGE_RETENTION_MODE");
+    expect(initializedKeys).toContain("GENERATION_IMAGE_MAX_COUNT");
     expect(initializedKeys).toContain("IMAGE_GENERATION_GLOBAL_CONCURRENCY");
     expect(initializedKeys).toContain("IMAGE_BASE_CREDITS_1024");
     expect(initializedKeys).toContain("IMAGE_BASE_CREDITS_4K");
@@ -136,6 +141,9 @@ describe("system setting default initialization", () => {
     expect(store.get("MARKETING_SLA_STATUS_ENABLED")?.value).toBe(true);
     expect(store.get("SELF_USE_MODE_ENABLED")?.value).toBe(true);
     expect(store.get("GENERATION_IMAGE_RETENTION_HOURS")?.value).toBe(0);
+    // 默认清理模式 off=永久保存（fail-safe）；最大张数默认 10000。
+    expect(store.get("GENERATION_IMAGE_RETENTION_MODE")?.value).toBe("off");
+    expect(store.get("GENERATION_IMAGE_MAX_COUNT")?.value).toBe(10000);
     expect(store.get("CREDITS_EXPIRY_DAYS")?.value).toBe(0);
     expect(store.get("IMAGE_GENERATION_GLOBAL_CONCURRENCY")?.value).toBe(500);
     expect(store.get("IMAGE_BASE_CREDITS_1024")?.value).toBe(1.27);

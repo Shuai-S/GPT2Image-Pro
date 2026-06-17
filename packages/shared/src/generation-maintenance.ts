@@ -16,6 +16,11 @@ export const IMAGE_GENERATION_TIMEOUT_ERROR =
   "Image generation timed out after 20 minutes. The image generation fee was refunded; any moderation fee already incurred was retained.";
 export const GENERATION_IMAGE_RETENTION_HOURS_SETTING_KEY =
   "GENERATION_IMAGE_RETENTION_HOURS";
+export const GENERATION_IMAGE_RETENTION_MODE_SETTING_KEY =
+  "GENERATION_IMAGE_RETENTION_MODE";
+export const GENERATION_IMAGE_MAX_COUNT_SETTING_KEY =
+  "GENERATION_IMAGE_MAX_COUNT";
+export const GENERATION_IMAGE_MAX_COUNT_DEFAULT = 10000;
 
 type ExpireStalePendingGenerationsOptions = {
   userId?: string;
@@ -28,6 +33,12 @@ type DestroyExpiredGenerationPhotosOptions = {
   now?: Date;
   limit?: number;
   retentionHours?: number;
+};
+
+type DestroyGenerationPhotosByMaxCountOptions = {
+  now?: Date;
+  limit?: number;
+  maxCount?: number;
 };
 
 export type GenerationImageStorageReference = {
@@ -81,6 +92,41 @@ export function resolvePhotoRetentionWindow(
     enabled: true,
     cutoff: new Date(now.getTime() - retentionHours * 60 * 60 * 1000),
   };
+}
+
+/**
+ * 解析按张数保留是否启用（纯函数，DB-free）。
+ *
+ * maxCount<=0 或非有限数短路返回 {enabled:false}，是阻止"保留 0 张=删光全站"的
+ * 运行层护栏（写入层 min:1 之外的二次设防），与 resolvePhotoRetentionWindow 的
+ * <=0 短路设计对齐。启用时回传归一化后的整数阈值（向下取整，避免小数 OFFSET）。
+ */
+export function resolveMaxCountRetention(maxCount: number): {
+  enabled: boolean;
+  maxCount: number;
+} {
+  if (!Number.isFinite(maxCount) || maxCount <= 0) {
+    return { enabled: false, maxCount: 0 };
+  }
+  return { enabled: true, maxCount: Math.floor(maxCount) };
+}
+
+/**
+ * 判断一次系统设置写入后是否应立即触发"按最大张数"清理（纯函数，DB-free）。
+ *
+ * 单点判定，供所有写设置入口（server action 与 UOL operation）共用，保证"启用即执行"
+ * 行为在不同传输路径上一致。条件：本次提交确实变更了清理模式键，且其新值为 "count"。
+ * changedKeys 来自 setSystemSettings 返回（本次实际写/删的键）；newModeValue 是该键的
+ * 新值，清空（回退默认）时调用方应传 undefined，使其不被误判为启用。
+ */
+export function shouldRunMaxCountCleanupOnSettingsChange(
+  changedKeys: readonly string[],
+  newModeValue: unknown
+): boolean {
+  return (
+    changedKeys.includes(GENERATION_IMAGE_RETENTION_MODE_SETTING_KEY) &&
+    newModeValue === "count"
+  );
 }
 
 export function collectGenerationImageStorageReferences(params: {
@@ -491,6 +537,146 @@ export async function destroyExpiredGenerationPhotos(
     enabled: true,
     retentionHours,
     cutoff: cutoff.toISOString(),
+    destroyed: details.length,
+    failed,
+    storageObjectsDeleted,
+    details,
+  };
+}
+
+/**
+ * 按"最大保留张数"清理：全站只保留最新的 maxCount 张可展示图，删除更老的图片文件。
+ *
+ * 与 destroyExpiredGenerationPhotos 同语义地"只删图、不删行"：删存储对象后把
+ * generation 行的 storageKey/fileSize 置空并在 metadata 记审计，画廊/历史的
+ * isNotNull(storageKey) 过滤会自动隐藏；绝不删 generation 行、不动 creditsConsumed。
+ *
+ * "张数"口径 = status='completed' AND storageKey IS NOT NULL 的行数（与按时间模式
+ * 一致，全站维度）。按 COALESCE(completedAt, createdAt) DESC 排序（最新在前），
+ * OFFSET maxCount 跳过要保留的最新 N 行，其后更老的进入待删集合，LIMIT 限定单批上限。
+ *
+ * 收敛性：超出量大于单批上限时本批只删最老的一批，后续调度继续删下一批，多次单调
+ * 收敛到恰好保留 maxCount 行（删除后总数下降，OFFSET 自然指向新边界，无需游标）。
+ *
+ * 短路防线：maxCount<=0 或非有限数经 resolveMaxCountRetention 返回 enabled:false，
+ * 直接零结果返回，不查库、不删文件。
+ */
+export async function destroyGenerationPhotosByMaxCount(
+  options: DestroyGenerationPhotosByMaxCountOptions = {}
+) {
+  const now = options.now ?? new Date();
+  const maxCount =
+    options.maxCount ??
+    (await getRuntimeSettingNumber(
+      GENERATION_IMAGE_MAX_COUNT_SETTING_KEY,
+      GENERATION_IMAGE_MAX_COUNT_DEFAULT,
+      { positive: true }
+    ));
+
+  const guard = resolveMaxCountRetention(maxCount);
+  if (!guard.enabled) {
+    return {
+      enabled: false,
+      maxCount: guard.maxCount,
+      destroyed: 0,
+      failed: 0,
+      storageObjectsDeleted: 0,
+      details: [] as Array<{
+        generationId: string;
+        userId: string;
+        storageObjectsDeleted: number;
+      }>,
+    };
+  }
+
+  // DESC（最新在前）+ OFFSET maxCount 跳过要保留的最新 N 张，其后更老的进入待删
+  // 集合，再 LIMIT 取本批。方向与按时间模式 destroyExpiredGenerationPhotos 的 desc
+  // 一致。追加 desc(id) 作确定性次级键，避免时间戳并列时 OFFSET 边界在多次调度间抖动。
+  const orderExpr = sql`COALESCE(${generation.completedAt}, ${generation.createdAt})`;
+  const rows = await db
+    .select({
+      id: generation.id,
+      userId: generation.userId,
+      storageKey: generation.storageKey,
+      storageBucket: generation.storageBucket,
+      metadata: generation.metadata,
+      completedAt: generation.completedAt,
+      createdAt: generation.createdAt,
+    })
+    .from(generation)
+    .where(
+      and(
+        eq(generation.status, "completed" as const),
+        isNotNull(generation.storageKey)
+      )
+    )
+    .orderBy(desc(orderExpr), desc(generation.id))
+    .offset(guard.maxCount)
+    .limit(options.limit ?? 500);
+
+  const details: Array<{
+    generationId: string;
+    userId: string;
+    storageObjectsDeleted: number;
+  }> = [];
+  let failed = 0;
+  let storageObjectsDeleted = 0;
+  const storage = rows.length > 0 ? await getStorageProvider() : null;
+
+  for (const row of rows) {
+    const refs = collectGenerationImageStorageReferences(row);
+    if (refs.length === 0) continue;
+
+    try {
+      for (const ref of refs) {
+        await storage?.deleteObject(ref.key, ref.bucket);
+      }
+
+      const destroyedAt = now.toISOString();
+      const [updated] = await db
+        .update(generation)
+        .set({
+          storageKey: null,
+          fileSize: null,
+          // retentionHours 在张数模式下无对应窗口，审计字段填 0 仅表"此次销毁"，
+          // 真正语义由 destroyedAt + storageObjectsDeleted 表达。
+          metadata: stripDestroyedGenerationImageReferences(row.metadata, {
+            destroyedAt,
+            retentionHours: 0,
+            storageObjectsDeleted: refs.length,
+          }),
+        })
+        .where(
+          and(
+            eq(generation.id, row.id),
+            eq(generation.status, "completed" as const),
+            isNotNull(generation.storageKey)
+          )
+        )
+        .returning({ id: generation.id });
+
+      if (!updated) continue;
+
+      storageObjectsDeleted += refs.length;
+      details.push({
+        generationId: row.id,
+        userId: row.userId,
+        storageObjectsDeleted: refs.length,
+      });
+    } catch (error) {
+      failed += 1;
+      logError(error, {
+        source: "generation-photo-max-count",
+        generationId: row.id,
+        userId: row.userId,
+        maxCount: guard.maxCount,
+      });
+    }
+  }
+
+  return {
+    enabled: true,
+    maxCount: guard.maxCount,
     destroyed: details.length,
     failed,
     storageObjectsDeleted,

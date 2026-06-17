@@ -176,3 +176,66 @@ describe("resolvePhotoRetentionWindow", () => {
     expect(result.cutoff?.toISOString()).toBe("2026-05-30T00:00:00.000Z");
   });
 });
+
+describe("resolveMaxCountRetention", () => {
+  it("disables cleanup when the max count is non-positive or not finite", async () => {
+    const { resolveMaxCountRetention } = await loadHelpers();
+    // 护栏：<=0 或非有限数绝不进入删除路径，防止"保留 0 张=删光全站"。
+    expect(resolveMaxCountRetention(0)).toEqual({
+      enabled: false,
+      maxCount: 0,
+    });
+    expect(resolveMaxCountRetention(-1)).toEqual({
+      enabled: false,
+      maxCount: 0,
+    });
+    expect(resolveMaxCountRetention(Number.NaN)).toEqual({
+      enabled: false,
+      maxCount: 0,
+    });
+    expect(resolveMaxCountRetention(Number.POSITIVE_INFINITY)).toEqual({
+      enabled: false,
+      maxCount: 0,
+    });
+  });
+
+  it("enables cleanup and floors the threshold to an integer offset", async () => {
+    const { resolveMaxCountRetention } = await loadHelpers();
+    expect(resolveMaxCountRetention(10000)).toEqual({
+      enabled: true,
+      maxCount: 10000,
+    });
+    // 小数阈值向下取整，避免传给 SQL OFFSET 的非整数。
+    expect(resolveMaxCountRetention(5.9)).toEqual({
+      enabled: true,
+      maxCount: 5,
+    });
+  });
+});
+
+describe("shouldRunMaxCountCleanupOnSettingsChange", () => {
+  it("triggers only when the retention mode was changed to count", async () => {
+    const { shouldRunMaxCountCleanupOnSettingsChange } = await loadHelpers();
+    const MODE = "GENERATION_IMAGE_RETENTION_MODE";
+    expect(shouldRunMaxCountCleanupOnSettingsChange([MODE], "count")).toBe(true);
+  });
+
+  it("does not trigger for non-count values, clears, or unchanged mode", async () => {
+    const { shouldRunMaxCountCleanupOnSettingsChange } = await loadHelpers();
+    const MODE = "GENERATION_IMAGE_RETENTION_MODE";
+    // 切到其他模式不触发。
+    expect(shouldRunMaxCountCleanupOnSettingsChange([MODE], "time")).toBe(false);
+    expect(shouldRunMaxCountCleanupOnSettingsChange([MODE], "off")).toBe(false);
+    // 清空（回退默认）传 undefined，不误判为启用。
+    expect(shouldRunMaxCountCleanupOnSettingsChange([MODE], undefined)).toBe(
+      false
+    );
+    // 模式键本次未变更（仅改了张数）即使值恰为 count 也不触发。
+    expect(
+      shouldRunMaxCountCleanupOnSettingsChange(
+        ["GENERATION_IMAGE_MAX_COUNT"],
+        "count"
+      )
+    ).toBe(false);
+  });
+});
