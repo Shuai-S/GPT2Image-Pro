@@ -3913,6 +3913,10 @@ export async function generateImage(
     const size = params.size || DEFAULT_IMAGE_SIZE;
     const dimensions = parseImageSize(size);
     const background = normalizeImageBackground(params.background);
+    // codex 直连 OpenAI 标准 images 接口:只认 size,拒绝非标准的 width/height
+    // (返回 400 Unknown parameter: 'width')与 gpt-image 不支持的 response_format;
+    // 故对 codex 去掉这些字段(b64 为默认返回)。中转(pool-api)后端不受影响,原样发送。
+    const isCodexDirect = shouldCodexUseDirectImagesEndpoint(config);
     const response = await fetch(`${config.baseUrl}/images/generations`, {
       method: "POST",
       redirect: "manual",
@@ -3925,7 +3929,7 @@ export async function generateImage(
         prompt,
         n: params.n || 1,
         size,
-        ...(dimensions
+        ...(dimensions && !isCodexDirect
           ? { width: dimensions.width, height: dimensions.height }
           : {}),
         ...(normalizeQuality(params.quality)
@@ -3946,7 +3950,7 @@ export async function generateImage(
           : {}),
         ...(background ? { background } : {}),
         ...(config.useStream ? { stream: true, partial_images: 2 } : {}),
-        response_format: "b64_json",
+        ...(isCodexDirect ? {} : { response_format: "b64_json" }),
       }),
     });
 
