@@ -2,6 +2,26 @@
 
 本文件记录各发布版本的变更。版本格式 `v<MAJOR>.<MINOR>.<PATCH>`。
 
+## v0.5.3 (2026-06-18)
+
+图片清理新增「每用户最大保留张数」模式、codex 生图遵循尺寸、Web-first 默认开启,及全库审计 P0/P1 修复与画廊批量操作。
+
+### 新增
+
+- **图片清理「按每用户最大张数」模式**:在永久保存基础上,可选改为每个用户各自保留最新 N 张(默认 10000)、删除其更老的图;启用即后台执行一次清理,定时任务逐批收敛。清理模式三态(关闭=永久保存,默认 / 按时间过期 / 按每用户最大张数),只删图片文件与图库展示,生成记录与计费流水保留。
+- **画廊批量操作**:多选 + Shift 范围选择、批量下载、两步确认批量删除;历史页新增页码输入框;修复创作页路由切回时残留上次输入。
+
+### 改进
+
+- **codex 生图遵循尺寸**:codex(Codex/Responses 账号)的普通生成/编辑改走该账号 `/images/generations`、`/images/edits` 直连端点(size 走顶层),确定性遵循尺寸;此前经 `/responses` 的 image_generation 托管工具不尊重 size。chat / agent / 瀑布流仍走 `/responses`。
+- **Web-first 默认开启**:Web-first 优先路由改为默认开启(不传即优先 Web、失败回退 Codex/Responses);仅当显式传 false 时才用 Web-first 像素区间判定。chat 的 `mix_web_first` 并入同一决策。仅对 mixed 后端分组生效,agent 不受影响。
+
+### 修复
+
+- **全库安全/正确性审计 P0+P1**:存储失败路径积分消耗不落库(两次 UPDATE 第二次空命中)、管理员充值缺幂等键可重复入账、画廊与 admin 状态页无 LIMIT 全量加载、Creem webhook 乱序漏发积分;新增 `subscription(user_id, updated_at DESC)` 索引优化 getUserPlan 热路径(迁移 0039)。
+- **onnxruntime .so / ISNet 固化进 standalone**:用 `outputFileTracingIncludes` 显式 trace,修复 standalone 缺 `libonnxruntime.so.1` 导致 dashboard 路由 server action 全 500、前端积分/套餐静默回退免费版的事故(裸机与 Docker 共用,不再需手工补拷)。
+- **SLA 样本只取已完结记录**:卡片合计与样本数对齐(在途 pending 不再被静默跳过)。
+
 ## v0.5.2 (2026-06-11)
 
 错误分类与自动重试加固(未知错误兜底切换、GROUP_DISABLED 踢出)、`prompt_repair` / 透明背景开关贯通全部 v1 端点、后端池多分组与账号常驻,及若干计费 / 登录修复。
