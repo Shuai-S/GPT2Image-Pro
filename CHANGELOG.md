@@ -2,6 +2,17 @@
 
 本文件记录各发布版本的变更。版本格式 `v<MAJOR>.<MINOR>.<PATCH>`。
 
+## v0.5.5 (2026-06-19)
+
+修复 always_active（遇错常驻）后端在终态/鉴权错误下不下线导致的"死号黑洞"。
+
+### 修复
+
+- **终态/鉴权类错误即使 always_active 也标 error 并踢出轮换**：
+  - 现象：常驻账号 token 失效/过期后被反复选中 → 必失败 → 再被选中，30 分钟内约 388 次 `401 token_expired`，并把最终失败 `image_generation_server_error` 返给用户。
+  - 根因：always_active 原设计"遇错不下线"——失败时丢弃整个分类结果（不改 status、不进冷却），且入选条件对 always_active 无视 status。这对临时错误（overload/5xx）正确，但对终态错误（token 失效/过期、401/403、凭据失效、封号、GROUP_DISABLED；分类器 status="error"）形成持续吃流量的黑洞——死号无法靠常驻自愈。
+  - 修法：always_active 仅豁免临时错误（status=active+cooldown）；`status="error"` 的终态错误照常标 error（账号与 API 两侧失败上报），且入选时 always_active 不再豁免 `status="error"`（仍豁免 cooldown 与临时故障）。请求侧不变——这些错误本就 switchable，自动切其他后端重试。
+
 ## v0.5.4 (2026-06-19)
 
 修复 v0.5.3 引入的 codex 直连 images 端点请求格式问题(生成/图生图恢复正常并遵循尺寸),并统一下载文件名格式。
