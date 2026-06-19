@@ -2,14 +2,22 @@ import { describe, expect, it } from "vitest";
 import { generateDownloadFilename } from "./download-filename";
 
 describe("generateDownloadFilename", () => {
-  it("格式为 gpt2image_<8位hash>_T<date>d<time>.<ext>", () => {
+  it("格式为 gpt2image_<8位hash>_<ISO时间戳>.<ext>", () => {
     const result = generateDownloadFilename(
       "a cat sitting on a roof",
-      "2026-06-19T14:30:52.000Z"
+      "2026-06-19T14:30:52.123Z"
     );
     expect(result).toMatch(
-      /^gpt2image_[a-z0-9]{8}_T\d{4}_\d{2}_\d{2}d\d{2}_\d{2}_\d{2}\.png$/
+      /^gpt2image_[a-z0-9]{8}_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.png$/
     );
+  });
+
+  it("时间戳精确到毫秒", () => {
+    const result = generateDownloadFilename(
+      "test",
+      "2026-06-19T08:00:00.456Z"
+    );
+    expect(result).toContain("2026-06-19T08-00-00-456Z");
   });
 
   it("同一 prompt 产生相同哈希", () => {
@@ -40,18 +48,18 @@ describe("generateDownloadFilename", () => {
   it("空 prompt 不报错", () => {
     const result = generateDownloadFilename("", "2026-06-19T14:30:52.000Z");
     expect(result).toMatch(
-      /^gpt2image_[a-z0-9]{8}_T\d{4}_\d{2}_\d{2}d\d{2}_\d{2}_\d{2}\.png$/
+      /^gpt2image_[a-z0-9]{8}_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.png$/
     );
   });
 
   it("无效时间回退到 sanitize 字符串", () => {
     const result = generateDownloadFilename("test", "invalid-date");
-    expect(result).toMatch(/^gpt2image_[a-z0-9]{8}_invaliddate\.png$/);
+    expect(result).toMatch(/^gpt2image_[a-z0-9]{8}_invalid-date\.png$/);
   });
 
   it("纯函数:相同输入永远产出相同文件名", () => {
-    const a = generateDownloadFilename("sunset", "2026-06-19T08:00:00Z");
-    const b = generateDownloadFilename("sunset", "2026-06-19T08:00:00Z");
+    const a = generateDownloadFilename("sunset", "2026-06-19T08:00:00.789Z");
+    const b = generateDownloadFilename("sunset", "2026-06-19T08:00:00.789Z");
     expect(a).toBe(b);
   });
 });
