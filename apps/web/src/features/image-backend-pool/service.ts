@@ -2060,9 +2060,13 @@ async function selectPoolMember(
   const accountBaseWhere = and(
     eq(imageBackendAccount.isEnabled, true),
     accountBackendFilter,
-    // always_active 的账号无视 status/cooldown 始终入选；其余维持原"健康且未冷却"判定。
+    // always_active 的账号无视 cooldown 与临时故障始终入选,但 status="error"（终态/鉴权类:
+    // 死号/封号/凭据失效）仍踢出轮换——避免死号常驻形成黑洞。其余维持原"健康且未冷却"判定。
     or(
-      eq(imageBackendAccount.alwaysActive, true),
+      and(
+        eq(imageBackendAccount.alwaysActive, true),
+        sql`${imageBackendAccount.status} <> 'error'`
+      ),
       and(
         isBackendAvailableStatus(
           imageBackendAccount.status,
@@ -2141,10 +2145,13 @@ async function selectPoolMember(
         );
   const apiBaseWhere = and(
     eq(imageBackendApi.isEnabled, true),
-    // always_active 的 API 无视 status/cooldown 始终入选；其余维持原"健康且
-    // 未冷却"判定。
+    // always_active 的 API 无视 cooldown 与临时故障始终入选,但 status="error"（终态）仍踢出
+    // 轮换。其余维持原"健康且未冷却"判定。
     or(
-      eq(imageBackendApi.alwaysActive, true),
+      and(
+        eq(imageBackendApi.alwaysActive, true),
+        sql`${imageBackendApi.status} <> 'error'`
+      ),
       and(
         isBackendAvailableStatus(
           imageBackendApi.status,
@@ -2832,8 +2839,12 @@ export async function reportImageBackendResult(
       input,
       now
     );
-    // always_active：遇错也不下线——失败时不改 status、不进冷却（仅记 lastError/failCount）。
-    const apiFailure = alwaysActive ? {} : effectiveFailure;
+    // always_active：遇【临时】错误不下线——不改 status、不进冷却（仅记 lastError/failCount）。
+    // 例外：终态/鉴权类错误（status="error"）必须照样标 error 踢出,见账号侧同款说明。
+    const apiFailure =
+      alwaysActive && effectiveFailure?.status !== "error"
+        ? {}
+        : effectiveFailure;
     // error 粘性：非常驻后端一旦被置 error，成功不再复活它（高并发下成功多来自
     // 早已在飞的兄弟请求）。只由 测活/手动重新启用/编辑保存/常驻 清除 error。
     const stickyError = api?.status === "error" && !alwaysActive;
@@ -2907,8 +2918,12 @@ export async function reportImageBackendResult(
     .where(eq(imageBackendAccount.id, input.memberId))
     .limit(1);
   const alwaysActive = account?.alwaysActive ?? false;
-  // always_active：遇错也不下线——失败时不改 status、不进冷却（仅记 lastError/failCount）。
-  const accountFailure = alwaysActive ? {} : failure;
+  // always_active：遇【临时】错误不下线——不改 status、不进冷却（仅记 lastError/failCount）。
+  // 例外：终态/鉴权类错误（status="error"，如 token 失效、401/403、凭据失效、封号、
+  // GROUP_DISABLED）必须照样标 error——死号无法靠常驻自愈,否则常驻入选→必失败→再入选,
+  // 形成持续吃流量的黑洞。临时错误（overload/5xx，status=active+cooldown）仍受常驻豁免。
+  const accountFailure =
+    alwaysActive && failure?.status !== "error" ? {} : failure;
   const backend = normalizeAccountBackend(account?.implementationMode);
   const webSuccess =
     input.success && backend === "web"
