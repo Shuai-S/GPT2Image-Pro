@@ -8,7 +8,7 @@ describe("generateDownloadFilename", () => {
       "2026-06-19T14:30:52.123Z"
     );
     expect(result).toMatch(
-      /^gpt2image_[a-z0-9]{8}_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.png$/
+      /^gpt2image_[a-z0-9]{8}_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}d\d{3}Z\.png$/
     );
   });
 
@@ -17,7 +17,7 @@ describe("generateDownloadFilename", () => {
       "test",
       "2026-06-19T08:00:00.456Z"
     );
-    expect(result).toContain("2026-06-19T08-00-00-456Z");
+    expect(result).toContain("2026-06-19T08-00-00d456Z");
   });
 
   it("同一 prompt 产生相同哈希", () => {
@@ -48,7 +48,7 @@ describe("generateDownloadFilename", () => {
   it("空 prompt 不报错", () => {
     const result = generateDownloadFilename("", "2026-06-19T14:30:52.000Z");
     expect(result).toMatch(
-      /^gpt2image_[a-z0-9]{8}_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.png$/
+      /^gpt2image_[a-z0-9]{8}_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}d\d{3}Z\.png$/
     );
   });
 
