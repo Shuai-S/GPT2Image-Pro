@@ -99,14 +99,17 @@
 - **UOL-first**：每个 adobe 能力先在 `uol/operations/adobe.ts` 暴露 `defineOperation`（Zod schema、权限、能力位、幂等、副作用声明），传输层（server action / api-route / 内置 agent）只做薄适配。
 - **admin**：后端池加 Adobe 后端类型；新增 Adobe 账号 / Entities 管理页。
 
-## 8. 待验证未知（实现前必须探活 adobe2api）
+## 8. 关键契约（已从 adobe2api 源码确认，api/routes/generation.py）
 
-文档未明确，需本地起服务 + 真实账号抓样例：
-1. **视频是否异步 / job-id + 轮询协议**（决定 Phase 3 状态机）——几乎必为异步。
-2. **响应确切结构**：图像（`data[].url` vs `b64_json`；chat 的 `choices[].message.content` 是 url 还是 base64）；视频媒体 URL 位置。
-3. **错误格式与限流**（错误分类映射、冷却策略）。
-4. **`/v1/images/generations` 是否支持图生图**，还是图生图只能走 `/v1/chat/completions`。
-5. **媒体 URL 时效**（`/generated/*` 是否需鉴权 / 过期 → re-host 时机）。
+无需 live 实例，源码已定死：
+1. **视频是同步的**：`_run_once` 调 `client.generate_video()` 等生成完写文件，直接返回最终 URL，**无 job-id / 无轮询**。Phase 3 不需异步状态机（但单请求耗时长，需放宽超时）。
+2. **响应结构**：
+   - `/v1/images/generations` → `{ created, model, data: [{ url }] }`；
+   - `/v1/chat/completions` → `{ choices: [{ message: { content } }] }`，图像 content 为 markdown `![...](url)`、视频为 ```html `<video src='url'>` ```；SSE 流式包一层。
+   - **产物是 URL 不是 base64**：`url = public_image_url(request, job_id)` 指向 adobe2api 本机 `/generated/{job_id}`（相对/绝对），须按 baseUrl 解析为绝对地址后 fetch 回来 re-host。
+3. **图生图走 `/v1/chat/completions`**（messages content 里带 `image_url` base64 data URL）；`/v1/images/generations` 仅文生图。
+4. 解析已落地为 `parseAdobeMediaResult`（兼容两种端点 + 相对 URL 解析）。
+5. 仍需 live 校准的小项：错误响应体格式（错误分类映射）、`/generated/*` URL 时效/是否需鉴权（影响 re-host 时机）、限流响应。
 
 ## 9. 风险
 
