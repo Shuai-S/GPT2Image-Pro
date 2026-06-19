@@ -73,6 +73,7 @@ import {
   getEffectiveConfig,
   getResponsesModel,
   getUserApiConfig,
+  poolBackendMemberType,
   repairModerationBlockedPromptWithResponses,
 } from "./service";
 import { isContentSafetyRejection } from "./sla-classification";
@@ -103,7 +104,7 @@ type RunImageGenerationInput =
       relayOnly?: boolean;
       backendRequestKind?: ImageBackendRequestKind;
       preferredBackendMemberId?: string;
-      preferredBackendMemberType?: "api" | "account";
+      preferredBackendMemberType?: "api" | "account" | "adobe";
       stickyPreviousResponseId?: string;
       stickySessionKey?: string;
       mixWebFirst?: boolean;
@@ -118,7 +119,7 @@ type RunImageGenerationInput =
       relayOnly?: boolean;
       backendRequestKind?: ImageBackendRequestKind;
       preferredBackendMemberId?: string;
-      preferredBackendMemberType?: "api" | "account";
+      preferredBackendMemberType?: "api" | "account" | "adobe";
       stickyPreviousResponseId?: string;
       stickySessionKey?: string;
       mixWebFirst?: boolean;
@@ -133,7 +134,7 @@ type RunImageGenerationInput =
       relayOnly?: boolean;
       backendRequestKind?: ImageBackendRequestKind;
       preferredBackendMemberId?: string;
-      preferredBackendMemberType?: "api" | "account";
+      preferredBackendMemberType?: "api" | "account" | "adobe";
       stickyPreviousResponseId?: string;
       stickySessionKey?: string;
       maxChatContextChars?: number;
@@ -214,7 +215,8 @@ function normalizeBillingMultiplier(value: unknown) {
 function getConfigBillingMultiplier(config: ApiConfig) {
   if (
     config.backend?.type !== "pool-account" &&
-    config.backend?.type !== "pool-api"
+    config.backend?.type !== "pool-api" &&
+    config.backend?.type !== "pool-adobe"
   ) {
     return 1;
   }
@@ -1001,12 +1003,14 @@ async function releasePoolBackendConfigLease(config?: ApiConfig | null) {
   const backend = config?.backend;
   if (
     !backend?.inflightLease ||
-    (backend.type !== "pool-api" && backend.type !== "pool-account")
+    (backend.type !== "pool-api" &&
+      backend.type !== "pool-account" &&
+      backend.type !== "pool-adobe")
   ) {
     return;
   }
   await releaseImageBackendInflightLease({
-    memberType: backend.type === "pool-api" ? "api" : "account",
+    memberType: poolBackendMemberType(backend.type),
     memberId: backend.id,
     leaseId: backend.inflightLeaseId,
     leasePersisted: backend.inflightLeasePersisted,

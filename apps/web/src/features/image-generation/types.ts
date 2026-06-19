@@ -230,7 +230,7 @@ export interface ChatGptWebConversationState {
 }
 
 export interface StickyBackendMemberState {
-  type: "api" | "account";
+  type: "api" | "account" | "adobe";
   id: string;
   groupId?: string | null;
   accountBackend?: "web" | "responses";
