@@ -58,11 +58,11 @@ describe("composeAdobeImageModelId", () => {
   it("拼装 firefly-<family>-<res>-<ratio>", () => {
     expect(
       composeAdobeImageModelId({
-        family: "gpt-image",
+        family: "gpt-image-2",
         resolution: "2k",
         ratio: "16x9",
       })
-    ).toBe("firefly-gpt-image-2k-16x9");
+    ).toBe("firefly-gpt-image-2-2k-16x9");
     expect(
       composeAdobeImageModelId({
         family: "nano-banana-pro",
@@ -88,11 +88,11 @@ describe("toAdobeImageDataUrl", () => {
 describe("buildAdobeImageRequestBody", () => {
   it("文生图：content 为纯文本，model 由 size 映射", () => {
     const body = buildAdobeImageRequestBody({
-      family: "gpt-image",
+      family: "gpt-image-2",
       prompt: "a cat",
       size: "1792x1024",
     });
-    expect(body.model).toBe("firefly-gpt-image-2k-16x9");
+    expect(body.model).toBe("firefly-gpt-image-2-2k-16x9");
     expect(body.messages).toEqual([{ role: "user", content: "a cat" }]);
     expect(body.stream).toBeUndefined();
   });
@@ -113,18 +113,18 @@ describe("buildAdobeImageRequestBody", () => {
 
   it("显式 ratio/resolution 覆盖 size 映射", () => {
     const body = buildAdobeImageRequestBody({
-      family: "gpt-image",
+      family: "gpt-image-2",
       prompt: "x",
       size: "1024x1024",
       ratio: "9x16",
       resolution: "4k",
     });
-    expect(body.model).toBe("firefly-gpt-image-4k-9x16");
+    expect(body.model).toBe("firefly-gpt-image-2-4k-9x16");
   });
 
   it("stream 透传", () => {
     const body = buildAdobeImageRequestBody({
-      family: "gpt-image",
+      family: "gpt-image-2",
       prompt: "x",
       stream: true,
     });

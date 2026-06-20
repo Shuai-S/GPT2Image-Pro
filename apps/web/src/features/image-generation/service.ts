@@ -3862,7 +3862,8 @@ export function poolBackendMemberType(
 // adobe（pool-adobe）后端的图像家族选择：Phase 1 默认 gpt-image；若后端声明了
 // enabledModels，取其中首个受支持的家族。
 const ADOBE_IMAGE_FAMILIES: AdobeImageFamily[] = [
-  "gpt-image",
+  "gpt-image-2",
+  "gpt-image-1.5",
   "nano-banana",
   "nano-banana2",
   "nano-banana-pro",
@@ -3878,7 +3879,7 @@ function pickAdobeImageFamily(
       }
     }
   }
-  return "gpt-image";
+  return "gpt-image-2";
 }
 
 // 从请求 model（firefly-<family>[-<res>-<ratio>]）解析模型族；解析不到返回 null（由调用
@@ -3909,6 +3910,7 @@ async function runAdobeImageRequest(
     prompt: string;
     model?: string | null;
     size?: string | null;
+    quality?: string | null;
     images?: Array<{ data: Buffer; type?: string | null }>;
     signal?: AbortSignal;
   }
@@ -3998,6 +4000,7 @@ export async function generateImage(
           prompt: getEffectivePrompt(params),
           model,
           size: params.size,
+          quality: params.quality,
           signal: params.signal,
         })
       )
@@ -4163,6 +4166,7 @@ export async function editImage(
           prompt: effectiveEditPrompt,
           model,
           size: params.size,
+          quality: params.quality,
           images: params.images,
           signal: params.signal,
         })

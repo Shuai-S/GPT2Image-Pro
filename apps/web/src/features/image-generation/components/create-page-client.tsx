@@ -1017,7 +1017,8 @@ const FIREFLY_MODEL_OPTIONS = [
   { value: "firefly-nano-banana-pro", label: "Firefly · Nano Banana Pro" },
   { value: "firefly-nano-banana", label: "Firefly · Nano Banana" },
   { value: "firefly-nano-banana2", label: "Firefly · Nano Banana 2" },
-  { value: "firefly-gpt-image", label: "Firefly · GPT Image" },
+  { value: "firefly-gpt-image-2", label: "Firefly · GPT Image 2" },
+  { value: "firefly-gpt-image-1.5", label: "Firefly · GPT Image 1.5" },
 ] as const;
 const TEXT_MODEL_OPTIONS = [
   { value: "default", label: "Default" },
@@ -7155,7 +7156,7 @@ export function CreatePageClient({
                   <Select
                     value={quality}
                     onValueChange={(value) => setQuality(value as ImageQuality)}
-                    disabled={modeBusy || disableResponsesOnlyControls || textFireflyActive}
+                    disabled={modeBusy || disableResponsesOnlyControls}
                   >
                     <SelectTrigger
                       id={`image-quality-${mode}`}
@@ -8065,7 +8066,7 @@ export function CreatePageClient({
                         onValueChange={(value) =>
                           setQuality(value as ImageQuality)
                         }
-                        disabled={isEditing || editMixWebFirstActive || editFireflyActive}
+                        disabled={isEditing || editMixWebFirstActive}
                       >
                         <SelectTrigger id="edit-quality" className="w-full">
                           <SelectValue />

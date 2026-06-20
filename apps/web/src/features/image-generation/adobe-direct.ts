@@ -336,7 +336,8 @@ async function markTokenStatus(
 }
 
 const ALLOWED_FAMILIES: AdobeImageFamily[] = [
-  "gpt-image",
+  "gpt-image-2",
+  "gpt-image-1.5",
   "nano-banana",
   "nano-banana2",
   "nano-banana-pro",
@@ -350,7 +351,7 @@ function pickFamily(enabled: string[] | null | undefined): AdobeImageFamily {
       }
     }
   }
-  return "gpt-image";
+  return "gpt-image-2";
 }
 
 // 从请求 model（firefly-<family> 或 firefly-<family>-<res>-<ratio>）解析模型族；
@@ -385,6 +386,7 @@ export async function runAdobeDirectImageRequest(
     prompt: string;
     model?: string | null;
     size?: string | null;
+    quality?: string | null;
     images?: Array<{ data: Buffer; type?: string | null }>;
     signal?: AbortSignal;
   }
@@ -455,9 +457,13 @@ export async function runAdobeDirectImageRequest(
       outputResolution: modelConf.outputResolution,
       upstreamModelId: modelConf.upstreamModelId,
       upstreamModelVersion: modelConf.upstreamModelVersion,
-      // gpt-image 质量(系统级,缺省 high → detailLevel 5);builder 对 nano-banana 忽略,
-      // 故无条件透传安全。此前未传导致一律落到最低 detailLevel 1。
-      qualityLevel: config.backend?.adobeGptImageQuality ?? "high",
+      // gpt-image 质量改用户操控：用户显式选的 low/medium/high 优先;auto/未选则回退
+      // 后端默认或 high。builder 把 low/medium/high → detailLevel 1/3/5,对 nano-banana
+      // 忽略,故无条件透传安全。
+      qualityLevel:
+        params.quality && params.quality !== "auto"
+          ? params.quality
+          : (config.backend?.adobeGptImageQuality ?? "high"),
       ...(sourceImageIds ? { sourceImageIds } : {}),
       signal: params.signal,
     });

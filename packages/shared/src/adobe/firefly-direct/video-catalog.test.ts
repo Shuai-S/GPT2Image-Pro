@@ -69,7 +69,7 @@ describe("firefly video catalog", () => {
 
   it("非法/未知 model id 返回 null", () => {
     expect(resolveFireflyVideoModel("firefly-sora2-3s-16x9")).toBeNull();
-    expect(resolveFireflyVideoModel("firefly-gpt-image-2k-1x1")).toBeNull();
+    expect(resolveFireflyVideoModel("firefly-gpt-image-2-2k-1x1")).toBeNull();
     expect(isFireflyVideoModelId("firefly-veo31-6s-16x9-1080p")).toBe(true);
     expect(isFireflyVideoModelId("nope")).toBe(false);
   });

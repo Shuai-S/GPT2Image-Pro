@@ -102,20 +102,26 @@ function registerNanoBananaFamily(
   }
 }
 
+// gpt-image 两个版本（2 / 1.5）：版本写进 model id 的版本段（紧跟 gpt-image），
+// upstreamModelVersion 由名字决定（不再写死 2）。
+const GPT_IMAGE_VERSIONS = ["2", "1.5"] as const;
+
 function registerGptImageFamily(): void {
-  for (const res of RESOLUTIONS) {
-    const resLower = res.toLowerCase();
-    for (const ratio of Object.keys(GPT_IMAGE_RATIO_SUFFIX_MAP)) {
-      const suffix = GPT_IMAGE_RATIO_SUFFIX_MAP[ratio];
-      const modelId = `firefly-gpt-image-${resLower}-${suffix}`;
-      FIREFLY_IMAGE_MODEL_CATALOG[modelId] = {
-        upstreamModel: "openai:firefly:gpt-image",
-        upstreamModelId: "gpt-image",
-        upstreamModelVersion: "2",
-        outputResolution: res,
-        aspectRatio: ratio,
-        description: `Firefly GPT Image (${res} ${ratio})`,
-      };
+  for (const version of GPT_IMAGE_VERSIONS) {
+    for (const res of RESOLUTIONS) {
+      const resLower = res.toLowerCase();
+      for (const ratio of Object.keys(GPT_IMAGE_RATIO_SUFFIX_MAP)) {
+        const suffix = GPT_IMAGE_RATIO_SUFFIX_MAP[ratio];
+        const modelId = `firefly-gpt-image-${version}-${resLower}-${suffix}`;
+        FIREFLY_IMAGE_MODEL_CATALOG[modelId] = {
+          upstreamModel: "openai:firefly:gpt-image",
+          upstreamModelId: "gpt-image",
+          upstreamModelVersion: version,
+          outputResolution: res,
+          aspectRatio: ratio,
+          description: `Firefly GPT Image ${version} (${res} ${ratio})`,
+        };
+      }
     }
   }
 }

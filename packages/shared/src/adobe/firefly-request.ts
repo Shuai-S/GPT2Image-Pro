@@ -11,7 +11,8 @@
 
 // adobe2api 图像模型家族（视频家族见 Phase 3）。
 export type AdobeImageFamily =
-  | "gpt-image"
+  | "gpt-image-2"
+  | "gpt-image-1.5"
   | "nano-banana"
   | "nano-banana2"
   | "nano-banana-pro";

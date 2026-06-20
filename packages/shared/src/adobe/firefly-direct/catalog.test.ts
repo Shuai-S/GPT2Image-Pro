@@ -7,14 +7,24 @@ import {
 } from "./catalog";
 
 describe("FIREFLY_IMAGE_MODEL_CATALOG", () => {
-  it("注册 gpt-image / nano-banana 家族", () => {
-    expect(FIREFLY_IMAGE_MODEL_CATALOG["firefly-gpt-image-2k-16x9"]).toEqual({
+  it("注册 gpt-image 2/1.5 / nano-banana 家族", () => {
+    expect(FIREFLY_IMAGE_MODEL_CATALOG["firefly-gpt-image-2-2k-16x9"]).toEqual({
       upstreamModel: "openai:firefly:gpt-image",
       upstreamModelId: "gpt-image",
       upstreamModelVersion: "2",
       outputResolution: "2K",
       aspectRatio: "16:9",
-      description: "Firefly GPT Image (2K 16:9)",
+      description: "Firefly GPT Image 2 (2K 16:9)",
+    });
+    expect(
+      FIREFLY_IMAGE_MODEL_CATALOG["firefly-gpt-image-1.5-2k-16x9"]
+    ).toEqual({
+      upstreamModel: "openai:firefly:gpt-image",
+      upstreamModelId: "gpt-image",
+      upstreamModelVersion: "1.5",
+      outputResolution: "2K",
+      aspectRatio: "16:9",
+      description: "Firefly GPT Image 1.5 (2K 16:9)",
     });
     const nano = FIREFLY_IMAGE_MODEL_CATALOG["firefly-nano-banana-pro-4k-1x1"];
     expect(nano?.upstreamModelId).toBe("gemini-flash");
