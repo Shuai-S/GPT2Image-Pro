@@ -104,6 +104,7 @@ import {
   validateImageSize,
 } from "../resolution";
 import { ImageLightbox, type LightboxGeneration } from "./image-lightbox";
+import { VideoCreatePanel } from "./video-create-panel";
 
 type RecentGeneration = {
   id: string;
@@ -569,7 +570,13 @@ type ImageAspectRatio =
   | "3:4"
   | "21:9";
 
-type ActiveMode = "text" | "image" | "chat" | "agent" | "waterfall";
+type ActiveMode =
+  | "text"
+  | "image"
+  | "chat"
+  | "agent"
+  | "waterfall"
+  | "video";
 type ReferenceTargetMode = Extract<ActiveMode, ReferenceHandoffMode>;
 type VisualOutputMode = "text-single" | "text-lines" | "image";
 
@@ -7521,6 +7528,10 @@ export function CreatePageClient({
               <span className="text-[10px] text-muted-foreground">Locked</span>
             )}
           </TabsTrigger>
+          <TabsTrigger value="video">
+            <Wand2 className="h-4 w-4" />
+            {copy("Video", "视频")}
+          </TabsTrigger>
         </TabsList>
 
         <div role="tabpanel" hidden={activeMode !== "text"} className="mt-0">
@@ -9306,6 +9317,10 @@ export function CreatePageClient({
               </div>
             )}
           </div>
+        </div>
+
+        <div role="tabpanel" hidden={activeMode !== "video"} className="mt-0">
+          <VideoCreatePanel />
         </div>
       </Tabs>
 
