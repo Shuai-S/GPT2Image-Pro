@@ -455,6 +455,9 @@ export async function runAdobeDirectImageRequest(
       outputResolution: modelConf.outputResolution,
       upstreamModelId: modelConf.upstreamModelId,
       upstreamModelVersion: modelConf.upstreamModelVersion,
+      // gpt-image 质量(系统级,缺省 high → detailLevel 5);builder 对 nano-banana 忽略,
+      // 故无条件透传安全。此前未传导致一律落到最低 detailLevel 1。
+      qualityLevel: config.backend?.adobeGptImageQuality ?? "high",
       ...(sourceImageIds ? { sourceImageIds } : {}),
       signal: params.signal,
     });

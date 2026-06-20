@@ -293,6 +293,8 @@ export interface ApiConfig {
     adobeDefaultRatio?: string;
     adobeDefaultResolution?: string;
     adobeSupportsVideo?: boolean;
+    // gpt-image 质量(系统级,low/medium/high → detailLevel 1/3/5);缺省走 high。
+    adobeGptImageQuality?: string;
     billingGroupId?: string | null;
     billingMultiplier?: number;
     reportResult?: boolean;
