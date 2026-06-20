@@ -2332,7 +2332,20 @@ async function selectPoolMember(
     createdAt: imageBackendAdobe.createdAt,
     metadata: imageBackendAdobe.metadata,
   };
-  const adobeRowsPromise = groupIds.length
+  // adobe 默认全局参与调度:请求模型为 firefly-* 前缀时,拉取所有启用的 adobe 后端(忽略
+  // 分组归属),实现"无需挂组、默认可被调度"。非 firefly 请求仍按分组解析(且 adobeMembers
+  // 对非 firefly 一律为空,不会混入 gpt/codex/web 调度)。
+  const adobeRowsPromise = isAdobeFireflyModelId(requestedModel)
+    ? db
+        .select(adobeSelection)
+        .from(imageBackendAdobe)
+        .where(adobeBaseWhere)
+        .orderBy(
+          asc(imageBackendAdobe.priority),
+          asc(imageBackendAdobe.lastUsedAt),
+          asc(imageBackendAdobe.createdAt)
+        )
+    : groupIds.length
     ? db
         .select({
           ...adobeSelection,
