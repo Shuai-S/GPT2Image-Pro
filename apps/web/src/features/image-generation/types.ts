@@ -230,7 +230,7 @@ export interface ChatGptWebConversationState {
 }
 
 export interface StickyBackendMemberState {
-  type: "api" | "account";
+  type: "api" | "account" | "adobe";
   id: string;
   groupId?: string | null;
   accountBackend?: "web" | "responses";
@@ -274,7 +274,7 @@ export interface ApiConfig {
   contentSafetyEnabled?: boolean;
   headers?: Record<string, string>;
   backend?: {
-    type: "platform" | "pool-api" | "pool-account" | "user-api";
+    type: "platform" | "pool-api" | "pool-account" | "pool-adobe" | "user-api";
     id?: string;
     groupId?: string | null;
     userId?: string;
@@ -285,6 +285,16 @@ export interface ApiConfig {
     chatCompletionsUpstreamMode?: "responses" | "chat_completions";
     imagesUpstreamMode?: "images" | "responses";
     apiForceResponsesEndpoint?: boolean;
+    // adobe（pool-adobe）专属：暴露的 Firefly 模型家族、默认宽高比/分辨率、是否支持
+    // 视频。供 image-generation 派发 adobe 请求时选择 family 与映射缺省值。
+    // gateway：调外部 adobe2api；direct：本仓库直连 Firefly（adobe_account/token + 旁路）。
+    adobeMode?: "gateway" | "direct";
+    adobeEnabledModels?: string[] | null;
+    adobeDefaultRatio?: string;
+    adobeDefaultResolution?: string;
+    adobeSupportsVideo?: boolean;
+    // gpt-image 质量(系统级,low/medium/high → detailLevel 1/3/5);缺省走 high。
+    adobeGptImageQuality?: string;
     billingGroupId?: string | null;
     billingMultiplier?: number;
     reportResult?: boolean;

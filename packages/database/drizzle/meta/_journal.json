@@ -281,6 +281,34 @@
       "when": 1780400720000,
       "tag": "0039_add_subscription_user_id_index",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1780400780000,
+      "tag": "0040_image_backend_adobe",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1780400840000,
+      "tag": "0041_adobe_account_token",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1780400900000,
+      "tag": "0042_video_generation",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1780400960000,
+      "tag": "0043_adobe_gpt_image_quality",
+      "breakpoints": true
     }
   ]
 }

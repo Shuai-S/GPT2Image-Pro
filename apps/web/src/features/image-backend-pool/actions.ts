@@ -14,6 +14,13 @@ import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { z } from "zod";
 
 import {
+  deleteAdobeAccount,
+  importAdobeAccount,
+  listAdobeAccounts,
+  setAdobeAccountEnabled,
+} from "@/features/image-generation/adobe-direct";
+
+import {
   bulkUpdateImageBackendAccounts,
   deleteImageBackendGroup,
   deleteImageBackendMembers,
@@ -35,6 +42,8 @@ import {
   runSub2ApiAutoSyncTaskNow,
   runSub2ApiManualSync,
   setImageBackendAccountAlwaysActive,
+  setImageBackendAdobeAlwaysActive,
+  setImageBackendAdobeEnabled,
   setImageBackendApiAlwaysActive,
   setImageBackendApiEnabled,
   setSub2ApiAutoSyncTaskEnabled,
@@ -43,6 +52,7 @@ import {
   syncImageBackendAccountsFromSub2Api,
   updateSub2ApiAutoSyncTaskOptions,
   upsertImageBackendAccount,
+  upsertImageBackendAdobe,
   upsertImageBackendApi,
   upsertImageBackendGroup,
 } from "./service";
@@ -574,6 +584,135 @@ export const saveImageBackendApiAction = withImageBackendPoolAdminAction(
     return { success: true, id };
   });
 
+export const saveImageBackendAdobeAction = withImageBackendPoolAdminAction(
+  "saveAdobe"
+)
+  .schema(
+    z
+      .object({
+        id: z.string().trim().optional(),
+        groupId: nullableGroupIdSchema,
+        groupIds: z.array(z.string().trim().min(1)).max(100).optional(),
+        name: z.string().trim().min(1).max(120),
+        mode: z.enum(["gateway", "direct"]).default("gateway"),
+        baseUrl: z.string().trim().default(""),
+        apiKey: z.string().trim().optional(),
+        enabledModels: z
+          .array(z.string().trim().min(1).max(60))
+          .max(20)
+          .optional(),
+        defaultRatio: z.string().trim().max(20).default("1x1"),
+        defaultResolution: z.string().trim().max(10).default("2k"),
+        gptImageQuality: z.enum(["low", "medium", "high"]).default("high"),
+        supportsVideo: z.boolean().default(false),
+        contentSafetyEnabled: z.boolean().default(true),
+        isEnabled: z.boolean().default(true),
+        alwaysActive: z.boolean().default(false),
+        failureCooldownEnabled: z.boolean().default(false),
+        priority: z.coerce.number().int().min(0).max(10000).default(50),
+        concurrency: z.coerce.number().int().min(1).max(10000).default(10),
+        status: z.string().trim().max(80).optional(),
+      })
+      // gateway 模式必须有合法 baseUrl；direct 模式凭据走 Adobe 账号（另表），baseUrl 可空。
+      .refine(
+        (value) =>
+          value.mode === "direct" || /^https?:\/\//i.test(value.baseUrl),
+        { message: "baseUrl must be a valid URL", path: ["baseUrl"] }
+      )
+  )
+  .action(async ({ parsedInput }) => {
+    const id = await upsertImageBackendAdobe({
+      id: parsedInput.id,
+      groupId: parsedInput.groupId,
+      groupIds: parsedInput.groupIds,
+      name: parsedInput.name,
+      mode: parsedInput.mode,
+      baseUrl: parsedInput.baseUrl,
+      apiKey: parsedInput.apiKey || undefined,
+      enabledModels: parsedInput.enabledModels ?? null,
+      defaultRatio: parsedInput.defaultRatio,
+      defaultResolution: parsedInput.defaultResolution,
+      gptImageQuality: parsedInput.gptImageQuality,
+      supportsVideo: parsedInput.supportsVideo,
+      contentSafetyEnabled: parsedInput.contentSafetyEnabled,
+      isEnabled: parsedInput.isEnabled,
+      alwaysActive: parsedInput.alwaysActive,
+      failureCooldownEnabled: parsedInput.failureCooldownEnabled,
+      priority: parsedInput.priority,
+      concurrency: parsedInput.concurrency,
+      status: parsedInput.status || "active",
+    });
+    return { success: true, id };
+  });
+
+export const setImageBackendAdobeEnabledAction =
+  withImageBackendPoolAdminAction("setAdobeEnabled")
+    .schema(z.object({ id: z.string().trim().min(1), isEnabled: z.boolean() }))
+    .action(async ({ parsedInput }) => {
+      await setImageBackendAdobeEnabled(parsedInput);
+      return { success: true };
+    });
+
+export const setImageBackendAdobeAlwaysActiveAction =
+  withImageBackendPoolAdminAction("setAdobeAlwaysActive")
+    .schema(
+      z.object({ id: z.string().trim().min(1), alwaysActive: z.boolean() })
+    )
+    .action(async ({ parsedInput }) => {
+      await setImageBackendAdobeAlwaysActive(parsedInput);
+      return { success: true };
+    });
+
+// ===== Adobe 直连账号管理（mode=direct）=====
+
+export const listAdobeAccountsAction = withImageBackendPoolAdminAction(
+  "listAdobeAccounts"
+)
+  .schema(z.object({ adobeId: z.string().trim().min(1) }))
+  .action(async ({ parsedInput }) => {
+    const accounts = await listAdobeAccounts(parsedInput.adobeId);
+    return { success: true, accounts };
+  });
+
+export const importAdobeAccountAction = withImageBackendPoolAdminAction(
+  "importAdobeAccount"
+)
+  .schema(
+    z.object({
+      adobeId: z.string().trim().min(1),
+      name: z.string().trim().max(120).optional(),
+      cookie: z.string().trim().min(1),
+      scope: z.string().trim().max(2000).optional(),
+    })
+  )
+  .action(async ({ parsedInput }) => {
+    const account = await importAdobeAccount({
+      adobeId: parsedInput.adobeId,
+      name: parsedInput.name,
+      cookie: parsedInput.cookie,
+      scope: parsedInput.scope ?? null,
+    });
+    return { success: true, account };
+  });
+
+export const deleteAdobeAccountAction = withImageBackendPoolAdminAction(
+  "deleteAdobeAccount"
+)
+  .schema(z.object({ id: z.string().trim().min(1) }))
+  .action(async ({ parsedInput }) => {
+    await deleteAdobeAccount(parsedInput.id);
+    return { success: true };
+  });
+
+export const setAdobeAccountEnabledAction = withImageBackendPoolAdminAction(
+  "setAdobeAccountEnabled"
+)
+  .schema(z.object({ id: z.string().trim().min(1), isEnabled: z.boolean() }))
+  .action(async ({ parsedInput }) => {
+    await setAdobeAccountEnabled(parsedInput.id, parsedInput.isEnabled);
+    return { success: true };
+  });
+
 export const setImageBackendApiEnabledAction = withImageBackendPoolAdminAction(
   "setApiEnabled"
 )
@@ -628,7 +767,7 @@ export const deleteImageBackendMemberAction = withImageBackendPoolAdminAction(
 )
   .schema(
     z.object({
-      type: z.enum(["account", "api"]),
+      type: z.enum(["account", "api", "adobe"]),
       id: z.string().trim().min(1),
     })
   )
@@ -636,7 +775,9 @@ export const deleteImageBackendMemberAction = withImageBackendPoolAdminAction(
     await deleteImageBackendMembers(
       parsedInput.type === "account"
         ? { accountIds: [parsedInput.id] }
-        : { apiIds: [parsedInput.id] }
+        : parsedInput.type === "adobe"
+          ? { adobeIds: [parsedInput.id] }
+          : { apiIds: [parsedInput.id] }
     );
     return { success: true };
   });

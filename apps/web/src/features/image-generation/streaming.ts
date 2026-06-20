@@ -51,7 +51,7 @@ export type ImageStreamEvent =
         selectedImageMessageId?: string;
       };
       backendMember?: {
-        type: "api" | "account";
+        type: "api" | "account" | "adobe";
         id: string;
         groupId?: string | null;
         accountBackend?: "web" | "responses";
@@ -65,7 +65,7 @@ export type ImageStreamEvent =
       responsesPreviousResponse?: {
         responseId: string;
         backendMember: {
-          type: "api" | "account";
+          type: "api" | "account" | "adobe";
           id: string;
           groupId?: string | null;
           accountBackend?: "web" | "responses";
@@ -85,6 +85,10 @@ export type ImageStreamEvent =
         index?: number;
         outputRole?: "final" | "agent_draft" | "choice";
       }>;
+      // Adobe Firefly 视频产物（视频生成路径专用，图像路径不设）。
+      videoGenerationId?: string;
+      videoUrl?: string;
+      videoDurationSeconds?: number;
       creditsConsumed?: number;
     }
   | {

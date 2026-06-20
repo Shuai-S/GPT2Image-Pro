@@ -35,6 +35,9 @@ type requestPayload struct {
 	Method     string            `json:"method"`
 	URLPath    string            `json:"urlPath"`
 	TargetPath string            `json:"targetPath"`
+	// TargetURL 为可选的绝对 URL（https）。设置后走主机白名单转发（用于 Adobe Firefly
+	// 等多主机直连）；未设置时回落到 URLPath + chatgpt.com（保持原 ChatGPT Web 行为）。
+	TargetURL  string            `json:"targetUrl"`
 	Headers    map[string]string `json:"headers"`
 	HeaderOrder []string         `json:"headerOrder"`
 	BodyBase64 string            `json:"bodyBase64"`
@@ -135,7 +138,13 @@ func (s *server) handleRequest(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 }
 
 func (s *server) forward(payload requestPayload) (*responsePayload, error) {
-	targetURL, err := buildTargetURL(payload.URLPath)
+	var targetURL string
+	var err error
+	if strings.TrimSpace(payload.TargetURL) != "" {
+		targetURL, err = buildAllowlistedURL(payload.TargetURL)
+	} else {
+		targetURL, err = buildTargetURL(payload.URLPath)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -196,6 +205,40 @@ func buildTargetURL(urlPath string) (string, error) {
 		return "", errors.New("only https://chatgpt.com requests are allowed")
 	}
 	return parsed.String(), nil
+}
+
+// buildAllowlistedURL 校验绝对 URL：必须 https，且主机在白名单内（chatgpt.com 或 Adobe
+// 系域名）。用于 Adobe Firefly 直连的多主机转发（firefly-3p / IMS / platform-cs 等）。
+func buildAllowlistedURL(rawURL string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return "", fmt.Errorf("invalid targetUrl: %w", err)
+	}
+	if parsed.Scheme != "https" {
+		return "", errors.New("only https targetUrl is allowed")
+	}
+	if !isAllowlistedHost(parsed.Hostname()) {
+		return "", fmt.Errorf("host not allowlisted: %s", parsed.Hostname())
+	}
+	return parsed.String(), nil
+}
+
+func isAllowlistedHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" {
+		return false
+	}
+	if host == "chatgpt.com" {
+		return true
+	}
+	// Adobe 系域名（含子域）。
+	suffixes := []string{".adobe.io", ".adobe.com", ".adobelogin.com"}
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(host, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func decodeBody(value string) ([]byte, error) {

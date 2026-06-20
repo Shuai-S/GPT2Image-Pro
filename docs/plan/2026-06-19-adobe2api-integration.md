@@ -99,14 +99,17 @@
 - **UOL-first**：每个 adobe 能力先在 `uol/operations/adobe.ts` 暴露 `defineOperation`（Zod schema、权限、能力位、幂等、副作用声明），传输层（server action / api-route / 内置 agent）只做薄适配。
 - **admin**：后端池加 Adobe 后端类型；新增 Adobe 账号 / Entities 管理页。
 
-## 8. 待验证未知（实现前必须探活 adobe2api）
+## 8. 关键契约（已从 adobe2api 源码确认，api/routes/generation.py）
 
-文档未明确，需本地起服务 + 真实账号抓样例：
-1. **视频是否异步 / job-id + 轮询协议**（决定 Phase 3 状态机）——几乎必为异步。
-2. **响应确切结构**：图像（`data[].url` vs `b64_json`；chat 的 `choices[].message.content` 是 url 还是 base64）；视频媒体 URL 位置。
-3. **错误格式与限流**（错误分类映射、冷却策略）。
-4. **`/v1/images/generations` 是否支持图生图**，还是图生图只能走 `/v1/chat/completions`。
-5. **媒体 URL 时效**（`/generated/*` 是否需鉴权 / 过期 → re-host 时机）。
+无需 live 实例，源码已定死：
+1. **视频是同步的**：`_run_once` 调 `client.generate_video()` 等生成完写文件，直接返回最终 URL，**无 job-id / 无轮询**。Phase 3 不需异步状态机（但单请求耗时长，需放宽超时）。
+2. **响应结构**：
+   - `/v1/images/generations` → `{ created, model, data: [{ url }] }`；
+   - `/v1/chat/completions` → `{ choices: [{ message: { content } }] }`，图像 content 为 markdown `![...](url)`、视频为 ```html `<video src='url'>` ```；SSE 流式包一层。
+   - **产物是 URL 不是 base64**：`url = public_image_url(request, job_id)` 指向 adobe2api 本机 `/generated/{job_id}`（相对/绝对），须按 baseUrl 解析为绝对地址后 fetch 回来 re-host。
+3. **图生图走 `/v1/chat/completions`**（messages content 里带 `image_url` base64 data URL）；`/v1/images/generations` 仅文生图。
+4. 解析已落地为 `parseAdobeMediaResult`（兼容两种端点 + 相对 URL 解析）。
+5. 仍需 live 校准的小项：错误响应体格式（错误分类映射）、`/generated/*` URL 时效/是否需鉴权（影响 re-host 时机）、限流响应。
 
 ## 9. 风险
 
@@ -130,3 +133,51 @@
 - Entities 的归属与配额（per-user vs 全站；与 Adobe 账号绑定关系如何对用户呈现）。
 - Adobe gpt-image 与现有 codex/web gpt-image 在调度上的优先级/分组策略。
 - Firefly 生态 tab 与现有创作页的导航关系（同页签 vs 独立入口）。
+
+## 12. 实施进度与池接入地图
+
+### 已完成（分支 feat/adobe2api-backend）
+- `9160112` Firefly 请求适配器（纯函数 + 14 单测）：`packages/shared/src/adobe/firefly-request.ts`。
+- `f6b365e` 数据模型 `image_backend_adobe`(+group) + 迁移 0040。
+- `1a5a7a2` Firefly 响应解析器（纯函数 + 12 单测）：`firefly-response.ts`（`parseAdobeMediaResult`）。
+- 全绿：typecheck + 26 单测 + lint。
+
+### 池接入已完成（feat/adobe2api-backend）
+- `ec28fc1` 调度接入：PoolMember adobe 变体、候选收集（与 api 同构 + always_active 终态
+  规则）、toResolvedPoolConfig/reportImageBackendResult adobe 分支、helper 加宽、测试 mock。
+- `7ff4b69` 派发接入：runAdobeImageRequest（Firefly 适配 → /v1/chat/completions → 解析 →
+  取回字节 re-host）、generate/edit 的 pool-adobe 分支、poolBackendMemberType 三态贯通
+  （含 memberType 联合在 sticky/lease/stream/options 全链路加宽）。
+- 全绿：web typecheck + 222 image 测试 + 26 adobe 测试。
+- 剩余：admin 后端表单（CRUD image_backend_adobe）；live 端到端验证（需 adobe2api 实例）。
+
+### Phase 1 池接入触点（已扫描，blast radius 已知，已全部落地）
+把第三种成员类型 `"adobe"` 穿过调度器 + 派发：
+
+1. `image-backend-pool/service.ts`：
+   - `PoolMember` 加 `type:"adobe"` 变体；`ResolvedImageBackendPoolConfig.memberType`、
+     `ImageBackendReportResultInput.memberType` 放宽含 `"adobe"`。
+   - 内部 helper 的 `memberType` 形参放宽（约 6 处：~899/989/1016/2513/2818，租约/粘性/SLA 指标）。
+   - `resolvePoolMember` 候选收集：查 `imageBackendAdobe`(+group)，镜像 api/account 的
+     where（含 always_active + 终态错误规则：`status<>'error'`）、优先级/SLA 排序。
+   - `toResolvedPoolConfig` 加 adobe 分支：构造 `config.backend = { type:"pool-adobe", ...,
+     adobeEnabledModels/defaultRatio/defaultResolution/supportsVideo }`。
+   - `reportImageBackendResult` 加 adobe 分支：镜像 api 的 always_active + 终态错误标 error +
+     冷却，写 `imageBackendAdobe`。
+   - `classifyFailure` / 错误分类对 adobe 响应适配。
+2. `image-generation/types.ts`：`backend.type` 联合加 `"pool-adobe"`（+ adobe 专属字段）。
+3. `image-generation/service.ts` 与 `operations.ts`：约 15+ 处
+   `backend.type === "pool-api" ? "api" : "account"` 映射须改三态（含 adobe）；
+   **真正的派发**（generate/edit）加 adobe 分支：用 `buildAdobeImageRequestBody` → POST
+   `{baseUrl}/v1/chat/completions` → `parseAdobeMediaResult` → fetch 媒体 re-host。
+4. admin：`image_backend_adobe` 后端表单（baseUrl + apiKey + enabledModels + 默认 ratio/res）。
+
+### Phase 2 账号管理（已确认可行）
+adobe2api 账号/cookie/token 管理全暴露 HTTP API（`/api/v1/tokens`、
+`/api/v1/refresh-profiles/import-cookie` 等），鉴权为 **admin session 登录**（`/api/v1/auth/login`）。
+gpt2image admin 做服务端代理（login 拿 session → 转发导入/列表/刷新/删除）。
+需给 `image_backend_adobe` 加 adobe2api 的 **admin 凭据字段**（与生成用 apiKey 分开）。
+注意：生成用 Service API Key；账号管理用 admin 登录——两套凭据。
+
+### 待 live 校准
+错误响应体格式、`/generated/*` URL 时效/鉴权、限流响应（需一个能用的 adobe2api 实例）。

@@ -937,6 +937,203 @@ export const imageBackendApiGroup = pgTable(
   ]
 );
 
+// Adobe Firefly（adobe2api）后端：OpenAI 兼容网关，但模型/尺寸/视频形态与通用
+// pool-api 不同（model id 编码宽高比+分辨率+时长、宽高比枚举、entities、视频），故
+// 独立成表。调度字段（status/cooldown/并发/always_active/优先级）语义与 imageBackendApi
+// 一致，复用同一套调度机制（租约/粘性/SLA 指标）。账号-token 池由 adobe2api 侧自管，
+// 本表只持有 baseUrl + apiKey。
+export const imageBackendAdobe = pgTable("image_backend_adobe", {
+  id: text("id").primaryKey(),
+  groupId: text("group_id").references(() => imageBackendGroup.id, {
+    onDelete: "set null",
+  }),
+  name: text("name").notNull(),
+  // gateway：调外部 adobe2api（OpenAI 兼容，用 baseUrl+apiKey）。
+  // direct：本仓库直连 Adobe Firefly（用 adobe_account/adobe_token + Go TLS 旁路）。
+  mode: text("mode").notNull().default("gateway"),
+  baseUrl: text("base_url").notNull(),
+  apiKey: text("api_key").notNull(),
+  // 本后端暴露的 Firefly 图像模型家族（如 ["gpt-image","nano-banana-pro"]）；
+  // 为空表示不限制。
+  enabledModels: json("enabled_models").$type<string[]>(),
+  // 站内 WxH 映射不出确定值时的默认宽高比/分辨率。
+  defaultRatio: text("default_ratio").notNull().default("1x1"),
+  defaultResolution: text("default_resolution").notNull().default("2k"),
+  // 用户 GPT Image 质量选 auto/未指定时映射到的质量（low/medium/high）；默认 high。
+  gptImageQuality: text("gpt_image_quality").notNull().default("high"),
+  // 是否允许走视频模型（Phase 3）；默认关闭。
+  supportsVideo: boolean("supports_video").notNull().default(false),
+  contentSafetyEnabled: boolean("content_safety_enabled")
+    .notNull()
+    .default(true),
+  isEnabled: boolean("is_enabled").notNull().default(true),
+  // 与 imageBackendApi 同义：遇错也始终可用（终态错误除外，见调度器）。
+  alwaysActive: boolean("always_active").notNull().default(false),
+  priority: integer("priority").notNull().default(50),
+  concurrency: integer("concurrency").notNull().default(10),
+  failureCooldownEnabled: boolean("failure_cooldown_enabled")
+    .notNull()
+    .default(false),
+  successCount: integer("success_count").notNull().default(0),
+  failCount: integer("fail_count").notNull().default(0),
+  status: text("status").notNull().default("active"),
+  lastUsedAt: timestamp("last_used_at"),
+  lastAcquiredAt: timestamp("last_acquired_at"),
+  cooldownUntil: timestamp("cooldown_until"),
+  lastError: text("last_error"),
+  lastErrorAt: timestamp("last_error_at"),
+  metadata: json("metadata").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Adobe 后端与分组的多对多关系（镜像 imageBackendApiGroup）。
+export const imageBackendAdobeGroup = pgTable(
+  "image_backend_adobe_group",
+  {
+    id: text("id").primaryKey(),
+    adobeId: text("adobe_id")
+      .notNull()
+      .references(() => imageBackendAdobe.id, { onDelete: "cascade" }),
+    groupId: text("group_id")
+      .notNull()
+      .references(() => imageBackendGroup.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("image_backend_adobe_group_adobe_group_unique").on(
+      table.adobeId,
+      table.groupId
+    ),
+    index("image_backend_adobe_group_group_idx").on(table.groupId),
+  ]
+);
+
+// Adobe 账号（直连模式）：一行 = 一个 Adobe 账号的刷新档案，镜像 adobe2api 的
+// refresh_profile.json。持有 cookie，用于换取短期 IMS access_token（写入 adobe_token）。
+// 归属某个 imageBackendAdobe 后端（其账号池）。直连模式专用；网关模式不需要。
+export const adobeAccount = pgTable(
+  "adobe_account",
+  {
+    id: text("id").primaryKey(),
+    adobeId: text("adobe_id")
+      .notNull()
+      .references(() => imageBackendAdobe.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    // Adobe 浏览器 cookie（IMS 刷新凭据）。无加密基建，按明文存（与 apiKey 一致）。
+    cookie: text("cookie").notNull(),
+    // 覆盖默认 IMS scope（为空用默认）。
+    scope: text("scope"),
+    isEnabled: boolean("is_enabled").notNull().default(true),
+    // IMS profile 拉到的账号信息。
+    displayName: text("display_name"),
+    email: text("email"),
+    accountUserId: text("account_user_id"),
+    // active / error / disabled。
+    status: text("status").notNull().default("active"),
+    lastRefreshAt: timestamp("last_refresh_at"),
+    lastRefreshError: text("last_refresh_error"),
+    nextRefreshAt: timestamp("next_refresh_at"),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    metadata: json("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [index("adobe_account_adobe_idx").on(table.adobeId)]
+);
+
+// Adobe IMS access_token（直连模式）：短期 Bearer，由 adobe_account 的 cookie 刷新得到，
+// 镜像 adobe2api 的 tokens.json。调度命中后端后在其 token 池里按策略轮换选取。
+export const adobeToken = pgTable(
+  "adobe_token",
+  {
+    id: text("id").primaryKey(),
+    adobeId: text("adobe_id")
+      .notNull()
+      .references(() => imageBackendAdobe.id, { onDelete: "cascade" }),
+    // 手动导入的 token 可无关联账号。
+    accountId: text("account_id").references(() => adobeAccount.id, {
+      onDelete: "cascade",
+    }),
+    // IMS access_token（明文，与 apiKey 一致）。
+    value: text("value").notNull(),
+    // 从 JWT 解出的 user_id（per-account 粘性 / entities 同账号约束用）。
+    accountUserId: text("account_user_id"),
+    // active / error / exhausted / invalid。
+    status: text("status").notNull().default("active"),
+    fails: integer("fails").notNull().default(0),
+    source: text("source").notNull().default("auto_refresh"),
+    expiresAt: timestamp("expires_at"),
+    creditsTotal: integer("credits_total"),
+    creditsUsed: integer("credits_used"),
+    creditsAvailable: integer("credits_available"),
+    creditsUpdatedAt: timestamp("credits_updated_at"),
+    creditsError: text("credits_error"),
+    lastUsedAt: timestamp("last_used_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("adobe_token_adobe_idx").on(table.adobeId),
+    index("adobe_token_account_idx").on(table.accountId),
+    index("adobe_token_adobe_status_idx").on(table.adobeId, table.status),
+  ]
+);
+
+// Adobe Firefly 视频生成（异步）：与图像 generation 解耦——视频是新产物类型，有自己的
+// 状态机、轮询恢复、按时长×倍率计费。提交后置 running 并保存 pollUrl，定时/请求侧轮询到
+// 完成再 re-host 到对象存储。financially 真相仍在 credits_transaction，本表仅记录产物与状态。
+export const videoGeneration = pgTable(
+  "video_generation",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // 外部 API key（站内创作页为空）。
+    apiKeyId: text("api_key_id"),
+    // 命中的 adobe 后端（删后端不删历史）。
+    adobeId: text("adobe_id").references(() => imageBackendAdobe.id, {
+      onDelete: "set null",
+    }),
+    // 完整 Firefly 视频 model id（firefly-<family>-<dur>s-<ratio>[-<res>]）。
+    model: text("model").notNull(),
+    family: text("family").notNull(),
+    prompt: text("prompt").notNull(),
+    durationSeconds: integer("duration_seconds").notNull(),
+    aspectRatio: text("aspect_ratio").notNull(),
+    resolution: text("resolution").notNull(),
+    // pending / running / completed / failed。
+    status: text("status").notNull().default("pending"),
+    // 图生视频输入：引用历史生成（@ 历史图）或上传图的 storageKey / generationId。
+    inputImageRefs: json("input_image_refs").$type<
+      Array<{ generationId?: string; storageKey?: string; role?: string }>
+    >(),
+    // 完成后 re-host 到对象存储的 key；videoUrl 为上游 presigned（短期）。
+    storageKey: text("storage_key"),
+    videoUrl: text("video_url"),
+    creditsConsumed: numeric("credits_consumed", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    // 异步轮询恢复用。
+    pollUrl: text("poll_url"),
+    upstreamJobId: text("upstream_job_id"),
+    error: text("error"),
+    metadata: json("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    completedAt: timestamp("completed_at"),
+  },
+  (table) => [
+    index("video_generation_user_idx").on(table.userId, table.createdAt),
+    index("video_generation_status_idx").on(table.status, table.createdAt),
+  ]
+);
+
 export const imageBackendInflightLease = pgTable(
   "image_backend_inflight_lease",
   {
