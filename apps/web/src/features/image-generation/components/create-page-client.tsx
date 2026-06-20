@@ -2796,6 +2796,9 @@ export function CreatePageClient({
     editMixWebFirst &&
     Boolean(effectiveEditSize) &&
     isWithinForceWebPixelRange(effectiveEditSize, forceWebPixelRange);
+  // 选 Firefly 模型时,gpt/codex 专属参数(质量/审核/输出格式/思考)对 adobe 无效,统一置灰禁用。
+  const textFireflyActive = isFireflyModel(textModel);
+  const editFireflyActive = isFireflyModel(editModel);
   const chatMixWebFirstActive =
     canUseMixWebFirstRouting &&
     chatMixWebFirst &&
@@ -7152,7 +7155,7 @@ export function CreatePageClient({
                   <Select
                     value={quality}
                     onValueChange={(value) => setQuality(value as ImageQuality)}
-                    disabled={modeBusy || disableResponsesOnlyControls}
+                    disabled={modeBusy || disableResponsesOnlyControls || textFireflyActive}
                   >
                     <SelectTrigger
                       id={`image-quality-${mode}`}
@@ -7184,7 +7187,7 @@ export function CreatePageClient({
                     onValueChange={(value) =>
                       setOutputFormat(value as ImageOutputFormat)
                     }
-                    disabled={modeBusy || disableResponsesOnlyControls}
+                    disabled={modeBusy || disableResponsesOnlyControls || textFireflyActive}
                   >
                     <SelectTrigger
                       id={`image-output-format-${mode}`}
@@ -7228,7 +7231,7 @@ export function CreatePageClient({
                           )
                         )
                       }
-                      disabled={modeBusy || disableResponsesOnlyControls}
+                      disabled={modeBusy || disableResponsesOnlyControls || textFireflyActive}
                       title={outputCompressionHelpText}
                     />
                   </div>
@@ -7264,7 +7267,7 @@ export function CreatePageClient({
                     onValueChange={(value) =>
                       setModeration(value as ImageModeration)
                     }
-                    disabled={modeBusy || disableResponsesOnlyControls}
+                    disabled={modeBusy || disableResponsesOnlyControls || textFireflyActive}
                   >
                     <SelectTrigger
                       id={`image-oai-moderation-${mode}`}
@@ -7972,7 +7975,7 @@ export function CreatePageClient({
                     <Select
                       value={editModel}
                       onValueChange={setEditModel}
-                      disabled={isEditing || editMixWebFirstActive}
+                      disabled={isEditing || editMixWebFirstActive || editFireflyActive}
                     >
                       <SelectTrigger
                         id="edit-model"
@@ -8062,7 +8065,7 @@ export function CreatePageClient({
                         onValueChange={(value) =>
                           setQuality(value as ImageQuality)
                         }
-                        disabled={isEditing || editMixWebFirstActive}
+                        disabled={isEditing || editMixWebFirstActive || editFireflyActive}
                       >
                         <SelectTrigger id="edit-quality" className="w-full">
                           <SelectValue />
@@ -8101,7 +8104,7 @@ export function CreatePageClient({
                         onValueChange={(value) =>
                           setOutputFormat(value as ImageOutputFormat)
                         }
-                        disabled={isEditing || editMixWebFirstActive}
+                        disabled={isEditing || editMixWebFirstActive || editFireflyActive}
                       >
                         <SelectTrigger
                           id="edit-output-format"
@@ -8155,7 +8158,7 @@ export function CreatePageClient({
                               )
                             )
                           }
-                          disabled={isEditing || editMixWebFirstActive}
+                          disabled={isEditing || editMixWebFirstActive || editFireflyActive}
                           title={outputCompressionHelpText}
                         />
                       </div>
@@ -8211,7 +8214,7 @@ export function CreatePageClient({
                         onValueChange={(value) =>
                           setModeration(value as ImageModeration)
                         }
-                        disabled={isEditing || editMixWebFirstActive}
+                        disabled={isEditing || editMixWebFirstActive || editFireflyActive}
                       >
                         <SelectTrigger
                           id="edit-oai-moderation"
