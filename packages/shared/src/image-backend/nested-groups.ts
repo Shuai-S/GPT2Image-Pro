@@ -1,4 +1,8 @@
-export type ImageBackendGroupBackendType = "mixed" | "web" | "responses";
+export type ImageBackendGroupBackendType =
+  | "mixed"
+  | "web"
+  | "responses"
+  | "adobe";
 
 type NestedGroupValidationInput = {
   groupId?: string;

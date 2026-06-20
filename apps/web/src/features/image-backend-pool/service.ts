@@ -360,7 +360,9 @@ function normalizeAccountBackend(
 function normalizeGroupBackendType(
   value?: unknown
 ): ImageBackendGroupBackendType {
-  return value === "web" || value === "responses" ? value : "mixed";
+  return value === "web" || value === "responses" || value === "adobe"
+    ? value
+    : "mixed";
 }
 
 function stripTrailingSlash(value: string) {
@@ -447,6 +449,10 @@ function groupBackendAllowsRequest(
   requestKind: ImageBackendRequestKind
 ) {
   const backendType = getGroupBackendType(metadata);
+  // adobe 分组与 codex/web 完全隔离：只承接图像生成/编辑，不参与 chat/responses。
+  if (backendType === "adobe") {
+    return requestKind === "image_generation" || requestKind === "image_edit";
+  }
   if (requestKind === "responses") {
     return backendType === "responses" || backendType === "mixed";
   }
@@ -2374,6 +2380,8 @@ async function selectPoolMember(
             const requiresResponsesEndpoint =
               effectiveAccountBackendPreference === "responses";
             return (
+              // adobe 分组与 codex/web/api 隔离：通用 API 后端不进 adobe 分组。
+              getGroupBackendType(metadata) !== "adobe" &&
               groupBackendAllowsRequest(metadata, effectiveRequestKind) &&
               imageBackendApiInterfaceAllowsRequest(
                 row.interfaceMode,
@@ -2480,7 +2488,8 @@ async function selectPoolMember(
       metadata: row.metadata,
     }));
 
-  // adobe 成员：只承接图像生成/编辑；强制 web 或要求 responses 端点时不参与。
+  // adobe 成员：仅在 backendType="adobe" 的【专属分组】里入选，与 codex/web/api 完全
+  // 隔离——adobe 永不进 mixed/web/responses 分组。只承接图像生成/编辑。
   const adobeMembers: PoolMember[] =
     effectiveAccountBackendPreference === "web" ||
     effectiveAccountBackendPreference === "responses"
@@ -2494,6 +2503,7 @@ async function selectPoolMember(
             const metadata = context?.metadata ?? groupMetadata;
             const effectiveRequestKind = requestKind || "image_generation";
             return (
+              getGroupBackendType(metadata) === "adobe" &&
               (effectiveRequestKind === "image_generation" ||
                 effectiveRequestKind === "image_edit") &&
               groupBackendAllowsRequest(metadata, effectiveRequestKind)

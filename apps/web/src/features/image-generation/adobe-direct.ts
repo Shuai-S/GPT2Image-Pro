@@ -22,6 +22,7 @@ import {
   AdobeFireflyClient,
   AuthError,
   decodeJwtExp,
+  decodeJwtPayload,
   FetchFireflyTransport,
   type FireflyTransport,
   fetchAccountInfo,
@@ -83,6 +84,24 @@ async function buildAdobeTransports(sessionKey: string): Promise<{
 function tokenExpiresAt(value: string): Date | null {
   const exp = decodeJwtExp(value);
   return exp === null ? null : new Date(exp * 1000);
+}
+
+/** 拒绝 Guest 会话 cookie：能 refresh 但 Firefly 生图会 401。 */
+function assertLoggedInAdobeCookie(
+  accessToken: string,
+  account: { displayName: string; email: string; userId: string } | null
+): void {
+  const sub = String(decodeJwtPayload(accessToken).sub || "").trim();
+  if (sub.includes("@GuestID")) {
+    throw new Error(
+      "Cookie 对应 Firefly 访客会话（GuestID），不是已登录 Adobe 账号。请在已登录 firefly.adobe.com 的标签页用 tools/adobe-cookie-exporter 重新导出（需含 HttpOnly 会话 cookie，例如 aux_sid）。"
+    );
+  }
+  if (!account?.userId && !account?.email && !account?.displayName) {
+    throw new Error(
+      "Cookie 能刷新 token，但读不到 Adobe 账号信息。请确认浏览器已登录 Adobe ID，并用 cookie 导出扩展重新导出完整 cookie。"
+    );
+  }
 }
 
 /**
@@ -395,6 +414,7 @@ export async function importAdobeAccount(input: {
       fetchAccount: true,
     }
   );
+  assertLoggedInAdobeCookie(result.accessToken, result.account);
   const account = result.account;
   const now = new Date();
 
