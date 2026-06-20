@@ -7992,30 +7992,32 @@ export function CreatePageClient({
                   </div>
                 )}
 
-                <div className="space-y-2">
-                  <label
-                    htmlFor="edit-gpt-model"
-                    className="text-sm font-medium text-foreground"
-                  >
-                    {labelWithHelp(
-                      copy("GPT model", "GPT 模型"),
-                      gptModelHelpText
-                    )}
-                  </label>
-                  {renderGptModelSelect({
-                    id: "edit-gpt-model",
-                    value: imageGptModel,
-                    onChange: setImageGptModel,
-                    disabled: isEditing,
-                    allowDefault: true,
-                  })}
-                  <p className="text-xs leading-snug text-muted-foreground">
-                    {copy(
-                      "Used by platform Web/Codex backend pools; external image APIs keep using the image model.",
-                      "仅用于平台 Web/Codex 后端池；默认会沿用后端配置，外接 image API 仍按图片模型请求。"
-                    )}
-                  </p>
-                </div>
+                {!isFireflyModel(editModel) && (
+                  <div className="space-y-2">
+                    <label
+                      htmlFor="edit-gpt-model"
+                      className="text-sm font-medium text-foreground"
+                    >
+                      {labelWithHelp(
+                        copy("GPT model", "GPT 模型"),
+                        gptModelHelpText
+                      )}
+                    </label>
+                    {renderGptModelSelect({
+                      id: "edit-gpt-model",
+                      value: imageGptModel,
+                      onChange: setImageGptModel,
+                      disabled: isEditing,
+                      allowDefault: true,
+                    })}
+                    <p className="text-xs leading-snug text-muted-foreground">
+                      {copy(
+                        "Used by platform Web/Codex backend pools; external image APIs keep using the image model.",
+                        "仅用于平台 Web/Codex 后端池；默认会沿用后端配置，外接 image API 仍按图片模型请求。"
+                      )}
+                    </p>
+                  </div>
+                )}
 
                 {showThinkingControls && (
                   <div className="space-y-2">
