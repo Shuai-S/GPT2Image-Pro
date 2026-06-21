@@ -4271,7 +4271,13 @@ function FieldName({
           field.custom ? "font-bold text-foreground" : "text-muted-foreground"
         }`}
       >
-        {field.name}
+        {/* 参数名常把多个等价别名用 " / " 串联（如 "size / quality / moderation"）。
+            内联渲染时 " / " 易被误读为"或"，故按 " / "（前后带空格）拆分，每个名字单独成行。
+            仅含空格的 " / " 触发拆分；路径/枚举里无空格的斜杠（如 "/v1/images/generations"、
+            "low/medium/high"）保持单行不受影响。 */}
+        {field.name.split(" / ").map((part) => (
+          <div key={part}>{part}</div>
+        ))}
       </div>
       {field.custom && <CustomMarker label={customLabel} />}
     </div>
