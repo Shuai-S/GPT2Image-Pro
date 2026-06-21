@@ -649,9 +649,15 @@ data: {"id":"chatcmpl_...","object":"chat.completion.chunk","choices":[{"index":
               custom: true,
             },
             {
-              name: "generation_id / generationId / credits_consumed",
+              name: "generation_id / generationId",
               description:
-                "本站扩展字段。返回生成记录 ID 和本次 Chat 轮次加图片输出后的结算积分。",
+                "本站扩展字段。非流式成功响应在顶层返回本次 Chat 轮次的生成记录 ID；批量请求会返回 generation_ids / generationIds。",
+              custom: true,
+            },
+            {
+              name: "credits_consumed",
+              description:
+                "本站扩展字段。本次请求 GPT2IMAGE 结算积分（Chat 轮次加图片输出）；批量请求返回合计值；命中用户自接 API 时为 0。",
               custom: true,
             },
             {
@@ -976,9 +982,15 @@ curl https://gpt2image.superapi.buzz/v1/images/task_... \\
               description: "上游返回的改写提示词，若有则返回。",
             },
             {
-              name: "generation_id / generationId / credits_consumed",
+              name: "generation_id / generationId",
               description:
-                "本站扩展字段。非流式成功响应会在顶层返回本次生成记录 ID 和本站结算积分；批量请求会返回 generation_ids / generationIds 以及合计 credits_consumed。命中用户自接 API 时为 0。",
+                "本站扩展字段。非流式成功响应会在顶层返回本次生成记录 ID；批量请求会返回 generation_ids / generationIds。",
+              custom: true,
+            },
+            {
+              name: "credits_consumed",
+              description:
+                "本站扩展字段。本次请求 GPT2IMAGE 结算积分；批量请求返回合计值；命中用户自接 API 时为 0。",
               custom: true,
             },
             {
@@ -1287,9 +1299,15 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
               description: "与 /v1/images/generations 相同。",
             },
             {
-              name: "generation_id / generationId / credits_consumed",
+              name: "generation_id / generationId",
               description:
-                "本站扩展字段。非流式成功响应会在顶层返回本次生成记录 ID 和本站结算积分；批量请求会返回 generation_ids / generationIds 以及合计 credits_consumed。命中用户自接 API 时为 0。",
+                "本站扩展字段。非流式成功响应会在顶层返回本次生成记录 ID；批量请求会返回 generation_ids / generationIds。",
+              custom: true,
+            },
+            {
+              name: "credits_consumed",
+              description:
+                "本站扩展字段。本次请求 GPT2IMAGE 结算积分；批量请求返回合计值；命中用户自接 API 时为 0。",
               custom: true,
             },
             {
@@ -1729,9 +1747,14 @@ data: {"type":"agent.completed","generation_id":"...","generationId":"...","agen
                 "任务事件数组，包含联网、生图、继续/停止决策等结构化事件。",
             },
             {
-              name: "credits_consumed / agent_round_count",
+              name: "credits_consumed",
               description:
-                "本站结算积分和 Agent 轮数。Agent 接口固定走 Codex/Responses 能力，不使用用户自接 API；计费 = Agent 每轮基础积分 + 最终图片输出积分 + 审核积分，并叠加分组倍率。",
+                "本站结算积分。Agent 接口固定走 Codex/Responses 能力，不使用用户自接 API；计费 = Agent 每轮基础积分 + 最终图片输出积分 + 审核积分，并叠加分组倍率。",
+              custom: true,
+            },
+            {
+              name: "agent_round_count",
+              description: "本次 Agent 任务的执行轮数。",
               custom: true,
             },
             {
@@ -2732,9 +2755,15 @@ data: {"id":"chatcmpl_...","object":"chat.completion.chunk","choices":[{"index":
               custom: true,
             },
             {
-              name: "generation_id / generationId / credits_consumed",
+              name: "generation_id / generationId",
               description:
-                "GPT2IMAGE extension. Generation record ID and billed credits after Chat round and image output settlement.",
+                "GPT2IMAGE extension. Non-stream success responses return this Chat round's generation record ID at the top level; batch requests return generation_ids / generationIds.",
+              custom: true,
+            },
+            {
+              name: "credits_consumed",
+              description:
+                "GPT2IMAGE extension. GPT2IMAGE-billed credits for this request (Chat round plus image output); batch requests return the aggregate; this is 0 when a user custom upstream API wins.",
               custom: true,
             },
             {
@@ -3060,9 +3089,15 @@ curl https://gpt2image.superapi.buzz/v1/images/task_... \\
                 "Returned when the upstream provides a revised prompt.",
             },
             {
-              name: "generation_id / generationId / credits_consumed",
+              name: "generation_id / generationId",
               description:
-                "GPT2IMAGE extension. Non-stream success responses return the generation record ID and GPT2IMAGE-billed credits at the top level; batch requests return generation_ids / generationIds and total credits_consumed. This is 0 when a user custom upstream API wins.",
+                "GPT2IMAGE extension. Non-stream success responses return the generation record ID at the top level; batch requests return generation_ids / generationIds.",
+              custom: true,
+            },
+            {
+              name: "credits_consumed",
+              description:
+                "GPT2IMAGE extension. GPT2IMAGE-billed credits for this request; batch requests return the aggregate; this is 0 when a user custom upstream API wins.",
               custom: true,
             },
             {
@@ -3372,9 +3407,15 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
               description: "Same as /v1/images/generations.",
             },
             {
-              name: "generation_id / generationId / credits_consumed",
+              name: "generation_id / generationId",
               description:
-                "GPT2IMAGE extension. Non-stream success responses return the generation record ID and GPT2IMAGE-billed credits at the top level; batch requests return generation_ids / generationIds and total credits_consumed. This is 0 when a user custom upstream API wins.",
+                "GPT2IMAGE extension. Non-stream success responses return the generation record ID at the top level; batch requests return generation_ids / generationIds.",
+              custom: true,
+            },
+            {
+              name: "credits_consumed",
+              description:
+                "GPT2IMAGE extension. GPT2IMAGE-billed credits for this request; batch requests return the aggregate; this is 0 when a user custom upstream API wins.",
               custom: true,
             },
             {
@@ -3816,10 +3857,15 @@ data: {"type":"agent.completed","generation_id":"...","generationId":"...","agen
                 "Structured task events such as web search, image generation, and continue/stop decisions.",
             },
             {
-              name: "credits_consumed / agent_round_count",
+              name: "credits_consumed",
               custom: true,
               description:
-                "GPT2IMAGE-billed credits and Agent rounds. Agent always requires Codex/Responses capability and does not use user custom API. Billing = Agent base round credits + final image output credits + moderation credits, with backend group multipliers applied.",
+                "GPT2IMAGE-billed credits. Agent always requires Codex/Responses capability and does not use user custom API. Billing = Agent base round credits + final image output credits + moderation credits, with backend group multipliers applied.",
+            },
+            {
+              name: "agent_round_count",
+              custom: true,
+              description: "Number of execution rounds for this Agent task.",
             },
             {
               name: "SSE agent.event / agent.partial_image / agent.completed",
