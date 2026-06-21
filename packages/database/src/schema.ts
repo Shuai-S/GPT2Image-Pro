@@ -961,6 +961,8 @@ export const imageBackendAdobe = pgTable("image_backend_adobe", {
   defaultResolution: text("default_resolution").notNull().default("2k"),
   // 用户 GPT Image 质量选 auto/未指定时映射到的质量（low/medium/high）；默认 high。
   gptImageQuality: text("gpt_image_quality").notNull().default("high"),
+  // 本 Adobe 后端的计费倍率（图像+视频统一）；与分组倍率相乘。默认 1（不改变）。
+  billingMultiplier: numeric("billing_multiplier").notNull().default("1"),
   // 是否允许走视频模型（Phase 3）；默认关闭。
   supportsVideo: boolean("supports_video").notNull().default(false),
   contentSafetyEnabled: boolean("content_safety_enabled")

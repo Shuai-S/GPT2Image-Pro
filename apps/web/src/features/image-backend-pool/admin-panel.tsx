@@ -196,6 +196,8 @@ type Adobe = {
   defaultRatio: string;
   defaultResolution: string;
   gptImageQuality: string;
+  // list 接口把 numeric 列回传为字符串。
+  billingMultiplier: number | string;
   supportsVideo: boolean;
   contentSafetyEnabled: boolean;
   isEnabled: boolean;
@@ -813,6 +815,7 @@ export function ImageBackendPoolAdminPanel({
     defaultRatio: "1x1",
     defaultResolution: "2k",
     gptImageQuality: "high" as "low" | "medium" | "high",
+    billingMultiplier: "1",
     supportsVideo: false,
     contentSafetyEnabled: true,
     isEnabled: true,
@@ -1278,6 +1281,7 @@ export function ImageBackendPoolAdminPanel({
       defaultRatio: "1x1",
       defaultResolution: "2k",
       gptImageQuality: "high",
+      billingMultiplier: "1",
       supportsVideo: false,
       contentSafetyEnabled: true,
       isEnabled: true,
@@ -1316,6 +1320,7 @@ export function ImageBackendPoolAdminPanel({
       defaultResolution: adobe.defaultResolution || "2k",
       gptImageQuality:
         (adobe.gptImageQuality as "low" | "medium" | "high") || "high",
+      billingMultiplier: String(adobe.billingMultiplier ?? "1"),
       supportsVideo: adobe.supportsVideo,
       contentSafetyEnabled: adobe.contentSafetyEnabled,
       isEnabled: adobe.isEnabled,
@@ -4122,6 +4127,26 @@ export function ImageBackendPoolAdminPanel({
                   </Select>
                   <p className="text-xs text-muted-foreground">
                     用户选 auto 时映射到此质量；显式选 low/medium/high 则按用户的来。
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">
+                    计费倍率（整个 Adobe 后端，图像+视频）
+                  </Label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={adobeForm.billingMultiplier}
+                    onChange={(event) =>
+                      setAdobeForm((current) => ({
+                        ...current,
+                        billingMultiplier: event.target.value,
+                      }))
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    对 adobe 图像与视频积分成本统一乘以此倍率;与分组倍率叠加。
                   </p>
                 </div>
                 <div className="space-y-2 rounded-md border p-3">

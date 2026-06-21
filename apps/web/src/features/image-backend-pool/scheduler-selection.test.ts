@@ -85,6 +85,7 @@ const schemaMock = vi.hoisted(() => {
       "defaultRatio",
       "defaultResolution",
       "gptImageQuality",
+      "billingMultiplier",
       "supportsVideo",
       "contentSafetyEnabled",
       "isEnabled",

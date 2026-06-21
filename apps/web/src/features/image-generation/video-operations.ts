@@ -154,11 +154,18 @@ export async function runAdobeVideoGenerationForUser(
     };
   }
 
+  // 实际计费成本 = 基价 × 后端计费倍率（组倍率已在池解析时合入 billingMultiplier）。
+  // 向上取整并非负；扣费/退款/落库一律用 billedCost，杜绝少扣/少退。
+  const billedCost = Math.max(
+    0,
+    Math.ceil(cost * (config.backend?.billingMultiplier ?? 1))
+  );
+
   // 预扣积分（幂等 sourceRef）。不足/失败 → 标记 failed 返回。
   try {
     await consumeCredits({
       userId: input.userId,
-      amount: cost,
+      amount: billedCost,
       serviceName: "adobe-video",
       description: `Adobe 视频生成 ${input.model}`,
       sourceRef,
@@ -179,7 +186,7 @@ export async function runAdobeVideoGenerationForUser(
 
   await db
     .update(videoGeneration)
-    .set({ status: "running", creditsConsumed: cost, updatedAt: new Date() })
+    .set({ status: "running", creditsConsumed: billedCost, updatedAt: new Date() })
     .where(eq(videoGeneration.id, videoId));
 
   // 失败统一退款 + 标记。退款幂等（同一 sourceRef 只退一次）。
@@ -187,7 +194,7 @@ export async function runAdobeVideoGenerationForUser(
     await refundGenerationCredits({
       generationId: videoId,
       userId: input.userId,
-      amount: cost,
+      amount: billedCost,
       sourceRef,
       description: `Adobe 视频生成失败退款 ${input.model}`,
     }).catch((error) =>
@@ -248,5 +255,5 @@ export async function runAdobeVideoGenerationForUser(
     })
     .where(eq(videoGeneration.id, videoId));
 
-  return { videoGenerationId: videoId, storageKey, creditsConsumed: cost };
+  return { videoGenerationId: videoId, storageKey, creditsConsumed: billedCost };
 }

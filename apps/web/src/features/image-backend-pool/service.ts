@@ -193,6 +193,8 @@ type PoolMember =
       defaultRatio: string;
       defaultResolution: string;
       gptImageQuality: string;
+      // 本 Adobe 后端的计费倍率（图像+视频统一）；与分组倍率相乘。
+      billingMultiplier: number;
       supportsVideo: boolean;
       contentSafetyEnabled: boolean;
       priority: number;
@@ -2348,6 +2350,7 @@ async function selectPoolMember(
     defaultRatio: imageBackendAdobe.defaultRatio,
     defaultResolution: imageBackendAdobe.defaultResolution,
     gptImageQuality: imageBackendAdobe.gptImageQuality,
+    billingMultiplier: imageBackendAdobe.billingMultiplier,
     supportsVideo: imageBackendAdobe.supportsVideo,
     contentSafetyEnabled: imageBackendAdobe.contentSafetyEnabled,
     priority: imageBackendAdobe.priority,
@@ -2578,6 +2581,8 @@ async function selectPoolMember(
               defaultRatio: row.defaultRatio,
               defaultResolution: row.defaultResolution,
               gptImageQuality: row.gptImageQuality,
+              // DB numeric 取回为字符串，强转并兜底 1。
+              billingMultiplier: Number(row.billingMultiplier) || 1,
               supportsVideo: row.supportsVideo,
               contentSafetyEnabled: row.contentSafetyEnabled,
               priority: row.priority,
@@ -2862,7 +2867,8 @@ function toResolvedPoolConfig(
           adobeGptImageQuality: member.gptImageQuality,
           adobeSupportsVideo: member.supportsVideo,
           billingGroupId: fallbackGroupId,
-          billingMultiplier,
+          // 组倍率 × 本 Adobe 后端倍率（叠加），作用于图像与视频扣费。
+          billingMultiplier: billingMultiplier * (member.billingMultiplier || 1),
           reportResult: true,
           inflightLease: true,
           inflightLeaseId: member.leaseId,
@@ -6861,6 +6867,7 @@ export type UpsertAdobeInput = {
   defaultRatio: string;
   defaultResolution: string;
   gptImageQuality: string;
+  billingMultiplier: number;
   supportsVideo: boolean;
   contentSafetyEnabled: boolean;
   isEnabled: boolean;
@@ -6898,6 +6905,8 @@ export async function upsertImageBackendAdobe(input: UpsertAdobeInput) {
     defaultRatio: input.defaultRatio,
     defaultResolution: input.defaultResolution,
     gptImageQuality: input.gptImageQuality,
+    // numeric 列要求字符串。
+    billingMultiplier: String(input.billingMultiplier),
     supportsVideo: input.supportsVideo,
     contentSafetyEnabled: input.contentSafetyEnabled,
     isEnabled: input.isEnabled,
@@ -7346,6 +7355,7 @@ export async function listAdminImageBackendPool() {
       defaultRatio: imageBackendAdobe.defaultRatio,
       defaultResolution: imageBackendAdobe.defaultResolution,
       gptImageQuality: imageBackendAdobe.gptImageQuality,
+      billingMultiplier: imageBackendAdobe.billingMultiplier,
       supportsVideo: imageBackendAdobe.supportsVideo,
       contentSafetyEnabled: imageBackendAdobe.contentSafetyEnabled,
       isEnabled: imageBackendAdobe.isEnabled,

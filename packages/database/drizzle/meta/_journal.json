@@ -309,6 +309,13 @@
       "when": 1780400960000,
       "tag": "0043_adobe_gpt_image_quality",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1780400961000,
+      "tag": "0044_adobe_billing_multiplier",
+      "breakpoints": true
     }
   ]
 }
