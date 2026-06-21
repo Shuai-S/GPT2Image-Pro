@@ -4582,7 +4582,11 @@ export function ImageBackendPoolAdminPanel({
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => editAdobe(adobe)}
+                        onClick={() => {
+                          // 临时探针:确认 adobe 编辑按钮 onClick 是否触发。定位后移除。
+                          console.log("[ADOBE-EDIT-CLICK]", adobe.id);
+                          editAdobe(adobe);
+                        }}
                       >
                         编辑
                       </Button>
