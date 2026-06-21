@@ -4514,6 +4514,16 @@ export function CreatePageClient({
       data.results?.filter((item) => item.imageUrl && item.generationId) ||
       (data.imageUrl && data.generationId ? [data] : []);
 
+    // 临时客户端探针:定位"积分0+不进最近生成"。定位后移除。
+    console.log("[CREDITS-DEBUG] addSuccessfulResults", {
+      model: data.model,
+      creditsConsumed: data.creditsConsumed,
+      hasImageUrl: Boolean(data.imageUrl),
+      hasGenerationId: Boolean(data.generationId),
+      hasResultsArray: Array.isArray(data.results),
+      successfulCount: successfulResults.length,
+    });
+
     if (successfulResults.length === 0) return [];
 
     const variants: ChatVariant[] = [];
