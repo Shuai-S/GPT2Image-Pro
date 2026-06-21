@@ -5,8 +5,8 @@
 #       第 0 章的协作准则 —— 文档镜像一致、代码风格、类型安全、测试、可构建、容器可打包。
 #
 # 触发：
-#   - pull_request → dev / main：贡献者门禁的主战场（每个 check 都会显示在 PR 上）。
-#   - push        → dev / main：合入后回归，保证主干始终绿色。
+#   - pull_request → main：贡献者门禁的主战场（每个 check 都会显示在 PR 上）。
+#   - push        → main：合入后回归，保证主干始终绿色。
 #   - 手动 (workflow_dispatch)：需要时人工重跑。
 #
 # 设计原则：
@@ -19,9 +19,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [dev, main]
+    branches: [main]
   push:
-    branches: [dev, main]
+    branches: [main]
   workflow_dispatch:
 
 # 同一分支/PR 的新提交会取消仍在跑的旧流水线，节省额度、加快反馈。

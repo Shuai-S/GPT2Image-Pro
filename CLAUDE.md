@@ -42,7 +42,7 @@ packages/ui/       Shadcn/UI 组件（@repo/ui/components/<name>）
 **Git 与版本**
 - 持续小步提交，每完成一部分即 commit；关键节点打 tag。Conventional Commits（`type(scope): 摘要`，正文说明 WHY）。
 - 版本格式 `v<MAJOR>.<MINOR>.<PATCH>-<alpha|beta|rc>.<N>`（正式版去后缀）。
-- 分支：开发在 `dev`（测试）并推送；`main`（生产）仅在用户明确要求时合并/推送。
+- 分支：单分支 `main`（默认 / 开发 / 生产），开发即提交并推送 `main`；已无 `dev`。
 - 不用 `--no-verify` 绕过校验；force-push、`reset --hard`、删分支/tag 等破坏性操作先确认。
 
 **健壮性**
