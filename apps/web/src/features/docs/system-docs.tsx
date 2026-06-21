@@ -552,9 +552,21 @@ data: {"id":"chatcmpl_...","object":"chat.completion.chunk","choices":[{"index":
                 "返回 choice 数量。每个 choice 会创建一次 Chat 生图任务并独立计费。",
             },
             {
-              name: "size / quality / moderation",
+              name: "size",
               requirement: "可选",
-              description: "与图片接口相同，作为本轮 Chat 生图运行参数。",
+              description:
+                "目标尺寸，非法尺寸返回参数错误；作为本轮 Chat 生图运行参数。",
+            },
+            {
+              name: "quality",
+              requirement: "可选",
+              description:
+                "auto、low、medium、high；作为本轮 Chat 生图运行参数。",
+            },
+            {
+              name: "moderation",
+              requirement: "可选",
+              description: "auto 或 low；作为本轮 Chat 生图运行参数。",
             },
             {
               name: "stream",
@@ -1537,10 +1549,34 @@ data: {"type":"agent.completed","generation_id":"...","generationId":"...","agen
                 "Agent 接口一次只跑一个任务；传入时必须为 1。需要多任务请并发调用接口。",
             },
             {
-              name: "size / quality / moderation / output_format / output_compression",
+              name: "size",
               requirement: "可选",
               description:
-                "同 image 接口，作为 Agent 内 image_generation 工具运行参数。",
+                "目标尺寸，非法尺寸返回参数错误；作为 Agent 内 image_generation 工具运行参数。",
+            },
+            {
+              name: "quality",
+              requirement: "可选",
+              description:
+                "auto、low、medium、high；作为 Agent 内 image_generation 工具运行参数。",
+            },
+            {
+              name: "moderation",
+              requirement: "可选",
+              description:
+                "auto 或 low；作为 Agent 内 image_generation 工具运行参数。",
+            },
+            {
+              name: "output_format",
+              requirement: "可选",
+              description:
+                "png、jpeg、webp，控制输出图片格式；作为 Agent 内 image_generation 工具运行参数。",
+            },
+            {
+              name: "output_compression",
+              requirement: "可选",
+              description:
+                "0 到 100，仅对 jpeg/webp 有意义，数值越高质量越高；作为 Agent 内 image_generation 工具运行参数。",
             },
             {
               name: "background",
@@ -1889,6 +1925,20 @@ data: {"type":"response.completed","response":{"id":"resp_...","object":"respons
       invalid: [
         "不是 ChatGPT Web，不支持 Web 专属能力或 Web 额度语义。",
         "账号限流、额度不足、凭据失效时，调度器会冷却/标错并尝试轮换。",
+      ],
+    },
+    adobe: {
+      title: "Adobe（Firefly）账号",
+      description:
+        "直连 Adobe Firefly 的自管账号/token 池，作为特殊成员按 priority 挂入分组兜底。",
+      valid: [
+        "**分辨率只接受 1k / 2k / 4k 三档，不是任意像素分辨率；传入的 size 会被映射到最近的比例（1x1/16x9/9x16/4x3/3x4）与最近的档位（长边 ≤1024→1k、≤2048→2k、否则 4k）。**",
+        "firefly-* 模型或 force_firefly 会强制走 Adobe；命中后把标准请求兼容转换成 Firefly 格式（默认族 gpt-image-2、quality→detailLevel、图生图用 referenceBlobs）。",
+        "自管账号/token 池，作为特殊成员按 priority 挂入分组兜底。",
+      ],
+      invalid: [
+        "不支持的参数会被静默忽略，不报错。",
+        "无法严格按任意像素尺寸输出；只能落到 1k/2k/4k 三档之一。",
       ],
     },
     api: {
@@ -2488,9 +2538,22 @@ data: {"id":"chatcmpl_...","object":"chat.completion.chunk","choices":[{"index":
                 "Number of choices. Each choice creates one Chat image task and is billed independently.",
             },
             {
-              name: "size / quality / moderation",
+              name: "size",
               requirement: "Optional",
-              description: "Same runtime image parameters as the image APIs.",
+              description:
+                "Target size; invalid values are rejected. Used as a runtime Chat image parameter.",
+            },
+            {
+              name: "quality",
+              requirement: "Optional",
+              description:
+                "auto, low, medium, or high. Used as a runtime Chat image parameter.",
+            },
+            {
+              name: "moderation",
+              requirement: "Optional",
+              description:
+                "auto or low. Used as a runtime Chat image parameter.",
             },
             {
               name: "stream",
@@ -2859,7 +2922,7 @@ curl https://gpt2image.superapi.buzz/v1/images/task_... \\
               requirement: "Optional",
               custom: true,
               description:
-                "Safety prompt-repair retry toggle (issue #24). Defaults to the platform setting (usually enabled): when local moderation or an upstream safety refusal yields no image, the system rewrites the prompt through Responses and re-moderates and retries inside the same task. When explicitly false, this automatic rewrite-retry is disabled and a moderation failure returns the real error without rewriting the prompt. See \"Safety Prompt Repair Retry\" below.",
+                'Safety prompt-repair retry toggle (issue #24). Defaults to the platform setting (usually enabled): when local moderation or an upstream safety refusal yields no image, the system rewrites the prompt through Responses and re-moderates and retries inside the same task. When explicitly false, this automatic rewrite-retry is disabled and a moderation failure returns the real error without rewriting the prompt. See "Safety Prompt Repair Retry" below.',
             },
             {
               name: "gptModel / gpt_model",
@@ -3179,7 +3242,7 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
               requirement: "Optional",
               custom: true,
               description:
-                "Safety prompt-repair retry toggle (issue #24). Defaults to the platform setting (usually enabled): when local moderation or an upstream safety refusal yields no image, the system rewrites the prompt through Responses and re-moderates and retries inside the same task. When explicitly false, this automatic rewrite-retry is disabled and a moderation failure returns the real error without rewriting the prompt. See \"Safety Prompt Repair Retry\" below.",
+                'Safety prompt-repair retry toggle (issue #24). Defaults to the platform setting (usually enabled): when local moderation or an upstream safety refusal yields no image, the system rewrites the prompt through Responses and re-moderates and retries inside the same task. When explicitly false, this automatic rewrite-retry is disabled and a moderation failure returns the real error without rewriting the prompt. See "Safety Prompt Repair Retry" below.',
             },
             {
               name: "gptModel / gpt_model",
@@ -3476,10 +3539,34 @@ data: {"type":"agent.completed","generation_id":"...","generationId":"...","agen
                 "The Agent API runs one task at a time; when supplied this must be 1. Use concurrent requests for multiple tasks.",
             },
             {
-              name: "size / quality / moderation / output_format / output_compression",
+              name: "size",
               requirement: "Optional",
               description:
-                "Same as image endpoints; used as runtime image_generation parameters inside Agent.",
+                "Target size; invalid values are rejected. Used as a runtime image_generation parameter inside Agent.",
+            },
+            {
+              name: "quality",
+              requirement: "Optional",
+              description:
+                "auto, low, medium, or high. Used as a runtime image_generation parameter inside Agent.",
+            },
+            {
+              name: "moderation",
+              requirement: "Optional",
+              description:
+                "auto or low. Used as a runtime image_generation parameter inside Agent.",
+            },
+            {
+              name: "output_format",
+              requirement: "Optional",
+              description:
+                "png, jpeg, or webp; controls the output image format. Used as a runtime image_generation parameter inside Agent.",
+            },
+            {
+              name: "output_compression",
+              requirement: "Optional",
+              description:
+                "0 to 100, only meaningful for jpeg/webp; higher values mean higher quality. Used as a runtime image_generation parameter inside Agent.",
             },
             {
               name: "background",
@@ -3834,6 +3921,20 @@ data: {"type":"response.completed","response":{"id":"resp_...","object":"respons
       invalid: [
         "Not ChatGPT Web, so Web-only capability or quota semantics do not apply.",
         "On rate limits, quota errors, or invalid credentials, the scheduler cools down/marks the account and tries another one.",
+      ],
+    },
+    adobe: {
+      title: "Adobe (Firefly) Account",
+      description:
+        "A self-managed account/token pool that connects directly to Adobe Firefly, attached to a group as a special priority member for fallback.",
+      valid: [
+        "**Resolution only accepts the 1k / 2k / 4k tiers, not arbitrary pixel resolutions; the incoming size is auto-mapped to the nearest ratio (1x1/16x9/9x16/4x3/3x4) and nearest tier (long edge <=1024 -> 1k, <=2048 -> 2k, otherwise 4k).**",
+        "firefly-* models or force_firefly force the Adobe path; matched requests are converted from the standard request into Firefly format (default family gpt-image-2, quality -> detailLevel, image-to-image via referenceBlobs).",
+        "Self-managed account/token pool, attached to a group as a special priority member for fallback.",
+      ],
+      invalid: [
+        "Unsupported parameters are silently ignored rather than rejected.",
+        "Cannot output arbitrary pixel sizes; output always lands on one of the 1k/2k/4k tiers.",
       ],
     },
     api: {
@@ -4537,20 +4638,22 @@ export function SystemDocsContent({
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-3">
-        {[content.web, content.codex, content.api].map((section) => (
-          <Card className="rounded-lg" key={section.title}>
-            <CardHeader>
-              <CardTitle className="text-base">{section.title}</CardTitle>
-              <p className="text-sm leading-relaxed text-muted-foreground">
-                {section.description}
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <ListBlock items={section.valid} type="valid" />
-              <ListBlock items={section.invalid} type="invalid" />
-            </CardContent>
-          </Card>
-        ))}
+        {[content.web, content.codex, content.adobe, content.api].map(
+          (section) => (
+            <Card className="rounded-lg" key={section.title}>
+              <CardHeader>
+                <CardTitle className="text-base">{section.title}</CardTitle>
+                <p className="text-sm leading-relaxed text-muted-foreground">
+                  {section.description}
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <ListBlock items={section.valid} type="valid" />
+                <ListBlock items={section.invalid} type="invalid" />
+              </CardContent>
+            </Card>
+          )
+        )}
       </div>
 
       <Card className="rounded-lg">
