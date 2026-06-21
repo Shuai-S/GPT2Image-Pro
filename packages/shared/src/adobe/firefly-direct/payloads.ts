@@ -216,31 +216,22 @@ export function buildFireflyImagePayloadCandidates(params: {
       return [basePayload];
     }
 
-    const subjectReference: FireflyImagePayload = {
-      ...basePayload,
-      referenceBlobs: sourceImageIds.map((imgId) => ({
-        id: imgId,
-        usage: "subject",
-      })),
-      modelSpecificPayload: {},
-    };
-
-    const referenceImage: FireflyImagePayload = {
+    // gpt-image 图生图:参考媒体必须走 referenceBlobs（每项 {id, usage}），
+    // Adobe 新 API 已拒收 referenceImages/referenceVideos（422 validation_error）。
+    // usage 用 "general"（与 nano-banana 图生图一致，且 subject 经实测对 edit 无效）。
+    const edited: FireflyImagePayload = {
       ...basePayload,
       generationMetadata: {
         module: "image2image",
         submodule: "ff-image-generate",
       },
-      referenceBlobs: [],
-      referenceImages: sourceImageIds.map((imgId) => ({ id: imgId })),
+      referenceBlobs: sourceImageIds.map((imgId) => ({
+        id: imgId,
+        usage: "general",
+      })),
     };
 
-    const localBlobReference: FireflyImagePayload = {
-      ...referenceImage,
-      referenceImages: sourceImageIds.map((imgId) => ({ localBlobRef: imgId })),
-    };
-
-    return [subjectReference, referenceImage, localBlobReference];
+    return [edited];
   }
 
   const basePayload: FireflyImagePayload = {

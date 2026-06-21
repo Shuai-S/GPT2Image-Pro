@@ -147,11 +147,9 @@ describe("AdobeFireflyClient.generateImage", () => {
     ).rejects.toBeInstanceOf(AuthError);
   });
 
-  it("gpt-image 图生图：首候选 400 时回退下一候选", async () => {
-    const api = new MockTransport((req, index) => {
+  it("gpt-image 图生图：单候选 referenceBlobs 提交成功", async () => {
+    const api = new MockTransport((req) => {
       if (req.url.includes("generate-async")) {
-        // 第一次 submit 候选 400，第二次 200
-        if (index === 0) return jsonResponse(400, { error: "bad" });
         return jsonResponse(
           200,
           {},
@@ -180,8 +178,8 @@ describe("AdobeFireflyClient.generateImage", () => {
       pollIntervalMs: 1,
     });
     expect(out.bytes.toString("utf-8")).toBe("Y");
-    // 至少两次 submit 候选 + 一次 poll
+    // 现在 gpt-image 图生图只有一个 referenceBlobs 候选,一次 submit 即可。
     const submits = api.calls.filter((c) => c.url.includes("generate-async"));
-    expect(submits.length).toBeGreaterThanOrEqual(2);
+    expect(submits.length).toBe(1);
   });
 });

@@ -63,7 +63,7 @@ describe("buildFireflyImagePayloadCandidates", () => {
     expect(p.size).toEqual({ width: 2560, height: 1440 });
   });
 
-  it("gpt-image 图生图：3 个候选（subject / referenceImages / localBlobRef）", () => {
+  it("gpt-image 图生图：单候选,referenceBlobs usage=general(不再用 referenceImages)", () => {
     const candidates = buildFireflyImagePayloadCandidates({
       prompt: "edit",
       aspectRatio: "1:1",
@@ -72,14 +72,14 @@ describe("buildFireflyImagePayloadCandidates", () => {
       upstreamModelVersion: "2",
       sourceImageIds: ["img1"],
     });
-    expect(candidates).toHaveLength(3);
-    const [c0, c1, c2] = candidates as Record<string, unknown>[];
-    expect((c0?.referenceBlobs as unknown[])[0]).toEqual({
-      id: "img1",
-      usage: "subject",
-    });
-    expect(c1?.referenceImages).toEqual([{ id: "img1" }]);
-    expect(c2?.referenceImages).toEqual([{ localBlobRef: "img1" }]);
+    expect(candidates).toHaveLength(1);
+    const [c0] = candidates as Record<string, unknown>[];
+    expect(c0?.referenceBlobs).toEqual([{ id: "img1", usage: "general" }]);
+    // Adobe 新 API 拒收 referenceImages,确保不再出现该字段。
+    expect(c0?.referenceImages).toBeUndefined();
+    expect((c0?.generationMetadata as Record<string, unknown>).module).toBe(
+      "image2image"
+    );
   });
 
   it("gpt-image 不支持比例抛错", () => {
