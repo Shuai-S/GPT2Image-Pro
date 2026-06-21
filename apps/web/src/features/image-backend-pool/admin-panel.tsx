@@ -4060,10 +4060,17 @@ export function ImageBackendPoolAdminPanel({
           )}
         >
           {!readOnly && (
-            <Card id="adobe-backend-form">
+            <Card
+              id="adobe-backend-form"
+              className={
+                adobeForm.id
+                  ? "ring-2 ring-primary transition-shadow"
+                  : "transition-shadow"
+              }
+            >
               <CardHeader>
                 <CardTitle className="text-base">
-                  {adobeForm.id ? "编辑 Adobe 后端" : "新增 Adobe 后端"}
+                  {adobeForm.id ? "正在编辑 Adobe 后端" : "新增 Adobe 后端"}
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
