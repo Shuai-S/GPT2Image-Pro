@@ -10,6 +10,7 @@ import {
 } from "@repo/shared/generation-maintenance";
 import { getFailedGenerationTargetCredits } from "@repo/shared/generation-settlement";
 import { logWarn } from "@repo/shared/logger";
+import { toClientErrorMessage } from "./error-sanitize";
 import {
   isContentModerationEnabled,
   moderateContent,
@@ -1509,11 +1510,14 @@ export async function runImageGenerationForUser(
       }
     );
   } catch (error) {
+    // 兜底:DB/内部异常不得把裸 SQL/内部细节回给前端（issue #35:池查询失败的
+    // Drizzle "Failed query: ..." 曾原样显示在用户 toast）。脱敏 + 记日志。
     return {
-      error:
-        error instanceof Error
-          ? error.message
-          : "Image generation queue is busy. Please retry shortly.",
+      error: toClientErrorMessage(
+        error,
+        { source: "image-generation", generationId },
+        "Image generation queue is busy. Please retry shortly."
+      ),
       generationId,
     };
   }
@@ -2212,8 +2216,12 @@ async function runQueuedImageGenerationForUser({
     try {
       result = await runGenerationAttempt();
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Image generation failed";
+      // 同上:生成尝试阶段的 DB/内部异常也脱敏,避免裸 SQL 漏到前端。
+      const message = toClientErrorMessage(
+        error,
+        { source: "image-generation-attempt", generationId },
+        "Image generation failed"
+      );
       const retryingRepairAttempt =
         getLastRetryingRepairAttempt(repairAttempts);
       if (retryingRepairAttempt) {
