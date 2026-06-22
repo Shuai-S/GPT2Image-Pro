@@ -46,7 +46,9 @@ export interface GenerationWithUrl {
   storageKey: string | null;
   storageBucket: string | null;
   imageUrl: string | null;
-  outputRole?: "final" | "agent_draft" | "upload";
+  // 视频项(视频 tab)：产物 mp4 的签名 URL;imageUrl 为空,渲染 <video> 而非 <img>。
+  videoUrl?: string | null;
+  outputRole?: "final" | "agent_draft" | "upload" | "video";
   referenceImages?: LightboxReferenceImage[];
   isLayered?: boolean;
 }
@@ -57,7 +59,8 @@ export interface GalleryClientProps {
   finalCount: number;
   draftCount: number;
   uploadCount: number;
-  activeTab: "final" | "agent-drafts" | "uploads";
+  videoCount: number;
+  activeTab: "final" | "agent-drafts" | "uploads" | "videos";
   page: number;
   timeZone: string;
 }
@@ -68,6 +71,7 @@ export function GalleryClient({
   finalCount,
   draftCount,
   uploadCount,
+  videoCount,
   activeTab,
   page,
   timeZone,
@@ -292,29 +296,42 @@ export function GalleryClient({
               </Badge>
             </Link>
           </TabsTrigger>
+          <TabsTrigger value="videos" asChild>
+            <Link href={galleryHref("videos")} scroll={false}>
+              {copy("Videos", "视频")}
+              <Badge
+                variant="outline"
+                className={countBadgeClass(activeTab === "videos")}
+              >
+                {videoCount}
+              </Badge>
+            </Link>
+          </TabsTrigger>
         </TabsList>
       </Tabs>
-      {/* 多选模式切换按钮 */}
-      <Button
-        variant={selectMode ? "secondary" : "outline"}
-        size="sm"
-        onClick={
-          selectMode ? exitSelectMode : () => setSelectMode(true)
-        }
-        className="shrink-0"
-      >
-        {selectMode ? (
-          <>
-            <X className="mr-1.5 h-3.5 w-3.5" />
-            {copy("Cancel", "取消")}
-          </>
-        ) : (
-          <>
-            <MousePointerClick className="mr-1.5 h-3.5 w-3.5" />
-            {copy("Select", "选择")}
-          </>
-        )}
-      </Button>
+      {/* 多选模式切换按钮(批量选择/下载是图片专用,视频 tab 隐藏) */}
+      {activeTab !== "videos" && (
+        <Button
+          variant={selectMode ? "secondary" : "outline"}
+          size="sm"
+          onClick={
+            selectMode ? exitSelectMode : () => setSelectMode(true)
+          }
+          className="shrink-0"
+        >
+          {selectMode ? (
+            <>
+              <X className="mr-1.5 h-3.5 w-3.5" />
+              {copy("Cancel", "取消")}
+            </>
+          ) : (
+            <>
+              <MousePointerClick className="mr-1.5 h-3.5 w-3.5" />
+              {copy("Select", "选择")}
+            </>
+          )}
+        </Button>
+      )}
     </div>
   );
 
@@ -332,7 +349,9 @@ export function GalleryClient({
               ? copy("No Agent drafts yet", "还没有 Agent 中间图")
               : activeTab === "uploads"
                 ? copy("No user uploads yet", "还没有用户上传图")
-                : copy("No images yet", "还没有图片")}
+                : activeTab === "videos"
+                  ? copy("No videos yet", "还没有视频")
+                  : copy("No images yet", "还没有图片")}
           </h3>
           <p className="mt-1 max-w-sm text-sm text-muted-foreground">
             {activeTab === "agent-drafts"
@@ -345,10 +364,15 @@ export function GalleryClient({
                     "Reference images uploaded for image edits and chats will appear here.",
                     "图生图和 Chat 上传的参考图会显示在这里。"
                   )
-                : copy(
-                    "Your generated images will appear here. Start by creating your first one.",
-                    "你生成的图片会显示在这里。先创建第一张图片吧。"
-                  )}
+                : activeTab === "videos"
+                  ? copy(
+                      "Videos you generate will appear here. Create one in the Video tab on the create page.",
+                      "你生成的视频会显示在这里。在创作页的「视频」tab 里生成。"
+                    )
+                  : copy(
+                      "Your generated images will appear here. Start by creating your first one.",
+                      "你生成的图片会显示在这里。先创建第一张图片吧。"
+                    )}
           </p>
           <Button asChild variant="outline" className="mt-6">
             <Link href={createHref}>{copy("Create an image", "创建图片")}</Link>
@@ -362,38 +386,66 @@ export function GalleryClient({
     <>
       <div className="mb-5">{tabs}</div>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-        {items.map((item) => (
-          <div key={item.id}>
-            <ImageCard
-              id={item.id}
-              prompt={item.prompt}
-              imageUrl={item.imageUrl}
-              model={item.model}
-              size={item.size}
-              creditsConsumed={item.creditsConsumed}
-              createdAt={item.createdAt}
-              status={item.status}
-              timeZone={timeZone}
-              selectable={selectMode}
-              selected={selectedIds.has(item.id)}
-              onSelect={
-                selectMode ? handleSelect : undefined
-              }
-              onClick={
-                selectMode
-                  ? undefined
-                  : () => setSelectedId(item.id)
-              }
-              badge={
-                item.outputRole === "agent_draft"
-                  ? copy("Draft", "中间图")
-                  : item.outputRole === "upload"
-                    ? copy("Upload", "上传")
-                    : undefined
-              }
-            />
-          </div>
-        ))}
+        {items.map((item) =>
+          item.outputRole === "video" ? (
+            // 视频项:直接内联 <video>(preload=metadata 显示首帧,点 controls 播放),
+            // 不参与多选/批量下载(那套是图片专用)。
+            <div
+              key={item.id}
+              className="overflow-hidden rounded-lg border border-border bg-card"
+            >
+              {item.videoUrl ? (
+                <video
+                  src={item.videoUrl}
+                  controls
+                  preload="metadata"
+                  className="aspect-square w-full bg-black object-contain"
+                >
+                  <track kind="captions" />
+                </video>
+              ) : (
+                <div className="flex aspect-square items-center justify-center bg-muted text-xs text-muted-foreground">
+                  {copy("Video unavailable", "视频不可用")}
+                </div>
+              )}
+              <div className="space-y-1 p-2">
+                <p className="line-clamp-2 text-xs text-muted-foreground">
+                  {item.prompt}
+                </p>
+                <p className="text-[10px] text-muted-foreground">
+                  {item.model} · {item.size}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div key={item.id}>
+              <ImageCard
+                id={item.id}
+                prompt={item.prompt}
+                imageUrl={item.imageUrl}
+                model={item.model}
+                size={item.size}
+                creditsConsumed={item.creditsConsumed}
+                createdAt={item.createdAt}
+                status={item.status}
+                timeZone={timeZone}
+                selectable={selectMode}
+                selected={selectedIds.has(item.id)}
+                onSelect={selectMode ? handleSelect : undefined}
+                onClick={
+                  selectMode ? undefined : () => setSelectedId(item.id)
+                }
+                badge={
+                  item.outputRole === "agent_draft"
+                    ? copy("Draft", "中间图")
+                    : item.outputRole === "upload"
+                      ? copy("Upload", "上传")
+                      : undefined
+                }
+              />
+            </div>
+          )
+        )}
       </div>
 
       {hasMore && (
