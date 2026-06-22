@@ -16,6 +16,9 @@
   - 根因:gpt-image edit 的 `referenceBlobs.usage` 用了 `general`,Adobe 不把它当作 edit 源图。v0.6.0 误判"与 nano-banana 一致用 general";而早期"subject 无效"的结论实为当时 `module` 仍是 `text2image`(漏改)导致退化成文生图、忽略了参考图。
   - 经对真实 Adobe API 实证(`scripts/probe-adobe-edit.ts`):gpt-image(2/1.5)edit 必须 `usage=subject`,nano-banana(pro/2)edit 必须 `usage=general`,两族恰好相反。故 gpt-image 分支改 `subject`、nano-banana 保持 `general`(现有实证背书)。完整 edit 链路(submit→轮询→下载)已实测出图。
 - **`/v1/models` 不返回 Firefly 模型**:此前只列默认图像模型 + GPT chat/responses,API 用户无从发现 Firefly。现补入 5 个图像族级 id(`firefly-gpt-image-2`/`1.5`、`firefly-nano-banana`/`nano-banana2`/`nano-banana-pro`,分辨率/宽高比走 `size`)+ 58 个视频全量 id(参数编码在 id 内),由 `externalApi.images.generate` 能力门控。
+- **`/api/storage` 全 500、所有图片下载/缩略图挂掉**:sharp 升 0.35 后,其 `@img/sharp-libvips-linux-x64` 运行时 dlopen 的 libvips `.so`(约 18MB)未被 Next standalone 打包(只留 stub),`import sharp` 加载即抛「Could not load the sharp module」→ 存储路由整体 500 → image_url 下载与列表缩略图全失败。照 onnx `.so` 的办法,next.config `outputFileTracingIncludes` 显式 trace `@img/sharp-libvips-linux-x64@*` 与 `@img/sharp-linux-x64@*`(版本通配)。
+- **生成失败把裸 DB 错误回传前端(issue #35)**:后端池查询瞬时失败时,Drizzle「Failed query: select …」(含列名)经兜底 catch 原样显示在用户「生成失败」toast。新增 `error-sanitize`:DB/内部异常记服务端日志 + 回通用可重试消息,已知用户级消息(积分不足等)原样透传。
+- **`/v1/images/{id}` 按 generation_id 查返回 404**:该接口此前只查进程内异步任务存储(仅 `async=true` 创建、`task_<uuid>` 为键、30 分钟 TTL、多实例不共享、重启即清),同步请求拿到的是 `generation_id`,查必 404。新增 DB 回退:内存未命中时按 `generation_id` 经 `getGenerationById` 持久取回(handler 内校验 `userId` 归属防越权),对同步/异步、跨重启/多实例都稳。
 
 ## v0.6.0 (2026-06-21)
 
