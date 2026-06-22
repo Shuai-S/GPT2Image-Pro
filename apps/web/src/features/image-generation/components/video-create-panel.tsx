@@ -18,9 +18,15 @@ import {
   SelectValue,
 } from "@repo/ui/components/select";
 import { Textarea } from "@repo/ui/components/textarea";
+import {
+  applyVideoBackendMultiplier,
+  getVideoCreditCost,
+  resolveVideoModelMultiplier,
+} from "@repo/shared/adobe";
 import { FIREFLY_VIDEO_FAMILIES } from "@repo/shared/adobe/firefly-direct/video-catalog";
 import { Loader2 } from "lucide-react";
 import { useMemo, useState } from "react";
+import type { VideoPricingInfo } from "../video-operations";
 
 type VideoStatus = "idle" | "running" | "done" | "error";
 
@@ -71,8 +77,10 @@ type VideoHistoryItem = {
 
 export function VideoCreatePanel({
   recent = [],
+  pricing,
 }: {
   recent?: VideoHistoryItem[];
+  pricing: VideoPricingInfo;
 }) {
   const families = FIREFLY_VIDEO_FAMILIES;
   const [familyId, setFamilyId] = useState(families[0]?.family ?? "sora2");
@@ -107,6 +115,22 @@ export function VideoCreatePanel({
       setResolution(next.resolutions[0] ?? resolution);
     }
   };
+
+  // 预估积分：与扣费侧（video-operations）同口径——每秒基价 × 时长 × 模型族倍率，
+  // 再叠加 Adobe 后端倍率。纯函数复用，确保展示价 = 实扣价。必须在任何 early return
+  // 之前无条件调用（React hooks 规则），故对 family 用可选链兜底。
+  const familyMultiplier = resolveVideoModelMultiplier(
+    family?.family,
+    pricing.multipliers
+  );
+  const estimatedCredits = useMemo(() => {
+    const baseCost = getVideoCreditCost({
+      durationSeconds: duration,
+      basePerSecond: pricing.basePerSecond,
+      modelMultiplier: familyMultiplier,
+    });
+    return applyVideoBackendMultiplier(baseCost, pricing.backendMultiplier);
+  }, [duration, familyMultiplier, pricing]);
 
   if (!family) return null;
 
@@ -331,11 +355,18 @@ export function VideoCreatePanel({
         )}
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button onClick={generate} disabled={busy || !prompt.trim()}>
           {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           生成视频
         </Button>
+        <span className="text-sm font-medium">
+          预计消耗 {estimatedCredits} 积分
+        </span>
+        <span className="text-xs text-muted-foreground">
+          {duration}s × {pricing.basePerSecond}/秒
+          {familyMultiplier !== 1 ? ` × ${familyMultiplier}倍` : ""}
+        </span>
         <span className="text-xs text-muted-foreground">{model}</span>
       </div>
 

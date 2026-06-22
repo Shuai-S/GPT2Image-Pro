@@ -103,6 +103,7 @@ import {
   roundUpCreditAmount,
   validateImageSize,
 } from "../resolution";
+import type { VideoPricingInfo } from "../video-operations";
 import { ImageLightbox, type LightboxGeneration } from "./image-lightbox";
 import { VideoCreatePanel } from "./video-create-panel";
 
@@ -1221,6 +1222,7 @@ interface CreatePageClientProps {
   imageBasePricing: ImageBaseCreditPricing;
   forceWebPixelRange: ForceWebPixelRange;
   timeZone: string;
+  videoPricing: VideoPricingInfo;
 }
 
 function isImageFile(file: File) {
@@ -1866,6 +1868,7 @@ export function CreatePageClient({
   imageBasePricing,
   forceWebPixelRange,
   timeZone,
+  videoPricing,
 }: CreatePageClientProps) {
   const locale = useLocale();
   const router = useRouter();
@@ -9328,7 +9331,7 @@ export function CreatePageClient({
         </div>
 
         <div role="tabpanel" hidden={activeMode !== "video"} className="mt-0">
-          <VideoCreatePanel recent={recent} />
+          <VideoCreatePanel recent={recent} pricing={videoPricing} />
         </div>
       </Tabs>
 

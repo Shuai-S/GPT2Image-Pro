@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyVideoBackendMultiplier,
   DEFAULT_VIDEO_BASE_CREDITS_PER_SECOND,
   getVideoCreditCost,
   resolveVideoModelMultiplier,
@@ -48,6 +49,31 @@ describe("getVideoCreditCost", () => {
       })
     ).toBe(240);
     expect(getVideoCreditCost({ durationSeconds: 0 })).toBe(0);
+  });
+});
+
+describe("applyVideoBackendMultiplier", () => {
+  it("叠加后端倍率,向上取整,缺省/非法回退 1", () => {
+    // 倍率 1：仅把 2 位小数向上取整成整数。
+    expect(applyVideoBackendMultiplier(240, 1)).toBe(240);
+    expect(applyVideoBackendMultiplier(199.95, 1)).toBe(200);
+    // 正常倍率。
+    expect(applyVideoBackendMultiplier(240, 1.5)).toBe(360);
+    // 缺省/非法/非正数回退 1。
+    expect(applyVideoBackendMultiplier(240, null)).toBe(240);
+    expect(applyVideoBackendMultiplier(240, 0)).toBe(240);
+    expect(applyVideoBackendMultiplier(240, -2)).toBe(240);
+    // 非负下限。
+    expect(applyVideoBackendMultiplier(0, 2)).toBe(0);
+  });
+
+  it("与扣费侧口径一致(getVideoCreditCost → applyVideoBackendMultiplier)", () => {
+    const base = getVideoCreditCost({
+      durationSeconds: 8,
+      basePerSecond: 30,
+      modelMultiplier: 1.5,
+    });
+    expect(applyVideoBackendMultiplier(base, 2)).toBe(720);
   });
 });
 

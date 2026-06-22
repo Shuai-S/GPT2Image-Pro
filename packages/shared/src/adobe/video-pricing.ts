@@ -59,3 +59,22 @@ export function getVideoCreditCost(params: {
   const duration = Math.max(0, params.durationSeconds || 0);
   return ceil2(base * duration * multiplier);
 }
+
+/**
+ * 把基础视频成本叠加 Adobe 后端计费倍率（组倍率已合入该值），向上取整并非负。
+ * 与扣费侧（video-operations）共用同一口径，确保前端预估与实际扣费完全一致。
+ * @param baseCost getVideoCreditCost 的产物。
+ * @param backendMultiplier config.backend.billingMultiplier（缺省 1）。
+ */
+export function applyVideoBackendMultiplier(
+  baseCost: number,
+  backendMultiplier?: number | null
+): number {
+  const multiplier =
+    typeof backendMultiplier === "number" &&
+    Number.isFinite(backendMultiplier) &&
+    backendMultiplier > 0
+      ? backendMultiplier
+      : 1;
+  return Math.max(0, Math.ceil(baseCost * multiplier));
+}

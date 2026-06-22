@@ -15,6 +15,7 @@ import { hasLayeredMeta } from "@/features/psd-export/layered-meta";
 import { getRuntimeImageBaseCreditPricing } from "@/features/image-generation/pricing-settings";
 import { getUserRecentGenerations } from "@/features/image-generation/queries";
 import { getUserApiConfig } from "@/features/image-generation/service";
+import { getVideoPricingForUser } from "@/features/image-generation/video-operations";
 import {
   getUserImageBackendPreference,
   listSelectableImageBackendGroups,
@@ -52,6 +53,7 @@ export default async function CreatePage() {
     imageBasePricing,
     forceWebMinPixels,
     forceWebMaxPixels,
+    videoPricing,
   ] = await Promise.all([
     getPlanCapabilitySnapshot(plan.plan),
     getRuntimeImageBaseCreditPricing(),
@@ -65,6 +67,7 @@ export default async function CreatePage() {
       DEFAULT_FORCE_WEB_MAX_PIXELS,
       { positive: true }
     ),
+    getVideoPricingForUser({ userId: user.id }),
   ]);
   const forceWebPixelRange = {
     minPixels: Math.min(forceWebMinPixels, forceWebMaxPixels),
@@ -107,6 +110,7 @@ export default async function CreatePage() {
       imageBasePricing={imageBasePricing}
       forceWebPixelRange={forceWebPixelRange}
       timeZone={timeZone}
+      videoPricing={videoPricing}
     />
   );
 }
