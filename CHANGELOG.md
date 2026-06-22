@@ -2,6 +2,20 @@
 
 本文件记录各发布版本的变更。版本格式 `v<MAJOR>.<MINOR>.<PATCH>`。
 
+## v0.6.2 (2026-06-22)
+
+视频生成支持异步 + 按 id 查询;图库新增「视频」tab;修复视频后端 inflight 租约泄漏导致的视频全线失败。
+
+### 新增
+
+- **视频生成异步**:`/v1/videos/generations` 支持 `async=true` / `callback_url`——立即返回 `task_...`,后台生成,凭 `task_id` 或 `generation_id` 轮询 `GET /v1/videos/{id}`(先查内存异步任务,未命中按 `generation_id` 从 `video_generation` 持久取回,跨重启/多实例可查;handler 校验 `userId` 归属防越权)。同步 keep-alive 保留为默认并补 `generation_id`。视频是长任务,异步避免长连接被代理/客户端掐断后产物丢失。
+- **图库「视频」tab**:图库新增「视频」tab,按时间倒序内联 `<video>` 播放已生成视频,展示 时长·比例·分辨率(视频不参与多选/批量下载)。存储路由补 `.mp4`=`video/mp4`(及 webm/mov):此前视频被当 `application/octet-stream`、浏览器 `<video>` 拒播——同时修复创作页视频面板播放。历史记录不加 tab。
+
+### 修复
+
+- **视频后端 inflight 租约泄漏 → 视频全线失败**:视频管线经 `getEffectiveConfig` 为 Adobe 成员获取 inflight 租约(进程内计数 + DB 租约)但全程不释放(图像管线有 `releasePoolBackendConfigLease`,视频侧此前完全没有)。每个视频请求(成功/失败都)泄漏一个租约,堆到 concurrency(默认 10)后该 Adobe 成员被 `hasBackendCapacity` 判为满载、彻底踢出候选,后续视频请求一律解析失败为「无可用 Adobe 视频后端」(单进程内重启才清、DB 租约约 18 分钟才过期)。修法:`releaseInflightLease()` 在 `getEffectiveConfig` 之后所有退出路径(非 direct 后端 / 积分不足 / 失败退款 / 成功)释放租约。已实测异步出片全链路通(8/8)。
+- **视频异步失败的错误 shape**:异步失败的错误信息此前被展开落在 `task.message`,改用 OpenAI 错误信封 → 规范 `task.error:{message,type,code}`(与图像异步一致)。
+
 ## v0.6.1 (2026-06-22)
 
 修复 Adobe gpt-image 图生图(`/v1/images/edits`)经 Adobe 后端 100% 失败;`/v1/models` 补全 Firefly 模型;创作页视频展示预估价格。
