@@ -316,6 +316,13 @@
       "when": 1780400961000,
       "tag": "0044_adobe_billing_multiplier",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1780400962000,
+      "tag": "0045_api_adobe_sourced",
+      "breakpoints": true
     }
   ]
 }

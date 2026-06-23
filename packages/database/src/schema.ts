@@ -886,6 +886,14 @@ export const imageBackendApi = pgTable("image_backend_api", {
     .notNull()
     .default("responses"),
   imageUpstreamMode: text("image_upstream_mode").notNull().default("images"),
+  // Adobe 来源：此 api 后端虽是 OpenAI/gpt 格式，但上游实际来自 Adobe。开启后：
+  // 计费按 Adobe 口径（套用下方 billing_multiplier，与分组倍率相乘，复用伪账号倍率链）；
+  // 调度上参与 firefly 候选（含 force_firefly 与显式 firefly-* 模型，后者经反向转换成
+  // gpt 请求后由本后端处理）。默认关闭，关闭时按普通 api（不套成员倍率、不进 firefly 候选）。
+  adobeSourced: boolean("adobe_sourced").notNull().default(false),
+  // 计费倍率（与 image_backend_adobe.billing_multiplier 同义）；仅当 adobeSourced 为真时
+  // 生效，与分组倍率相乘汇入 config.backend.billingMultiplier，作用于图像扣费。默认 1。
+  billingMultiplier: numeric("billing_multiplier").notNull().default("1"),
   contentSafetyEnabled: boolean("content_safety_enabled").notNull().default(true),
   isEnabled: boolean("is_enabled").notNull().default(true),
   // 遇错也始终可用：与 isEnabled 同时为真时，该 API 永不进入冷却、不因失败被

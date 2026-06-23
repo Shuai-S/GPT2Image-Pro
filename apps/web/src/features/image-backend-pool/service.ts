@@ -143,6 +143,11 @@ type PoolMember =
       chatCompletionsUpstreamMode: ChatCompletionsUpstreamMode;
       imagesUpstreamMode: ImagesUpstreamMode;
       useStream: boolean;
+      // Adobe 来源：上游实为 Adobe 的 gpt 格式 api。开启后计费套用下方 billingMultiplier
+      // （与分组倍率相乘，复用 Adobe 伪账号倍率链），并参与 firefly 候选（含反向转换）。
+      adobeSourced: boolean;
+      // 计费倍率（仅当 adobeSourced 时生效）。
+      billingMultiplier: number;
       contentSafetyEnabled: boolean;
       priority: number;
       concurrency: number;
@@ -2267,6 +2272,8 @@ async function selectPoolMember(
             imageBackendApi.chatCompletionsUpstreamMode,
           imageUpstreamMode: imageBackendApi.imageUpstreamMode,
           useStream: imageBackendApi.useStream,
+          adobeSourced: imageBackendApi.adobeSourced,
+          billingMultiplier: imageBackendApi.billingMultiplier,
           contentSafetyEnabled: imageBackendApi.contentSafetyEnabled,
           priority: imageBackendApi.priority,
           concurrency: imageBackendApi.concurrency,
@@ -2302,6 +2309,8 @@ async function selectPoolMember(
             imageBackendApi.chatCompletionsUpstreamMode,
           imageUpstreamMode: imageBackendApi.imageUpstreamMode,
           useStream: imageBackendApi.useStream,
+          adobeSourced: imageBackendApi.adobeSourced,
+          billingMultiplier: imageBackendApi.billingMultiplier,
           contentSafetyEnabled: imageBackendApi.contentSafetyEnabled,
           priority: imageBackendApi.priority,
           concurrency: imageBackendApi.concurrency,
@@ -2423,8 +2432,10 @@ async function selectPoolMember(
             const requiresResponsesEndpoint =
               effectiveAccountBackendPreference === "responses";
             return (
-              // fireflyOnly（force_firefly 或 firefly-* 模型）时只走 adobe，通用 API 不参与。
-              !fireflyOnly &&
+              // fireflyOnly（force_firefly 或 firefly-* 模型）时通用 API 不参与、只走 adobe；
+              // 但「Adobe 来源」api（上游即 Adobe）参与 firefly 候选：force_firefly 直接以 gpt
+              // 格式服务，显式 firefly-* 由下游反向转换成 gpt 请求后服务。
+              (!fireflyOnly || row.adobeSourced) &&
               groupBackendAllowsRequest(metadata, effectiveRequestKind) &&
               imageBackendApiInterfaceAllowsRequest(
                 row.interfaceMode,
@@ -2472,6 +2483,8 @@ async function selectPoolMember(
                 row.imageUpstreamMode
               ),
               useStream: row.useStream,
+              adobeSourced: row.adobeSourced,
+              billingMultiplier: Number(row.billingMultiplier) || 1,
               contentSafetyEnabled: row.contentSafetyEnabled,
               priority: row.priority,
               concurrency: row.concurrency,
@@ -2827,8 +2840,13 @@ function toResolvedPoolConfig(
           imagesUpstreamMode: member.imagesUpstreamMode,
           apiForceResponsesEndpoint:
             options.accountBackendPreference === "responses",
+          adobeSourced: member.adobeSourced,
           billingGroupId: fallbackGroupId,
-          billingMultiplier,
+          // Adobe 来源 api：组倍率 × 本后端倍率（复用 Adobe 伪账号同一倍率链）；
+          // 普通 api 不套成员倍率，仅组倍率。
+          billingMultiplier: member.adobeSourced
+            ? billingMultiplier * (member.billingMultiplier || 1)
+            : billingMultiplier,
           reportResult: true,
           inflightLease: true,
           inflightLeaseId: member.leaseId,

@@ -8,7 +8,6 @@ import {
   RESPONSES_IMAGE_MODELS,
 } from "@repo/shared/config/subscription-plan";
 import {
-  type AdobeImageFamily,
   buildAdobeImageRequestBody,
   parseAdobeMediaResult,
 } from "@repo/shared/adobe";
@@ -40,6 +39,10 @@ import type {
   ImageBackendRequestKind,
 } from "@/features/image-backend-pool/types";
 import { runAdobeDirectImageRequest } from "./adobe-direct";
+import {
+  pickAdobeFamilyFromModel,
+  reverseFireflyToGptRequest,
+} from "./adobe-sourced-firefly";
 import {
   AGENT_CONTINUE_INSTRUCTIONS,
   createDefaultAgentAdditionalTools,
@@ -3864,33 +3867,21 @@ export function poolBackendMemberType(
   return "account";
 }
 
-// adobe（pool-adobe）后端的图像家族选择：Phase 1 默认 gpt-image；若后端声明了
-// enabledModels，取其中首个受支持的家族。
-const ADOBE_IMAGE_FAMILIES: AdobeImageFamily[] = [
-  "gpt-image-2",
-  "gpt-image-1.5",
-  "nano-banana",
-  "nano-banana2",
-  "nano-banana-pro",
-];
-
-// 从请求 model（firefly-<family>[-<res>-<ratio>]）解析模型族；解析不到返回 null（由调用
-// 方回退后端默认）。按最长前缀匹配，避免 nano-banana 误吞 nano-banana-pro/nano-banana2。
-function pickAdobeFamilyFromModel(
-  model: string | null | undefined
-): AdobeImageFamily | null {
-  const normalized = String(model || "")
-    .trim()
-    .toLowerCase();
-  if (!normalized.startsWith("firefly-")) return null;
-  const rest = normalized.slice("firefly-".length);
-  const byLength = [...ADOBE_IMAGE_FAMILIES].sort(
-    (a, b) => b.length - a.length
-  );
-  for (const family of byLength) {
-    if (rest === family || rest.startsWith(`${family}-`)) return family;
+// 「Adobe 来源」api 接 firefly-* 请求的反向转换薄封装：仅判定后端（pool-api + adobeSourced），
+// 纯映射逻辑（截家族名 + 推 size，可选 backendModel 覆盖）见 ./adobe-sourced-firefly。
+function reverseAdobeSourcedApiFirefly(
+  config: ApiConfig,
+  requestedModel: string | null | undefined,
+  requestedSize: string | null | undefined
+): { model: string; size: string | undefined } | null {
+  if (config.backend?.type !== "pool-api" || !config.backend.adobeSourced) {
+    return null;
   }
-  return null;
+  return reverseFireflyToGptRequest({
+    requestedModel,
+    requestedSize,
+    backendModel: config.model,
+  });
 }
 
 // adobe（pool-adobe）派发：用 Firefly 适配器构造 /v1/chat/completions 请求，解析产物
@@ -3974,7 +3965,16 @@ export async function generateImage(
     );
   }
 
-  const model = getModel(config, params.model);
+  const fireflyRewrite = reverseAdobeSourcedApiFirefly(
+    config,
+    params.model,
+    params.size
+  );
+  if (fireflyRewrite) {
+    // 反向转换后 size 改写一次，下游所有 params.size 读取（含 appendImageParams）即一致。
+    params = { ...params, size: fireflyRewrite.size };
+  }
+  const model = fireflyRewrite?.model ?? getModel(config, params.model);
   if (isPoolAccountBackend(config, "web")) {
     return requireImageOutput(
       await generateImageWithChatGptWeb(config, {
@@ -4127,7 +4127,16 @@ export async function editImage(
     params.signal
   );
 
-  const model = getModel(config, params.model);
+  const fireflyRewrite = reverseAdobeSourcedApiFirefly(
+    config,
+    params.model,
+    params.size
+  );
+  if (fireflyRewrite) {
+    // 反向转换后 size 改写一次，下游所有 params.size 读取（含 appendImageParams）即一致。
+    params = { ...params, size: fireflyRewrite.size };
+  }
+  const model = fireflyRewrite?.model ?? getModel(config, params.model);
   const editPromptRefs = resolvePromptImageReferences({
     prompt: getEffectivePrompt(params),
     images: params.images,
