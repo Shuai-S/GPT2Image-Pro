@@ -3923,43 +3923,45 @@ export function ImageBackendPoolAdminPanel({
                       }
                     />
                     <p className="text-xs text-muted-foreground">
-                      仅「Adobe 来源」开启时生效。最终扣费 = 基础价 × 命中组倍率 ×
-                      本成员倍率（默认 1 不改变）。
+                      仅「Adobe 来源」开启时生效。最终扣费 = 向上保留两位(向上保留两位
+                      (基础价 + 审核附加) × 模型倍率 × 命中组倍率 × 本成员倍率)。
                     </p>
-                    <div className="rounded-md border bg-muted/30 p-3 text-xs">
-                      <div className="mb-1 font-medium">
-                        倍率算例（基础价以 100 积分示意）
-                      </div>
-                      <table className="w-full text-left">
-                        <thead>
-                          <tr className="border-b border-border/60">
-                            <th className="py-1 pr-2 font-medium">场景</th>
-                            <th className="py-1 pr-2 font-medium">组 × 成员</th>
-                            <th className="py-1 font-medium">实扣</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr className="border-b border-border/30">
-                            <td className="py-1 pr-2">普通 api（默认）</td>
-                            <td className="py-1 pr-2">1 ×（恒 1）</td>
-                            <td className="py-1">100</td>
-                          </tr>
-                          <tr className="border-b border-border/30">
-                            <td className="py-1 pr-2">组 ×1.2 + 成员 ×2</td>
-                            <td className="py-1 pr-2">1.2 × 2 = 2.4</td>
-                            <td className="py-1">240</td>
-                          </tr>
-                          <tr>
-                            <td className="py-1 pr-2">仅成员 ×2（组 1）</td>
-                            <td className="py-1 pr-2">1 × 2 = 2</td>
-                            <td className="py-1">200</td>
-                          </tr>
-                        </tbody>
-                      </table>
-                      <p className="mt-1 text-muted-foreground">
-                        关闭「Adobe 来源」则不吃成员倍率，退回只吃组倍率（同普通 api）。
-                      </p>
-                    </div>
+                    {(() => {
+                      // 实时算例：以 nano-banana-pro · 1024×1024 为例，套上方输入的成员
+                      // 倍率，与"含分组倍率示例"同口径（基础价 6 + 审核附加 0.04 + 嵌套
+                      // ceil2），再叠模型倍率（线上 IMAGE_MODEL_MULTIPLIERS：
+                      // nano-banana-pro x1.5）与示例组倍率。香蕉 pro 是"多一些乘数"的典型。
+                      const member = Number(apiForm.billingMultiplier) || 1;
+                      const sampleGroup = 1.2;
+                      const modelMultiplier = 1.5;
+                      const ceil2 = (v: number) =>
+                        Math.ceil(v * 100 - 1e-9) / 100;
+                      const final = ceil2(
+                        ceil2(6.04) * modelMultiplier * sampleGroup * member
+                      );
+                      return (
+                        <div className="space-y-1 rounded-md border bg-muted/30 p-3 text-xs">
+                          <div className="font-medium">
+                            算例：nano-banana-pro · 1024×1024
+                          </div>
+                          <div className="text-muted-foreground">
+                            模型 x{modelMultiplier} · 组 x{sampleGroup}（示例） ·
+                            成员 x{member}
+                          </div>
+                          <div className="text-muted-foreground">
+                            向上保留两位(向上保留两位(6 基础价 + 0.04 审核附加) x{" "}
+                            {modelMultiplier} x {sampleGroup} x {member})
+                          </div>
+                          <div className="font-medium text-foreground">
+                            = {final} 积分/张
+                          </div>
+                          <p className="text-muted-foreground">
+                            模型倍率（如 nano-banana-pro x1.5）按 IMAGE_MODEL_MULTIPLIERS
+                            配置、与本成员倍率叠乘；关闭「Adobe 来源」则成员 x1（同普通 api）。
+                          </p>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
                 <Button
