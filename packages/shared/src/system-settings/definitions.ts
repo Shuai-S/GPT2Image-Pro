@@ -23,6 +23,7 @@ export type SettingKey =
   | "NEXT_PUBLIC_ASSET_PREFIX"
   | "APP_TIME_ZONE"
   | "MARKETING_SLA_STATUS_ENABLED"
+  | "EXTERNAL_API_CORS_ENABLED"
   | "SELF_USE_MODE_ENABLED"
   | "BETTER_AUTH_SECRET"
   | "BETTER_AUTH_URL"
@@ -403,6 +404,15 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     label: "首页 SLA 展示",
     description:
       "控制主页是否展示生图服务 SLA 区块。管理员和超管可在首页直接关闭或开启；观察管理员只读。",
+    category: "general",
+    valueType: "boolean",
+    defaultValue: true,
+  },
+  {
+    key: "EXTERNAL_API_CORS_ENABLED",
+    label: "外部 API 跨域(CORS)",
+    description:
+      "控制外部 API(/v1、/api/v1)是否允许浏览器跨域调用。开启后对所有来源开放(Access-Control-Allow-Origin: *,Bearer 鉴权不带 cookie,不开启凭据);关闭则不返回跨域头,浏览器跨域被拦,服务端直连不受影响。",
     category: "general",
     valueType: "boolean",
     defaultValue: true,
