@@ -116,8 +116,18 @@ curl -s $BASE/images/edits \
 
 ## 视频
 
-视频是长任务，**建议异步**（`async: true`）。模型 id 形如
-`firefly-<family>-<dur>s-<ratio>[-<res>]`（如 `firefly-sora2-4s-16x9`），可从 `/v1/models` 获取。
+视频是长任务（数十秒到数分钟）。同步直连很容易在出片前被代理/客户端掐断、导致产物丢失，
+所以**默认走异步**——站内创作页的视频面板出于同样原因也默认异步。除非是很短的片段，否则一律建议 `async: true`。
+
+模型 id 形如 `firefly-<family>-<dur>s-<ratio>[-<res>]`（如 `firefly-sora2-4s-16x9`），从 `/v1/models` 获取。
+
+### 异步流程（推荐）
+
+1. **提交**：`POST /v1/videos/generations` 带 `async: true`，立即返回 `task_...`，不占用长连接。
+2. **拿结果**（二选一）：
+   - **轮询**：凭返回的 `id`（`task_...`，或同步响应里的 `generation_id`）周期性 `GET /v1/videos/{id}`（建议间隔 3–5s），直到 `status` 进入终态。
+   - **回调**：提交时带 `callback_url`，完成/失败时会向该地址 POST 一次完整任务对象，无需轮询。
+3. **取视频**：`status` 为 `completed` 后从 `video_url` / `data[].url` 下载（带签名、有有效期）。
 
 ### POST /v1/videos/generations
 
@@ -127,28 +137,26 @@ curl -s $BASE/images/edits \
 | `model` | string | firefly 视频模型 id（必填） |
 | `negative_prompt` | string | 反向提示词（可选） |
 | `image` | string[] | 图生视频输入图，base64 data URL，最多 3 张（首帧/参考） |
-| `async` | bool | 异步：立即返回 `task_...`（强烈建议） |
-| `callback_url` | string(url) | 异步完成回调（POST 任务对象） |
-
-异步提交（推荐）：
+| `async` | bool | 异步：立即返回 `task_...`（长任务强烈建议） |
+| `callback_url` | string(url) | 异步完成/失败回调（POST 任务对象） |
 
 ```bash
 curl -s $BASE/videos/generations \
   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-  -d '{"prompt":"a drone shot over a beach","model":"firefly-sora2-4s-16x9","async":true}'
+  -d '{"prompt":"a drone shot over a beach","model":"firefly-sora2-4s-16x9","async":true,"callback_url":"https://you.example/cb"}'
 ```
 
-异步立即返回任务：
+异步立即返回任务（尚未出片）：
 
 ```json
 { "id": "task_5d936d7e...", "object": "image.generation", "model": "firefly-sora2-4s-16x9", "status": "processing" }
 ```
 
-随后凭 `id`（`task_...` 或 `generation_id`）轮询 `GET /v1/videos/{id}`。
-同步模式（不传 `async`）会用 keep-alive 撑住连接，跑完直接返回，响应含
-`data[].url`、`generation_id`、`credits_consumed`。
+> 同步模式（不传 `async`）会用 keep-alive 撑住连接、跑完直接返回（响应含 `data[].url`、`generation_id`、`credits_consumed`），仅适合很短的片段；长视频请用异步，避免连接中途断开丢失产物。
 
 ### `GET /v1/videos/{id}` — 查询视频任务
+
+`{id}` 可为异步返回的 `task_...`，或同步响应里的 `generation_id`（后者从 `video_generation` 持久取回，跨重启/多实例可查，并校验归属）。
 
 ```json
 {
@@ -165,7 +173,7 @@ curl -s $BASE/videos/generations \
 }
 ```
 
-`status` 同图像；未完成时 `object` 为 `video.generation`，无 `*_url`。
+`status`：`processing`（进行中）/ `completed`（完成）/ `failed`（失败），同图像语义；未完成时 `object` 为 `video.generation`、无 `*_url`，失败时含 `error: { message, type, code }`。
 `callback_url` 会在完成/失败时收到一次该任务对象的 POST。
 
 ---
