@@ -167,13 +167,19 @@ const sections = {
           "Adobe Firefly video",
           "/v1/videos/generations",
           "video",
-          "本站扩展。固定路由到 Adobe（Firefly）后端的长任务，keep-alive 撑住连接直到出片，返回产物视频 URL。",
+          "本站扩展。固定路由到 Adobe（Firefly）后端的长任务；默认 keep-alive 撑住连接直到出片，也可传 async:true 立即返回 task_... 后台生成，凭 GET /v1/videos/{id} 轮询或 callback_url 回调（长视频强烈建议）。",
         ],
         [
           "Async image task",
           "/v1/images/{task_id}",
           "image_generation",
           "查询 async=true 创建的内存异步任务，任务 30 分钟后自动过期。",
+        ],
+        [
+          "Async video task",
+          "/v1/videos/{id}",
+          "video",
+          "查询视频任务：先查 async=true 返回的内存 task_...（30 分钟过期），未命中再按响应里的 generation_id 从库持久取回。",
         ],
         [
           "OpenAI chat completions",
@@ -294,7 +300,7 @@ const sections = {
         "/v1/agents/images 和需要 Codex/Responses 能力的页面功能会忽略用户自接 API，按平台后端池或外接后端池结算本站积分。",
         "image 接口的 web_first / webFirst / force_web / forceWeb（chat 对应 mix_web_first）是 Web-first 优先路由，不是硬性只走 Web，且默认开启。开启时（不传或显式 true）按 Web-first 像素区间（IMAGE_FORCE_WEB_MIN_PIXELS / IMAGE_FORCE_WEB_MAX_PIXELS，默认 0.66MP-2MP）判定：尺寸落在区间内才优先 Web、失败回退 Codex/Responses，超出区间（如 4K）则走正常调度；auto 或无法解析的尺寸视为可优先 Web。显式传 false 则不优先 Web。该路由只对 mixed 后端分组生效（纯 Web / 纯 Codex-Responses 分组无此概念），不会覆盖用户自接 API；agent 始终走 Codex/Responses，不受此项影响。",
         "Adobe（Firefly）后端：作为特殊成员按 priority 挂入分组同池调度——firefly-* 模型或 force_firefly=true 会把候选收敛到仅 Adobe；普通请求则只有当组内 web/codex/api 限流/耗尽/可切换失败时才兜底到 Adobe（取决于 Adobe 是否在该组及其优先级，priority 越大越靠后）。是否进 Adobe、计费倍率均随 admin「Adobe 后端」tab 配置变化。图像计费 = 尺寸基础积分 × 模型族倍率 × Adobe 后端倍率 × 分组倍率；视频计费见 /v1/videos/generations。路由兜底详见 docs/adobe-firefly-routing.md，兼容转换（站内参数→Adobe 字段、被忽略参数、算例）详见 docs/adobe-firefly-compat.md。",
-        "异步任务（async）：body async:true 或 URL ?async=true（等价、不能与 stream 同用）会立即返回 task_... 任务，需用 GET /v1/images/{task_id} 轮询；task_... 为进程内内存对象，30 分钟后过期，服务重启或多实例切换即无法再查询。若需持久查询，改用响应里的 generation_id（gen_...）作为 GET /v1/images/{id} 的路径参数——它从数据库取回，跨重启/多实例都可查（同步请求也可用此方式按 generation_id 复查）。callback_url 是可选的完成回调 webhook——任务结束时服务端把任务对象 POST 到该公网地址，已发出的回调不受过期/重启影响。",
+        "异步任务（async）：body async:true 或 URL ?async=true（等价、不能与 stream 同用）会立即返回 task_... 任务，需用 GET /v1/images/{task_id} 轮询；task_... 为进程内内存对象，30 分钟后过期，服务重启或多实例切换即无法再查询。若需持久查询，改用响应里的 generation_id（gen_...）作为 GET /v1/images/{id} 的路径参数——它从数据库取回，跨重启/多实例都可查（同步请求也可用此方式按 generation_id 复查）。callback_url 是可选的完成回调 webhook——任务结束时服务端把任务对象 POST 到该公网地址，已发出的回调不受过期/重启影响。视频同理：/v1/videos/generations 传 async:true（或 ?async=true）即立即返回 task_...，用 GET /v1/videos/{id} 轮询（task_... 30 分钟过期，或用响应里的 generation_id 持久查），或用 callback_url 完成回调——视频是长任务，强烈建议异步，以免同步连接被中途掐断丢产物。",
       ],
       officialRefsTitle: "官方参考",
       officialRefs: [
@@ -1426,7 +1432,7 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
           path: "/v1/videos/generations",
           contentType: "application/json",
           description:
-            "本站扩展：Adobe Firefly 视频生成。固定路由到 Adobe（Firefly）后端，是长任务（保持连接 / keep-alive 撑住连接直到出片），返回 OpenAI Images 风格结构，data[].url 为产物视频 URL。鉴权与其他 v1 接口一致（外部 API Key）。",
+            "本站扩展：Adobe Firefly 视频生成。固定路由到 Adobe（Firefly）后端，是长任务，返回 OpenAI Images 风格结构，data[].url 为产物视频 URL。鉴权与其他 v1 接口一致（外部 API Key）。视频是长任务，强烈建议异步：传 async:true（或 ?async=true）立即返回 task_... 任务对象、后台生成，凭 GET /v1/videos/{id} 轮询或 callback_url 完成回调；不传则同步 keep-alive 撑住连接直到出片。",
           example: `# 1. 文生视频；model 为完整 Firefly 视频 id
 curl https://gpt2image.superapi.buzz/v1/videos/generations \\
   -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
@@ -1445,7 +1451,21 @@ curl https://gpt2image.superapi.buzz/v1/videos/generations \\
     "model": "firefly-kling3-5s-9x16",
     "prompt": "让画面中的人物缓缓抬头微笑",
     "image": ["data:image/png;base64,iVBORw0KGgo..."]
-  }'`,
+  }'
+
+# 3. 异步（长视频强烈建议）：async:true 立即返回 task_...，后台生成
+curl https://gpt2image.superapi.buzz/v1/videos/generations \\
+  -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "firefly-veo31-8s-16x9-1080p",
+    "prompt": "城市夜景延时，霓虹倒影",
+    "async": true,
+    "callback_url": "https://your-server.example/callback"
+  }'
+# 立即返回 { "id": "task_...", "status": "processing" }；随后轮询（或等 callback_url 回调）：
+curl https://gpt2image.superapi.buzz/v1/videos/task_... \\
+  -H "Authorization: Bearer $GPT2IMAGE_API_KEY"`,
           responseExample: `{
   "created": 1713833628,
   "model": "firefly-veo31-8s-16x9-1080p",
@@ -1477,6 +1497,20 @@ curl https://gpt2image.superapi.buzz/v1/videos/generations \\
               description:
                 "图生视频输入图（首帧 / 参考），为 base64 image data URL 数组，最多 3 张。",
             },
+            {
+              name: "async",
+              requirement: "可选",
+              custom: true,
+              description:
+                "异步开关（视频是长任务，强烈建议开启）。传 async:true 或 URL ?async=true（等价）即立即返回 task_... 任务对象（status:processing）、后台生成，凭 GET /v1/videos/{id} 轮询结果。",
+            },
+            {
+              name: "callback_url / callbackUrl",
+              requirement: "可选",
+              custom: true,
+              description:
+                "完成回调 webhook（仅异步任务）。任务完成 / 失败时服务端把任务对象 POST 到该公网 http(s) 地址，无需轮询；已发出的回调不受任务过期 / 重启影响。",
+            },
           ],
           responses: [
             {
@@ -1499,7 +1533,7 @@ curl https://gpt2image.superapi.buzz/v1/videos/generations \\
           ],
           notes: [
             "该接口是本站扩展，不是 OpenAI 官方接口；/api/v1/videos/generations 是同一 handler 的别名。",
-            "视频生成是长任务，本站用 keep-alive 撑住连接直到出片或失败；请把客户端读超时设置得足够长。",
+            "视频生成是长任务：同步模式用 keep-alive 撑住连接直到出片或失败（请把客户端读超时设足够长）；长视频强烈建议异步（async:true）——立即拿 task_...，用 GET /v1/videos/{id} 轮询（task_... 为内存态、30 分钟过期，或用响应里的 generation_id 持久查），或用 callback_url 完成回调，避免连接被中途掐断丢产物。",
             "计费 = 每秒基础积分（默认 30）× 时长（秒）× 模型族倍率，结果向上取两位小数；时长由 model id 中的 <dur> 决定。",
             "默认需要 externalApi.images.generate 能力（入门版及以上），可在套餐能力矩阵中调整。",
           ],
@@ -2271,13 +2305,19 @@ data: {"type":"response.completed","response":{"id":"resp_...","object":"respons
           "Adobe Firefly video",
           "/v1/videos/generations",
           "video",
-          "GPT2IMAGE extension. A long-running job that always routes to the Adobe (Firefly) backend, holds the connection with keep-alive until the video is ready, and returns the produced video URL.",
+          "GPT2IMAGE extension. A long-running job that always routes to the Adobe (Firefly) backend; by default it holds the connection with keep-alive until the video is ready, or pass async:true to return a task_... immediately and poll GET /v1/videos/{id} (or use callback_url) — strongly recommended for long videos.",
         ],
         [
           "Async image task",
           "/v1/images/{task_id}",
           "image_generation",
           "Returns the in-memory task created with async=true. Tasks expire after 30 minutes.",
+        ],
+        [
+          "Async video task",
+          "/v1/videos/{id}",
+          "video",
+          "Returns a video task: first the in-memory task_... created with async=true (expires after 30 minutes), otherwise looked up persistently by the generation_id from the response.",
         ],
         [
           "OpenAI chat completions",
@@ -2398,7 +2438,7 @@ data: {"type":"response.completed","response":{"id":"resp_...","object":"respons
         "/v1/agents/images and page features that require Codex/Responses capability ignore user custom API and are billed through the platform or external backend pool.",
         "Image endpoint web_first / webFirst / force_web / forceWeb means Web-first preference, not hard Web-only routing. It only applies after routing enters a platform mixed backend group, does not override user custom API, and falls back to Codex/Responses when Web is unavailable or fails.",
         "Adobe (Firefly) backend: it joins the group as a special pool member ranked by priority. A firefly-* model or force_firefly=true narrows candidates to Adobe only; ordinary requests only fall back to Adobe once the group's web/codex/api members are rate-limited, exhausted, or fail with a switchable error (and only if Adobe is in that group — the larger its priority, the later it is tried). Whether a request reaches Adobe and its billing multiplier follow the admin 'Adobe backend' tab config. Image billing = size base credits × model-family multiplier × Adobe backend multiplier × group multiplier; see /v1/videos/generations for video billing. Routing/fallback: docs/adobe-firefly-routing.md; compatibility conversion (in-app params → Adobe fields, ignored params, worked example): docs/adobe-firefly-compat.md.",
-        "Async tasks (async): body async:true or URL ?async=true (equivalent, and cannot be combined with stream) returns a task_... object immediately; poll GET /v1/images/{task_id} for the result. Tasks are in-memory objects that expire after 30 minutes and become unavailable after a restart or multi-instance switch. callback_url is an optional completion webhook — when the task finishes the server POSTs the task object to that public URL, and an already-sent callback is unaffected by expiry or restart.",
+        "Async tasks (async): body async:true or URL ?async=true (equivalent, and cannot be combined with stream) returns a task_... object immediately; poll GET /v1/images/{task_id} for the result. Tasks are in-memory objects that expire after 30 minutes and become unavailable after a restart or multi-instance switch. callback_url is an optional completion webhook — when the task finishes the server POSTs the task object to that public URL, and an already-sent callback is unaffected by expiry or restart. Video works the same way: POST /v1/videos/generations with async:true (or ?async=true) returns a task_... immediately; poll GET /v1/videos/{id} (task_... expires after 30 minutes, or use the generation_id for persistent lookups) or rely on callback_url — video is long-running, so async is strongly recommended to avoid a synchronous connection being cut mid-way and losing the output.",
       ],
       officialRefsTitle: "Official References",
       officialRefs: [
@@ -3534,7 +3574,7 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
           path: "/v1/videos/generations",
           contentType: "application/json",
           description:
-            "GPT2IMAGE extension: Adobe Firefly video generation. It always routes to the Adobe (Firefly) backend, is a long-running job (the connection is held with keep-alive until the video is ready), and returns an OpenAI Images-style shape where data[].url is the produced video URL. Auth matches other v1 endpoints (external API key).",
+            "GPT2IMAGE extension: Adobe Firefly video generation. It always routes to the Adobe (Firefly) backend, is a long-running job, and returns an OpenAI Images-style shape where data[].url is the produced video URL. Auth matches other v1 endpoints (external API key). Video is long-running, so async is strongly recommended: pass async:true (or ?async=true) to return a task_... object immediately and generate in the background, then poll GET /v1/videos/{id} or use callback_url; otherwise it runs synchronously, holding the connection with keep-alive until the video is ready.",
           example: `# 1. Text-to-video. model is a full Firefly video id.
 curl https://gpt2image.superapi.buzz/v1/videos/generations \\
   -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
@@ -3553,7 +3593,21 @@ curl https://gpt2image.superapi.buzz/v1/videos/generations \\
     "model": "firefly-kling3-5s-9x16",
     "prompt": "Make the person slowly look up and smile",
     "image": ["data:image/png;base64,iVBORw0KGgo..."]
-  }'`,
+  }'
+
+# 3. Async (strongly recommended for long videos): async:true returns a task_... immediately, generated in the background
+curl https://gpt2image.superapi.buzz/v1/videos/generations \\
+  -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "firefly-veo31-8s-16x9-1080p",
+    "prompt": "City night timelapse, neon reflections",
+    "async": true,
+    "callback_url": "https://your-server.example/callback"
+  }'
+# Returns { "id": "task_...", "status": "processing" } immediately; then poll (or wait for the callback_url):
+curl https://gpt2image.superapi.buzz/v1/videos/task_... \\
+  -H "Authorization: Bearer $GPT2IMAGE_API_KEY"`,
           responseExample: `{
   "created": 1713833628,
   "model": "firefly-veo31-8s-16x9-1080p",
@@ -3585,6 +3639,20 @@ curl https://gpt2image.superapi.buzz/v1/videos/generations \\
               description:
                 "Image-to-video input (first frame / reference). An array of base64 image data URLs, up to 3.",
             },
+            {
+              name: "async",
+              requirement: "Optional",
+              custom: true,
+              description:
+                "Async switch (video is long-running, strongly recommended). Pass async:true or URL ?async=true (equivalent) to return a task_... object immediately (status:processing) and generate in the background; poll GET /v1/videos/{id} for the result.",
+            },
+            {
+              name: "callback_url / callbackUrl",
+              requirement: "Optional",
+              custom: true,
+              description:
+                "Completion webhook (async tasks only). When the task finishes or fails the server POSTs the task object to this public http(s) URL, so no polling is needed; an already-sent callback is unaffected by task expiry or restart.",
+            },
           ],
           responses: [
             {
@@ -3607,7 +3675,7 @@ curl https://gpt2image.superapi.buzz/v1/videos/generations \\
           ],
           notes: [
             "This endpoint is a GPT2IMAGE extension, not an official OpenAI endpoint. /api/v1/videos/generations is an alias.",
-            "Video generation is long-running. GPT2IMAGE holds the connection with keep-alive until the video is ready or fails, so set a generous client read timeout.",
+            "Video generation is long-running: in sync mode GPT2IMAGE holds the connection with keep-alive until the video is ready or fails (set a generous client read timeout); for long videos prefer async (async:true) — get a task_... immediately and poll GET /v1/videos/{id} (task_... is in-memory and expires after 30 minutes, or use the generation_id from the response for persistent lookups) or rely on callback_url, to avoid the connection being cut mid-way and losing the output.",
             "Billing = base credits per second (default 30) × duration in seconds × model-family multiplier, rounded up to two decimals. The duration comes from <dur> in the model id.",
             "Requires externalApi.images.generate by default (Starter or higher); admins can change it in the Plan Capability Matrix.",
           ],

@@ -287,4 +287,19 @@ describe("image backend error classification", () => {
       "ChatGPTAgentToolRateLimitException you were unable to invoke the image_gen.text2im tool right now";
     expect(svc.isMissingImageToolBackendError(err)).toBe(false);
   });
+
+  it("从工具限流文案解析出真实重置时间(21h26m)作为冷却,而非回落 3 分钟", async () => {
+    const svc = await loadService();
+    // 上游 ChatGPTAgentToolRateLimitException 的完整文案,含 "resets in 21 hours and 26 minutes"。
+    const err = `ChatGPTAgentToolRateLimitException Before doing anything else, explicitly explain to the user that you were unable to invoke the image_gen.text2im tool right now. Make sure to begin your response with "You've hit the Free plan limit for image generations requests. You can create more images when the limit resets in 21 hours and 26 minutes.". DO NOT UNDER ANY CIRCUMSTANCES retry using this tool until the next user message.`;
+    const failure = await svc.classifyFailure(err);
+    expect(failure.status).toBe("limited");
+    expect(failure.cooldownUntil).toBeInstanceOf(Date);
+    const remainMin =
+      ((failure.cooldownUntil as Date).getTime() - Date.now()) / 60_000;
+    // 应解析出 21h26m ≈ 1286 分钟(parseDurationMs 把 hours 的 h、minutes 的 m 当单位),
+    // 而不是 3 分钟兜底;留少量时钟漂移余量。
+    expect(remainMin).toBeGreaterThan(21 * 60);
+    expect(remainMin).toBeLessThan(22 * 60);
+  });
 });

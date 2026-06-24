@@ -2,8 +2,10 @@ import { DocsBody, DocsPage, DocsTitle } from "fumadocs-ui/page";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 
-import { BackendDocs } from "@/features/docs/backend-docs";
-import { getSystemDocsMetadata } from "@/features/docs/system-docs";
+import {
+  getSystemDocsMetadata,
+  SystemDocsContent,
+} from "@/features/docs/system-docs";
 import { docsSource } from "@/lib/source";
 
 function isSystemDocsSlug(slug?: string[]) {
@@ -83,8 +85,8 @@ export default async function Page({
         toc={[]}
       >
         <DocsBody className="max-w-none">
-          <BackendDocs
-            className="mx-auto w-full max-w-[1500px] space-y-10 px-4 py-6 lg:px-8"
+          <SystemDocsContent
+            className="mx-auto w-full max-w-[1500px] space-y-6 px-4 py-6 lg:px-8"
             locale={locale}
           />
         </DocsBody>
