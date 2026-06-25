@@ -1304,19 +1304,20 @@ export function isMissingImageToolBackendError(error?: string | null) {
  * - "没有可用token"：中转无上游额度/令牌（如 sub2api 中转池空）。
  * - "html response body"：端点返回 HTML（源站宕机/网关错误页/baseUrl 配错），
  *   非 OpenAI 兼容 JSON。
- * - "service temporarily unavailable"：中转上游 502/服务不可用（典型
- *   "Upstream service temporarily unavailable"）。按运维要求：这类持续不可用的中转直接
- *   标 error 踢出轮换（而非临时冷却自恢复），由测活/重新启用复活；当次请求仍会换号重试
- *   （文案含 502/temporarily unavailable，被 isRecoverableBackendError 判为可切换）。
  * 这类不会自愈，应踢出轮换直到管理员处理（测活/重新启用/常驻）。
+ *
+ * 注：曾把 "service temporarily unavailable"（502）也归此处标 error，但线上该文案高频出现
+ * （2h 内数千次，含 adobe/adobe_sourced 后端），粘性踢出会把服务 firefly 的 Adobe 后端全
+ * 清空 → firefly/nano-banana 请求无后端可解析。已回退：这类 502 仍按 overload 临时冷却、
+ * 自恢复（见 isOverloadBackendError）。要单独处置某个持续坏的中转,用其 failureCooldownEnabled
+ * 开关，或后续按"连续多次失败才升 error"的渐进策略,不做全局首次即 error。
  */
 function isDeadRelayBackendError(error?: string | null) {
   const normalized = (error || "").toLowerCase();
   return (
     normalized.includes("没有可用token") ||
     normalized.includes("没有可用 token") ||
-    normalized.includes("html response body") ||
-    normalized.includes("service temporarily unavailable")
+    normalized.includes("html response body")
   );
 }
 
