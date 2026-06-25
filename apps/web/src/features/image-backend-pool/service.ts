@@ -4199,6 +4199,7 @@ async function importAccessTokens(
     syncedByMode: Record<ImageBackendAccountBackend, number>;
     failedByMode: Record<ImageBackendAccountBackend, number>;
     importedIds: string[];
+    firstError?: string;
   },
   importBatchId: string
 ) {
@@ -4232,9 +4233,11 @@ async function importAccessTokens(
       counters.syncedByMode.web++;
     } catch (error) {
       counters.failedByMode.web++;
+      const reason = error instanceof Error ? error.message : String(error);
+      if (!counters.firstError) counters.firstError = reason;
       logWarn("手工 Web AT 导入生图账号失败，已跳过", {
         index: index + 1,
-        error: error instanceof Error ? error.message : String(error),
+        error: reason,
       });
     }
   }
@@ -4298,11 +4301,20 @@ export async function importImageBackendWebAccountsFromAccessTokens(input: {
   const importBatchId = nanoid();
 
   if (!accessTokens.length) {
+    const rtCount = parsedTokens.refreshTokens.length;
     return emptyAccessTokenImportResult(
-      "未提取到可导入的 Web AT。请粘贴 accessToken、Bearer token，或粘贴 Auth Session 完整 JSON。"
+      rtCount
+        ? `未识别到 access token，但检测到 ${rtCount} 个 refresh token（rt_ 开头）。这些是「导入 RT」用的——请改用「导入 RT」按钮，不要在「导入 Web AT」里粘 rt_。`
+        : "未识别到任何 access token（写入 0、失败 0 表示根本没解析出可导入的 token，并非写库失败）。Web AT 应为 eyJ 开头的 JWT（或 Bearer eyJ...、或含 accessToken 字段的 Auth Session JSON）；请确认粘的不是 cookie、session id、账号密码或 rt_。多个 token 用换行分隔。"
     );
   }
 
+  const importState: {
+    syncedByMode: Record<ImageBackendAccountBackend, number>;
+    failedByMode: Record<ImageBackendAccountBackend, number>;
+    importedIds: string[];
+    firstError?: string;
+  } = { syncedByMode, failedByMode, importedIds };
   await importAccessTokens(
     {
       accessTokens,
@@ -4313,7 +4325,7 @@ export async function importImageBackendWebAccountsFromAccessTokens(input: {
       priority: input.priority,
       concurrency: input.concurrency,
     },
-    { syncedByMode, failedByMode, importedIds },
+    importState,
     importBatchId
   );
 
@@ -4324,6 +4336,7 @@ export async function importImageBackendWebAccountsFromAccessTokens(input: {
     skipped,
     failed: failedByMode.web + failedByMode.responses,
     failedByMode,
+    ...(importState.firstError ? { firstError: importState.firstError } : {}),
     message:
       parsedAccessTokenCount > accessTokens.length
         ? `已导入前 ${accessTokens.length} 个 Web AT，超出 ${MANUAL_TOKEN_IMPORT_LIMIT} 个的部分已跳过。该类账号没有 RT，AT 过期后需要重新导入。`

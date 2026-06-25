@@ -1518,14 +1518,27 @@ export function ImageBackendPoolAdminPanel({
     isPending: isImportingWebAccessTokens,
   } = useAction(importImageBackendWebAccountsFromAccessTokensAction, {
     onSuccess: ({ data }) => {
-      const prefix = data?.message
-        ? `${data.message} `
-        : `导入完成：提取 Web AT ${data?.sourceCount || 0} 个，`;
-      toast.success(
-        `${prefix}写入 ${
-          data?.syncedCount || 0
-        } 个，失败 ${data?.failed || 0} 个`
-      );
+      const sourceCount = data?.sourceCount || 0;
+      const synced = data?.syncedCount || 0;
+      const failed = data?.failed || 0;
+      // 一个都没解析出来:只显示诊断信息(rt_ 误粘/非 JWT 等),不追加"写入0/失败0"
+      // 以免误导成写库失败;红色提示,且保留弹窗与已粘内容方便修正。
+      if (sourceCount === 0) {
+        toast.error(data?.message || "未识别到可导入的 Web AT");
+        return;
+      }
+      const note = data?.message ? `${data.message} ` : "";
+      const firstError = (data as { firstError?: string } | undefined)
+        ?.firstError;
+      const detail = `识别 ${sourceCount} 个，写入 ${synced} 个，失败 ${failed} 个${
+        failed && firstError ? `；首个错误：${firstError}` : ""
+      }`;
+      // 解析出了但全部写入失败:同样红色提示、保留弹窗。
+      if (synced === 0) {
+        toast.error(`${note}${detail}`);
+        return;
+      }
+      toast.success(`${note}${detail}`);
       setIsWebAtImportOpen(false);
       resetWebAtImportForm();
       reload();
