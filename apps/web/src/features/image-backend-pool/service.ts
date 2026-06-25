@@ -3150,12 +3150,20 @@ export async function resolveImageBackendPoolConfig(
     if (!resolved.member.leaseTouchedMember) {
       await touchSelectedMember(resolved.member);
     }
-    return toResolvedPoolConfig(
+    const result = toResolvedPoolConfig(
       resolved.group.id,
       resolved.member,
       options,
       resolved.group.metadata
     );
+    // 盖 firefly 意图(与 selectPoolMember:2174 的 fireflyOnly 同口径):让换号重试能
+    // 保持「只走 Adobe」,避免 firefly 请求被重试到非 Adobe 后端。
+    if (result?.config.backend) {
+      result.config.backend.fireflyOnly =
+        options.forceFirefly === true ||
+        isAdobeFireflyModelId(options.requestedModel);
+    }
+    return result;
   } catch (error) {
     await releaseImageBackendInflightLease({
       memberType: resolved.member.type,

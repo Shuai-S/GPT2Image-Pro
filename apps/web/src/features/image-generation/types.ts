@@ -288,6 +288,10 @@ export interface ApiConfig {
     // pool-api 专属：该 api 后端上游实为 Adobe（adobe-sourced）。为真时计费吃成员倍率
     // （见 service.ts），且 firefly-* 请求经反向转换（截家族名 + 推 size）后由本后端服务。
     adobeSourced?: boolean;
+    // 本次请求是否为 firefly 意图（firefly-* 模型或 force_firefly）。解析时按请求口径盖在
+    // config 上，使后端失败换号重试能保持「只走 Adobe（pool-adobe / adobe_sourced api）」，
+    // 避免 firefly/按-Adobe-计费 的请求被重试到非 Adobe 后端（计费/产物错配）。
+    fireflyOnly?: boolean;
     // adobe（pool-adobe）专属：暴露的 Firefly 模型家族、默认宽高比/分辨率、是否支持
     // 视频。供 image-generation 派发 adobe 请求时选择 family 与映射缺省值。
     // gateway：调外部 adobe2api；direct：本仓库直连 Firefly（adobe_account/token + 旁路）。

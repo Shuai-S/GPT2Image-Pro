@@ -1041,6 +1041,16 @@ async function fetchResponsesWithPreviousResponseFallback(
 // 有限次换后端机会兜底新形态错误，同时防止真终态错误在大池子里无限放大。
 const MAX_UNCLASSIFIED_ERROR_SWITCHES = 3;
 
+// firefly-* / force_firefly 请求只允许落 Adobe：pool-adobe 直连,或上游即 Adobe 的
+// adobe_sourced pool-api。换号重试时据此约束目标,防止按 Adobe 计费的请求漂到非 Adobe。
+function isAdobeRoutedBackend(backend: ApiConfig["backend"]): boolean {
+  if (!backend) return false;
+  return (
+    backend.type === "pool-adobe" ||
+    (backend.type === "pool-api" && backend.adobeSourced === true)
+  );
+}
+
 async function retryPoolBackendResult(
   config: ApiConfig,
   run: (candidate: ApiConfig) => Promise<GenerateImageResult>,
@@ -1060,6 +1070,9 @@ async function retryPoolBackendResult(
   }
 
   const requestKind = config.backend.requestKind;
+  // firefly 意图(解析时盖在 config 上,反映请求口径而非后端类型)。换号 re-resolve 时强制
+  // forceFirefly 以保持「只走 Adobe」,并对换号结果做不变量校验兜底。
+  const fireflyRequest = config.backend.fireflyOnly === true;
   const excluded = new Set<string>();
   let accountBackendPreference: ImageBackendAccountBackend | undefined =
     options?.accountBackendPreference ||
@@ -1088,6 +1101,7 @@ async function retryPoolBackendResult(
         accountBackendPreference,
         accountBackendPreferenceMode: options?.accountBackendPreferenceMode,
         allowAnyResponsesBackend: options?.allowAnyResponsesBackend,
+        forceFirefly: fireflyRequest,
       });
     } catch (fallbackError) {
       if (fallbackError instanceof ImageBackendPoolUnavailableError) {
@@ -1190,6 +1204,7 @@ async function retryPoolBackendResult(
         accountBackendPreference,
         accountBackendPreferenceMode: options?.accountBackendPreferenceMode,
         allowAnyResponsesBackend: options?.allowAnyResponsesBackend,
+        forceFirefly: fireflyRequest,
       });
     } catch (error) {
       if (error instanceof ImageBackendPoolUnavailableError) {
@@ -1213,6 +1228,26 @@ async function retryPoolBackendResult(
       next = await resolveResponsesFallback(result.error);
     }
     if (!next?.config?.backend) break;
+    // 不变量兜底:firefly 请求的换号目标必须仍是 Adobe 路由(pool-adobe 或 adobe_sourced
+    // api)。正常已由上面的 forceFirefly 约束保证;此处 fail-closed 拦截任何未来回归,宁可
+    // 不换号失败,也不让按 Adobe 计费的请求落到非 Adobe 后端。
+    if (fireflyRequest && !isAdobeRoutedBackend(next.config.backend)) {
+      await releaseImageBackendInflightLease({
+        memberType: poolBackendMemberType(next.config.backend.type),
+        memberId: next.config.backend.id,
+        leaseId: next.config.backend.inflightLeaseId,
+        leasePersisted: next.config.backend.inflightLeasePersisted,
+      });
+      next.config.backend.inflightLease = false;
+      logError(new Error("firefly 请求换号命中非 Adobe 后端，已阻断"), {
+        source: "image-backend-pool",
+        operation: "firefly-retry-guard",
+        requestKind,
+        nextBackendType: next.config.backend.type,
+        nextBackendId: next.config.backend.id,
+      });
+      break;
+    }
     if (poolBackendMemberKey(next.config) === memberKey) {
       await releaseImageBackendInflightLease({
         memberType: poolBackendMemberType(next.config.backend.type),

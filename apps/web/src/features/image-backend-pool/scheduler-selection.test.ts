@@ -1489,5 +1489,36 @@ describe("image backend pool scheduler selection", () => {
       expect(result?.memberType).toBe("adobe");
       expect(result?.memberId).toBe("adobe-1");
     });
+
+    it("把 fireflyOnly 盖在解析结果 config 上(供换号重试保持只走 Adobe)", async () => {
+      dbMock.state.accounts = [{ ...makeAccount(1), priority: 1 }];
+      dbMock.state.adobes = [makeAdobe(1, { priority: 50 })];
+
+      // firefly-* 模型:fireflyOnly 盖 true,且只选到 adobe。
+      const firefly = await resolveImageBackendPoolConfig({
+        userId: "user-a",
+        requestKind: "image_generation",
+        requestedModel: "firefly-nano-banana-pro",
+      });
+      expect(firefly?.memberType).toBe("adobe");
+      expect(firefly?.config.backend?.fireflyOnly).toBe(true);
+
+      // force_firefly 同样盖 true。
+      const forced = await resolveImageBackendPoolConfig({
+        userId: "user-a",
+        requestKind: "image_generation",
+        forceFirefly: true,
+      });
+      expect(forced?.config.backend?.fireflyOnly).toBe(true);
+
+      // 普通请求不盖(undefined/false)。
+      dbMock.state.accounts = [makeAccount(1)];
+      dbMock.state.adobes = [];
+      const normal = await resolveImageBackendPoolConfig({
+        userId: "user-a",
+        requestKind: "image_generation",
+      });
+      expect(normal?.config.backend?.fireflyOnly).toBeFalsy();
+    });
   });
 });

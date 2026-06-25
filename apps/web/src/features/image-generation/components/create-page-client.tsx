@@ -1029,6 +1029,11 @@ const TEXT_MODEL_OPTIONS = [
   { value: "gpt-image-1-mini", label: "GPT Image 1 Mini" },
   ...FIREFLY_MODEL_OPTIONS,
 ] as const;
+// 对话生图/Agent 不提供 firefly:它走 Codex/Responses,与 Adobe 直连不兼容,服务端也会拒收
+// (见 /api/images/chat)。故 chat 图像模型下拉用去掉 firefly 的子集。
+const CHAT_IMAGE_MODEL_OPTIONS = TEXT_MODEL_OPTIONS.filter(
+  (option) => !option.value.startsWith("firefly-")
+);
 const EDIT_MODEL_OPTIONS = [
   { value: "default", label: "Default" },
   { value: "gpt-image-2", label: "GPT Image 2" },
@@ -3138,7 +3143,7 @@ export function CreatePageClient({
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {TEXT_MODEL_OPTIONS.map((option) => (
+        {CHAT_IMAGE_MODEL_OPTIONS.map((option) => (
           <SelectItem key={option.value} value={option.value}>
             {chatImageModelLabel(option.label)}
           </SelectItem>

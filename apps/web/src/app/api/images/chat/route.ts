@@ -14,6 +14,7 @@ import {
   runBatchImageGeneration,
 } from "@/features/image-generation/batch-runner";
 import { runImageGenerationForUser } from "@/features/image-generation/operations";
+import { isFireflyModel } from "@/features/image-generation/resolution";
 import {
   normalizeImageBackground,
   normalizeOutputCompression,
@@ -884,6 +885,15 @@ export const POST = withApiLogging(async (request: NextRequest) => {
     getText(formData, "imageModel") ||
     getText(formData, "image_model") ||
     undefined;
+  // 对话生图/Agent 走 Codex/Responses 语义,与 Adobe 直连不兼容;firefly 图像模型在此
+  // 不被支持(否则 firefly 意图不进 fireflyOnly,会落到非 Adobe 后端)。UI 已不暴露,此处
+  // 服务端兜底拒收,作为防御边界。
+  if (isFireflyModel(imageModel)) {
+    return errorResponse(
+      "Firefly image models are not supported in chat/agent mode. Use /api/images/generate or /api/images/edit (or the external API) for Firefly.",
+      400
+    );
+  }
   try {
     for (const file of sourceFiles) {
       validateImageFile(file, {
