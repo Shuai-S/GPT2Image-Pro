@@ -61,3 +61,17 @@ export class UpstreamTemporaryError extends AdobeRequestError {
 export function isRetryableStatus(status: number): boolean {
   return status === 429 || status === 451 || status >= 500;
 }
+
+/**
+ * 是否属于"换 token/账号重试"类错误：429/451/5xx 上游临时错误、账号配额耗尽、token
+ * 鉴权失效。这些都是账号/凭据级问题——同一 Adobe 后端（伪账号）下换一个账号可能成功，
+ * 故 Adobe 直连应在后端内轮换所有可用账号后才上抛。非此类（请求本身 4xx、内容拒绝、
+ * 模型不支持等）换号也无用，直接上抛。
+ */
+export function isAdobeRotatableError(error: unknown): boolean {
+  return (
+    error instanceof UpstreamTemporaryError ||
+    error instanceof QuotaExhaustedError ||
+    error instanceof AuthError
+  );
+}

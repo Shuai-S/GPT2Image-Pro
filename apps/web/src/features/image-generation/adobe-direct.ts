@@ -27,6 +27,7 @@ import {
   type FireflyTransport,
   fetchAccountInfo,
   fetchCreditsBalance,
+  isAdobeRotatableError,
   isTokenExpired,
   fireflyVideoSize,
   ProxyFireflyTransport,
@@ -35,7 +36,7 @@ import {
   resolveFireflyImageModel,
   resolveFireflyVideoModel,
 } from "@repo/shared/adobe/firefly-direct";
-import { logError } from "@repo/shared/logger";
+import { logError, logWarn } from "@repo/shared/logger";
 import { getRuntimeSettingString } from "@repo/shared/system-settings";
 import { and, asc, eq, sql } from "drizzle-orm";
 
@@ -265,13 +266,16 @@ async function storeTokenCredits(
 async function acquireToken(
   adobeId: string,
   transport: FireflyTransport,
-  signal?: AbortSignal
-): Promise<{ id: string; value: string } | null> {
+  signal?: AbortSignal,
+  // 换号重试用：跳过本次已试过的 token / 账号（被 429 等限流的账号本次不再重选）。
+  exclude?: { tokenIds?: Set<string>; accountIds?: Set<string> }
+): Promise<{ id: string; value: string; accountId: string | null } | null> {
   const candidates = await db
     .select({
       id: adobeToken.id,
       value: adobeToken.value,
       expiresAt: adobeToken.expiresAt,
+      accountId: adobeToken.accountId,
     })
     .from(adobeToken)
     .where(
@@ -280,6 +284,10 @@ async function acquireToken(
     .orderBy(asc(adobeToken.lastUsedAt), asc(adobeToken.createdAt));
 
   for (const candidate of candidates) {
+    if (exclude?.tokenIds?.has(candidate.id)) continue;
+    if (candidate.accountId && exclude?.accountIds?.has(candidate.accountId)) {
+      continue;
+    }
     const expired = candidate.expiresAt
       ? candidate.expiresAt.getTime() - TOKEN_REFRESH_SKEW_SECONDS * 1000 <=
         Date.now()
@@ -289,10 +297,14 @@ async function acquireToken(
       .update(adobeToken)
       .set({ lastUsedAt: new Date() })
       .where(eq(adobeToken.id, candidate.id));
-    return { id: candidate.id, value: candidate.value };
+    return {
+      id: candidate.id,
+      value: candidate.value,
+      accountId: candidate.accountId,
+    };
   }
 
-  // 没有可用 token：用一个 enabled 账号刷新。
+  // 没有可用 token：用一个 enabled 账号刷新（同样跳过本次已试过的账号）。
   const accounts = await db
     .select({
       id: adobeAccount.id,
@@ -306,6 +318,7 @@ async function acquireToken(
     .orderBy(asc(adobeAccount.lastRefreshAt), asc(adobeAccount.createdAt));
 
   for (const account of accounts) {
+    if (exclude?.accountIds?.has(account.id)) continue;
     const refreshed = await refreshAccountToken(
       adobeId,
       account,
@@ -317,7 +330,7 @@ async function acquireToken(
         .update(adobeToken)
         .set({ lastUsedAt: new Date() })
         .where(eq(adobeToken.id, refreshed.id));
-      return refreshed;
+      return { id: refreshed.id, value: refreshed.value, accountId: account.id };
     }
   }
   return null;
@@ -335,6 +348,68 @@ async function markTokenStatus(
       updatedAt: new Date(),
     })
     .where(eq(adobeToken.id, tokenId));
+}
+
+// 单个 Adobe 后端（伪账号）内换号重试的账号数上限。实际收口由「本后端可用账号数」与
+// 「整单 signal（20 分钟）」共同决定；此常数仅作防御性兜底，避免账号池极大时空转过久。
+const MAX_ADOBE_TOKEN_ROTATION = 24;
+
+/**
+ * 在一个 Adobe 后端（伪账号）内带 token/账号轮换地执行一次直连调用。
+ * - 每次取一个本次未试过的可用账号 token，执行 run（用该 token 完成上传+生成）；
+ * - 遇「可轮换错误」（429/5xx 上游临时、配额耗尽、鉴权失效）就标记当前 token、把该
+ *   token+账号本次排除，换下一个账号重试；
+ * - 直到成功、本后端内已无更多可用账号、或 signal 取消。
+ * WHY：池层换号是「整个 Adobe 后端」粒度——一旦本后端被排除就轮到下一个后端。故必须先在
+ * 本后端内把所有可用账号都试完（重试完毕）才返回错误上抛，才能满足
+ * 「伪账号内部重试完毕 → 再由外层切换其它 Adobe 后端继续轮换」的两级语义。
+ * 非可轮换错误（请求本身 4xx、内容拒绝、模型不支持等）换号无用，立即上抛。
+ */
+async function runWithAdobeTokenRotation<T>(
+  adobeId: string,
+  transport: FireflyTransport,
+  signal: AbortSignal | undefined,
+  run: (token: string) => Promise<T>
+): Promise<{ ok: true; value: T } | { ok: false; error: string }> {
+  const triedTokenIds = new Set<string>();
+  const triedAccountIds = new Set<string>();
+  let lastError =
+    "Adobe 直连无可用账号/token（请在 admin 导入 Adobe cookie 账号）";
+  for (let attempt = 1; attempt <= MAX_ADOBE_TOKEN_ROTATION; attempt++) {
+    if (signal?.aborted) break;
+    const acquired = await acquireToken(adobeId, transport, signal, {
+      tokenIds: triedTokenIds,
+      accountIds: triedAccountIds,
+    });
+    if (!acquired) break; // 本后端内已无更多未试过的可用账号
+    triedTokenIds.add(acquired.id);
+    if (acquired.accountId) triedAccountIds.add(acquired.accountId);
+    try {
+      return { ok: true, value: await run(acquired.value) };
+    } catch (error) {
+      // 配额耗尽/鉴权失效是持久态，落库标记便于后续请求跳过；429 等临时态不改 token 状态，
+      // 仅本次排除（lastUsedAt 已更新，下次自然排到队尾）。
+      if (error instanceof QuotaExhaustedError) {
+        await markTokenStatus(acquired.id, "exhausted").catch(() => {});
+      } else if (error instanceof AuthError) {
+        await markTokenStatus(acquired.id, "invalid").catch(() => {});
+      }
+      lastError = error instanceof Error ? error.message : "Adobe 直连生成失败";
+      if (isAdobeRotatableError(error) && !signal?.aborted) {
+        logWarn("Adobe 直连账号失败，换下一个账号重试", {
+          source: "adobe-direct-rotate",
+          adobeId,
+          attempt,
+          triedAccounts: triedAccountIds.size,
+          error: lastError.slice(0, 160),
+        });
+        continue;
+      }
+      logError(error, { source: "adobe-direct-rotate", adobeId, attempt });
+      return { ok: false, error: lastError };
+    }
+  }
+  return { ok: false, error: lastError };
 }
 
 const ALLOWED_FAMILIES: AdobeImageFamily[] = [
@@ -390,15 +465,9 @@ export async function runAdobeDirectImageRequest(
   const { apiTransport, downloadTransport } =
     await buildAdobeTransports(sessionKey);
 
-  const acquired = await acquireToken(adobeId, apiTransport, params.signal);
-  if (!acquired) {
-    return {
-      error: "Adobe 直连无可用账号/token（请在 admin 导入 Adobe cookie 账号）",
-    };
-  }
-
-  // 模型族 + 宽高比/分辨率：family 优先取请求 model（创作页/接口选的 Firefly 模型），
-  // 非 firefly 模型一律落 gpt-image-2；ratio/res 由 size 映射，缺省走后端默认。
+  // 模型族 + 宽高比/分辨率（与 token 无关，放轮换外只算一次）：family 优先取请求 model
+  // （创作页/接口选的 Firefly 模型），非 firefly 模型一律落 gpt-image-2；ratio/res 由 size
+  // 映射，缺省走后端默认。
   const family = resolveAdobeFamilyFromModel(params.model);
   const fallbackRatio = (config.backend?.adobeDefaultRatio ||
     "1x1") as AdobeRatio;
@@ -423,53 +492,50 @@ export async function runAdobeDirectImageRequest(
     downloadTransport,
   });
 
-  try {
-    // 图生图：先上传输入图，拿 Adobe image id。
-    let sourceImageIds: string[] | undefined;
-    if (params.images && params.images.length > 0) {
-      sourceImageIds = [];
-      for (const image of params.images) {
-        const id = await client.uploadImage(
-          acquired.value,
-          image.data,
-          image.type || "image/png",
-          params.signal
-        );
-        sourceImageIds.push(id);
+  // 伪账号内换号重试：撞 429/配额/鉴权就换本后端下一个账号，轮完才上抛（交外层切后端）。
+  const result = await runWithAdobeTokenRotation(
+    adobeId,
+    apiTransport,
+    params.signal,
+    async (token) => {
+      // 图生图：先上传输入图拿 Adobe image id（与 token 绑定，故放轮换内、每次换号重传）。
+      let sourceImageIds: string[] | undefined;
+      if (params.images && params.images.length > 0) {
+        sourceImageIds = [];
+        for (const image of params.images) {
+          sourceImageIds.push(
+            await client.uploadImage(
+              token,
+              image.data,
+              image.type || "image/png",
+              params.signal
+            )
+          );
+        }
       }
-    }
 
-    const output = await client.generateImage({
-      token: acquired.value,
-      prompt: params.prompt,
-      aspectRatio: modelConf.aspectRatio,
-      outputResolution: modelConf.outputResolution,
-      upstreamModelId: modelConf.upstreamModelId,
-      upstreamModelVersion: modelConf.upstreamModelVersion,
-      // gpt-image 质量改用户操控：用户显式选的 low/medium/high 优先;auto/未选则回退
-      // 后端默认或 high。builder 把 low/medium/high → detailLevel 1/3/5,对 nano-banana
-      // 忽略,故无条件透传安全。
-      qualityLevel:
-        params.quality && params.quality !== "auto"
-          ? params.quality
-          : (config.backend?.adobeGptImageQuality ?? "high"),
-      ...(sourceImageIds ? { sourceImageIds } : {}),
-      signal: params.signal,
-    });
-
-    return { imageBase64: output.bytes.toString("base64") };
-  } catch (error) {
-    // token 级错误：标记 token 状态（账号失效/配额耗尽），便于轮换跳过。
-    if (error instanceof QuotaExhaustedError) {
-      await markTokenStatus(acquired.id, "exhausted").catch(() => {});
-    } else if (error instanceof AuthError) {
-      await markTokenStatus(acquired.id, "invalid").catch(() => {});
+      const output = await client.generateImage({
+        token,
+        prompt: params.prompt,
+        aspectRatio: modelConf.aspectRatio,
+        outputResolution: modelConf.outputResolution,
+        upstreamModelId: modelConf.upstreamModelId,
+        upstreamModelVersion: modelConf.upstreamModelVersion,
+        // gpt-image 质量改用户操控：用户显式选的 low/medium/high 优先;auto/未选则回退
+        // 后端默认或 high。builder 把 low/medium/high → detailLevel 1/3/5,对 nano-banana
+        // 忽略,故无条件透传安全。
+        qualityLevel:
+          params.quality && params.quality !== "auto"
+            ? params.quality
+            : (config.backend?.adobeGptImageQuality ?? "high"),
+        ...(sourceImageIds ? { sourceImageIds } : {}),
+        signal: params.signal,
+      });
+      return output.bytes.toString("base64");
     }
-    logError(error, { source: "adobe-direct-generate", adobeId });
-    return {
-      error: error instanceof Error ? error.message : "Adobe 直连生成失败",
-    };
-  }
+  );
+  if (!result.ok) return { error: result.error };
+  return { imageBase64: result.value };
 }
 
 export type AdobeVideoResult =
@@ -508,63 +574,59 @@ export async function runAdobeDirectVideoRequest(
   const sessionKey = `adobe-${adobeId}`;
   const { apiTransport, downloadTransport } =
     await buildAdobeTransports(sessionKey);
-  const acquired = await acquireToken(adobeId, apiTransport, params.signal);
-  if (!acquired) {
-    return {
-      error: "Adobe 直连无可用账号/token（请在 admin 导入 Adobe cookie 账号）",
-    };
-  }
-
   const client = new AdobeFireflyClient({
     transport: apiTransport,
     downloadTransport,
   });
 
-  try {
-    let sourceImageIds: string[] | undefined;
-    if (params.inputImages && params.inputImages.length > 0) {
-      sourceImageIds = [];
-      for (const image of params.inputImages) {
-        const id = await client.uploadImage(
-          acquired.value,
-          image.data,
-          image.type || "image/png",
-          params.signal
-        );
-        sourceImageIds.push(id);
+  // 伪账号内换号重试：撞 429/配额/鉴权就换本后端下一个账号，轮完才上抛（交外层切后端）。
+  const result = await runWithAdobeTokenRotation(
+    adobeId,
+    apiTransport,
+    params.signal,
+    async (token) => {
+      // 图生视频：先上传输入图拿 id（与 token 绑定，故放轮换内、每次换号重传）。
+      let sourceImageIds: string[] | undefined;
+      if (params.inputImages && params.inputImages.length > 0) {
+        sourceImageIds = [];
+        for (const image of params.inputImages) {
+          sourceImageIds.push(
+            await client.uploadImage(
+              token,
+              image.data,
+              image.type || "image/png",
+              params.signal
+            )
+          );
+        }
       }
-    }
 
-    const output = await client.generateVideo({
-      token: acquired.value,
-      prompt: params.prompt,
-      upstreamModel: conf.upstreamModel,
-      upstreamModelId: conf.upstreamModelId,
-      upstreamModelVersion: conf.upstreamModelVersion,
-      engine: conf.engine,
-      duration: conf.duration,
-      size,
-      generateAudio: conf.generateAudio,
-      ...(conf.referenceMode ? { referenceMode: conf.referenceMode } : {}),
-      ...(params.negativePrompt != null
-        ? { negativePrompt: params.negativePrompt }
-        : {}),
-      ...(sourceImageIds ? { sourceImageIds } : {}),
-      signal: params.signal,
-    });
-
-    return { bytes: output.bytes, contentType: "video/mp4", raw: output.raw };
-  } catch (error) {
-    if (error instanceof QuotaExhaustedError) {
-      await markTokenStatus(acquired.id, "exhausted").catch(() => {});
-    } else if (error instanceof AuthError) {
-      await markTokenStatus(acquired.id, "invalid").catch(() => {});
+      const output = await client.generateVideo({
+        token,
+        prompt: params.prompt,
+        upstreamModel: conf.upstreamModel,
+        upstreamModelId: conf.upstreamModelId,
+        upstreamModelVersion: conf.upstreamModelVersion,
+        engine: conf.engine,
+        duration: conf.duration,
+        size,
+        generateAudio: conf.generateAudio,
+        ...(conf.referenceMode ? { referenceMode: conf.referenceMode } : {}),
+        ...(params.negativePrompt != null
+          ? { negativePrompt: params.negativePrompt }
+          : {}),
+        ...(sourceImageIds ? { sourceImageIds } : {}),
+        signal: params.signal,
+      });
+      return {
+        bytes: output.bytes,
+        contentType: "video/mp4",
+        raw: output.raw,
+      };
     }
-    logError(error, { source: "adobe-direct-video", adobeId });
-    return {
-      error: error instanceof Error ? error.message : "Adobe 直连视频生成失败",
-    };
-  }
+  );
+  if (!result.ok) return { error: result.error };
+  return result.value;
 }
 
 /**
