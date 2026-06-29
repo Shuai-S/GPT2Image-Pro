@@ -399,8 +399,15 @@ describe("Responses native state cache observation", () => {
     expect(bodies[1]).toMatchObject({
       store: true,
       previous_response_id: "resp_first",
-      prompt_cache_key: bodies[0]?.prompt_cache_key,
     });
+    // 修复后:不同 prompt(蓝色海报 vs 改成红色)→ 不同 inputSignature → 不同
+    // prompt_cache_key,杜绝上游中转误把 prompt_cache_key 当结果缓存键时的串图。
+    expect(bodies[1]?.prompt_cache_key).toEqual(
+      expect.stringMatching(/^g2i_[a-f0-9]{32}$/)
+    );
+    expect(bodies[1]?.prompt_cache_key).not.toEqual(
+      bodies[0]?.prompt_cache_key
+    );
   });
 
   it("scopes official prompt cache keys to the selected Responses backend", async () => {
@@ -601,7 +608,9 @@ describe("Responses image references", () => {
       expect(
         normalImage?.type === "input_image" &&
           typeof normalImage.image_url === "string" &&
-          normalImage.image_url.startsWith("https://app.example.test/api/storage/")
+          normalImage.image_url.startsWith(
+            "https://app.example.test/api/storage/"
+          )
       ).toBe(true);
 
       // forceBase64 + 有字节：跳过 URL 选择，强制内联 base64（上游下载我方 URL 失败兜底）。

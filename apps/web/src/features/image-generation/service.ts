@@ -60,7 +60,10 @@ import {
   getInputImageUrl,
   isImageDownloadUpstreamError,
 } from "./input-image-url";
-import { buildOpenAIPromptCacheKey } from "./openai-prompt-cache";
+import {
+  buildOpenAIPromptCacheKey,
+  buildRequestInputSignature,
+} from "./openai-prompt-cache";
 import {
   normalizeImageBackground,
   normalizeOutputCompression,
@@ -1757,11 +1760,12 @@ async function generateChatImageWithChatCompletions(
   const attempt = async (
     forceBase64: boolean
   ): Promise<GenerateImageResult> => {
+    const messages =
+      rawBody?.messages || buildChatCompletionsMessages(params, forceBase64);
     const body = {
       ...(rawBody || {}),
       model,
-      messages:
-        rawBody?.messages || buildChatCompletionsMessages(params, forceBase64),
+      messages,
       prompt_cache_key:
         rawBody?.prompt_cache_key ||
         buildOpenAIPromptCacheKey(config, {
@@ -1769,6 +1773,7 @@ async function generateChatImageWithChatCompletions(
           model,
           imageModel: params.imageModel,
           promptOptimization: params.promptOptimization,
+          inputSignature: buildRequestInputSignature(messages),
         }),
       ...(stream ? { stream: true } : {}),
     };
@@ -4610,6 +4615,7 @@ export async function generateChatImage(
           tool,
           additionalTools: defaultAdditionalTools,
         }),
+        inputSignature: buildRequestInputSignature(input),
       });
       const requestBody: ResponsesStreamRequestBody =
         params.rawResponsesBody && isPlainRecord(params.rawResponsesBody)

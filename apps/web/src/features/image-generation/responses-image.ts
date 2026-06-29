@@ -3,7 +3,10 @@ import {
   normalizeOutputCompression,
   normalizeOutputFormat,
 } from "./output-format";
-import { buildOpenAIPromptCacheKey } from "./openai-prompt-cache";
+import {
+  buildOpenAIPromptCacheKey,
+  buildRequestInputSignature,
+} from "./openai-prompt-cache";
 import {
   AUTO_IMAGE_SIZE,
   DEFAULT_IMAGE_MODEL,
@@ -231,15 +234,16 @@ export function buildResponsesImageGenerationRequest(
   const instructions = getInstructions(params) || RESPONSES_IMAGE_INSTRUCTIONS;
   const responseModel = getResponsesModel(config, params.gptModel);
 
+  const input: ResponsesImageRequest["input"] = [
+    {
+      type: "message",
+      role: "user",
+      content: [{ type: "input_text", text: prompt }],
+    },
+  ];
   return {
     model: responseModel,
-    input: [
-      {
-        type: "message",
-        role: "user",
-        content: [{ type: "input_text", text: prompt }],
-      },
-    ],
+    input,
     tools: [tool],
     tool_choice: { type: "image_generation" },
     stream: true,
@@ -254,6 +258,7 @@ export function buildResponsesImageGenerationRequest(
       imageModel: tool.model,
       promptOptimization: params.promptOptimization,
       toolSignature: toolCacheSignature(tool),
+      inputSignature: buildRequestInputSignature(input),
     }),
   };
 }
@@ -307,18 +312,19 @@ export function buildResponsesImageEditRequest(
   );
   const responseModel = getResponsesModel(config, params.gptModel);
 
+  const input: ResponsesImageRequest["input"] = [
+    {
+      type: "message",
+      role: "user",
+      content: [
+        ...getEditImageContent(params.images, forceBase64),
+        { type: "input_text", text: `User edit request: ${prompt}` },
+      ],
+    },
+  ];
   return {
     model: responseModel,
-    input: [
-      {
-        type: "message",
-        role: "user",
-        content: [
-          ...getEditImageContent(params.images, forceBase64),
-          { type: "input_text", text: `User edit request: ${prompt}` },
-        ],
-      },
-    ],
+    input,
     tools: [tool],
     tool_choice: { type: "image_generation" },
     stream: true,
@@ -333,6 +339,8 @@ export function buildResponsesImageEditRequest(
       imageModel: tool.model,
       promptOptimization: params.promptOptimization,
       toolSignature: toolCacheSignature(tool),
+      // 参考图与 prompt 都在 input 里,签名随之变化 → 不同参考图必得不同 key。
+      inputSignature: buildRequestInputSignature(input),
     }),
   };
 }
