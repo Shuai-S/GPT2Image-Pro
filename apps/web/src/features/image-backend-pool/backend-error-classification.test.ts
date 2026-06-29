@@ -230,6 +230,35 @@ describe("image backend error classification", () => {
     ).toBe(false);
   });
 
+  it("does not switch (no retry) for prompt/image input-limit user errors (incl. code-less)", async () => {
+    const isImageBackendSwitchableError = await loadClassifier();
+    // 用户输入超限:切后端也救不了 → 不可换号、不重试、直接报。含无错误码、仅文案的变体。
+    for (const error of [
+      "Upstream Images API returned HTTP 400: 提示词过长 (9147 字), 最长约 4000 字。 Prompt too long. | prompt_too_long | invalid_request_error",
+      "Upstream Images API returned HTTP 400: Too many reference images (9 > 6 max). | too_many_images | invalid_request_error",
+      "Chat input context must be no more than 30000 characters.",
+      "参考图最多 6 张, 当前 9 张, 请减少。",
+      "Upstream Images API returned HTTP 400: image dimensions exceed the supported limit of 33177600 pixels | image_too_large | invalid_request_error",
+    ]) {
+      expect(isImageBackendSwitchableError(error)).toBe(false);
+    }
+  });
+
+  it("keeps rate-limit / concurrency errors switchable (must retry, not a user error)", async () => {
+    const isImageBackendSwitchableError = await loadClassifier();
+    // 限流是瞬时、可切换的:不能因 'exceeded' / 'too many' 字样误判成用户错而不重试。
+    expect(
+      isImageBackendSwitchableError(
+        "Upstream Images API returned HTTP 429: Upstream rate limit exceeded, please retry later | rate_limit_error"
+      )
+    ).toBe(true);
+    expect(
+      isImageBackendSwitchableError(
+        "Upstream Images API returned HTTP 429: Concurrency limit exceeded for account, please retry later | rate_limit_error"
+      )
+    ).toBe(true);
+  });
+
   it("marks group-disabled backends (403 GROUP_DISABLED) switchable and as error", async () => {
     const svc = await loadService();
     // 2026-06-10 事故文案：中转把整组 API Key 停用，确定性坏配置。

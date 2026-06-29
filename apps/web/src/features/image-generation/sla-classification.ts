@@ -10,7 +10,29 @@ export type GenerationErrorCategory =
 // quota | insufficient_quota"、池账号 401)，归 user_request 会把平台事故从
 // SLA 成功率分母中剔除。用户侧额度问题用更具体的模式(积分不足/api key
 // quota exceeded/invalid or missing api key 等)匹配。
+// 用户输入超限类(提示词过长 / 参考图超数 / 输入图过大)。切后端也救不了 → 算用户错:不重试、
+// 直接报告;SLA 不计平台。这些码来自上游中转、未必稳定,故同时匹配中英文案兜底。由本文件
+// classifyGenerationError 与后端调度侧 isUserRequestBackendError(image-backend-pool/service.ts)
+// 共用同一份,避免两处分类器漂移。注意:勿混入 rate limit / concurrency / too many requests 等
+// 限流(那是瞬时、可切换的,要重试)。
+export const USER_INPUT_LIMIT_PATTERNS = [
+  // 提示词 / 输入上下文过长
+  "prompt_too_long",
+  "提示词过长",
+  "prompt too long",
+  "chat input context",
+  // 参考图数量超上限
+  "too_many_images",
+  "参考图最多",
+  "too many reference images",
+  // 输入图尺寸过大
+  "image_too_large",
+  "image dimensions exceed",
+  "decompression bomb",
+];
+
 const USER_REQUEST_PATTERNS = [
+  ...USER_INPUT_LIMIT_PATTERNS,
   "积分不足",
   "insufficient credits",
   "insufficient_credits",

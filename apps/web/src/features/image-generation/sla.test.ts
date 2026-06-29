@@ -124,6 +124,30 @@ describe("generation SLA error classification", () => {
     }
   });
 
+  it("classifies prompt/image input-limit errors as user errors (incl. code-less variants)", () => {
+    const userErrors = [
+      "Upstream Images API returned HTTP 400: 提示词过长 (9147 字), 最长约 4000 字, 请精简后重试。 Prompt too long (9147 chars, max ~4000). | prompt_too_long | invalid_request_error",
+      "Upstream Images API returned HTTP 400: 参考图最多 6 张, 当前 9 张, 请减少。 Too many reference images (9 > 6 max). | too_many_images | invalid_request_error",
+      // 无错误码、仅文案的变体(不同上游),也必须归用户错。
+      "Chat input context must be no more than 30000 characters.",
+      "Upstream Images API returned HTTP 400: image dimensions exceed the supported limit of 33177600 pixels | image_too_large | invalid_request_error",
+    ];
+    for (const error of userErrors) {
+      expect(classifyGenerationError(error)).toBe("user_request");
+    }
+  });
+
+  it("keeps rate-limit / concurrency errors out of user_request (they are switchable platform-side)", () => {
+    // 限流是瞬时、可切换的,绝不能误判成用户错而不重试。
+    for (const error of [
+      "Upstream Images API returned HTTP 429: Upstream rate limit exceeded, please retry later | rate_limit_error",
+      "Upstream Images API returned HTTP 429: Concurrency limit exceeded for account, please retry later | rate_limit_error",
+      "ChatGPT Web conversation failed: HTTP 429 Too many requests",
+    ]) {
+      expect(classifyGenerationError(error)).not.toBe("user_request");
+    }
+  });
+
   it("attributes Web backend timeouts to moderation (suspected silent refusal)", () => {
     // Web 上游对违规内容常静默挂住直至超时（无审核码/拒绝文本），补"疑似审核"标记后归
     // moderation，避免隐性审核淹没在平台超时里。

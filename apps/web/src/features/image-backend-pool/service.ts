@@ -51,7 +51,10 @@ import {
   type ChatGptWebAccountInfo,
   getChatGptWebAccountInfo,
 } from "@/features/image-generation/chatgpt-web";
-import { isContentSafetyRejection } from "@/features/image-generation/sla-classification";
+import {
+  isContentSafetyRejection,
+  USER_INPUT_LIMIT_PATTERNS,
+} from "@/features/image-generation/sla-classification";
 import type { ApiConfig } from "@/features/image-generation/types";
 
 import {
@@ -1451,6 +1454,10 @@ function isUserRequestBackendError(error?: string | null) {
     normalized.includes("user_error") ||
     normalized.includes("content_policy") ||
     normalized.includes("policy_violation") ||
+    // 用户输入超限(提示词过长 / 参考图超数 / 输入图过大):切后端也救不了 → 不重试、直接报。
+    // 与 SLA 侧共用 USER_INPUT_LIMIT_PATTERNS(sla-classification.ts),码 + 中英文案兜底,避免
+    // 两处分类器漂移;限流类(rate limit/concurrency/too many requests)不在表内,仍可切换。
+    USER_INPUT_LIMIT_PATTERNS.some((pattern) => normalized.includes(pattern)) ||
     normalized.includes(
       "the image data you provided does not represent a valid image"
     ) ||
