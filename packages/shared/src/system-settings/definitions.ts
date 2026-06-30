@@ -170,6 +170,8 @@ export type SettingKey =
   | "CHATGPT_REGISTER_MOEMAIL_API_KEY"
   | "CHATGPT_REGISTER_MOEMAIL_BASE_URL"
   | "CHATGPT_REGISTER_MOEMAIL_DOMAIN"
+  | "CHATGPT_REGISTER_DOMAINS"
+  | "CHATGPT_REGISTER_DOMAIN_ROTATION_ENABLED"
   | "CHATGPT_REGISTER_PROXY"
   | "CHATGPT_REGISTER_PROXY_DISABLED"
   | "CHATGPT_REGISTER_REFRESH_URL"
@@ -1549,6 +1551,23 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     description: "注册时使用的临时邮箱域名，例如 pt.sanyela.shop。",
     category: "models",
     valueType: "string",
+  },
+  {
+    key: "CHATGPT_REGISTER_DOMAINS",
+    label: "注册机可用域名列表",
+    description:
+      "点「查询可用域名」时自动保存的 moemail 可用域名（逗号分隔），供「轮换域名」使用。",
+    category: "models",
+    valueType: "string",
+  },
+  {
+    key: "CHATGPT_REGISTER_DOMAIN_ROTATION_ENABLED",
+    label: "注册机轮换域名",
+    description:
+      "开启后每一轮注册从已保存的域名列表中轮换取一个不同域名，避免单域名被拉黑。需先查询并保存域名列表。",
+    category: "models",
+    valueType: "boolean",
+    defaultValue: false,
   },
   {
     key: "CHATGPT_REGISTER_PROXY",

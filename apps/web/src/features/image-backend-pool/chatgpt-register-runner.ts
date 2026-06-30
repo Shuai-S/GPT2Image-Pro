@@ -35,6 +35,11 @@ export type RegisterBatchResult = {
   skipped: number;
 };
 
+// 域名轮换计数器：进程级，每批次（每次 callRegisterSidecar）自增，开启轮换时按
+// counter % domains.length 取一个域名，使「每一轮用不同的域名」。跨副本各自计数、
+// 重启归零均可接受——目的只是分散域名、避免单域名被拉黑，非严格全局轮转。
+let domainRotationCounter = 0;
+
 /**
  * 调 sidecar 跑一批注册，流式回调日志，返回获得的 access token。
  *
@@ -53,19 +58,44 @@ export async function callRegisterSidecar(
     throw new Error("注册机 sidecar 未配置（CHATGPT_REGISTER_URL）");
   }
 
-  const [apiKey, baseUrl, domain, proxy, refreshUrl, proxyDisabled] =
-    await Promise.all([
-      getRuntimeSettingString("CHATGPT_REGISTER_MOEMAIL_API_KEY"),
-      getRuntimeSettingString("CHATGPT_REGISTER_MOEMAIL_BASE_URL"),
-      getRuntimeSettingString("CHATGPT_REGISTER_MOEMAIL_DOMAIN"),
-      getRuntimeSettingString("CHATGPT_REGISTER_PROXY"),
-      getRuntimeSettingString("CHATGPT_REGISTER_REFRESH_URL"),
-      getRuntimeSettingBoolean("CHATGPT_REGISTER_PROXY_DISABLED", false),
-    ]);
+  const [
+    apiKey,
+    baseUrl,
+    domain,
+    proxy,
+    refreshUrl,
+    proxyDisabled,
+    domainsRaw,
+    domainRotationEnabled,
+  ] = await Promise.all([
+    getRuntimeSettingString("CHATGPT_REGISTER_MOEMAIL_API_KEY"),
+    getRuntimeSettingString("CHATGPT_REGISTER_MOEMAIL_BASE_URL"),
+    getRuntimeSettingString("CHATGPT_REGISTER_MOEMAIL_DOMAIN"),
+    getRuntimeSettingString("CHATGPT_REGISTER_PROXY"),
+    getRuntimeSettingString("CHATGPT_REGISTER_REFRESH_URL"),
+    getRuntimeSettingBoolean("CHATGPT_REGISTER_PROXY_DISABLED", false),
+    getRuntimeSettingString("CHATGPT_REGISTER_DOMAINS"),
+    getRuntimeSettingBoolean(
+      "CHATGPT_REGISTER_DOMAIN_ROTATION_ENABLED",
+      false
+    ),
+  ]);
   // 禁用代理开关：直连本机 IP。代理值保留不动（避免 secret 空值无法清空的问题），
   // 仅由开关决定是否启用；禁用时刷新也跳过（本机 IP 刷新无意义）。
   const effectiveProxy = proxyDisabled ? "" : (proxy ?? "");
   const effectiveRefreshUrl = proxyDisabled ? "" : (refreshUrl ?? "");
+  // 域名轮换：开关开且已保存域名列表非空时，本批次按计数器轮换取一个域名；
+  // 否则用单个配置域名。每批自增计数器，使「每一轮用不同的域名」。
+  const domainList = (domainsRaw ?? "")
+    .split(",")
+    .map((d) => d.trim())
+    .filter(Boolean);
+  let effectiveDomain = domain ?? "";
+  if (domainRotationEnabled && domainList.length > 0) {
+    effectiveDomain =
+      domainList[domainRotationCounter % domainList.length] ?? effectiveDomain;
+    domainRotationCounter += 1;
+  }
   // 代理 IP 刷新节流：取「每 N 秒一次」与「每 M 次尝试一次」的慢者，缺省 60s / 100 次。
   const [refreshMinIntervalSeconds, refreshMinAttempts] = await Promise.all([
     getRuntimeSettingNumber(
@@ -80,8 +110,11 @@ export async function callRegisterSidecar(
   if (!apiKey) {
     throw new Error("未配置 Moemail API Key");
   }
-  if (!domain) {
+  if (!effectiveDomain) {
     throw new Error("未配置邮箱域名");
+  }
+  if (domainRotationEnabled && domainList.length > 0) {
+    onLog?.(`[注册机] 本轮使用域名：${effectiveDomain}`);
   }
 
   const resp = await fetch(`${sidecarUrl.replace(/\/$/, "")}/register`, {
@@ -95,7 +128,7 @@ export async function callRegisterSidecar(
       concurrency: input.concurrency,
       moemailBaseUrl: baseUrl ?? "",
       moemailApiKey: apiKey,
-      moemailDomain: domain,
+      moemailDomain: effectiveDomain,
       proxy: effectiveProxy,
       refreshUrl: effectiveRefreshUrl,
       refreshMinIntervalSeconds,

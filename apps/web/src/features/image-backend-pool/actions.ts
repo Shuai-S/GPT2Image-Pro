@@ -906,6 +906,8 @@ export const getChatgptRegisterConfigAction =
         apiKey,
         baseUrl,
         domain,
+        domains,
+        domainRotationEnabled,
         proxy,
         proxyDisabled,
         refreshUrl,
@@ -920,6 +922,11 @@ export const getChatgptRegisterConfigAction =
         getRuntimeSettingString("CHATGPT_REGISTER_MOEMAIL_API_KEY"),
         getRuntimeSettingString("CHATGPT_REGISTER_MOEMAIL_BASE_URL"),
         getRuntimeSettingString("CHATGPT_REGISTER_MOEMAIL_DOMAIN"),
+        getRuntimeSettingString("CHATGPT_REGISTER_DOMAINS"),
+        getRuntimeSettingBoolean(
+          "CHATGPT_REGISTER_DOMAIN_ROTATION_ENABLED",
+          false
+        ),
         getRuntimeSettingString("CHATGPT_REGISTER_PROXY"),
         getRuntimeSettingBoolean("CHATGPT_REGISTER_PROXY_DISABLED", false),
         getRuntimeSettingString("CHATGPT_REGISTER_REFRESH_URL"),
@@ -947,6 +954,8 @@ export const getChatgptRegisterConfigAction =
         apiKey,
         baseUrl,
         domain,
+        domains,
+        domainRotationEnabled,
         proxy,
         proxyDisabled,
         refreshUrl,
@@ -981,7 +990,7 @@ export const getMoemailDomainsAction =
         apiKey: z.string().trim().min(1).optional(),
       })
     )
-    .action(async ({ parsedInput }) => {
+    .action(async ({ parsedInput, ctx }) => {
       const baseUrl =
         parsedInput.baseUrl?.replace(/\/$/, "") ??
         (await getRuntimeSettingString("CHATGPT_REGISTER_MOEMAIL_BASE_URL")) ??
@@ -1008,6 +1017,13 @@ export const getMoemailDomainsAction =
         .split(",")
         .map((d) => d.trim())
         .filter(Boolean);
+      // 自动保存可用域名列表，供「轮换域名」使用（用户手动查询即落库）。
+      if (domains.length > 0) {
+        await setSystemSettings(
+          [{ key: "CHATGPT_REGISTER_DOMAINS", value: domains.join(",") }],
+          ctx.userId
+        );
+      }
       return { domains };
     });
 
@@ -1019,6 +1035,7 @@ export const saveChatgptRegisterConfigAction =
         apiKey: z.string().trim().optional(),
         baseUrl: z.string().trim().optional(),
         domain: z.string().trim().optional(),
+        domainRotationEnabled: z.boolean().optional(),
         proxy: z.string().trim().optional(),
         proxyDisabled: z.boolean().optional(),
         refreshUrl: z.string().trim().optional(),
@@ -1039,6 +1056,10 @@ export const saveChatgptRegisterConfigAction =
       put("CHATGPT_REGISTER_MOEMAIL_API_KEY", parsedInput.apiKey);
       put("CHATGPT_REGISTER_MOEMAIL_BASE_URL", parsedInput.baseUrl);
       put("CHATGPT_REGISTER_MOEMAIL_DOMAIN", parsedInput.domain);
+      put(
+        "CHATGPT_REGISTER_DOMAIN_ROTATION_ENABLED",
+        parsedInput.domainRotationEnabled
+      );
       put("CHATGPT_REGISTER_PROXY", parsedInput.proxy);
       put("CHATGPT_REGISTER_PROXY_DISABLED", parsedInput.proxyDisabled);
       put("CHATGPT_REGISTER_REFRESH_URL", parsedInput.refreshUrl);

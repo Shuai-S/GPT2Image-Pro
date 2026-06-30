@@ -66,6 +66,8 @@ export function ChatgptRegisterTab({ groups }: Props) {
   const [proxy, setProxy] = useState("");
   const [proxyDisabled, setProxyDisabled] = useState(false);
   const [availableDomains, setAvailableDomains] = useState<string[]>([]);
+  const [domainRotationEnabled, setDomainRotationEnabled] = useState(false);
+  const [savedDomainCount, setSavedDomainCount] = useState(0);
 
   // 代理 IP 刷新配置
   const [refreshUrl, setRefreshUrl] = useState("");
@@ -112,6 +114,10 @@ export function ChatgptRegisterTab({ groups }: Props) {
         if (data.apiKey) setApiKey(data.apiKey);
         if (data.baseUrl) setBaseUrl(data.baseUrl);
         if (data.domain) setDomain(data.domain);
+        setDomainRotationEnabled(Boolean(data.domainRotationEnabled));
+        setSavedDomainCount(
+          (data.domains ?? "").split(",").filter((d) => d.trim()).length
+        );
         if (data.proxy) setProxy(data.proxy);
         setProxyDisabled(Boolean(data.proxyDisabled));
         if (data.refreshUrl) setRefreshUrl(data.refreshUrl);
@@ -159,10 +165,12 @@ export function ChatgptRegisterTab({ groups }: Props) {
       onSuccess: ({ data }) => {
         if (!data) return;
         setAvailableDomains(data.domains);
+        setSavedDomainCount(data.domains.length);
         if (data.domains.length > 0 && !domain) {
           setDomain(data.domains[0]!);
         }
-        toast.success(`获取到 ${data.domains.length} 个可用域名`);
+        // 查询即自动落库（供轮换域名使用），无需再点保存。
+        toast.success(`获取并保存 ${data.domains.length} 个可用域名`);
       },
       onError: ({ error }) =>
         toast.error(`查询域名失败：${error.serverError ?? "未知错误"}`),
@@ -175,6 +183,7 @@ export function ChatgptRegisterTab({ groups }: Props) {
       apiKey,
       baseUrl,
       domain,
+      domainRotationEnabled,
       proxy,
       proxyDisabled,
       refreshUrl,
@@ -332,6 +341,24 @@ export function ChatgptRegisterTab({ groups }: Props) {
                 />
               )}
             </div>
+            <div className="flex items-center justify-between rounded border p-2.5">
+              <span className="text-sm">
+                轮换域名
+                <span className="ml-2 text-xs text-muted-foreground">
+                  已保存 {savedDomainCount} 个域名（点「查询可用域名」自动保存）
+                </span>
+              </span>
+              <Switch
+                checked={domainRotationEnabled}
+                onCheckedChange={setDomainRotationEnabled}
+                disabled={running || savedDomainCount === 0}
+              />
+            </div>
+            {domainRotationEnabled && (
+              <p className="text-xs text-muted-foreground">
+                已开启：每一轮注册从已保存域名中轮换取一个不同域名。
+              </p>
+            )}
           </div>
 
           <div className="space-y-1.5">
