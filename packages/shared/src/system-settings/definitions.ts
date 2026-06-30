@@ -1571,7 +1571,7 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     key: "CHATGPT_REGISTER_REFRESH_URL",
     label: "注册机代理 IP 刷新地址",
     description:
-      "动态代理 IP 刷新端点（如 rola 的 refresh 链接），GET 请求即换 IP。留空则不刷新。",
+      "动态代理 IP 刷新端点（GET 请求即换 IP）。留空则不刷新。",
     category: "models",
     valueType: "string",
     secret: true,

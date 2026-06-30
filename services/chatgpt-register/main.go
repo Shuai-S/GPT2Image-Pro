@@ -54,7 +54,7 @@ type registerRequest struct {
 	MoemailAPIKey  string `json:"moemailApiKey"`
 	MoemailDomain  string `json:"moemailDomain"`
 	Proxy          string `json:"proxy"`
-	// 动态代理 IP 刷新（如 rola 的 refresh 端点）。为空则不刷新。节流取
+	// 动态代理 IP 刷新端点（GET 即换 IP）。为空则不刷新。节流取
 	// RefreshMinIntervalSeconds 与 RefreshMinAttempts 的慢者。
 	RefreshURL                string `json:"refreshUrl"`
 	RefreshMinIntervalSeconds int    `json:"refreshMinIntervalSeconds"`

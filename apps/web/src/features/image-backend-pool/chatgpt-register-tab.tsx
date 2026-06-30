@@ -366,7 +366,7 @@ export function ChatgptRegisterTab({ groups }: Props) {
               type="password"
               value={refreshUrl}
               onChange={(e) => setRefreshUrl(e.target.value)}
-              placeholder="https://refresh.rola.vip/refresh?user=...（留空则不刷新）"
+              placeholder="动态代理 IP 刷新 URL（GET 即换 IP，留空则不刷新）"
               disabled={running || proxyDisabled}
             />
             <p className="text-xs text-muted-foreground">
