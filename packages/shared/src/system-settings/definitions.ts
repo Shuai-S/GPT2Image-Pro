@@ -157,6 +157,7 @@ export type SettingKey =
   | "INTERNAL_JOB_IMAGES_MAINTENANCE_INTERVAL_MINUTES"
   | "INTERNAL_JOB_CREDITS_EXPIRE_INTERVAL_MINUTES"
   | "INTERNAL_JOB_WEB_ACCOUNTS_REFRESH_INTERVAL_MINUTES"
+  | "INTERNAL_JOB_WEB_ACCOUNTS_REPLENISH_INTERVAL_MINUTES"
   | "INTERNAL_JOB_SUB2API_SYNC_INTERVAL_MINUTES"
   | "UPSTASH_REDIS_REST_URL"
   | "UPSTASH_REDIS_REST_TOKEN"
@@ -169,7 +170,15 @@ export type SettingKey =
   | "CHATGPT_REGISTER_MOEMAIL_API_KEY"
   | "CHATGPT_REGISTER_MOEMAIL_BASE_URL"
   | "CHATGPT_REGISTER_MOEMAIL_DOMAIN"
-  | "CHATGPT_REGISTER_PROXY";
+  | "CHATGPT_REGISTER_PROXY"
+  | "CHATGPT_REGISTER_REFRESH_URL"
+  | "CHATGPT_REGISTER_REFRESH_MIN_INTERVAL_SECONDS"
+  | "CHATGPT_REGISTER_REFRESH_MIN_ATTEMPTS"
+  | "CHATGPT_REGISTER_POOL_MAINTAIN_ENABLED"
+  | "CHATGPT_REGISTER_POOL_MAINTAIN_GROUP_ID"
+  | "CHATGPT_REGISTER_POOL_MAINTAIN_TARGET"
+  | "CHATGPT_REGISTER_POOL_MAINTAIN_MAX_PER_RUN"
+  | "CHATGPT_REGISTER_POOL_MAINTAIN_CONCURRENCY";
 
 export interface SettingDefinition {
   key: SettingKey;
@@ -1547,6 +1556,81 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     category: "models",
     valueType: "string",
     secret: true,
+  },
+  {
+    key: "CHATGPT_REGISTER_REFRESH_URL",
+    label: "注册机代理 IP 刷新地址",
+    description:
+      "动态代理 IP 刷新端点（如 rola 的 refresh 链接），GET 请求即换 IP。留空则不刷新。",
+    category: "models",
+    valueType: "string",
+    secret: true,
+  },
+  {
+    key: "CHATGPT_REGISTER_REFRESH_MIN_INTERVAL_SECONDS",
+    label: "注册机 IP 刷新最小间隔（秒）",
+    description:
+      "两次 IP 刷新之间的最小时间间隔。实际刷新取本项与「最小尝试数」的慢者。",
+    category: "models",
+    valueType: "number",
+    defaultValue: 60,
+  },
+  {
+    key: "CHATGPT_REGISTER_REFRESH_MIN_ATTEMPTS",
+    label: "注册机 IP 刷新最小尝试数",
+    description:
+      "两次 IP 刷新之间至少累计的注册尝试数。实际刷新取本项与「最小间隔」的慢者。",
+    category: "models",
+    valueType: "number",
+    defaultValue: 100,
+  },
+  {
+    key: "CHATGPT_REGISTER_POOL_MAINTAIN_ENABLED",
+    label: "号池自动维持开关",
+    description:
+      "开启后，定时任务会在目标分组可用 web 账号数低于目标值时自动注册补号。",
+    category: "models",
+    valueType: "boolean",
+    defaultValue: false,
+  },
+  {
+    key: "CHATGPT_REGISTER_POOL_MAINTAIN_GROUP_ID",
+    label: "号池维持目标分组",
+    description: "自动维持可用数的目标分组 ID；新注册账号也导入该分组。",
+    category: "models",
+    valueType: "string",
+  },
+  {
+    key: "CHATGPT_REGISTER_POOL_MAINTAIN_TARGET",
+    label: "号池维持目标可用数",
+    description: "目标分组要维持的可用 web 账号数量。低于此值时自动补号。",
+    category: "models",
+    valueType: "number",
+    defaultValue: 0,
+  },
+  {
+    key: "CHATGPT_REGISTER_POOL_MAINTAIN_MAX_PER_RUN",
+    label: "号池维持每轮最多注册数",
+    description: "单次维持任务最多发起的注册数量，避免一次性突发过多。",
+    category: "models",
+    valueType: "number",
+    defaultValue: 10,
+  },
+  {
+    key: "CHATGPT_REGISTER_POOL_MAINTAIN_CONCURRENCY",
+    label: "号池维持注册并发",
+    description: "自动补号时传给注册机的并发数。",
+    category: "models",
+    valueType: "number",
+    defaultValue: 5,
+  },
+  {
+    key: "INTERNAL_JOB_WEB_ACCOUNTS_REPLENISH_INTERVAL_MINUTES",
+    label: "号池维持任务间隔（分钟）",
+    description: "号池自动维持（补号）任务的内置执行间隔。",
+    category: "general",
+    valueType: "number",
+    defaultValue: 15,
   },
 ] as const satisfies readonly SettingDefinition[];
 

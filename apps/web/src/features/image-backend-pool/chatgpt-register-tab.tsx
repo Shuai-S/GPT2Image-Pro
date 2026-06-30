@@ -31,12 +31,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@repo/ui/components/select";
+import { Switch } from "@repo/ui/components/switch";
 import { useAction } from "next-safe-action/hooks";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
   getChatgptRegisterConfigAction,
+  getGroupAvailableCountAction,
   getMoemailDomainsAction,
   saveChatgptRegisterConfigAction,
 } from "./actions";
@@ -63,6 +65,20 @@ export function ChatgptRegisterTab({ groups }: Props) {
   const [domain, setDomain] = useState("");
   const [proxy, setProxy] = useState("");
   const [availableDomains, setAvailableDomains] = useState<string[]>([]);
+
+  // 代理 IP 刷新配置
+  const [refreshUrl, setRefreshUrl] = useState("");
+  const [refreshMinIntervalSeconds, setRefreshMinIntervalSeconds] =
+    useState(60);
+  const [refreshMinAttempts, setRefreshMinAttempts] = useState(100);
+
+  // 号池维持配置
+  const [maintainEnabled, setMaintainEnabled] = useState(false);
+  const [maintainGroupId, setMaintainGroupId] = useState("");
+  const [maintainTarget, setMaintainTarget] = useState(0);
+  const [maintainMaxPerRun, setMaintainMaxPerRun] = useState(10);
+  const [maintainConcurrency, setMaintainConcurrency] = useState(5);
+  const [availableCount, setAvailableCount] = useState<number | null>(null);
 
   // 注册参数
   const [count, setCount] = useState(10);
@@ -96,6 +112,17 @@ export function ChatgptRegisterTab({ groups }: Props) {
         if (data.baseUrl) setBaseUrl(data.baseUrl);
         if (data.domain) setDomain(data.domain);
         if (data.proxy) setProxy(data.proxy);
+        if (data.refreshUrl) setRefreshUrl(data.refreshUrl);
+        if (data.refreshMinIntervalSeconds)
+          setRefreshMinIntervalSeconds(data.refreshMinIntervalSeconds);
+        if (data.refreshMinAttempts)
+          setRefreshMinAttempts(data.refreshMinAttempts);
+        setMaintainEnabled(Boolean(data.maintainEnabled));
+        if (data.maintainGroupId) setMaintainGroupId(data.maintainGroupId);
+        setMaintainTarget(data.maintainTarget ?? 0);
+        if (data.maintainMaxPerRun) setMaintainMaxPerRun(data.maintainMaxPerRun);
+        if (data.maintainConcurrency)
+          setMaintainConcurrency(data.maintainConcurrency);
       },
       onError: () => toast.error("加载注册机配置失败"),
     }
@@ -104,6 +131,15 @@ export function ChatgptRegisterTab({ groups }: Props) {
   useEffect(() => {
     loadConfig();
   }, []);
+
+  // 查询维持目标分组当前可用数
+  const { execute: fetchAvailable, isExecuting: isFetchingAvailable } =
+    useAction(getGroupAvailableCountAction, {
+      onSuccess: ({ data }) => {
+        if (data) setAvailableCount(data.available);
+      },
+      onError: () => toast.error("查询可用数失败"),
+    });
 
   // 保存配置
   const { execute: saveConfig, isExecuting: isSavingConfig } = useAction(
@@ -130,6 +166,24 @@ export function ChatgptRegisterTab({ groups }: Props) {
         toast.error(`查询域名失败：${error.serverError ?? "未知错误"}`),
     }
   );
+
+  // 收集完整配置（两处「保存配置」按钮共用，一次保存全部字段）
+  function collectConfig() {
+    return {
+      apiKey,
+      baseUrl,
+      domain,
+      proxy,
+      refreshUrl,
+      refreshMinIntervalSeconds,
+      refreshMinAttempts,
+      maintainEnabled,
+      maintainGroupId,
+      maintainTarget,
+      maintainMaxPerRun,
+      maintainConcurrency,
+    };
+  }
 
   // 启动注册任务（SSE）
   async function startRegister() {
@@ -288,6 +342,47 @@ export function ChatgptRegisterTab({ groups }: Props) {
             />
           </div>
 
+          <div className="space-y-1.5">
+            <Label>代理 IP 刷新地址</Label>
+            <Input
+              type="password"
+              value={refreshUrl}
+              onChange={(e) => setRefreshUrl(e.target.value)}
+              placeholder="https://refresh.rola.vip/refresh?user=...（留空则不刷新）"
+              disabled={running}
+            />
+            <p className="text-xs text-muted-foreground">
+              GET 即换 IP。实际刷新取「最小间隔」与「最小尝试数」的慢者。
+            </p>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label>IP 刷新最小间隔（秒）</Label>
+              <Input
+                type="number"
+                min={1}
+                value={refreshMinIntervalSeconds}
+                onChange={(e) =>
+                  setRefreshMinIntervalSeconds(Math.max(1, Number(e.target.value)))
+                }
+                disabled={running}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>IP 刷新最小尝试数</Label>
+              <Input
+                type="number"
+                min={1}
+                value={refreshMinAttempts}
+                onChange={(e) =>
+                  setRefreshMinAttempts(Math.max(1, Number(e.target.value)))
+                }
+                disabled={running}
+              />
+            </div>
+          </div>
+
           <div className="flex justify-end gap-2">
             <Button
               type="button"
@@ -299,9 +394,117 @@ export function ChatgptRegisterTab({ groups }: Props) {
             </Button>
             <Button
               type="button"
-              onClick={() =>
-                saveConfig({ apiKey, baseUrl, domain, proxy })
-              }
+              onClick={() => saveConfig(collectConfig())}
+              disabled={isSavingConfig || running}
+            >
+              {isSavingConfig ? "保存中..." : "保存配置"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 号池维持 */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between text-base">
+            <span>号池自动维持</span>
+            <span className="flex items-center gap-2 text-sm font-normal">
+              <span className="text-muted-foreground">启用</span>
+              <Switch
+                checked={maintainEnabled}
+                onCheckedChange={setMaintainEnabled}
+                disabled={running}
+              />
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            开启后，定时任务会在目标分组可用 web 账号数低于目标值时自动注册补号
+            （单轮最多注册「每轮上限」个，受 OpenAI 机房 IP 检测影响，靠多轮逼近）。
+          </p>
+
+          <div className="space-y-1.5">
+            <Label>目标分组</Label>
+            <div className="flex gap-2">
+              <Select
+                value={maintainGroupId}
+                onValueChange={setMaintainGroupId}
+                disabled={running}
+              >
+                <SelectTrigger className="flex-1">
+                  <SelectValue placeholder="选择要维持的分组" />
+                </SelectTrigger>
+                <SelectContent>
+                  {groups.map((g) => (
+                    <SelectItem key={g.id} value={g.id}>
+                      {g.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (maintainGroupId) fetchAvailable({ groupId: maintainGroupId });
+                }}
+                disabled={!maintainGroupId || isFetchingAvailable || running}
+              >
+                {isFetchingAvailable ? "查询中..." : "查可用数"}
+              </Button>
+            </div>
+            {availableCount !== null && (
+              <p className="text-xs text-muted-foreground">
+                当前可用：{availableCount} / 目标 {maintainTarget}
+              </p>
+            )}
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="space-y-1.5">
+              <Label>目标可用数</Label>
+              <Input
+                type="number"
+                min={0}
+                value={maintainTarget}
+                onChange={(e) =>
+                  setMaintainTarget(Math.max(0, Number(e.target.value)))
+                }
+                disabled={running}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>每轮上限</Label>
+              <Input
+                type="number"
+                min={1}
+                value={maintainMaxPerRun}
+                onChange={(e) =>
+                  setMaintainMaxPerRun(Math.max(1, Number(e.target.value)))
+                }
+                disabled={running}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>注册并发</Label>
+              <Input
+                type="number"
+                min={1}
+                value={maintainConcurrency}
+                onChange={(e) =>
+                  setMaintainConcurrency(Math.max(1, Number(e.target.value)))
+                }
+                disabled={running}
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              onClick={() => saveConfig(collectConfig())}
               disabled={isSavingConfig || running}
             >
               {isSavingConfig ? "保存中..." : "保存配置"}

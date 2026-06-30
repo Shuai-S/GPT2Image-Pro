@@ -19,11 +19,13 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,6 +39,11 @@ const (
 	defaultMaxCount    = 500
 	defaultMaxConc     = 50
 	defaultTimeoutSecs = 1800 // 注册批次整体超时（秒），防止 wine 卡死占用单飞槽
+
+	// IP 刷新默认节流：取「每分钟一次」与「每 100 次尝试一次」的慢者——即同时满足
+	// 「距上次刷新 >= 60s」且「自上次刷新已累计 >= 100 次尝试」才刷新。
+	defaultRefreshMinIntervalSeconds = 60
+	defaultRefreshMinAttempts        = 100
 )
 
 // registerRequest 为 web 下发的注册参数。
@@ -47,6 +54,11 @@ type registerRequest struct {
 	MoemailAPIKey  string `json:"moemailApiKey"`
 	MoemailDomain  string `json:"moemailDomain"`
 	Proxy          string `json:"proxy"`
+	// 动态代理 IP 刷新（如 rola 的 refresh 端点）。为空则不刷新。节流取
+	// RefreshMinIntervalSeconds 与 RefreshMinAttempts 的慢者。
+	RefreshURL                string `json:"refreshUrl"`
+	RefreshMinIntervalSeconds int    `json:"refreshMinIntervalSeconds"`
+	RefreshMinAttempts        int    `json:"refreshMinAttempts"`
 }
 
 type server struct {
@@ -60,6 +72,59 @@ type server struct {
 	// running 单飞标志：同一时刻仅允许一个注册任务。
 	mu      sync.Mutex
 	running bool
+
+	// IP 刷新节流状态。因单飞，状态跨请求复用（lastRefreshAt/attempts 累计），
+	// 使「每分钟/每100次尝试」的节流在多次小批次调用间也成立。
+	refreshMu       sync.Mutex
+	lastRefreshAt   time.Time
+	attemptsCounter int
+}
+
+// attemptRe 匹配 exe 每次注册尝试的结果行（形如 `[1/10] 成功` 或 `[3/10] 失败: ...`），
+// 用于累计尝试数驱动 IP 刷新节流。
+var attemptRe = regexp.MustCompile(`\[\d+/\d+\].*(成功|失败)`)
+
+// refreshIP 调一次动态代理刷新端点（GET），成功与否都仅记日志、不阻断注册。
+func refreshIP(ctx context.Context, refreshURL string) (string, bool) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, refreshURL, nil)
+	if err != nil {
+		return "构造刷新请求失败: " + err.Error(), false
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "刷新 IP 失败: " + err.Error(), false
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	return fmt.Sprintf("刷新 IP: HTTP %d %s", resp.StatusCode, strings.TrimSpace(string(body))), true
+}
+
+// maybeRefresh 在每次注册尝试完成时调用：累计尝试数，当「距上次刷新 >= minInterval」
+// 且「自上次刷新已累计 >= minAttempts 次尝试」两条件同时满足（取慢者）时，异步刷新一次
+// 动态代理 IP。节流状态跨请求复用，使小批次多次调用也遵守同一节流。
+func (s *server) maybeRefresh(ctx context.Context, req registerRequest, emit func(map[string]any)) {
+	if req.RefreshURL == "" {
+		return
+	}
+	minInterval := time.Duration(req.RefreshMinIntervalSeconds) * time.Second
+	s.refreshMu.Lock()
+	s.attemptsCounter++
+	due := time.Since(s.lastRefreshAt) >= minInterval &&
+		s.attemptsCounter >= req.RefreshMinAttempts
+	if due {
+		s.lastRefreshAt = time.Now()
+		s.attemptsCounter = 0
+	}
+	s.refreshMu.Unlock()
+	if !due {
+		return
+	}
+	// 异步刷新，避免阻塞 stdout 读取（刷新 HTTP 可能耗时近秒级）。
+	go func() {
+		msg, _ := refreshIP(ctx, req.RefreshURL)
+		emit(map[string]any{"type": "log", "line": "[IP] " + msg})
+	}()
 }
 
 func main() {
@@ -122,6 +187,13 @@ func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Count = clamp(req.Count, 1, s.maxCount)
 	req.Concurrency = clamp(req.Concurrency, 1, s.maxConc)
+	// IP 刷新节流参数缺省回退默认（慢者：60s / 100 次尝试）。
+	if req.RefreshMinIntervalSeconds <= 0 {
+		req.RefreshMinIntervalSeconds = defaultRefreshMinIntervalSeconds
+	}
+	if req.RefreshMinAttempts <= 0 {
+		req.RefreshMinAttempts = defaultRefreshMinAttempts
+	}
 
 	// 单飞占用：已有任务在跑则返回 409。
 	s.mu.Lock()
@@ -147,11 +219,16 @@ func (s *server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 	flusher, _ := w.(http.Flusher)
+	// emit 受 mutex 保护：stdout/stderr 读取与 IP 刷新 goroutine 会并发调用，
+	// 而 http.ResponseWriter 并发写不安全。
+	var emitMu sync.Mutex
 	emit := func(event map[string]any) {
 		payload, err := json.Marshal(event)
 		if err != nil {
 			return
 		}
+		emitMu.Lock()
+		defer emitMu.Unlock()
 		_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
 		if flusher != nil {
 			flusher.Flush()
@@ -237,6 +314,10 @@ func (s *server) runRegister(r *http.Request, req registerRequest, emit func(map
 				continue
 			}
 			emit(map[string]any{"type": "log", "line": line})
+			// 每完成一次注册尝试，按节流规则考虑刷新 IP（仅 stdout 的结果行）。
+			if !isStderr && attemptRe.MatchString(line) {
+				s.maybeRefresh(ctx, req, emit)
+			}
 		}
 	}
 	go streamLines(bufio.NewScanner(stdout), false)

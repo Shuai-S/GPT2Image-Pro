@@ -12,7 +12,9 @@ import {
 } from "@repo/shared/safe-action";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import {
+  getRuntimeSettingBoolean,
   getRuntimeSettingJson,
+  getRuntimeSettingNumber,
   getRuntimeSettingString,
   setSystemSettings,
 } from "@repo/shared/system-settings";
@@ -29,6 +31,7 @@ import {
 import {
   bulkUpdateImageBackendAccounts,
   deleteImageBackendGroup,
+  countAvailableWebAccountsInGroup,
   deleteImageBackendMembers,
   deleteSub2ApiAutoSyncTask,
   fromSafetyOverride,
@@ -895,19 +898,76 @@ export const getImageBackendGroupOptionsAction = protectedAction
     return { groups };
   });
 
-// 读取 ChatGPT 注册机配置
+// 读取 ChatGPT 注册机配置（moemail + 代理 + IP 刷新 + 号池维持）
 export const getChatgptRegisterConfigAction =
   withImageBackendPoolAdminAction("getChatgptRegisterConfig").action(
     async () => {
-      const [apiKey, baseUrl, domain, proxy] = await Promise.all([
+      const [
+        apiKey,
+        baseUrl,
+        domain,
+        proxy,
+        refreshUrl,
+        refreshMinIntervalSeconds,
+        refreshMinAttempts,
+        maintainEnabled,
+        maintainGroupId,
+        maintainTarget,
+        maintainMaxPerRun,
+        maintainConcurrency,
+      ] = await Promise.all([
         getRuntimeSettingString("CHATGPT_REGISTER_MOEMAIL_API_KEY"),
         getRuntimeSettingString("CHATGPT_REGISTER_MOEMAIL_BASE_URL"),
         getRuntimeSettingString("CHATGPT_REGISTER_MOEMAIL_DOMAIN"),
         getRuntimeSettingString("CHATGPT_REGISTER_PROXY"),
+        getRuntimeSettingString("CHATGPT_REGISTER_REFRESH_URL"),
+        getRuntimeSettingNumber(
+          "CHATGPT_REGISTER_REFRESH_MIN_INTERVAL_SECONDS",
+          60
+        ),
+        getRuntimeSettingNumber("CHATGPT_REGISTER_REFRESH_MIN_ATTEMPTS", 100),
+        getRuntimeSettingBoolean(
+          "CHATGPT_REGISTER_POOL_MAINTAIN_ENABLED",
+          false
+        ),
+        getRuntimeSettingString("CHATGPT_REGISTER_POOL_MAINTAIN_GROUP_ID"),
+        getRuntimeSettingNumber("CHATGPT_REGISTER_POOL_MAINTAIN_TARGET", 0),
+        getRuntimeSettingNumber(
+          "CHATGPT_REGISTER_POOL_MAINTAIN_MAX_PER_RUN",
+          10
+        ),
+        getRuntimeSettingNumber(
+          "CHATGPT_REGISTER_POOL_MAINTAIN_CONCURRENCY",
+          5
+        ),
       ]);
-      return { apiKey, baseUrl, domain, proxy };
+      return {
+        apiKey,
+        baseUrl,
+        domain,
+        proxy,
+        refreshUrl,
+        refreshMinIntervalSeconds,
+        refreshMinAttempts,
+        maintainEnabled,
+        maintainGroupId,
+        maintainTarget,
+        maintainMaxPerRun,
+        maintainConcurrency,
+      };
     }
   );
+
+// 查询某分组当前可用 web 账号数（号池维持面板展示用）
+export const getGroupAvailableCountAction =
+  withImageBackendPoolAdminAction("getGroupAvailableCount")
+    .schema(z.object({ groupId: z.string().trim().min(1) }))
+    .action(async ({ parsedInput }) => {
+      const available = await countAvailableWebAccountsInGroup(
+        parsedInput.groupId
+      );
+      return { available };
+    });
 
 // 从 Moemail 服务端查询可用邮箱域名列表
 export const getMoemailDomainsAction =
@@ -929,21 +989,26 @@ export const getMoemailDomainsAction =
       if (!apiKey) {
         throw new Error("未配置 Moemail API Key");
       }
+      // Moemail 用 X-API-Key 头鉴权（非 Authorization: Bearer），/api/config 返回
+      // emailDomains 为逗号分隔字符串（非 domains 数组）。
       const resp = await fetch(`${baseUrl}/api/config`, {
-        headers: { Authorization: `Bearer ${apiKey}` },
+        headers: { "X-API-Key": apiKey },
         signal: AbortSignal.timeout(10_000),
       });
       if (!resp.ok) {
         throw new Error(`Moemail 返回 ${resp.status}`);
       }
       const data = (await resp.json()) as {
-        domains?: string[];
-        allowCustomDomain?: boolean;
+        emailDomains?: string;
       };
-      return { domains: data.domains ?? [] };
+      const domains = (data.emailDomains ?? "")
+        .split(",")
+        .map((d) => d.trim())
+        .filter(Boolean);
+      return { domains };
     });
 
-// 保存 ChatGPT 注册机配置
+// 保存 ChatGPT 注册机配置（moemail + 代理 + IP 刷新 + 号池维持）
 export const saveChatgptRegisterConfigAction =
   withImageBackendPoolAdminAction("saveChatgptRegisterConfig")
     .schema(
@@ -952,18 +1017,48 @@ export const saveChatgptRegisterConfigAction =
         baseUrl: z.string().trim().optional(),
         domain: z.string().trim().optional(),
         proxy: z.string().trim().optional(),
+        refreshUrl: z.string().trim().optional(),
+        refreshMinIntervalSeconds: z.coerce.number().int().min(1).optional(),
+        refreshMinAttempts: z.coerce.number().int().min(1).optional(),
+        maintainEnabled: z.boolean().optional(),
+        maintainGroupId: z.string().trim().optional(),
+        maintainTarget: z.coerce.number().int().min(0).optional(),
+        maintainMaxPerRun: z.coerce.number().int().min(1).optional(),
+        maintainConcurrency: z.coerce.number().int().min(1).optional(),
       })
     )
     .action(async ({ parsedInput, ctx }) => {
       const entries: Array<{ key: string; value: unknown }> = [];
-      if (parsedInput.apiKey !== undefined)
-        entries.push({ key: "CHATGPT_REGISTER_MOEMAIL_API_KEY", value: parsedInput.apiKey });
-      if (parsedInput.baseUrl !== undefined)
-        entries.push({ key: "CHATGPT_REGISTER_MOEMAIL_BASE_URL", value: parsedInput.baseUrl });
-      if (parsedInput.domain !== undefined)
-        entries.push({ key: "CHATGPT_REGISTER_MOEMAIL_DOMAIN", value: parsedInput.domain });
-      if (parsedInput.proxy !== undefined)
-        entries.push({ key: "CHATGPT_REGISTER_PROXY", value: parsedInput.proxy });
+      const put = (key: string, value: unknown) => {
+        if (value !== undefined) entries.push({ key, value });
+      };
+      put("CHATGPT_REGISTER_MOEMAIL_API_KEY", parsedInput.apiKey);
+      put("CHATGPT_REGISTER_MOEMAIL_BASE_URL", parsedInput.baseUrl);
+      put("CHATGPT_REGISTER_MOEMAIL_DOMAIN", parsedInput.domain);
+      put("CHATGPT_REGISTER_PROXY", parsedInput.proxy);
+      put("CHATGPT_REGISTER_REFRESH_URL", parsedInput.refreshUrl);
+      put(
+        "CHATGPT_REGISTER_REFRESH_MIN_INTERVAL_SECONDS",
+        parsedInput.refreshMinIntervalSeconds
+      );
+      put(
+        "CHATGPT_REGISTER_REFRESH_MIN_ATTEMPTS",
+        parsedInput.refreshMinAttempts
+      );
+      put("CHATGPT_REGISTER_POOL_MAINTAIN_ENABLED", parsedInput.maintainEnabled);
+      put(
+        "CHATGPT_REGISTER_POOL_MAINTAIN_GROUP_ID",
+        parsedInput.maintainGroupId
+      );
+      put("CHATGPT_REGISTER_POOL_MAINTAIN_TARGET", parsedInput.maintainTarget);
+      put(
+        "CHATGPT_REGISTER_POOL_MAINTAIN_MAX_PER_RUN",
+        parsedInput.maintainMaxPerRun
+      );
+      put(
+        "CHATGPT_REGISTER_POOL_MAINTAIN_CONCURRENCY",
+        parsedInput.maintainConcurrency
+      );
       if (entries.length > 0) {
         await setSystemSettings(entries, ctx.userId);
       }

@@ -11,6 +11,7 @@ import {
   runImageMaintenanceJob,
   runSub2ApiSyncJob,
   runWebAccountsRefreshJob,
+  runWebAccountsReplenishJob,
 } from "./scheduled-jobs";
 
 type InternalJob = {
@@ -20,6 +21,7 @@ type InternalJob = {
     | "INTERNAL_JOB_IMAGES_MAINTENANCE_INTERVAL_MINUTES"
     | "INTERNAL_JOB_CREDITS_EXPIRE_INTERVAL_MINUTES"
     | "INTERNAL_JOB_WEB_ACCOUNTS_REFRESH_INTERVAL_MINUTES"
+    | "INTERNAL_JOB_WEB_ACCOUNTS_REPLENISH_INTERVAL_MINUTES"
     | "INTERNAL_JOB_SUB2API_SYNC_INTERVAL_MINUTES";
   defaultIntervalMinutes: number;
   initialDelayMs: number;
@@ -70,6 +72,14 @@ const jobs: InternalJob[] = [
     defaultIntervalMinutes: 10,
     initialDelayMs: 120_000,
     run: () => runSub2ApiSyncJob(),
+  },
+  {
+    name: "web-accounts-replenish",
+    lockKey: 5,
+    intervalSettingKey: "INTERNAL_JOB_WEB_ACCOUNTS_REPLENISH_INTERVAL_MINUTES",
+    defaultIntervalMinutes: 15,
+    initialDelayMs: 150_000,
+    run: runWebAccountsReplenishJob,
   },
 ];
 
