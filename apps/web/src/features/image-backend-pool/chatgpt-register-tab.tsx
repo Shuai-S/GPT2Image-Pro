@@ -350,8 +350,12 @@ export function ChatgptRegisterTab({ groups }: Props) {
               </span>
               <Switch
                 checked={domainRotationEnabled}
-                onCheckedChange={setDomainRotationEnabled}
-                disabled={running || savedDomainCount === 0}
+                onCheckedChange={(v) => {
+                  // 开关点击即时保存（仅该字段），避免忘点「保存配置」导致"没效果"。
+                  setDomainRotationEnabled(v);
+                  saveConfig({ domainRotationEnabled: v });
+                }}
+                disabled={running || savedDomainCount === 0 || isSavingConfig}
               />
             </div>
             {domainRotationEnabled && (
@@ -368,8 +372,11 @@ export function ChatgptRegisterTab({ groups }: Props) {
                 <span className="text-muted-foreground">禁用代理（直连本机 IP）</span>
                 <Switch
                   checked={proxyDisabled}
-                  onCheckedChange={setProxyDisabled}
-                  disabled={running}
+                  onCheckedChange={(v) => {
+                    setProxyDisabled(v);
+                    saveConfig({ proxyDisabled: v });
+                  }}
+                  disabled={running || isSavingConfig}
                 />
               </span>
             </div>
@@ -457,8 +464,11 @@ export function ChatgptRegisterTab({ groups }: Props) {
               <span className="text-muted-foreground">启用</span>
               <Switch
                 checked={maintainEnabled}
-                onCheckedChange={setMaintainEnabled}
-                disabled={running}
+                onCheckedChange={(v) => {
+                  setMaintainEnabled(v);
+                  saveConfig({ maintainEnabled: v });
+                }}
+                disabled={running || isSavingConfig}
               />
             </span>
           </CardTitle>
