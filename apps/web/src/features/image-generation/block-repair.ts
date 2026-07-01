@@ -22,6 +22,8 @@ import sharp from "sharp";
 export const BLOCK_OVERLAP_FRACTION = 0.2;
 // 网格封顶：每边最多 2 块（共 2×2=4 块）。
 export const BLOCK_GRID_MAX = 2;
+// 整图上下文参考的较长边上限（缩小整图给模型做全局参考，控 base64 体积/延迟）。
+const CONTEXT_MAX_EDGE = 1024;
 
 // web 后端各比例的「1K 块」尺寸（近似 web 指定比例时的固定返回分辨率，见 resolution.ts 预设）。
 const TILE_RATIOS: ReadonlyArray<{ w: number; h: number }> = [
@@ -166,8 +168,9 @@ export function featherWeight1D(
  *
  * @param image 输入图片字节（通常是上游原图或已超分的图）
  * @param targetLongEdge 期望最终较长边
- * @param repairTile 注入的重绘回调：输入一块 PNG 字节 + 目标块宽高 + 块序号，返回重绘后的图片
- *   字节（实际由 operations.ts 用 gpt-image-2 img2img 实现，并按块序号做幂等逐块计费）
+ * @param repairTile 注入的重绘回调：输入一块 PNG 字节 + 目标块宽高 + 块序号 + 整图上下文
+ *   （缩小的整张图,作第二参考帮助各块重绘一致、改善拼接衔接），返回重绘后的图片字节（实际由
+ *   operations.ts 用 gpt-image-2 img2img 实现，并按块序号做幂等逐块计费）
  * @param superResolve 注入的 4 倍超分（Real-ESRGAN general-x4v3）。内部 upscaleTo 据放大倍率
  *   决定用它（大倍率、更干净）还是 Lanczos（小倍率、快），用于「超分到 R」与「R 超分到目标」。
  * @returns { buffer, tilesRepaired }：拼接+补足后的最终图，与实际重绘的块数（供计费加和）
@@ -182,7 +185,8 @@ export async function blockRepairImage(
     tile: Buffer,
     w: number,
     h: number,
-    index: number
+    index: number,
+    context: Buffer
   ) => Promise<Buffer>,
   superResolve: (img: Buffer) => Promise<Buffer>
 ): Promise<{ buffer: Buffer; tilesRepaired: number }> {
@@ -202,7 +206,16 @@ export async function blockRepairImage(
     superResolve
   );
 
-  // 2. 逐块重绘：切出块 → repairTile → 缩回精确块尺寸。失败回退原块。
+  // 缩小的整图上下文(第二参考):帮助每块重绘时对齐周围内容/风格,改善拼接衔接。
+  const contextImage = await sharp(work)
+    .resize(CONTEXT_MAX_EDGE, CONTEXT_MAX_EDGE, {
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .png()
+    .toBuffer();
+
+  // 2. 逐块重绘：切出块 → repairTile(带整图上下文) → 缩回精确块尺寸。失败回退原块。
   const workRaw = await sharp(work)
     .removeAlpha()
     .raw()
@@ -216,7 +229,7 @@ export async function blockRepairImage(
       .png()
       .toBuffer();
     try {
-      const out = await repairTile(tilePng, t.w, t.h, i);
+      const out = await repairTile(tilePng, t.w, t.h, i, contextImage);
       const norm = await sharp(out)
         .resize(t.w, t.h, { fit: "fill" })
         .removeAlpha()

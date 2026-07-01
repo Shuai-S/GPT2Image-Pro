@@ -842,9 +842,12 @@ function resolveOutputGenerationId(
     : `${parentGenerationId}-${index + 1}`;
 }
 
-// 分块修复默认提示词：只修复、不改内容/构图（管理端 IMAGE_BLOCK_REPAIR_PROMPT 可覆盖）。
+// 分块修复默认提示词：只修复、不改内容/构图（请求级 repair_prompt 可覆盖）。
 const DEFAULT_BLOCK_REPAIR_PROMPT =
   "Restore and sharpen this image tile: fix blurry or garbled text and fine details, keep the exact same composition, layout, colors and content unchanged. Do not add, remove or reinterpret anything.";
+// 两图输入的系统前缀：说明第一张是待重绘的块、第二张是整图上下文，供模型对齐周围内容以消缝。
+const BLOCK_REPAIR_CONTEXT_INSTRUCTION =
+  "You are given two images. The FIRST image is a tile (a crop) of the SECOND image, which is the full picture provided only as context. Redraw ONLY the FIRST image at the same crop and exact size, keeping it seamlessly consistent with the surrounding content shown in the SECOND image so that adjacent tiles stitch together without visible seams.";
 
 async function storeGeneratedImageOutput(params: {
   output: {
@@ -906,10 +909,14 @@ async function storeGeneratedImageOutput(params: {
             imageBuffer,
             targetLongEdge,
             // 重绘一块:gpt-image-2 img2img(强制 web 后端,尺寸较稳),成功后逐块计费。
-            async (tile, w, h, tileIndex) => {
+            // 两图输入:第一张=待重绘的块,第二张=整图上下文(帮各块对齐周围内容、改善衔接)。
+            async (tile, w, h, tileIndex, context) => {
               const edited = await editImage(params.config, {
-                prompt: repairPrompt,
-                images: [{ data: tile, name: "tile.png", type: "image/png" }],
+                prompt: `${BLOCK_REPAIR_CONTEXT_INSTRUCTION} ${repairPrompt}`,
+                images: [
+                  { data: tile, name: "tile.png", type: "image/png" },
+                  { data: context, name: "context.png", type: "image/png" },
+                ],
                 size: `${w}x${h}`,
                 model: DEFAULT_IMAGE_MODEL,
                 outputFormat: "png",

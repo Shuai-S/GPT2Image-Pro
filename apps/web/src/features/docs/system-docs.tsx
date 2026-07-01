@@ -2311,7 +2311,7 @@ data: {"type":"response.completed","response":{"id":"resp_...","object":"respons
         ],
         [
           "分块修复（手动，gpt-image-2）",
-          "与高清修复不同：它用真实生成后端逐块重绘。用户勾选「分块修复」或 API 传 block_repair=true 时，把最终图切成 2×2 个 web 尺寸小块，每块用 gpt-image-2 img2img 重绘（重点修文字/细节，提示词取 repair_prompt 或内置默认），带重叠羽化拼接，再超分补足到目标尺寸。每块单独调用后端并单独计费（最后加和），比超分/高清修复更慢也更贵；由管理端「出图分块修复」开关控制，需手动勾选，默认关。启用成功时替代自动超分。",
+          "与高清修复不同：它用真实生成后端逐块重绘。用户勾选「分块修复」或 API 传 block_repair=true 时，把最终图切成 2×2 个 web 尺寸小块，每块用 gpt-image-2 img2img 重绘（重点修文字/细节，提示词取 repair_prompt 或内置默认；同时把整张图作为第二参考传入，帮各块对齐周围内容、改善衔接），带重叠羽化拼接，再超分补足到目标尺寸。每块单独调用后端并单独计费（最后加和），比超分/高清修复更慢也更贵；由管理端「出图分块修复」开关控制，需手动勾选，默认关。启用成功时替代自动超分。",
         ],
         [
           "组合与顺序",
@@ -4594,7 +4594,7 @@ data: {"type":"response.completed","response":{"id":"resp_...","object":"respons
         ],
         [
           "Block repair (manual, gpt-image-2)",
-          "Unlike HD repair, this redraws through the real generation backend. When the user checks 'Block repair' or the API sends block_repair=true, the final image is split into 2x2 web-sized tiles, each redrawn with gpt-image-2 img2img (focusing on text/detail, using repair_prompt or a built-in default), feather-stitched, then upscaled to the target size. Each tile is a separate backend call billed separately (summed) — slower and costlier than super-resolution / HD repair; controlled by the admin 'Block repair' switch, off by default and opt-in. When active it replaces auto super-resolution.",
+          "Unlike HD repair, this redraws through the real generation backend. When the user checks 'Block repair' or the API sends block_repair=true, the final image is split into 2x2 web-sized tiles, each redrawn with gpt-image-2 img2img (focusing on text/detail, using repair_prompt or a built-in default; the full image is also passed as a second reference so tiles align with surrounding content for better seams), feather-stitched, then upscaled to the target size. Each tile is a separate backend call billed separately (summed) — slower and costlier than super-resolution / HD repair; controlled by the admin 'Block repair' switch, off by default and opt-in. When active it replaces auto super-resolution.",
         ],
         [
           "Order & composition",
