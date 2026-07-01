@@ -2248,6 +2248,16 @@ export function CreatePageClient({
   // 高清修复:默认关闭(用轻量 general-x4v3,快且安全);勾选才用 SwinIR 复原(文字/结构最佳,
   // 但 CPU 极慢、吃满多核,仅供受控测试)。仅在超分主开关开且上游图偏小触发超分时生效。
   const [hdRepair, setHdRepair] = useCreateRuntimeState("hdRepair", false);
+  // 分块修复:默认关。勾选后把最终图切成 2×2 web 块逐块 gpt-image-2 重绘再拼接超分(重点修文字),
+  // 逐块单独计费。repairPrompt 为每块提示词(空则用管理端默认)。
+  const [blockRepair, setBlockRepair] = useCreateRuntimeState(
+    "blockRepair",
+    false
+  );
+  const [repairPrompt, setRepairPrompt] = useCreateRuntimeState(
+    "repairPrompt",
+    ""
+  );
   const [outputCompression, setOutputCompression] = useCreateRuntimeState(
     "outputCompression",
     100
@@ -3273,6 +3283,48 @@ export function CreatePageClient({
     </label>
   );
 
+  // 分块修复开关 + 每块提示词输入。开关总是可见(与后端无关);勾选后展开提示词输入。
+  const renderBlockRepairToggle = (params: {
+    id: string;
+    disabled?: boolean;
+  }) => (
+    <>
+      <label
+        htmlFor={params.id}
+        className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
+          blockRepair
+            ? "border-primary bg-primary/10 text-primary"
+            : "border-primary/40 bg-primary/5 text-foreground"
+        }`}
+        title={copy(
+          "Block repair (gpt-image-2): off by default. When on, the final image is split into 2x2 web-sized tiles, each redrawn with gpt-image-2 img2img (focusing on text/detail), feather-stitched, then upscaled to the target. Each tile is a separate backend call billed separately (summed). Slower and costs more; requires the server-side block-repair switch.",
+          "分块修复(gpt-image-2):默认关闭。勾选后,最终图切成 2×2 个 web 尺寸小块,每块用 gpt-image-2 img2img 重绘(重点修文字/细节),重叠羽化拼接,再超分到目标尺寸。每块单独调用后端、单独计费(最后加和),更慢也更贵。需管理端开启「分块修复」主开关。"
+        )}
+      >
+        <Checkbox
+          id={params.id}
+          checked={blockRepair}
+          onCheckedChange={(checked) => setBlockRepair(checked === true)}
+          disabled={params.disabled}
+        />
+        {copy("Block repair", "分块修复")}
+      </label>
+      {blockRepair && (
+        <input
+          type="text"
+          value={repairPrompt}
+          onChange={(event) => setRepairPrompt(event.target.value)}
+          disabled={params.disabled}
+          placeholder={copy(
+            "Repair prompt (optional, defaults to server setting)",
+            "修复提示词(可选,留空用默认)"
+          )}
+          className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground"
+        />
+      )}
+    </>
+  );
+
   const renderReferenceMentionMenu = (params: {
     open: boolean;
     options: ImageReferenceMentionOption[];
@@ -3703,6 +3755,11 @@ export function CreatePageClient({
       }
       // 高清修复:关闭时显式传 false 走轻量 general-x4v3;默认(true)由后端选 SwinIR。
       formData.append("hd_repair", String(hdRepair));
+      // 分块修复:开关 + 每块提示词(非空才传)。
+      formData.append("block_repair", String(blockRepair));
+      if (blockRepair && repairPrompt.trim()) {
+        formData.append("repair_prompt", repairPrompt.trim());
+      }
       if (outputFormat !== "png") {
         formData.append("output_compression", String(outputCompression));
       }
@@ -5428,6 +5485,10 @@ export function CreatePageClient({
             id: "chat-hd-repair",
             disabled: isChatGenerating,
           })}
+          {renderBlockRepairToggle({
+            id: "chat-block-repair",
+            disabled: isChatGenerating,
+          })}
           <Button
             type="button"
             variant="outline"
@@ -6355,6 +6416,10 @@ export function CreatePageClient({
         ...(promptOptimizationAllowed ? { promptOptimization } : {}),
         ...(textMixWebFirstActive ? { mix_web_first: true } : {}),
         hd_repair: hdRepair,
+        block_repair: blockRepair,
+        ...(blockRepair && repairPrompt.trim()
+          ? { repair_prompt: repairPrompt.trim() }
+          : {}),
       }),
     });
 
@@ -6521,6 +6586,11 @@ export function CreatePageClient({
     }
     // 高清修复:关闭时显式传 false 走轻量 general-x4v3;默认(true)由后端选 SwinIR。
     formData.append("hd_repair", String(hdRepair));
+    // 分块修复:开关 + 每块提示词(非空才传)。
+    formData.append("block_repair", String(blockRepair));
+    if (blockRepair && repairPrompt.trim()) {
+      formData.append("repair_prompt", repairPrompt.trim());
+    }
     if (outputFormat !== "png") {
       formData.append("output_compression", String(outputCompression));
     }
@@ -7187,6 +7257,10 @@ export function CreatePageClient({
               {/* 高清修复放分辨率卡内:与后端类型无关(纯服务端超分后处理),须对 web 后端也可见。 */}
               {renderHdRepairToggle({
                 id: `image-hd-repair-${mode}`,
+                disabled: modeBusy,
+              })}
+              {renderBlockRepairToggle({
+                id: `image-block-repair-${mode}`,
                 disabled: modeBusy,
               })}
             </div>
@@ -8370,6 +8444,10 @@ export function CreatePageClient({
                     id: "edit-hd-repair",
                     disabled: isEditing,
                   })}
+                  {renderBlockRepairToggle({
+                    id: "edit-block-repair",
+                    disabled: isEditing,
+                  })}
                 </div>
 
                 <div className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
@@ -9018,6 +9096,10 @@ export function CreatePageClient({
                   })}
                 {renderHdRepairToggle({
                   id: "batch-hd-repair",
+                  disabled: isBatchActive,
+                })}
+                {renderBlockRepairToggle({
+                  id: "batch-block-repair",
                   disabled: isBatchActive,
                 })}
               </div>
