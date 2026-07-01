@@ -27,6 +27,11 @@ export interface GenerateImageParams {
   /** 高清修复:上游图偏小需超分时,选用的超分模型。undefined/true=SwinIR(文字/结构复原最佳,
    *  CPU 慢);false=general-x4v3(轻量快)。仅在超分主开关开且触发超分时生效(见 operations.ts)。 */
   hdRepair?: boolean;
+  /** 分块修复:true 时把最终图切成 2×2 web 尺寸块,逐块 gpt-image-2 img2img 重绘(重点修文字)
+   *  再拼接、超分到目标。逐块单独计费。仅在主开关 IMAGE_BLOCK_REPAIR_ENABLED 开时生效。 */
+  blockRepair?: boolean;
+  /** 分块修复每块提示词(覆盖管理端默认);为空用默认。 */
+  repairPrompt?: string;
 }
 
 export interface GenerateImageResult {
@@ -184,6 +189,11 @@ export interface EditImageParams {
   /** 高清修复:上游图偏小需超分时,选用的超分模型。undefined/true=SwinIR(文字/结构复原最佳,
    *  CPU 慢);false=general-x4v3(轻量快)。仅在超分主开关开且触发超分时生效(见 operations.ts)。 */
   hdRepair?: boolean;
+  /** 分块修复:true 时把最终图切成 2×2 web 尺寸块,逐块 gpt-image-2 img2img 重绘(重点修文字)
+   *  再拼接、超分到目标。逐块单独计费。仅在主开关 IMAGE_BLOCK_REPAIR_ENABLED 开时生效。 */
+  blockRepair?: boolean;
+  /** 分块修复每块提示词(覆盖管理端默认);为空用默认。 */
+  repairPrompt?: string;
 }
 
 export interface ChatImageParams {
@@ -227,6 +237,11 @@ export interface ChatImageParams {
   /** 高清修复:上游图偏小需超分时,选用的超分模型。undefined/true=SwinIR(文字/结构复原最佳,
    *  CPU 慢);false=general-x4v3(轻量快)。仅在超分主开关开且触发超分时生效(见 operations.ts)。 */
   hdRepair?: boolean;
+  /** 分块修复:true 时把最终图切成 2×2 web 尺寸块,逐块 gpt-image-2 img2img 重绘(重点修文字)
+   *  再拼接、超分到目标。逐块单独计费。仅在主开关 IMAGE_BLOCK_REPAIR_ENABLED 开时生效。 */
+  blockRepair?: boolean;
+  /** 分块修复每块提示词(覆盖管理端默认);为空用默认。 */
+  repairPrompt?: string;
 }
 
 export interface ChatGptWebConversationState {

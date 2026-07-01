@@ -166,10 +166,10 @@ export function featherWeight1D(
  *
  * @param image 输入图片字节（通常是上游原图或已超分的图）
  * @param targetLongEdge 期望最终较长边
- * @param repairTile 注入的重绘回调：输入一块 PNG 字节 + 目标块宽高，返回重绘后的图片字节
- *   （实际由 operations.ts 用 gpt-image-2 img2img 实现，并负责逐块计费）
- * @param upscale 注入的超分回调：把图放大到指定宽高（复用 Real-ESRGAN），用于「超分到 R」与
- *   「R 超分到目标」。返回 PNG 字节。
+ * @param repairTile 注入的重绘回调：输入一块 PNG 字节 + 目标块宽高 + 块序号，返回重绘后的图片
+ *   字节（实际由 operations.ts 用 gpt-image-2 img2img 实现，并按块序号做幂等逐块计费）
+ * @param superResolve 注入的 4 倍超分（Real-ESRGAN general-x4v3）。内部 upscaleTo 据放大倍率
+ *   决定用它（大倍率、更干净）还是 Lanczos（小倍率、快），用于「超分到 R」与「R 超分到目标」。
  * @returns { buffer, tilesRepaired }：拼接+补足后的最终图，与实际重绘的块数（供计费加和）
  *
  * 边界：任一块重绘失败则该块回退为原块（不阻断整图）；全部失败则返回原图。整体失败上抛由
@@ -178,8 +178,13 @@ export function featherWeight1D(
 export async function blockRepairImage(
   image: Buffer,
   targetLongEdge: number,
-  repairTile: (tile: Buffer, w: number, h: number) => Promise<Buffer>,
-  upscale: (img: Buffer, w: number, h: number) => Promise<Buffer>
+  repairTile: (
+    tile: Buffer,
+    w: number,
+    h: number,
+    index: number
+  ) => Promise<Buffer>,
+  superResolve: (img: Buffer) => Promise<Buffer>
 ): Promise<{ buffer: Buffer; tilesRepaired: number }> {
   const meta = await sharp(image).metadata();
   const srcW = meta.width ?? 0;
@@ -190,13 +195,12 @@ export async function blockRepairImage(
   const plan = planBlockRepair(tileW, tileH, targetLongEdge);
 
   // 1. 把输入图缩/超分到修复分辨率 R（切块要求精确尺寸）。
-  const work =
-    srcW >= plan.repairW && srcH >= plan.repairH
-      ? await sharp(image)
-          .resize(plan.repairW, plan.repairH, { fit: "fill" })
-          .png()
-          .toBuffer()
-      : await upscale(image, plan.repairW, plan.repairH);
+  const work = await upscaleTo(
+    image,
+    plan.repairW,
+    plan.repairH,
+    superResolve
+  );
 
   // 2. 逐块重绘：切出块 → repairTile → 缩回精确块尺寸。失败回退原块。
   const workRaw = await sharp(work)
@@ -205,13 +209,14 @@ export async function blockRepairImage(
     .toBuffer({ resolveWithObject: true });
   const repaired: Buffer[] = [];
   let tilesRepaired = 0;
-  for (const t of plan.tiles) {
+  for (let i = 0; i < plan.tiles.length; i++) {
+    const t = plan.tiles[i]!;
     const tilePng = await sharp(work)
       .extract({ left: t.x, top: t.y, width: t.w, height: t.h })
       .png()
       .toBuffer();
     try {
-      const out = await repairTile(tilePng, t.w, t.h);
+      const out = await repairTile(tilePng, t.w, t.h, i);
       const norm = await sharp(out)
         .resize(t.w, t.h, { fit: "fill" })
         .removeAlpha()
@@ -237,14 +242,32 @@ export async function blockRepairImage(
   const rLong = Math.max(plan.repairW, plan.repairH);
   if (targetLongEdge > rLong) {
     const scale = targetLongEdge / rLong;
-    result = await upscale(
+    result = await upscaleTo(
       result,
       Math.round(plan.repairW * scale),
-      Math.round(plan.repairH * scale)
+      Math.round(plan.repairH * scale),
+      superResolve
     );
   }
 
   return { buffer: result, tilesRepaired };
+}
+
+/**
+ * 把图放大/缩放到精确 (w,h)。放大倍率 ≥1.5 用 Real-ESRGAN 4 倍超分（更干净）再缩到目标；
+ * 否则直接 Lanczos 缩放（小倍率超分收益小、且省算力）。fit:fill 到精确尺寸（比例已 snap，形变极小）。
+ */
+async function upscaleTo(
+  image: Buffer,
+  w: number,
+  h: number,
+  superResolve: (img: Buffer) => Promise<Buffer>
+): Promise<Buffer> {
+  const meta = await sharp(image).metadata();
+  const srcLong = Math.max(meta.width ?? 1, meta.height ?? 1);
+  const factor = Math.max(w, h) / srcLong;
+  const base = factor >= 1.5 ? await superResolve(image) : image;
+  return sharp(base).resize(w, h, { fit: "fill" }).png().toBuffer();
 }
 
 /** 从整幅 raw RGB 抠出一块（HWC uint8）。 */

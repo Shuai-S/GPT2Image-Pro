@@ -58,6 +58,7 @@ import { buildInputImagesMetadata } from "./generation-metadata";
 import { getRuntimeImageBaseCreditPricing } from "./pricing-settings";
 import { withImageGenerationQueue } from "./queue";
 import {
+  DEFAULT_IMAGE_MODEL,
   DEFAULT_IMAGE_SIZE,
   getImageCreditCostBreakdown,
   getImageModel,
@@ -68,11 +69,14 @@ import {
   isFireflyModel,
   isImageSizeWithinPixelRange,
   normalizeImageSize,
+  parseImageSize,
   roundCreditAmount,
   roundUpCreditAmount,
 } from "./resolution";
+import { blockRepairImage } from "./block-repair";
 import { restoreImage } from "./image-restoration";
 import { calibrateImageResolution } from "./resolution-calibration";
+import { superResolve } from "./super-resolution";
 import {
   editImage,
   generateChatImage,
@@ -838,6 +842,10 @@ function resolveOutputGenerationId(
     : `${parentGenerationId}-${index + 1}`;
 }
 
+// 分块修复默认提示词：只修复、不改内容/构图（管理端 IMAGE_BLOCK_REPAIR_PROMPT 可覆盖）。
+const DEFAULT_BLOCK_REPAIR_PROMPT =
+  "Restore and sharpen this image tile: fix blurry or garbled text and fine details, keep the exact same composition, layout, colors and content unchanged. Do not add, remove or reinterpret anything.";
+
 async function storeGeneratedImageOutput(params: {
   output: {
     imageBase64?: string;
@@ -857,6 +865,12 @@ async function storeGeneratedImageOutput(params: {
   requestedFormat?: string;
   /** 高清修复开关(请求级):false=general-x4v3 快速;其余(含 undefined)=SwinIR 高清修复。 */
   hdRepair?: boolean;
+  /** 分块修复开关(请求级):true 时把图切成 2×2 web 尺寸块逐块 gpt-image-2 重绘再拼接。 */
+  blockRepair?: boolean;
+  /** 分块修复的每块提示词(请求级覆盖);为空则用管理端默认。 */
+  repairPrompt?: string;
+  /** 逐块计费回调(由调用点注入,携带 chargeAdditionalCredits+定价);每成功重绘一块调一次。 */
+  chargeTile?: (tileSize: string, tileIndex: number) => Promise<void>;
 }) {
   let imageBuffer: Buffer = await toImageBuffer(params.output);
   // 出图后处理（仅对最终图）：修复与超分两个独立步骤，各自主开关门控、失败回退不阻断。
@@ -873,9 +887,59 @@ async function storeGeneratedImageOutput(params: {
       const restored = await restoreImage(imageBuffer);
       imageBuffer = restored.buffer;
     }
+    // 分块修复（手动 blockRepair + 主开关 IMAGE_BLOCK_REPAIR_ENABLED）：把图切成 2×2 web 尺寸
+    // 块,逐块 gpt-image-2 img2img 重绘(重点修文字),羽化拼接,再超分补足到目标。逐块单独计费
+    // (chargeTile)。因自带「超分到 R + 超分到目标」,启用成功时替代下面的独立超分。失败回退不阻断。
+    let blockRepaired = false;
+    if (
+      params.blockRepair === true &&
+      (await getRuntimeSettingBoolean("IMAGE_BLOCK_REPAIR_ENABLED", false))
+    ) {
+      const target = parseImageSize(params.requestedSize || DEFAULT_IMAGE_SIZE);
+      const targetLongEdge = target ? Math.max(target.width, target.height) : 0;
+      if (targetLongEdge > 0) {
+        const repairPrompt =
+          params.repairPrompt?.trim() ||
+          (await getRuntimeSettingString("IMAGE_BLOCK_REPAIR_PROMPT"))?.trim() ||
+          DEFAULT_BLOCK_REPAIR_PROMPT;
+        try {
+          const repairedResult = await blockRepairImage(
+            imageBuffer,
+            targetLongEdge,
+            // 重绘一块:gpt-image-2 img2img(强制 web 后端,尺寸较稳),成功后逐块计费。
+            async (tile, w, h, tileIndex) => {
+              const edited = await editImage(params.config, {
+                prompt: repairPrompt,
+                images: [{ data: tile, name: "tile.png", type: "image/png" }],
+                size: `${w}x${h}`,
+                model: DEFAULT_IMAGE_MODEL,
+                outputFormat: "png",
+                forceWebBackend: true,
+              });
+              if (edited.error || !edited.imageBase64) {
+                throw new Error(edited.error || "分块修复:该块无输出");
+              }
+              await params.chargeTile?.(`${w}x${h}`, tileIndex);
+              return Buffer.from(edited.imageBase64, "base64");
+            },
+            superResolve
+          );
+          imageBuffer = repairedResult.buffer;
+          blockRepaired = repairedResult.tilesRepaired > 0;
+        } catch (error) {
+          logWarn("分块修复失败，回退原图", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
     // 超分（自动 + 主开关 IMAGE_SUPER_RESOLUTION_ENABLED）：上游图较长边 < 目标 2/3 时用
-    // 轻量 general-x4v3 放大到目标尺寸（快，见 resolution-calibration.ts）。
-    if (await getRuntimeSettingBoolean("IMAGE_SUPER_RESOLUTION_ENABLED", false)) {
+    // 轻量 general-x4v3 放大到目标尺寸（快，见 resolution-calibration.ts）。分块修复已管到
+    // 目标分辨率时跳过（避免二次超分）。
+    if (
+      !blockRepaired &&
+      (await getRuntimeSettingBoolean("IMAGE_SUPER_RESOLUTION_ENABLED", false))
+    ) {
       const calibrated = await calibrateImageResolution(
         imageBuffer,
         params.requestedSize || DEFAULT_IMAGE_SIZE
@@ -2590,20 +2654,43 @@ async function runQueuedImageGenerationForUser({
       }
     } else {
       for (const [index, output] of imageOutputs.entries()) {
+        const outputGenerationId = resolveOutputGenerationId(
+          generationId,
+          index,
+          imageOutputs.length
+        );
         storedOutputs.push(
           await storeGeneratedImageOutput({
             output,
             config,
             userId: input.userId,
-            generationId: resolveOutputGenerationId(
-              generationId,
-              index,
-              imageOutputs.length
-            ),
+            generationId: outputGenerationId,
             bucket,
             requestedSize: size,
             requestedFormat: input.outputFormat,
             hdRepair: input.hdRepair,
+            blockRepair: input.blockRepair,
+            repairPrompt: input.repairPrompt,
+            // 分块修复逐块计费:每成功重绘一块按块尺寸扣一次,幂等 sourceRef 防重试重复扣。
+            chargeTile: async (tileSize, tileIndex) => {
+              const tileCost = applyBillingMultiplierToCreditCost(
+                getImageCreditCostBreakdown(tileSize, {
+                  textModerationCount: 0,
+                  imageModerationCount: 0,
+                  basePricing: imageBasePricing,
+                  quality: input.quality as ImageQualityLevel | undefined,
+                  thinking: input.thinking as ImageThinkingLevel | undefined,
+                }),
+                billingMultiplier
+              ).totalCredits;
+              await chargeAdditionalCredits(
+                tileCost,
+                "image-generation",
+                `分块修复 tile ${tileIndex} (${tileSize})`,
+                { blockRepairTile: tileIndex, tileSize },
+                `${outputGenerationId}:blockrepair-${tileIndex}`
+              );
+            },
           })
         );
         if (isAgentChatInput) {
