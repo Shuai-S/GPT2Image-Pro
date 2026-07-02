@@ -24,8 +24,8 @@ export interface GenerateImageParams {
   transparentMatte?: boolean;
   /** 审核改写重试:显式 false 时本次失败不自动改写提示词重试,直接返回真实错误(issue #24)。 */
   moderationPromptRepair?: boolean;
-  /** 高清修复:上游图偏小需超分时,选用的超分模型。undefined/true=SwinIR(文字/结构复原最佳,
-   *  CPU 慢);false=general-x4v3(轻量快)。仅在超分主开关开且触发超分时生效(见 operations.ts)。 */
+  /** 高清修复:true 时对最终图用 SCUNet 盲复原(去噪/去压缩块/增强质感,不改分辨率);仅在主开关
+   *  IMAGE_RESTORATION_ENABLED 开时生效,默认关(见 operations.ts / image-restoration.ts)。 */
   hdRepair?: boolean;
   /** 分块修复:true 时把最终图切成 2×2 web 尺寸块,逐块 gpt-image-2 img2img 重绘(重点修文字)
    *  再拼接、超分到目标。逐块单独计费。仅在主开关 IMAGE_BLOCK_REPAIR_ENABLED 开时生效。 */
@@ -186,8 +186,8 @@ export interface EditImageParams {
   transparentMatte?: boolean;
   /** 审核改写重试:显式 false 时本次失败不自动改写提示词重试,直接返回真实错误(issue #24)。 */
   moderationPromptRepair?: boolean;
-  /** 高清修复:上游图偏小需超分时,选用的超分模型。undefined/true=SwinIR(文字/结构复原最佳,
-   *  CPU 慢);false=general-x4v3(轻量快)。仅在超分主开关开且触发超分时生效(见 operations.ts)。 */
+  /** 高清修复:true 时对最终图用 SCUNet 盲复原(去噪/去压缩块/增强质感,不改分辨率);仅在主开关
+   *  IMAGE_RESTORATION_ENABLED 开时生效,默认关(见 operations.ts / image-restoration.ts)。 */
   hdRepair?: boolean;
   /** 分块修复:true 时把最终图切成 2×2 web 尺寸块,逐块 gpt-image-2 img2img 重绘(重点修文字)
    *  再拼接、超分到目标。逐块单独计费。仅在主开关 IMAGE_BLOCK_REPAIR_ENABLED 开时生效。 */
@@ -234,8 +234,8 @@ export interface ChatImageParams {
   transparentMatte?: boolean;
   /** 审核改写重试:显式 false 时本次失败不自动改写提示词重试,直接返回真实错误(issue #24)。 */
   moderationPromptRepair?: boolean;
-  /** 高清修复:上游图偏小需超分时,选用的超分模型。undefined/true=SwinIR(文字/结构复原最佳,
-   *  CPU 慢);false=general-x4v3(轻量快)。仅在超分主开关开且触发超分时生效(见 operations.ts)。 */
+  /** 高清修复:true 时对最终图用 SCUNet 盲复原(去噪/去压缩块/增强质感,不改分辨率);仅在主开关
+   *  IMAGE_RESTORATION_ENABLED 开时生效,默认关(见 operations.ts / image-restoration.ts)。 */
   hdRepair?: boolean;
   /** 分块修复:true 时把最终图切成 2×2 web 尺寸块,逐块 gpt-image-2 img2img 重绘(重点修文字)
    *  再拼接、超分到目标。逐块单独计费。仅在主开关 IMAGE_BLOCK_REPAIR_ENABLED 开时生效。 */

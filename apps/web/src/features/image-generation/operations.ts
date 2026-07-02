@@ -863,7 +863,7 @@ async function storeGeneratedImageOutput(params: {
   bucket: string;
   requestedSize: string;
   requestedFormat?: string;
-  /** 高清修复开关(请求级):false=general-x4v3 快速;其余(含 undefined)=SwinIR 高清修复。 */
+  /** 高清修复开关(请求级):true 且主开关开时用 SCUNet 盲复原最终图(不改分辨率);其余不修复。 */
   hdRepair?: boolean;
   /** 分块修复开关(请求级):true 时把图切成 2×2 web 尺寸块逐块 gpt-image-2 重绘再拼接。 */
   blockRepair?: boolean;
