@@ -216,6 +216,8 @@ const PLAN_CAPABILITY_MATRIX_EXAMPLE = {
     "imageGeneration.agent": "pro",
     "imageGeneration.waterfall": "pro",
     "imageGeneration.batch": "free",
+    "export.ppt": "free",
+    "export.psd": "free",
     "promptOptimization.control": "pro",
     "models.gpt55": "ultra",
     "customApi.configure": "starter",

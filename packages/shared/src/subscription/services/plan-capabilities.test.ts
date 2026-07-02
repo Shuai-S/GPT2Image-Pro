@@ -58,6 +58,8 @@ describe("plan capability matrix defaults", () => {
     expect(matrix.features["imageGeneration.chat"]).toBe("pro");
     expect(matrix.features["imageGeneration.agent"]).toBe("pro");
     expect(matrix.features["imageGeneration.waterfall"]).toBe("pro");
+    expect(matrix.features["export.ppt"]).toBe("free");
+    expect(matrix.features["export.psd"]).toBe("free");
     expect(matrix.features["moderation.onlyFailureSettlement"]).toBe("ultra");
     expect(matrix.limits.ultra).toMatchObject({
       maxFileMb: 100,
