@@ -48,7 +48,7 @@ describe("ChatGPT Web image choices", () => {
       content: {
         content_type: "system_error",
         name: "ChatGPTAgentToolRateLimitException",
-        text: "Before doing anything else, explicitly explain to the user that you were unable to invoke the image_gen.text2im tool right now. Make sure to begin your response with \"You've hit the Free plan limit for image generation.\"",
+        text: 'Before doing anything else, explicitly explain to the user that you were unable to invoke the image_gen.text2im tool right now. Make sure to begin your response with "You\'ve hit the Free plan limit for image generation."',
       },
     };
     const sse = `data: ${JSON.stringify({ o: "add", v: { message } })}\n\n`;
@@ -217,5 +217,94 @@ describe("ChatGPT Web image choices", () => {
       messageId: "select_message_1",
       selectedImageMessageId: "choice_message_a",
     });
+  });
+});
+
+describe("ChatGPT Web editable file (ppt/psd)", () => {
+  it("extracts primary + zip artifacts from metadata.attachments", () => {
+    const conversation = {
+      current_node: "asst_1",
+      mapping: {
+        request_1: {
+          id: "request_1",
+          create_time: 100,
+          children: ["asst_1"],
+          message: { id: "request_1", create_time: 100 },
+        },
+        asst_1: {
+          id: "asst_1",
+          parent: "request_1",
+          create_time: 101,
+          message: {
+            id: "asst_message_1",
+            metadata: {
+              attachments: [
+                {
+                  id: "file-abc",
+                  name: "deck.pptx",
+                  mimeType:
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                },
+                { id: "file-zip", name: "assets.zip" },
+              ],
+            },
+          },
+        },
+      },
+    };
+    const artifacts = __testing__.extractEditableArtifacts(
+      JSON.stringify(conversation),
+      "request_1",
+      "ppt"
+    );
+    const primary = artifacts.find((a) => !a.isZip);
+    const zip = artifacts.find((a) => a.isZip);
+    expect(primary?.name).toBe("deck.pptx");
+    expect(primary?.fileId).toBe("file-abc");
+    expect(primary?.messageId).toBe("asst_message_1");
+    expect(zip?.name).toBe("assets.zip");
+    expect(zip?.fileId).toBe("file-zip");
+  });
+
+  it("extracts psd artifact from a /mnt/data sandbox path in message text", () => {
+    const conversation = {
+      current_node: "asst_1",
+      mapping: {
+        request_1: {
+          id: "request_1",
+          create_time: 100,
+          children: ["asst_1"],
+          message: { id: "request_1", create_time: 100 },
+        },
+        asst_1: {
+          id: "asst_1",
+          parent: "request_1",
+          create_time: 101,
+          message: {
+            id: "asst_message_1",
+            content: {
+              parts: ["已导出 sandbox:/mnt/data/poster.psd,请下载。"],
+            },
+          },
+        },
+      },
+    };
+    const artifacts = __testing__.extractEditableArtifacts(
+      JSON.stringify(conversation),
+      "request_1",
+      "psd"
+    );
+    expect(artifacts.some((a) => a.name === "poster.psd" && !a.isZip)).toBe(
+      true
+    );
+    expect(artifacts[0]?.sandboxPath).toBe("/mnt/data/poster.psd");
+  });
+
+  it("appends user extra to the fixed template", () => {
+    const withExtra = __testing__.editableFilePrompt("ppt", "8 页,商务风");
+    expect(withExtra).toContain("以下是用户补充需求");
+    expect(withExtra).toContain("8 页,商务风");
+    const empty = __testing__.editableFilePrompt("psd", "   ");
+    expect(empty).not.toContain("以下是用户补充需求");
   });
 });

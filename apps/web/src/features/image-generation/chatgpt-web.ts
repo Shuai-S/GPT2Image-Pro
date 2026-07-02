@@ -882,7 +882,9 @@ async function prepareImageConversation(
 function buildMessage(
   prompt: string,
   references: UploadedAttachment[],
-  messageId: string
+  messageId: string,
+  // 图片生成用 ["picture_v2"];可编辑文件(PPT/PSD)生成传 [](gpt-5-5-thinking + 代码解释器)。
+  systemHints: string[] = ["picture_v2"]
 ) {
   const parts = references.map((item) => ({
     content_type: item.content_type,
@@ -906,7 +908,7 @@ function buildMessage(
       ? { content_type: "multimodal_text", parts }
       : { content_type: "text", parts: [prompt] },
     metadata: {
-      system_hints: ["picture_v2"],
+      system_hints: systemHints,
       serialization_metadata: { custom_symbol_offsets: [] },
       ...(references.length
         ? {
@@ -1555,7 +1557,9 @@ async function getConversationText(
     headers: getHeaders(config, path, { Accept: "application/json" }),
   });
   if (!response.ok) {
-    throw new Error(await webErrorMessage(response, "ChatGPT Web conversation"));
+    throw new Error(
+      await webErrorMessage(response, "ChatGPT Web conversation")
+    );
   }
   return JSON.stringify(await response.json());
 }
@@ -1637,7 +1641,9 @@ async function getDownloadUrl(
     headers: getHeaders(config, path, { Accept: "application/json" }),
   });
   if (!response.ok) {
-    throw new Error(await webErrorMessage(response, "ChatGPT Web image lookup"));
+    throw new Error(
+      await webErrorMessage(response, "ChatGPT Web image lookup")
+    );
   }
   const data = (await response.json()) as {
     download_url?: string;
@@ -2050,6 +2056,391 @@ export async function selectChatGptWebImageCandidate(params: {
   return true;
 }
 
+// ===== 可编辑文件生成(PPT/PSD):对话式产文件 =====
+//
+// 移植 basketikun/chatgpt2api 的机制(非 gizmo):model=gpt-5-5-thinking + thinking_effort=extended
+// + system_hints=[] + 固定中文提示词 → ChatGPT 内建生图 + 代码解释器(Python 沙盒)拼出 .pptx/.psd
+// 写到 /mnt/data,再从会话结果里抠沙盒路径/附件 file_id,按 4 端点顺序换下载链接拉二进制。
+// 复用现有 web 对话链路(PoW/Sentinel/上传/会话轮询/getDownloadUrl);不动图片生成路径。
+// 依赖账号:代码解释器 + gpt-5-5-thinking 灰度(限 plus/pro,调度层保证,见 editable-file-operations)。
+
+const EDITABLE_FILE_MODEL = "gpt-5-5-thinking";
+const EDITABLE_FILE_THINKING_EFFORT = "extended";
+const EDITABLE_FILE_POLL_TIMEOUT_MS = 600_000; // 文件生成分钟级,10min
+const EDITABLE_FILE_POLL_INTERVAL_MS = 5_000;
+const EDITABLE_USER_EXTRA_PREFIX = "以下是用户补充需求,请直接结合执行:\n";
+
+// 固定提示词(移植 chatgpt2api _editable_prompt 的三步/两段模板)。
+const EDITABLE_PPT_PROMPT =
+  "我需要你根据用户的需求,来制作一个可以编辑的PPT。整体流程:\n" +
+  "1. 用生图的方式,帮我生成一个精美的产品介绍ppt,5-6个页面;\n" +
+  "2. 帮我把以上涉及到的所有图像和形状素材,拆分成单独的png;\n" +
+  "3. 利用以上所有图片和形状素材,用python-pptx帮我还原你第一次生成的展示ppt,导出为可编辑的 .pptx 文件,并把用到的素材打包成 .zip。";
+const EDITABLE_PSD_PROMPT =
+  "帮我生成这个图像,并把这张海报/图像分成若干独立图层素材,再帮我把拆分的图层素材拼合成一个可编辑的 psd 文件(每个图层独立),导出 .psd 文件,并把用到的图层素材打包成 .zip。";
+
+// 沙盒路径 / asset pointer 正则(移植 chatgpt2api 常量)。
+const EDITABLE_PPT_FILE_RE =
+  /(?:sandbox:)?(\/mnt\/data\/[^\s"'\)\]]+\.(?:pptx?|zip))/gi;
+const EDITABLE_PSD_FILE_RE =
+  /(?:sandbox:)?(\/mnt\/data\/[^\s"'\)\]]+\.(?:psd|zip))/gi;
+const EDITABLE_ASSET_POINTER_RE =
+  /(?:file-service|sediment):\/\/([A-Za-z0-9_-]+)/g;
+
+export type EditableFileKind = "ppt" | "psd";
+
+/** 会话结果里定位到的一个文件产物(主文件或 zip)。 */
+type EditableArtifact = {
+  attachmentId: string;
+  fileId: string;
+  name: string;
+  mimeType: string;
+  sandboxPath: string;
+  messageId: string;
+  isZip: boolean;
+};
+
+/** 下载落地的文件二进制(不转 base64,保留 mime)。 */
+export type EditableFileBinary = {
+  buffer: Buffer;
+  fileName: string;
+  mimeType: string;
+  size: number;
+};
+
+export type EditableFileResult = {
+  conversationId: string;
+  primary: EditableFileBinary;
+  zip: EditableFileBinary | null;
+};
+
+function editableFilePrompt(kind: EditableFileKind, userPrompt: string) {
+  const base = kind === "psd" ? EDITABLE_PSD_PROMPT : EDITABLE_PPT_PROMPT;
+  const extra = userPrompt.trim();
+  return extra ? `${base}\n\n${EDITABLE_USER_EXTRA_PREFIX}${extra}` : base;
+}
+
+/** 文件模式的会话预备:去掉 picture_v2/paragen,改 gpt-5-5-thinking + thinking_effort=extended。 */
+async function prepareFileConversation(
+  config: ApiConfig,
+  prompt: string,
+  requirements: ChatRequirements,
+  requestMessageId: string
+) {
+  const path = "/backend-api/f/conversation/prepare";
+  const response = await fetchChatGptWeb(config, path, path, {
+    method: "POST",
+    signal: config.signal,
+    headers: imageHeaders(config, path, requirements),
+    body: JSON.stringify({
+      action: "next",
+      fork_from_shared_post: false,
+      parent_message_id: randomUUID(),
+      model: EDITABLE_FILE_MODEL,
+      thinking_effort: EDITABLE_FILE_THINKING_EFFORT,
+      client_prepare_state: "success",
+      timezone_offset_min: -480,
+      timezone: "Asia/Shanghai",
+      conversation_mode: { kind: "primary_assistant" },
+      system_hints: [],
+      partial_query: {
+        id: requestMessageId,
+        author: { role: "user" },
+        content: { content_type: "text", parts: [prompt] },
+      },
+      supports_buffering: true,
+      supported_encodings: ["v1"],
+      client_contextual_info: { app_name: "chatgpt.com" },
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(
+      await webErrorMessage(response, "ChatGPT Web file prepare")
+    );
+  }
+  const data = (await response.json()) as { conduit_token?: string };
+  return data.conduit_token || "";
+}
+
+/** 文件模式的会话发起:system_hints=[]、gpt-5-5-thinking + thinking_effort=extended。 */
+async function startFileConversation(
+  config: ApiConfig,
+  prompt: string,
+  requirements: ChatRequirements,
+  conduitToken: string,
+  requestMessageId: string,
+  references: UploadedAttachment[]
+) {
+  const path = "/backend-api/f/conversation";
+  const response = await fetchChatGptWeb(config, path, path, {
+    method: "POST",
+    signal: config.signal,
+    headers: imageHeaders(config, path, requirements, conduitToken),
+    body: JSON.stringify({
+      action: "next",
+      messages: [buildMessage(prompt, references, requestMessageId, [])],
+      parent_message_id: randomUUID(),
+      model: EDITABLE_FILE_MODEL,
+      thinking_effort: EDITABLE_FILE_THINKING_EFFORT,
+      client_prepare_state: "sent",
+      timezone_offset_min: -480,
+      timezone: "Asia/Shanghai",
+      conversation_mode: { kind: "primary_assistant" },
+      enable_message_followups: true,
+      system_hints: [],
+      supports_buffering: true,
+      supported_encodings: ["v1"],
+      client_contextual_info: { app_name: "chatgpt.com" },
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(
+      await webErrorMessage(response, "ChatGPT Web file request")
+    );
+  }
+  return response;
+}
+
+/** 从一条消息节点的 metadata.attachments 取附件(file_id/name/mime/attachmentId)。 */
+function attachmentsFromNode(node: unknown): Array<Record<string, unknown>> {
+  const metadata = messageMetadataFromValue(node);
+  const attachments = isRecord(metadata) ? metadata.attachments : undefined;
+  return Array.isArray(attachments)
+    ? attachments.filter((a): a is Record<string, unknown> => isRecord(a))
+    : [];
+}
+
+/**
+ * 从会话结果里提取文件产物(移植 chatgpt2api _extract_editable_artifacts):
+ * 遍历 requestMessageId 之后的 assistant/tool 节点,① 从 metadata.attachments 取附件;
+ * ② 从节点序列化文本里正则抠沙盒路径 /mnt/data/*.(pptx|psd|zip);③ 抠 asset_pointer 的 file_id。
+ * 按扩展名判定 kind 主文件 vs zip。export 供单测。
+ */
+function extractEditableArtifacts(
+  conversationText: string,
+  requestMessageId: string,
+  kind: EditableFileKind
+): EditableArtifact[] {
+  const fileRe = kind === "psd" ? EDITABLE_PSD_FILE_RE : EDITABLE_PPT_FILE_RE;
+  const primaryExt = kind === "psd" ? /\.psd$/i : /\.pptx?$/i;
+  const artifacts: EditableArtifact[] = [];
+  const seen = new Set<string>();
+  for (const { id, node } of conversationNodesAfterMessage(
+    conversationText,
+    requestMessageId
+  )) {
+    const messageId = conversationNodeId(node, id);
+    const serialized = JSON.stringify(node);
+    // 附件来源
+    for (const att of attachmentsFromNode(node)) {
+      const name = String(att.name || att.file_name || "");
+      const fileId = String(att.id || att.file_id || "");
+      if (!name || (!primaryExt.test(name) && !/\.zip$/i.test(name))) continue;
+      const key = `${fileId}:${name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      artifacts.push({
+        attachmentId: String(att.id || ""),
+        fileId,
+        name,
+        mimeType: String(att.mimeType || att.mime_type || ""),
+        sandboxPath: "",
+        messageId,
+        isZip: /\.zip$/i.test(name),
+      });
+    }
+    // 沙盒路径来源
+    for (const m of serialized.matchAll(fileRe)) {
+      const sandboxPath = m[1] || "";
+      if (!sandboxPath) continue;
+      const name = sandboxPath.split("/").pop() || sandboxPath;
+      const key = `sandbox:${sandboxPath}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const pointer = [...serialized.matchAll(EDITABLE_ASSET_POINTER_RE)][0];
+      artifacts.push({
+        attachmentId: "",
+        fileId: pointer?.[1] || "",
+        name,
+        mimeType: "",
+        sandboxPath,
+        messageId,
+        isZip: /\.zip$/i.test(name),
+      });
+    }
+  }
+  return artifacts;
+}
+
+/** 从产物按 4 端点顺序解析真实下载 URL(移植 chatgpt2api _resolve_editable_download_url)。 */
+async function resolveEditableDownloadUrl(
+  config: ApiConfig,
+  conversationId: string,
+  artifact: EditableArtifact
+): Promise<string> {
+  const candidates: string[] = [];
+  if (artifact.sandboxPath) {
+    const q = new URLSearchParams({
+      message_id: artifact.messageId,
+      sandbox_path: artifact.sandboxPath,
+    });
+    candidates.push(
+      `/backend-api/conversation/${conversationId}/interpreter/download?${q.toString()}`
+    );
+  }
+  if (artifact.attachmentId) {
+    candidates.push(
+      `/backend-api/conversation/${conversationId}/attachment/${artifact.attachmentId}/download`
+    );
+  }
+  if (artifact.fileId) {
+    candidates.push(
+      `/backend-api/files/download/${artifact.fileId}?post_id=&inline=false`
+    );
+    candidates.push(`/backend-api/files/${artifact.fileId}/download`);
+  }
+  for (const path of candidates) {
+    try {
+      const url = await getDownloadUrl(config, path, config.signal);
+      if (url) return url;
+    } catch {
+      // 换下一个端点
+    }
+  }
+  return "";
+}
+
+/** 解析下载 URL → 拉二进制 → EditableFileBinary(保留 mime/文件名)。 */
+async function downloadEditableBinary(
+  config: ApiConfig,
+  conversationId: string,
+  artifact: EditableArtifact
+): Promise<EditableFileBinary | null> {
+  const url = await resolveEditableDownloadUrl(
+    config,
+    conversationId,
+    artifact
+  );
+  if (!url) return null;
+  const response = await fetch(url, { signal: config.signal });
+  if (!response.ok) return null;
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const mimeType =
+    artifact.mimeType ||
+    response.headers.get("content-type") ||
+    "application/octet-stream";
+  return {
+    buffer,
+    fileName: artifact.name,
+    mimeType,
+    size: buffer.length,
+  };
+}
+
+/** 轮询会话直到同时凑齐「主文件」+「zip」(或超时后取到什么算什么)。 */
+async function pollEditableArtifacts(
+  config: ApiConfig,
+  conversationId: string,
+  requestMessageId: string,
+  kind: EditableFileKind
+): Promise<{ primary: EditableArtifact | null; zip: EditableArtifact | null }> {
+  const deadline = Date.now() + EDITABLE_FILE_POLL_TIMEOUT_MS;
+  let primary: EditableArtifact | null = null;
+  let zip: EditableArtifact | null = null;
+  while (Date.now() < deadline) {
+    throwIfAborted(config.signal);
+    const text = await getConversationText(
+      config,
+      conversationId,
+      config.signal
+    );
+    for (const a of extractEditableArtifacts(text, requestMessageId, kind)) {
+      if (a.isZip) {
+        if (!zip) zip = a;
+      } else if (!primary) {
+        primary = a;
+      }
+    }
+    if (primary && zip) break;
+    await sleep(EDITABLE_FILE_POLL_INTERVAL_MS);
+  }
+  return { primary, zip };
+}
+
+/**
+ * 对话式生成可编辑文件(PPT/PSD)。上层入口(editable-file-operations 调用,传已选 plus/pro 账号 config)。
+ * 流程:getChatRequirements → 上传输入图 → prepareFileConversation → startFileConversation → 读 SSE 取
+ *   conversationId → 轮询取主文件+zip → 下载二进制。主文件缺失则抛错;zip 可缺。
+ */
+export async function generateFileWithChatGptWeb(params: {
+  config: ApiConfig;
+  kind: EditableFileKind;
+  prompt: string;
+  images: ImageInputFile[];
+}): Promise<EditableFileResult> {
+  const abortController = new AbortController();
+  const timeout = setTimeout(
+    () => abortController.abort(),
+    EDITABLE_FILE_POLL_TIMEOUT_MS + 60_000
+  );
+  try {
+    const config = { ...params.config, signal: abortController.signal };
+    const requestMessageId = randomUUID();
+    const prompt = editableFilePrompt(params.kind, params.prompt);
+    const references = await Promise.all(
+      params.images.map((image, index) =>
+        uploadAttachment(config, image, index + 1, { image: true })
+      )
+    );
+    const requirements = await getChatRequirements(config);
+    const conduitToken = await prepareFileConversation(
+      config,
+      prompt,
+      requirements,
+      requestMessageId
+    );
+    const response = await startFileConversation(
+      config,
+      prompt,
+      requirements,
+      conduitToken,
+      requestMessageId,
+      references
+    );
+    const text = await readSseText(response);
+    throwIfAborted(abortController.signal);
+    const streamError = extractWebStreamError(text);
+    if (streamError) throw new Error(streamError);
+    const conversationId = extractConversationId(text);
+    if (!conversationId) {
+      throw new Error("ChatGPT Web file: 无 conversation_id");
+    }
+    const { primary, zip } = await pollEditableArtifacts(
+      config,
+      conversationId,
+      requestMessageId,
+      params.kind
+    );
+    if (!primary) {
+      throw new Error(`ChatGPT Web file: 未在超时内取到 ${params.kind} 主文件`);
+    }
+    const primaryBinary = await downloadEditableBinary(
+      config,
+      conversationId,
+      primary
+    );
+    if (!primaryBinary) {
+      throw new Error("ChatGPT Web file: 主文件下载失败");
+    }
+    const zipBinary = zip
+      ? await downloadEditableBinary(config, conversationId, zip)
+      : null;
+    return { conversationId, primary: primaryBinary, zip: zipBinary };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export const __testing__ = {
   extractWebErrorPayloadMessage,
   extractWebStreamError,
@@ -2060,4 +2451,6 @@ export const __testing__ = {
   extractImageIds,
   extractSelectionMessageId,
   scopedConversationTextAfterMessage,
+  extractEditableArtifacts,
+  editableFilePrompt,
 };
