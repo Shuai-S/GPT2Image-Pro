@@ -174,11 +174,11 @@ export async function maskedOutpaintImage(
     index: number
   ) => Promise<Buffer>,
   superResolve: (img: Buffer) => Promise<Buffer>
-): Promise<{ buffer: Buffer; tilesRepaired: number }> {
+): Promise<{ buffer: Buffer; tilesRepaired: number; tilesTotal: number }> {
   const meta = await sharp(image).metadata();
   const sW = meta.width ?? 0;
   const sH = meta.height ?? 0;
-  if (!sW || !sH) return { buffer: image, tilesRepaired: 0 };
+  if (!sW || !sH) return { buffer: image, tilesRepaired: 0, tilesTotal: 0 };
 
   // 工作分辨率：较长边封顶 OUTPAINT_MAX_WORKING(→2×2=4 块)，保持源比例。
   const workLong = Math.min(targetLongEdge, OUTPAINT_MAX_WORKING);
@@ -252,7 +252,7 @@ export async function maskedOutpaintImage(
       superResolve
     );
   }
-  return { buffer, tilesRepaired };
+  return { buffer, tilesRepaired, tilesTotal: plan.tiles.length };
 }
 
 /**

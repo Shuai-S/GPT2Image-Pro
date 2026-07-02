@@ -916,43 +916,69 @@ async function storeGeneratedImageOutput(params: {
         // 掩码顺序外绘（留黑真外绘）:在目标尺寸上切 1K 重叠块,逐块把待补区留黑、
         // 只留已提交邻块的边,让模型「从边缘往黑区外绘」,并严格照整幅原图参考还原该处内容。
         // 路由 codex(会发 mask、尊重 1K)。首块(i=0,无邻居)按原图内容整块重绘作种子。
+        // 诊断日志(临时):开始/每块失败/完成都打点,便于确认外绘是否跑、每块成败(见 tileref 复盘)。
+        logWarn("掩码外绘开始", {
+          generationId: params.generationId,
+          target: `${target.width}x${target.height}`,
+        });
         try {
           const res = await maskedOutpaintImage(
             imageBuffer,
             Math.max(target.width, target.height),
             async (tileCanvas, mask, tileRef, w, h, i) => {
-              const edited = await editImage(params.config, {
-                // 首块=img2img 修复(有原图内容);其余=留黑外绘,用外绘提示词强行往黑区补。
-                prompt: i === 0 ? repairPrompt : DEFAULT_OUTPAINT_PROMPT,
-                // images[0]=待补块（已提交邻块边缘 + 黑色待补区，mask 标黑区为重绘）；
-                // images[1]=该块对齐裁剪的原图（同框同尺寸）作参考，决定黑区该补什么内容——
-                // 不能喂整幅原图(模型会把整图塞进一个块)。mask 作用于 images[0]。
-                images: [
-                  { data: tileCanvas, name: "tile.png", type: "image/png" },
-                  {
-                    data: tileRef,
-                    name: "reference.png",
-                    type: "image/png",
-                  },
-                ],
-                mask: { data: mask, name: "mask.png", type: "image/png" },
-                size: `${w}x${h}`,
-                model: DEFAULT_IMAGE_MODEL,
-                outputFormat: "png",
-                requiresResponsesBackend: true,
-              });
-              if (edited.error || !edited.imageBase64) {
-                throw new Error(edited.error || "掩码外绘:该块无输出");
+              try {
+                const edited = await editImage(params.config, {
+                  // 首块=img2img 修复(有原图内容);其余=留黑外绘,用外绘提示词强行往黑区补。
+                  prompt: i === 0 ? repairPrompt : DEFAULT_OUTPAINT_PROMPT,
+                  // images[0]=待补块（已提交邻块边缘 + 黑色待补区，mask 标黑区为重绘）；
+                  // images[1]=该块对齐裁剪的原图（同框同尺寸）作参考，决定黑区该补什么内容——
+                  // 不能喂整幅原图(模型会把整图塞进一个块)。mask 作用于 images[0]。
+                  images: [
+                    { data: tileCanvas, name: "tile.png", type: "image/png" },
+                    {
+                      data: tileRef,
+                      name: "reference.png",
+                      type: "image/png",
+                    },
+                  ],
+                  mask: { data: mask, name: "mask.png", type: "image/png" },
+                  size: `${w}x${h}`,
+                  model: DEFAULT_IMAGE_MODEL,
+                  outputFormat: "png",
+                  requiresResponsesBackend: true,
+                });
+                if (edited.error || !edited.imageBase64) {
+                  throw new Error(edited.error || "该块无输出");
+                }
+                await params.chargeTile?.(`${w}x${h}`, i);
+                return Buffer.from(edited.imageBase64, "base64");
+              } catch (tileError) {
+                // 每块失败原本被 maskedOutpaintImage 静默吞掉;这里显式打点便于诊断。
+                logWarn("掩码外绘该块失败", {
+                  generationId: params.generationId,
+                  tile: i,
+                  size: `${w}x${h}`,
+                  error:
+                    tileError instanceof Error
+                      ? tileError.message
+                      : String(tileError),
+                });
+                throw tileError;
               }
-              await params.chargeTile?.(`${w}x${h}`, i);
-              return Buffer.from(edited.imageBase64, "base64");
             },
             superResolve
           );
           imageBuffer = res.buffer;
           blockRepaired = res.tilesRepaired > 0;
+          logWarn("掩码外绘完成", {
+            generationId: params.generationId,
+            tilesRepaired: res.tilesRepaired,
+            tilesTotal: res.tilesTotal,
+            blockRepaired,
+          });
         } catch (error) {
           logWarn("掩码外绘修复失败，回退原图", {
+            generationId: params.generationId,
             error: error instanceof Error ? error.message : String(error),
           });
         }
