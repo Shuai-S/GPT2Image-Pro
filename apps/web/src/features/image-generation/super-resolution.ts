@@ -1,70 +1,43 @@
 /**
- * 服务端超分辨率（Real-ESRGAN，SRVGGNetCompact 系列）。
+ * 服务端超分辨率（Real-ESRGAN general-x4v3）。
  *
- * 职责：把图放大 4 倍，供「分辨率校准」（上游图偏小时，见 resolution-calibration.ts）与
- *   「生成式修复」（重绘后放大到目标，见 generative-repair.ts）调用。只放大、不做复原——
- *   复原是独立模块（见 image-restoration.ts，SCUNet）。
+ * 职责：把偏小的图片放大 4 倍并增强细节，供「分辨率校准」在上游返回图分辨率明显不足时
+ *   调用（见 resolution-calibration.ts）。只做「放大到目标尺寸」，不做画质复原——复原是
+ *   独立模块（见 image-restoration.ts，SCUNet）。两者职责分离。
  *
- * 两个模型（同架构 SRVGGNetCompact、都很快，按用途选）：
- *   - general：realesr-general-x4v3（feat=64，conv=32，prelu）。照片复原型，偏平滑。用于自动
- *     分辨率校准。
- *   - anime：realesr-animevideov3（feat=64，conv=16，prelu，更轻更快）。线条/文字/平涂边缘更脆。
- *     用于生成式修复放大——那里输入已被 gpt-image-2 画干净，需要「边缘保真」而非「去糊平滑」，
- *     且内容多含文字/插画，anime 版明显更清晰。
+ * 模型来源/许可：realesr-general-x4v3（Real-ESRGAN，Xinntao Wang 等，
+ *   https://github.com/xinntao/Real-ESRGAN，BSD-3-Clause，可商用；SRVGGNetCompact，
+ *   in/out=3，feat=64，conv=32，upscale=4，prelu）。由官方 .pth 导出为 ONNX。
+ * 推理引擎：onnxruntime-node（MIT）。预/后处理按 Real-ESRGAN 标准自写（RGB[0,1]，无 offset）。
  *
- * 模型来源/许可：Real-ESRGAN（Xinntao Wang 等，https://github.com/xinntao/Real-ESRGAN，
- *   BSD-3-Clause，可商用）。官方 .pth 导出为动态尺寸 ONNX。推理：onnxruntime-node（MIT）；
- *   预/后处理按 Real-ESRGAN 标准自写（RGB[0,1]，无 offset）。
- *
- * 性能：CPU 单张 512→2048 约 1-2s（32 核），anime 更快。InferenceSession 按模型进程内缓存。
- *   大图按 tile 分块推理以限内存峰值。
+ * 性能：CPU 单张 512→2048 约 1.6s（32 核）。InferenceSession 进程内缓存，避免重载。
+ *   大图按 tile 分块推理以限制内存峰值（4 倍放大中间张量随像素平方增长）。
  */
 import path from "node:path";
 import * as ort from "onnxruntime-node";
 import sharp from "sharp";
 
-/** 模型固定放大倍数（两模型一致）。 */
+/** 模型固定放大倍数。 */
 export const SUPER_RESOLUTION_SCALE = 4;
-
-/** 超分模型选择：general（照片，自动校准）/ anime（线条文字保脆，生成式修复放大）。 */
-export type SuperResolutionModel = "general" | "anime";
 
 // 分块参数：每块输入边长 TILE，块间重叠 PAD（消除拼接缝）。TILE 越大越快但内存峰值越高。
 const TILE = 256;
 const PAD = 16;
 
-// 各模型：文件名 + 路径覆盖 env。
-const MODEL_CONFIG: Record<
-  SuperResolutionModel,
-  { file: string; envKey: string }
-> = {
-  general: { file: "realesr-general-x4v3.onnx", envKey: "REALESR_MODEL_PATH" },
-  anime: { file: "realesr-animevideov3.onnx", envKey: "REALESR_ANIME_MODEL_PATH" },
-};
-
-/** 模型路径：优先对应 env，否则 cwd/models/<file>（standalone 与 dev 一致）。 */
-function modelPath(model: SuperResolutionModel): string {
-  const cfg = MODEL_CONFIG[model];
+/** 模型路径：优先 env，否则 cwd/models/realesr-general-x4v3.onnx（standalone 与 dev 一致）。 */
+function modelPath(): string {
   return (
-    process.env[cfg.envKey]?.trim() ||
-    path.join(process.cwd(), "models", cfg.file)
+    process.env.REALESR_MODEL_PATH?.trim() ||
+    path.join(process.cwd(), "models", "realesr-general-x4v3.onnx")
   );
 }
 
-// 按模型缓存会话（首次用到才加载）。
-const sessionPromises = new Map<
-  SuperResolutionModel,
-  Promise<ort.InferenceSession>
->();
-function getSession(
-  model: SuperResolutionModel
-): Promise<ort.InferenceSession> {
-  let p = sessionPromises.get(model);
-  if (!p) {
-    p = ort.InferenceSession.create(modelPath(model));
-    sessionPromises.set(model, p);
+let sessionPromise: Promise<ort.InferenceSession> | null = null;
+function getSession(): Promise<ort.InferenceSession> {
+  if (!sessionPromise) {
+    sessionPromise = ort.InferenceSession.create(modelPath());
   }
-  return p;
+  return sessionPromise;
 }
 
 /** 对一块 padded RGB（HWC uint8）跑模型，返回 4 倍的 RGB（HWC uint8）。 */
@@ -115,16 +88,12 @@ function clamp255(v: number): number {
  * 超分放大 4 倍，返回 PNG 字节。
  *
  * @param image 任意图片字节
- * @param model 模型：general（默认，照片校准）或 anime（线条文字保脆，生成式修复放大）
  * @returns 放大 4 倍的 PNG 字节
  * @throws 尺寸不可解析或模型输出异常时抛错
  * 副作用：CPU 密集；大图分块以限内存。
  */
-export async function superResolve(
-  image: Buffer,
-  model: SuperResolutionModel = "general"
-): Promise<Buffer> {
-  const session = await getSession(model);
+export async function superResolve(image: Buffer): Promise<Buffer> {
+  const session = await getSession();
   const meta = await sharp(image).metadata();
   if (!meta.width || !meta.height) {
     throw new Error("superResolve: 无法解析图片尺寸");

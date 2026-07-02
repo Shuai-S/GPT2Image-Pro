@@ -2311,7 +2311,7 @@ data: {"type":"response.completed","response":{"id":"resp_...","object":"respons
         ],
         [
           "生成式修复（手动，gpt-image-2）",
-          "与高清修复不同：它用真实生成后端重绘。用户勾选「生成式修复」或 API 传 block_repair=true 时，把最终图缩到 web 甜点分辨率（约 1280），一次性用 gpt-image-2 img2img 整图重绘（重点修文字/细节、保持构图与内容不变，提示词取 repair_prompt 或内置默认），再用边缘保真型 Real-ESRGAN（animevideov3，线条/文字更脆）超分补足到目标尺寸。整图一次重绘无接缝（不再切块，避免重叠重影）；额外调用一次后端并单独计费，比超分/高清修复更慢也更贵；由管理端「出图生成式修复」开关控制，需手动勾选，默认关。启用成功时替代自动超分。",
+          "与高清修复不同：它用真实生成后端重绘。用户勾选「生成式修复」或 API 传 block_repair=true 时，把最终图缩到 web 甜点分辨率（约 1280），一次性用 gpt-image-2 img2img 整图重绘（重点修文字/细节、保持构图与内容不变，提示词取 repair_prompt 或内置默认），再超分补足到目标尺寸。整图一次重绘无接缝（不再切块，避免重叠重影）；额外调用一次后端并单独计费，比超分/高清修复更慢也更贵；由管理端「出图生成式修复」开关控制，需手动勾选，默认关。启用成功时替代自动超分。",
         ],
         [
           "组合与顺序",
@@ -4594,7 +4594,7 @@ data: {"type":"response.completed","response":{"id":"resp_...","object":"respons
         ],
         [
           "Generative repair (manual, gpt-image-2)",
-          "Unlike HD repair, this redraws through the real generation backend. When the user checks 'Generative repair' or the API sends block_repair=true, the final image is shrunk to the web sweet-spot resolution (~1280) and redrawn once with gpt-image-2 img2img (fixing text/detail while keeping composition and content unchanged, using repair_prompt or a built-in default), then upscaled to the target size with an edge-preserving Real-ESRGAN (animevideov3, crisper on lines/text). A single whole-image redraw means no seams (no tiling, no overlap ghosting); one extra backend call billed separately — slower and costlier than super-resolution / HD repair; controlled by the admin 'Generative repair' switch, off by default and opt-in. When active it replaces auto super-resolution.",
+          "Unlike HD repair, this redraws through the real generation backend. When the user checks 'Generative repair' or the API sends block_repair=true, the final image is shrunk to the web sweet-spot resolution (~1280) and redrawn once with gpt-image-2 img2img (fixing text/detail while keeping composition and content unchanged, using repair_prompt or a built-in default), then upscaled to the target size. A single whole-image redraw means no seams (no tiling, no overlap ghosting); one extra backend call billed separately — slower and costlier than super-resolution / HD repair; controlled by the admin 'Generative repair' switch, off by default and opt-in. When active it replaces auto super-resolution.",
         ],
         [
           "Order & composition",

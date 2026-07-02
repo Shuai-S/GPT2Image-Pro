@@ -1,13 +1,12 @@
 /**
  * 生成式修复（whole-image generative repair）。
  *
- * 职责：把整张图缩到 web 原生分辨率（按比例 snap，1:1≈1248、横/竖≈1536 长边），一次性用
- *   gpt-image-2 img2img 重绘修复（重点修文字/细节、保持构图与内容不变），再用 Real-ESRGAN
- *   超分补足到目标尺寸，末尾轻锐化提脆文字边缘。
+ * 职责：把整张图缩到 web 甜点分辨率（~1280 长边），一次性用 gpt-image-2 img2img 重绘修复
+ *   （重点修文字/细节、保持构图与内容不变），再用 Real-ESRGAN 超分补足到目标尺寸。
  *
  * 为什么整图而非分块：早期用「2×2 切块 + 各块独立重绘 + 羽化融合」，但 gpt-image-2 是重绘、
  *   非像素级修补，相邻块在重叠区各画各的（尤其文字/编号），羽化一叠就变重影/双重文字。整图
- *   一次重绘从根上消除接缝；代价是修复细节封顶在 web 原生分辨率，再超分放大到目标。
+ *   一次重绘从根上消除接缝；代价是修复细节封顶在 web 分辨率（~1280），再超分放大到目标。
  *
  * 设计（职责分离，便于单测）：尺寸计算是纯函数（repairDimensions/finalDimensions），单独单测；
  *   编排 generativeRepairImage 用 sharp 缩放，用注入的 repair 回调（gpt-image-2，计费在
@@ -15,42 +14,28 @@
  */
 import sharp from "sharp";
 
-// web 后端各比例的原生输出尺寸（指定比例基本返回固定尺寸）。修复直接用这些尺寸重绘,
-// 以吃满 web 原生细节、尽量减小之后的放大倍率(放大越少文字越清晰)。
-const REPAIR_SIZES: ReadonlyArray<{ w: number; h: number }> = [
-  { w: 1248, h: 1248 }, // 1:1
-  { w: 1536, h: 1024 }, // 3:2 横
-  { w: 1024, h: 1536 }, // 2:3 竖
-];
+// web 修复分辨率的较长边（web img2img 甜点，指定比例基本返回固定尺寸）。
+export const REPAIR_LONG_EDGE = 1280;
+// 尺寸取整步长（对齐 web/上游对 16 整除的偏好，避免细碎尺寸）。
+const DIM_STEP = 16;
 
-// 兼容导出：方形修复较长边（旧调用/测试参照）。
-export const REPAIR_LONG_EDGE = 1248;
+function roundToStep(v: number): number {
+  return Math.max(DIM_STEP, Math.round(v / DIM_STEP) * DIM_STEP);
+}
 
 /**
- * 纯函数：把源宽高 snap 到最贴近的 web 原生比例，返回该比例的原生重绘尺寸。
- *
- * 判据：比较 width/height 与各候选的比值（对数距离，横竖对称）。相比固定较长边缩放,直接用
- *   web 原生尺寸重绘可保留最多原生细节(横/竖图达 1536 长边),减小之后放大倍率、改善文字清晰度。
+ * 纯函数：把源宽高缩/放到 web 修复分辨率（较长边 = REPAIR_LONG_EDGE，保持比例，取整到 16）。
+ * 源比甜点小则放大到甜点、大则缩小到甜点；保持原始宽高比。
  */
 export function repairDimensions(
   width: number,
   height: number
 ): { rw: number; rh: number } {
-  const fallback = REPAIR_SIZES[0]!;
   if (width <= 0 || height <= 0) {
-    return { rw: fallback.w, rh: fallback.h };
+    return { rw: REPAIR_LONG_EDGE, rh: REPAIR_LONG_EDGE };
   }
-  const target = Math.log(width / height);
-  let best = fallback;
-  let bestDist = Number.POSITIVE_INFINITY;
-  for (const s of REPAIR_SIZES) {
-    const dist = Math.abs(Math.log(s.w / s.h) - target);
-    if (dist < bestDist) {
-      bestDist = dist;
-      best = s;
-    }
-  }
-  return { rw: best.w, rh: best.h };
+  const scale = REPAIR_LONG_EDGE / Math.max(width, height);
+  return { rw: roundToStep(width * scale), rh: roundToStep(height * scale) };
 }
 
 /**
@@ -104,7 +89,7 @@ export async function generativeRepairImage(
     return { buffer: image, repaired: false };
   }
 
-  // 超分补足到目标（保持修复图比例）。放大用的超分网络由 upscaleTo 决定（见下）。
+  // 超分补足到目标（保持修复图比例）。
   const { fw, fh } = finalDimensions(rw, rh, targetLongEdge);
   const final = await upscaleTo(repaired, fw, fh, superResolve);
   return { buffer: final, repaired: true };

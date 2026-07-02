@@ -11,22 +11,26 @@ import {
 } from "./generative-repair";
 
 describe("repairDimensions", () => {
-  it("方形 snap 到 1:1 原生尺寸(1248)", () => {
-    expect(repairDimensions(2880, 2880)).toEqual({ rw: 1248, rh: 1248 });
-    expect(repairDimensions(512, 512)).toEqual({ rw: 1248, rh: 1248 });
+  it("大图缩到甜点分辨率(较长边=REPAIR_LONG_EDGE),保持比例", () => {
+    const p = repairDimensions(2880, 2880);
+    expect(Math.max(p.rw, p.rh)).toBe(REPAIR_LONG_EDGE);
+    expect(p.rw).toBe(p.rh); // 方形保持方形
   });
 
-  it("横图 snap 到 3:2 原生尺寸(1536x1024,长边 1536)", () => {
-    expect(repairDimensions(3000, 2000)).toEqual({ rw: 1536, rh: 1024 });
-    expect(repairDimensions(2560, 1440)).toEqual({ rw: 1536, rh: 1024 });
+  it("竖图保持比例,较长边=甜点,尺寸对齐 16", () => {
+    const p = repairDimensions(1024, 1536);
+    expect(Math.max(p.rw, p.rh)).toBe(REPAIR_LONG_EDGE);
+    expect(p.rh).toBeGreaterThan(p.rw); // 竖图
+    expect(p.rw % 16).toBe(0);
+    expect(p.rh % 16).toBe(0);
   });
 
-  it("竖图 snap 到 2:3 原生尺寸(1024x1536)", () => {
-    expect(repairDimensions(1024, 1536)).toEqual({ rw: 1024, rh: 1536 });
-    expect(repairDimensions(2000, 3000)).toEqual({ rw: 1024, rh: 1536 });
+  it("小图也放大到甜点(源小于甜点时)", () => {
+    const p = repairDimensions(512, 512);
+    expect(Math.max(p.rw, p.rh)).toBe(REPAIR_LONG_EDGE);
   });
 
-  it("非法尺寸回退首个(方形)原生尺寸", () => {
+  it("非法尺寸回退甜点方形", () => {
     expect(repairDimensions(0, 100)).toEqual({
       rw: REPAIR_LONG_EDGE,
       rh: REPAIR_LONG_EDGE,
