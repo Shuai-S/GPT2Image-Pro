@@ -8,12 +8,13 @@
  *   （含文字/布局）。切记不能喂整幅原图——模型不知当前黑块对应原图哪一块，会把整张原图塞进
  *   这一个块（x 方向「半张图≈整张原图」）；只有同框裁剪，模型才只补这一块。
  *   首块无邻居，整块按原图内容重绘作种子（见 operations.ts 首块用修复提示词、其余用外绘提示词）。
- *   拼接时在重叠带内做线性羽化过渡（committed→edited），把边界亚像素级不连续抹平 → 消竖/横缝。
+ *   拼接用「平移最小误差对齐」+ 硬拼（不再线性羽化）：在小窗口内滑动 edited，找与已提交重叠区
+ *   差最小的偏移(=最佳叠加位置)，再把新区写为对齐后的 edited、重叠区保持 committed 不动、
+ *   滑动露出的空位填黑。硬拼不叠加两版 → 不重影（线性羽化会把两版轻微错位内容糊成重影）。
  *
  * 为什么能无缝且尺寸稳：① 1K tile —— codex/api 后端尊重 1K 尺寸（2K/4K 才不尊重，见 #19175）；
  *   ② mask —— web 后端不发 mask，故必须路由到 codex/responses/标准 API（它们把 mask 发给上游，
  *   标准 images/edits 支持局部重绘）。见 operations.ts 的路由（requiresResponsesBackend）。
- *   mask 锁住重叠区使模型输出的重叠区≈已提交像素，故重叠带内羽化混合不产生重影。
  *
  * 设计（职责分离，便于单测）：切块几何与每块保留区是纯函数（planOutpaintTiles / tileKeepInset），
  *   单独单测；编排 maskedOutpaintImage 用 sharp 做缩放/切块/合成，用注入的 editWithMask 回调重绘
@@ -25,9 +26,13 @@ import sharp from "sharp";
 export const OUTPAINT_TILE = 1024;
 // 步进占块边比例：仅用于 axisCount 决定块数；2×2 时实际重叠由 OUTPAINT_MAX_WORKING 决定。
 export const OUTPAINT_STEP_FRACTION = 0.75;
-// 重叠占块边比例：越大 → 喂给模型的已提交上下文越多、羽化过渡带越宽，接缝越不可见
+// 重叠占块边比例：越大 → 喂给模型的已提交上下文越多、对齐搜索余量越大，接缝越不可见
 // （代价：工作分辨率略低、外层超分多担一点）。0.4 → 2×2 时相邻块重叠约 410px。
 export const OUTPAINT_OVERLAP_FRACTION = 0.4;
+// 平移对齐搜索半径(px)与采样步长：在 [-R,R]² 内滑动 edited,按重叠区 MSE 找最佳偏移。
+// R 越大越能纠正模型的位移漂移,但更慢、露出的黑边更宽;stride 采样降算力。
+export const OUTPAINT_ALIGN_RANGE = 24;
+export const OUTPAINT_ALIGN_STRIDE = 3;
 
 export type OutpaintTile = {
   x: number;
@@ -159,8 +164,9 @@ export const OUTPAINT_MAX_WORKING =
  * @param superResolve 注入的 4 倍超分（Real-ESRGAN general）；把外绘后的工作图放大补足到目标。
  * @returns { buffer, tilesRepaired }：无缝拼接(+超分)后的图，与实际重绘块数（供计费加和）
  *
- * 流程：封顶工作分辨率(≤~1638 长边 → 2×2=4 块) → 逐块留黑外绘（喂该块对齐裁剪原图参考）→ 超分补足到目标较长边。
- * 关键：非首块待补区填黑逼外绘、重叠带内羽化混合(committed→edited)、纯保留区不动 → 无缝。单块失败则整块保留原像素。
+ * 流程：封顶工作分辨率(≤~1638 长边 → 2×2=4 块) → 逐块留黑外绘（喂该块对齐裁剪原图参考）
+ *   → 平移最小误差对齐硬拼 → 超分补足到目标较长边。
+ * 关键：非首块待补区填黑逼外绘、拼接用平移对齐+硬拼(不羽化,消重影)、露出空位填黑。单块失败则整块保留原像素。
  */
 export async function maskedOutpaintImage(
   image: Buffer,
@@ -228,8 +234,8 @@ export async function maskedOutpaintImage(
         .removeAlpha()
         .raw()
         .toBuffer();
-      // 重叠带内羽化混合(committed→edited)、纯新区全用编辑结果、纯保留区不动 → 无缝。
-      blendEditedTile(canvas, workW, t, editedRaw, left, top);
+      // 平移最小误差对齐后硬拼:重叠区保持 committed、新区写对齐后的 edited、露出空位填黑 → 不重影。
+      slideAlignEditedTile(canvas, workW, t, editedRaw, left, top);
       tilesRepaired++;
     } catch {
       // 该块失败：画布保留原像素，继续下一块。
@@ -298,15 +304,73 @@ export function blackenNewRegion(
   }
 }
 
+/** RGB 平方差(a[ai..]与 b[bi..]三通道)。 */
+function diff3(a: Buffer, ai: number, b: Buffer, bi: number): number {
+  const dr = (a[ai] ?? 0) - (b[bi] ?? 0);
+  const dg = (a[ai + 1] ?? 0) - (b[bi + 1] ?? 0);
+  const db = (a[ai + 2] ?? 0) - (b[bi + 2] ?? 0);
+  return dr * dr + db * db + dg * dg;
+}
+
 /**
- * 把编辑后的块混合回画布，在与已提交邻块的重叠带内做线性羽化过渡：
- *   权重 w = wx·wy，wx 在左重叠带[0,left)内从 0(邻块侧)线性升到 1、之外=1；wy 同理按 top。
- *   out = (1-w)·canvas + w·edited。故纯保留区角(w=0)保持已提交像素、纯新区(w=1)全用编辑结果、
- *   重叠带内平滑过渡。因 mask 锁住重叠区使 edited 的重叠区≈已提交像素，羽化只抹平边界不连续、不重影。
+ * 在 [-R,R]² 平移窗口内滑动 edited，求与已提交重叠区(committed)差最小的偏移(dx,dy)。
+ * 只在重叠区(x<left || y<top，committed 有值处)按采样后的 MSE 评分；无重叠(首块)返回 (0,0)。
+ * dx,dy 语义：新区某点 (x,y) 取 edited(x-dx, y-dy)——即把 edited 整体平移 (dx,dy) 去贴合 committed。
+ *
+ * 注：export 供单测。
+ */
+export function findBestOffset(
+  canvas: Buffer,
+  canvasW: number,
+  t: OutpaintTile,
+  edited: Buffer,
+  left: number,
+  top: number,
+  range: number = OUTPAINT_ALIGN_RANGE,
+  stride: number = OUTPAINT_ALIGN_STRIDE
+): { dx: number; dy: number } {
+  const { w, h } = t;
+  let bestDx = 0;
+  let bestDy = 0;
+  let bestErr = Number.POSITIVE_INFINITY;
+  for (let dy = -range; dy <= range; dy++) {
+    for (let dx = -range; dx <= range; dx++) {
+      let sum = 0;
+      let n = 0;
+      for (let y = 0; y < h; y += stride) {
+        for (let x = 0; x < w; x += stride) {
+          if (x >= left && y >= top) continue; // 只比重叠区
+          const sx = x - dx;
+          const sy = y - dy;
+          if (sx < 0 || sx >= w || sy < 0 || sy >= h) continue;
+          const c = ((t.y + y) * canvasW + (t.x + x)) * 3;
+          const e = (sy * w + sx) * 3;
+          sum += diff3(canvas, c, edited, e);
+          n++;
+        }
+      }
+      if (n > 0) {
+        const mse = sum / n;
+        if (mse < bestErr) {
+          bestErr = mse;
+          bestDx = dx;
+          bestDy = dy;
+        }
+      }
+    }
+  }
+  return { dx: bestDx, dy: bestDy };
+}
+
+/**
+ * 平移最小误差对齐 + 硬拼(替代线性羽化,消重影)：
+ *   先 findBestOffset 求最佳偏移(dx,dy)，再把「新区」(x>=left && y>=top)写为对齐后的 edited
+ *   (读 edited(x-dx, y-dy))；重叠区(committed)原样不动；滑动后取不到 edited 的位置填黑(RGB=0)。
+ *   硬拼不混合两版 → 不重影；对齐使新区内容在边界处贴合 committed。首块(无重叠)偏移(0,0)、整块写回。
  *
  * 注：export 供单测；生产仅 maskedOutpaintImage 内部调用（原地改写 canvas）。
  */
-export function blendEditedTile(
+export function slideAlignEditedTile(
   canvas: Buffer,
   canvasW: number,
   t: OutpaintTile,
@@ -314,29 +378,22 @@ export function blendEditedTile(
   left: number,
   top: number
 ): void {
-  for (let y = 0; y < t.h; y++) {
-    const wy = top > 0 && y < top ? y / top : 1;
-    const rowBase = (t.y + y) * canvasW + t.x;
-    const srcRow = y * t.w;
-    for (let x = 0; x < t.w; x++) {
-      const wx = left > 0 && x < left ? x / left : 1;
-      const w = wx * wy;
-      if (w <= 0) continue; // 完全保留：画布不动。
-      const s = (srcRow + x) * 3;
-      const d = (rowBase + x) * 3;
-      if (w >= 1) {
-        canvas[d] = edited[s] ?? 0;
-        canvas[d + 1] = edited[s + 1] ?? 0;
-        canvas[d + 2] = edited[s + 2] ?? 0;
+  const { w, h } = t;
+  const { dx, dy } = findBestOffset(canvas, canvasW, t, edited, left, top);
+  for (let y = top; y < h; y++) {
+    for (let x = left; x < w; x++) {
+      const d = ((t.y + y) * canvasW + (t.x + x)) * 3;
+      const sx = x - dx;
+      const sy = y - dy;
+      if (sx < 0 || sx >= w || sy < 0 || sy >= h) {
+        canvas[d] = 0; // 滑动露出的空位→黑
+        canvas[d + 1] = 0;
+        canvas[d + 2] = 0;
       } else {
-        const iw = 1 - w;
-        canvas[d] = Math.round((canvas[d] ?? 0) * iw + (edited[s] ?? 0) * w);
-        canvas[d + 1] = Math.round(
-          (canvas[d + 1] ?? 0) * iw + (edited[s + 1] ?? 0) * w
-        );
-        canvas[d + 2] = Math.round(
-          (canvas[d + 2] ?? 0) * iw + (edited[s + 2] ?? 0) * w
-        );
+        const e = (sy * w + sx) * 3;
+        canvas[d] = edited[e] ?? 0;
+        canvas[d + 1] = edited[e + 1] ?? 0;
+        canvas[d + 2] = edited[e + 2] ?? 0;
       }
     }
   }
