@@ -348,12 +348,12 @@ async function fetchChatGptWeb(
       return (await response.json()) as WebProxyResponsePayload;
     };
     let payload = await sendOnce();
-    // cf_clearance 后备(默认关闭):上游命中 Cloudflare 挑战(403/503 挑战页)时,经 FlareSolverr
-    // (同一 WARP 出口)刷 cf_clearance+UA,注入 headers 后重试一次。off 时 refreshClearance 返回 null、无操作。
+    // cf_clearance 后备(默认启用但惰性):上游命中 Cloudflare 挑战(403/503 挑战页)时,经 FlareSolverr
+    // (同一 WARP 出口)刷全局 cf_clearance+UA,注入 headers 后重试一次。未命中挑战则从不触发。
     if (payload.status === 403 || payload.status === 503) {
       const bodyText = safeDecodeText(payload.bodyBase64);
       if (isCloudflareChallenge(payload.status, bodyText)) {
-        const clearance = await refreshClearance(getWebSessionKey(config));
+        const clearance = await refreshClearance();
         if (clearance) {
           applyClearanceHeaders(headers, clearance);
           payload = await sendOnce();
@@ -520,8 +520,8 @@ function getHeaders(
     Authorization: `Bearer ${config.apiKey}`,
     ...extra,
   };
-  // cf_clearance 后备(默认关闭):缓存里有该账号的 clearance 时,覆盖 UA/Sec-Ch-Ua 并加 Cookie。
-  const clearance = getActiveClearance(getWebSessionKey(config));
+  // cf_clearance 后备(全局单例,默认启用但惰性):缓存里有 clearance 时覆盖 UA/Sec-Ch-Ua 并加 Cookie。
+  const clearance = getActiveClearance();
   if (clearance) {
     applyClearanceHeaders(headers, clearance);
   }

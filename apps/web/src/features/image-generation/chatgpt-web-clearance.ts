@@ -24,9 +24,11 @@ import {
 
 const CHATGPT_URL = "https://chatgpt.com/";
 
-// 按账号(getWebSessionKey)缓存 clearance;in-flight 锁按同 key 去重。
-const cache = new Map<string, WebClearance>();
-const inflight = new Map<string, Promise<WebClearance | null>>();
+// cf_clearance 绑「出口 IP + UA」不绑 ChatGPT 账号,而全池共用同一 3021→WARP 出口,
+// 故一份 clearance 全池通用:全局单例缓存 + 单一 in-flight 锁(一次挑战波只打 1 次 FlareSolverr,
+// 不至于每个号一次把无头 Chrome 打爆 —— 见 MEMORY「重后处理别挂同步主链路」)。
+let cached: WebClearance | null = null;
+let inflight: Promise<WebClearance | null> | null = null;
 
 // 配置读 env(经 systemd EnvironmentFile / gpt2image-shared/.env.local 注入进程),
 // 非 SettingKey 白名单,故不走 getRuntimeSettingString;开启须设 env 并重启单元(见文件头注释)。
@@ -34,23 +36,26 @@ function settingStr(key: string, fallback = ""): string {
   return (process.env[key]?.trim() || fallback).trim();
 }
 
-/** cf_clearance 后备是否启用(默认 off)。 */
+/**
+ * cf_clearance 后备是否启用。默认启用(遇挑战自动调用);显式设 CHATGPT_WEB_CLEARANCE_MODE=off 关闭。
+ * WHY 默认开:启用也完全惰性——无 Cloudflare 挑战时不触发 FlareSolverr、不注入任何 Cookie/UA,
+ * 对现网零影响;只有真命中挑战页才自愈,故无需人工在故障时才手动开。
+ */
 export function isClearanceEnabled(): boolean {
   return (
-    settingStr("CHATGPT_WEB_CLEARANCE_MODE", "off").toLowerCase() ===
-    "flaresolverr"
+    settingStr("CHATGPT_WEB_CLEARANCE_MODE", "flaresolverr").toLowerCase() !==
+    "off"
   );
 }
 
-/** 同步取缓存里未过期的 clearance(供 getHeaders 注入);无/过期返回 null。 */
-export function getActiveClearance(sessionKey: string): WebClearance | null {
-  const c = cache.get(sessionKey);
-  if (!c) return null;
-  if (Date.now() >= c.expiresAt) {
-    cache.delete(sessionKey);
+/** 同步取全局缓存里未过期的 clearance(供 getHeaders 注入);无/过期返回 null。 */
+export function getActiveClearance(): WebClearance | null {
+  if (!cached) return null;
+  if (Date.now() >= cached.expiresAt) {
+    cached = null;
     return null;
   }
-  return c;
+  return cached;
 }
 
 type FlareSolverrResp = {
@@ -67,18 +72,16 @@ type FlareSolverrResp = {
  * 经 FlareSolverr(走 WARP 出口)解 chatgpt.com,拿 cf_clearance+UA,写缓存并返回。
  * 未启用直接返回 null;in-flight 去重;任何失败返回 null 并记 warn(不抛,后备失败不阻断主链路)。
  */
-export async function refreshClearance(
-  sessionKey: string
-): Promise<WebClearance | null> {
+export async function refreshClearance(): Promise<WebClearance | null> {
   if (!isClearanceEnabled()) return null;
-  const existing = inflight.get(sessionKey);
-  if (existing) return existing;
-  const task = doRefresh(sessionKey).finally(() => inflight.delete(sessionKey));
-  inflight.set(sessionKey, task);
-  return task;
+  if (inflight) return inflight;
+  inflight = doRefresh().finally(() => {
+    inflight = null;
+  });
+  return inflight;
 }
 
-async function doRefresh(sessionKey: string): Promise<WebClearance | null> {
+async function doRefresh(): Promise<WebClearance | null> {
   const base = settingStr("FLARESOLVERR_URL", "http://127.0.0.1:8191").replace(
     /\/$/,
     ""
@@ -107,10 +110,7 @@ async function doRefresh(sessionKey: string): Promise<WebClearance | null> {
     const data = (await resp.json()) as FlareSolverrResp;
     const sol = data.solution;
     if (data.status !== "ok" || !sol) {
-      logWarn("cf_clearance 刷新失败", {
-        sessionKey,
-        message: data.message,
-      });
+      logWarn("cf_clearance 刷新失败", { message: data.message });
       return null;
     }
     const cookie = buildClearanceCookie(
@@ -118,7 +118,7 @@ async function doRefresh(sessionKey: string): Promise<WebClearance | null> {
     );
     const ua = (sol.userAgent || "").trim();
     if (!cookie.includes("cf_clearance=") || !ua) {
-      logWarn("cf_clearance 刷新未拿到有效 clearance/UA", { sessionKey });
+      logWarn("cf_clearance 刷新未拿到有效 clearance/UA", {});
       return null;
     }
     const clearance: WebClearance = {
@@ -126,12 +126,11 @@ async function doRefresh(sessionKey: string): Promise<WebClearance | null> {
       userAgent: ua,
       expiresAt: Date.now() + refreshSec * 1000,
     };
-    cache.set(sessionKey, clearance);
-    logWarn("cf_clearance 已刷新", { sessionKey, ua });
+    cached = clearance;
+    logWarn("cf_clearance 已刷新", { ua });
     return clearance;
   } catch (error) {
     logWarn("cf_clearance 刷新异常", {
-      sessionKey,
       error: error instanceof Error ? error.message : String(error),
     });
     return null;
