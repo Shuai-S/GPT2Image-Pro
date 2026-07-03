@@ -7,8 +7,8 @@
 
 | 文件 | 触发 | 作用 |
 |---|---|---|
-| `.github/workflows/ci.yml` | PR / push → `dev`·`main`，手动 | 提交门禁：文档镜像、风格、类型、测试、构建、容器可构建性 |
-| `.github/workflows/docker-release.yml` | push tag `v*.*.*`，手动 | 发布：构建并推送 3 个镜像到 GHCR + 起草 GitHub Release |
+| `.github/workflows/ci.yml` | PR / push → `main`，手动 | 提交门禁：文档镜像、风格、类型、测试、构建、容器可构建性 |
+| `.github/workflows/docker-release.yml` | push → `my-main` / tag `v*`，手动 | 镜像 CI：构建并推送 4 个镜像到当前仓库 owner 的 GHCR；tag 额外起草 GitHub Release |
 | `.github/actions/setup/action.yml` | 被 ci.yml 复用 | 统一 Node 22 + pnpm + frozen-lockfile 安装 |
 | `.github/dependabot.yml` | 每周 | 依赖 / Action 安全更新自动开 PR |
 
@@ -30,18 +30,24 @@
 > 门禁有效性已本地验证：`biome lint --changed` 对含 `noExplicitAny` 的改动文件失败（EXIT≠0），对仅含 `noNonNullAssertion` 告警的文件通过；纯文档改动 `Checked 0 files` 通过。
 > 首次推送（2026-05-30）经 CI 实跑修正：typecheck 因缺 `.source` 失败 → 增生成步骤；lint 原用 `biome ci`（含格式）在大合并改动集上暴露 300+ 历史格式债 → 改 `biome lint` 且仅 PR。
 
-## docker-release.yml —— 发布（tag 触发）
+## docker-release.yml —— 镜像 CI 与发布
 
-- 触发：推送形如 `v*.*.*` 的 tag（含预发布 `v1.0.0-rc.1`，glob `v*.*.*` 同样匹配）。
-- 构建 + 推送到 GHCR（`ghcr.io`）3 个镜像：`web`、`migrate`、`chatgpt-web-proxy`，tag 含语义 tag、`latest`、`sha-<sha>`。
-- 起草（draft）一份 GitHub Release，附 docker-compose 部署包（`.tar.gz` / `.zip`）。
+- 触发：推送到 `my-main`、推送形如 `v*` 的 tag、或手动触发。
+- 镜像命名空间：运行时从 `GITHUB_REPOSITORY_OWNER` 小写化得到，例如 fork `Shuai-S/GPT2Image-Pro` 会推送到 `ghcr.io/shuai-s/*`。
+- 构建 + 推送到 GHCR（`ghcr.io`）4 个镜像：`web`、`migrate`、`chatgpt-web-proxy`、`chatgpt-register`。
+- 分支推送生成 `my-main`、`latest`、`sha-<sha>` 标签；版本 tag 额外生成 `vX.Y.Z`、`X.Y.Z`、`X.Y`、`X`、`latest`、`sha-<sha>` 标签。
+- `my-main` 分支构建 `linux/amd64`；版本 tag 为 `web`、`migrate`、`chatgpt-web-proxy` 构建 `linux/amd64,linux/arm64`，`chatgpt-register` 因 Wine/x86 依赖仅构建 `linux/amd64`。
+- tag 触发时起草（draft）一份 GitHub Release，附 docker-compose 部署包（`.tar.gz` / `.zip`）。
 
 ## 版本与发布流程（对齐 §0.2）
 
 版本格式：`v<MAJOR>.<MINOR>.<PATCH>-<alpha|beta|rc>.<N>`（正式版去后缀）。
 
 ```bash
-# 在 dev 验证通过、（按需）合入 main 后，在目标提交上打 tag 触发发布：
+# 推送 my-main 会构建并推送 latest / my-main / sha-<sha> 镜像：
+git push origin my-main
+
+# 在目标提交上打 tag 会触发版本镜像与 Release 草稿：
 git tag v0.2.0-rc.1
 git push origin v0.2.0-rc.1   # → 触发 docker-release.yml
 ```
