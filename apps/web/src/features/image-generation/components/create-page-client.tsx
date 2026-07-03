@@ -1537,7 +1537,11 @@ function sanitizeChatMessages(value: unknown): ChatMessage[] {
         role: item.role,
         text: messageText,
         mode:
-          item.mode === "agent" || item.mode === "chat" ? item.mode : undefined,
+          item.mode === "agent" ||
+          item.mode === "chat" ||
+          item.mode === "web"
+            ? item.mode
+            : undefined,
         attachments: item.attachments,
         variants,
         activeVariant: item.activeVariant,
@@ -1582,9 +1586,9 @@ function createChatConversation(
 }
 
 function inferChatConversationMode(messages: ChatMessage[]): ConversationMode {
-  return messages.some((message) => message.mode === "agent")
-    ? "agent"
-    : "chat";
+  if (messages.some((message) => message.mode === "agent")) return "agent";
+  if (messages.some((message) => message.mode === "web")) return "web";
+  return "chat";
 }
 
 function chatActiveConversationStorageKey(mode: ConversationMode) {
@@ -1607,7 +1611,13 @@ function sanitizeChatConversations(value: unknown): ChatConversation[] {
     const now = new Date().toISOString();
     const baseId = typeof item.id === "string" ? item.id : createLocalId();
     const storedMode: ConversationMode | null =
-      item.mode === "agent" ? "agent" : item.mode === "chat" ? "chat" : null;
+      item.mode === "agent"
+        ? "agent"
+        : item.mode === "web"
+          ? "web"
+          : item.mode === "chat"
+            ? "chat"
+            : null;
     const storedTitle =
       typeof item.title === "string" && item.title.trim()
         ? item.title
@@ -1620,11 +1630,17 @@ function sanitizeChatConversations(value: unknown): ChatConversation[] {
     }> = [
       {
         mode: "chat",
-        messages: messages.filter((message) => message.mode !== "agent"),
+        messages: messages.filter(
+          (message) => message.mode !== "agent" && message.mode !== "web"
+        ),
       },
       {
         mode: "agent",
         messages: messages.filter((message) => message.mode === "agent"),
+      },
+      {
+        mode: "web",
+        messages: messages.filter((message) => message.mode === "web"),
       },
     ];
     const byMode = modeBuckets.filter((entry) => entry.messages.length > 0);
@@ -1709,7 +1725,9 @@ function persistChatConversationSnapshot(params: {
       persistedMessages.filter((message) =>
         params.mode === "agent"
           ? message.mode === "agent"
-          : message.mode !== "agent"
+          : params.mode === "web"
+            ? message.mode === "web"
+            : message.mode !== "agent" && message.mode !== "web"
       ),
       params.titleFallback
     );
