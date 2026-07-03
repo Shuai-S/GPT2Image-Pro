@@ -192,6 +192,12 @@ type TaskImageStatusData = {
 type TaskImageStatusPayload = {
   code?: number;
   data?: TaskImageStatusData;
+  id?: string;
+  status?: string;
+  progress?: number;
+  result?: {
+    images?: TaskImageResult[];
+  };
   error?: unknown;
   message?: string;
 };
@@ -3872,6 +3878,28 @@ function taskStatusErrorMessage(data: TaskImageStatusData) {
   );
 }
 
+function normalizeTaskStatusData(
+  payload: TaskImageStatusPayload | null
+): TaskImageStatusData | null {
+  if (!payload) return null;
+  if (payload.data) return payload.data;
+  if (
+    typeof payload.status === "string" ||
+    typeof payload.id === "string" ||
+    payload.result ||
+    payload.error
+  ) {
+    return {
+      id: payload.id,
+      status: payload.status,
+      progress: payload.progress,
+      result: payload.result,
+      error: payload.error,
+    };
+  }
+  return null;
+}
+
 function waitForTaskPoll(ms: number, signal?: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
     if (signal?.aborted) {
@@ -3940,7 +3968,7 @@ async function pollTaskImageResult(
     const parsed = await parseTaskStatusResponse(response);
     if (parsed.error) return { error: parsed.error };
 
-    const data = parsed.payload?.data;
+    const data = normalizeTaskStatusData(parsed.payload);
     if (!data) return { error: "Task status response missing data" };
     const status = data.status?.toLowerCase();
     if (status === "completed") return toTaskImageResult(data);

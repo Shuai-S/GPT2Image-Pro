@@ -108,6 +108,37 @@ describe("task image backend", () => {
     expect(result.imageUrl).toBe("https://upload.example.test/edit.png");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it("accepts direct task status payloads without data wrapper", async () => {
+    process.env.DATABASE_URL =
+      process.env.DATABASE_URL || "postgresql://test:test@127.0.0.1:5432/test";
+    const { generateImage } = await import("./service");
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/images/generations")) {
+        return Response.json({
+          status: "submitted",
+          task_id: "task_direct",
+        });
+      }
+      return Response.json({
+        id: "task_direct",
+        status: "completed",
+        result: {
+          images: [{ url: ["https://upload.example.test/direct.png"] }],
+        },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await generateImage(taskConfig(), {
+      prompt: "direct status payload",
+      model: "gpt-image-2",
+      size: "1024x1024",
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.imageUrl).toBe("https://upload.example.test/direct.png");
+  });
 });
 
 function taskConfig(): ApiConfig {
