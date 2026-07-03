@@ -115,6 +115,8 @@ export async function runEditableFileForUser(params: {
         apiKeyId,
         requestKind: "image_generation",
         accountBackendPreference: "web",
+        // PPT/PSD 需代码解释器,限付费账号:池只在付费级 web 账号里选(见 planType 回填/导入 check)。
+        accountPlanFilter: "paid",
         excludedMemberKeys: excluded,
       });
     } catch (error) {

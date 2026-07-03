@@ -76,6 +76,7 @@ import type {
   ChatCompletionsUpstreamMode,
   ContentSafetyOverride,
   ImageBackendAccountBackend,
+  ImageBackendAccountPlanFilter,
   ImageBackendApiInterfaceMode,
   ImageBackendGroupBackendType,
   ImageBackendGroupSummary,
@@ -134,6 +135,9 @@ type ResolveBackendOptions = {
   stickySessionKey?: string;
   accountBackendPreference?: ImageBackendAccountBackend;
   accountBackendPreferenceMode?: ImageBackendPreferenceMode;
+  // 账号 plan 过滤(opt-in,默认 "any" 不过滤)。"paid" 仅选付费级账号,供 PPT/PSD
+  // 可编辑文件生成用(代码解释器限付费)。只作用于 account 候选,不影响 api/adobe。
+  accountPlanFilter?: ImageBackendAccountPlanFilter;
   // 强制走 adobe（firefly）后端：与 requestedModel 为 firefly-* 前缀等价地把候选收敛到
   // 仅 adobe。供 force_firefly 请求标志使用（用户可对任意模型强制改用 adobe 出图）。
   forceFirefly?: boolean;
@@ -2263,7 +2267,8 @@ async function selectPoolMember(
   requestedModel?: string,
   forceFirefly = false,
   staleRetryCount = 0,
-  capacityWaitCount = 0
+  capacityWaitCount = 0,
+  accountPlanFilter: ImageBackendAccountPlanFilter = "any"
 ): Promise<PoolMember | null> {
   // fireflyOnly：候选收敛到仅 adobe 的两种触发——显式 force_firefly 标志，或请求模型
   // 本身就是 firefly-* 前缀。两者语义一致：本次只调度 adobe 后端，不混入 api/account。
@@ -2309,10 +2314,23 @@ async function selectPoolMember(
   const accountBackendFilter = requiredAccountBackend
     ? eq(imageBackendAccount.implementationMode, requiredAccountBackend)
     : sql`true`;
+  // opt-in plan 过滤:仅 "paid" 时把账号候选收敛到付费级账号。默认 "any" 不加约束——主图像管线
+  // 行为不变。付费判定读两处(任一命中即付费,兼容两种落库来源):
+  //   ① metadata.planType —— 手工按分组回填(Pro-Web=pro)写的顶层字段;
+  //   ② metadata.webAccount.type —— refreshImageBackendAccountInfo 实时查 ChatGPT 落的嵌套字段
+  //      (导入后跑"刷新账号信息"即写入)。二者都为空 → 视作非付费,保守排除。
+  const accountPlanWhere =
+    accountPlanFilter === "paid"
+      ? sql`(
+          LOWER(COALESCE(${imageBackendAccount.metadata}->>'planType', '')) IN ('plus', 'pro', 'team', 'enterprise')
+          OR LOWER(COALESCE(${imageBackendAccount.metadata}->'webAccount'->>'type', '')) IN ('plus', 'pro', 'team', 'enterprise')
+        )`
+      : sql`true`;
   const now = new Date();
   const accountBaseWhere = and(
     eq(imageBackendAccount.isEnabled, true),
     accountBackendFilter,
+    accountPlanWhere,
     // always_active 的账号无视 cooldown 与临时故障始终入选,但 status="error"（终态/鉴权类:
     // 死号/封号/凭据失效）仍踢出轮换——避免死号常驻形成黑洞。其余维持原"健康且未冷却"判定。
     or(
@@ -2922,7 +2940,8 @@ async function selectPoolMember(
       requestedModel,
       forceFirefly,
       staleRetryCount + 1,
-      capacityWaitCount
+      capacityWaitCount,
+      accountPlanFilter
     );
   }
 
@@ -2951,7 +2970,8 @@ async function selectPoolMember(
       requestedModel,
       forceFirefly,
       staleRetryCount,
-      capacityWaitCount + 1
+      capacityWaitCount + 1,
+      accountPlanFilter
     );
   }
 
@@ -3214,7 +3234,10 @@ async function resolvePoolMember(
     options.accountBackendPreference,
     options.accountBackendPreferenceMode,
     options.requestedModel,
-    options.forceFirefly
+    options.forceFirefly,
+    0,
+    0,
+    options.accountPlanFilter ?? "any"
   );
   if (!member) {
     const fallback = await resolveAnyResponsesMember();
@@ -3267,7 +3290,10 @@ async function resolveAnyResponsesPoolMember(
       "responses",
       options.accountBackendPreferenceMode,
       options.requestedModel,
-      options.forceFirefly
+      options.forceFirefly,
+      0,
+      0,
+      options.accountPlanFilter ?? "any"
     );
     if (member) return { group, member };
   }
