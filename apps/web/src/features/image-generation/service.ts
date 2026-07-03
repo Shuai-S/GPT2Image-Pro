@@ -1,16 +1,16 @@
 import { db } from "@repo/database";
 import { userApiConfig } from "@repo/database/schema";
 import {
+  buildAdobeImageRequestBody,
+  parseAdobeMediaResult,
+} from "@repo/shared/adobe";
+import {
   GPT52_CHAT_MODEL,
   GPT54_CHAT_MODEL,
   GPT54_MINI_CHAT_MODEL,
   GPT55_CHAT_MODEL,
   RESPONSES_IMAGE_MODELS,
 } from "@repo/shared/config/subscription-plan";
-import {
-  buildAdobeImageRequestBody,
-  parseAdobeMediaResult,
-} from "@repo/shared/adobe";
 import { logError, logWarn } from "@repo/shared/logger";
 import { canUsePlanCapability } from "@repo/shared/subscription/services/plan-capabilities";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
@@ -159,6 +159,43 @@ type ImageResponsePayload = {
   message?: string;
 };
 
+type TaskImageSubmissionItem = {
+  status?: string;
+  task_id?: string;
+  taskId?: string;
+};
+
+type TaskImageSubmissionPayload = {
+  code?: number;
+  data?: TaskImageSubmissionItem[] | TaskImageSubmissionItem;
+  task_id?: string;
+  taskId?: string;
+  error?: unknown;
+  message?: string;
+};
+
+type TaskImageResult = {
+  url?: unknown;
+  expires_at?: unknown;
+};
+
+type TaskImageStatusData = {
+  id?: string;
+  status?: string;
+  progress?: number;
+  result?: {
+    images?: TaskImageResult[];
+  };
+  error?: unknown;
+};
+
+type TaskImageStatusPayload = {
+  code?: number;
+  data?: TaskImageStatusData;
+  error?: unknown;
+  message?: string;
+};
+
 type ResponsesOutputItem = {
   type?: string;
   id?: string;
@@ -292,6 +329,13 @@ function isPoolApiResponsesBackend(config: ApiConfig) {
       config.backend.apiForceResponsesEndpoint,
       config.backend.imagesUpstreamMode
     )
+  );
+}
+
+function isPoolApiTaskBackend(config: ApiConfig) {
+  return (
+    config.backend?.type === "pool-api" &&
+    config.backend.apiInterfaceMode === "task"
   );
 }
 
@@ -951,7 +995,7 @@ function attachResponsesPreviousResponseState(
     return publicResult;
   }
   const backendMember = getStickyBackendMember(config);
-  if (!backendMember || backendMember.accountBackend !== "responses") {
+  if (backendMember?.accountBackend !== "responses") {
     return publicResult;
   }
   return {
@@ -3720,6 +3764,239 @@ async function parseImageResponse(
   return withRetryMetadata(result, responseRetryMetadata);
 }
 
+const TASK_IMAGE_POLL_INTERVAL_MS = 2_000;
+const TASK_IMAGE_MAX_WAIT_MS = 10 * 60_000;
+
+const TASK_IMAGE_SIZE_PRESETS: Record<
+  string,
+  { size: string; resolution: "2k" | "4k" }
+> = {
+  "2048x2048": { size: "1:1", resolution: "2k" },
+  "2048x1360": { size: "3:2", resolution: "2k" },
+  "1360x2048": { size: "2:3", resolution: "2k" },
+  "2048x1536": { size: "4:3", resolution: "2k" },
+  "1536x2048": { size: "3:4", resolution: "2k" },
+  "2560x2048": { size: "5:4", resolution: "2k" },
+  "2048x2560": { size: "4:5", resolution: "2k" },
+  "2048x1152": { size: "16:9", resolution: "2k" },
+  "1152x2048": { size: "9:16", resolution: "2k" },
+  "2688x1344": { size: "2:1", resolution: "2k" },
+  "1344x2688": { size: "1:2", resolution: "2k" },
+  "3072x1024": { size: "3:1", resolution: "2k" },
+  "1024x3072": { size: "1:3", resolution: "2k" },
+  "2688x1152": { size: "21:9", resolution: "2k" },
+  "1152x2688": { size: "9:21", resolution: "2k" },
+  "2880x2880": { size: "1:1", resolution: "4k" },
+  "3520x2336": { size: "3:2", resolution: "4k" },
+  "2336x3520": { size: "2:3", resolution: "4k" },
+  "3312x2480": { size: "4:3", resolution: "4k" },
+  "2480x3312": { size: "3:4", resolution: "4k" },
+  "3216x2576": { size: "5:4", resolution: "4k" },
+  "2576x3216": { size: "4:5", resolution: "4k" },
+  "3840x2160": { size: "16:9", resolution: "4k" },
+  "2160x3840": { size: "9:16", resolution: "4k" },
+  "3840x1920": { size: "2:1", resolution: "4k" },
+  "1920x3840": { size: "1:2", resolution: "4k" },
+  "3840x1280": { size: "3:1", resolution: "4k" },
+  "1280x3840": { size: "1:3", resolution: "4k" },
+  "3840x1648": { size: "21:9", resolution: "4k" },
+  "1648x3840": { size: "9:21", resolution: "4k" },
+};
+
+// task 模式的上游以任务协议返回 URL；这里只把已知 2K/4K 像素档映射成
+// APIMart 文档的 size + resolution，其他尺寸保持像素字符串以避免额外变形。
+function getTaskImageSizeFields(size: string) {
+  const normalized = size.trim().toLowerCase();
+  const preset = TASK_IMAGE_SIZE_PRESETS[normalized];
+  if (preset) return preset;
+  return { size };
+}
+
+// 把 Buffer 输入转成 task 接口支持的 data URI。该模式没有 multipart /edits，
+// 图生图必须通过 /images/generations 的 image_urls 传递。
+function imageInputFileToDataUri(image: ImageInputFile) {
+  return `data:${image.type || "image/png"};base64,${Buffer.from(
+    image.data
+  ).toString("base64")}`;
+}
+
+function extractTaskSubmissionId(payload: TaskImageSubmissionPayload) {
+  if (typeof payload.task_id === "string" && payload.task_id.trim()) {
+    return payload.task_id.trim();
+  }
+  if (typeof payload.taskId === "string" && payload.taskId.trim()) {
+    return payload.taskId.trim();
+  }
+
+  const data = Array.isArray(payload.data) ? payload.data : [payload.data];
+  for (const item of data) {
+    if (!item) continue;
+    if (typeof item.task_id === "string" && item.task_id.trim()) {
+      return item.task_id.trim();
+    }
+    if (typeof item.taskId === "string" && item.taskId.trim()) {
+      return item.taskId.trim();
+    }
+  }
+  return null;
+}
+
+function extractTaskImageUrls(data: TaskImageStatusData) {
+  const outputs: NonNullable<GenerateImageResult["imageOutputs"]> = [];
+  for (const [index, image] of (data.result?.images || []).entries()) {
+    const urls = Array.isArray(image.url) ? image.url : [image.url];
+    const url = urls.find((item): item is string =>
+      Boolean(typeof item === "string" && item.trim())
+    );
+    if (!url) continue;
+    outputs.push({ imageUrl: url, index });
+  }
+  return outputs;
+}
+
+function toTaskImageResult(data: TaskImageStatusData): GenerateImageResult {
+  const imageOutputs = extractTaskImageUrls(data);
+  const primary = imageOutputs.at(-1);
+  if (!primary?.imageUrl) return { error: "Task completed without image data" };
+  return {
+    imageUrl: primary.imageUrl,
+    imageOutputCount: imageOutputs.length,
+    imageOutputs,
+  };
+}
+
+function taskStatusErrorMessage(data: TaskImageStatusData) {
+  return (
+    getApiErrorMessage(data.error) ||
+    `Task ${data.id || "unknown"} failed while generating image`
+  );
+}
+
+function waitForTaskPoll(ms: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error("Task polling aborted"));
+      return;
+    }
+    let timeout: ReturnType<typeof setTimeout>;
+    let onAbort: () => void;
+    const cleanup = () => signal?.removeEventListener("abort", onAbort);
+    onAbort = () => {
+      clearTimeout(timeout);
+      cleanup();
+      reject(new Error("Task polling aborted"));
+    };
+    const finish = () => {
+      cleanup();
+      resolve();
+    };
+    timeout = setTimeout(finish, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function parseTaskStatusResponse(response: Response) {
+  if (!response.ok) {
+    const rawBody = await response.text().catch(() => "");
+    return {
+      error: getHttpErrorMessage(response, rawBody, "Images API"),
+      payload: null,
+    };
+  }
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    const text = await response.text().catch(() => "");
+    return {
+      error: getNonJsonErrorMessage(text, "Images API", response),
+      payload: null,
+    };
+  }
+  const payload = (await response.json()) as TaskImageStatusPayload;
+  return {
+    error: payload.error ? getApiErrorMessage(payload.error) : null,
+    payload,
+  };
+}
+
+async function pollTaskImageResult(
+  config: ApiConfig,
+  taskId: string,
+  signal?: AbortSignal
+): Promise<GenerateImageResult> {
+  const deadline = Date.now() + TASK_IMAGE_MAX_WAIT_MS;
+  while (Date.now() < deadline) {
+    const response = await fetch(
+      `${stripTrailingSlash(config.baseUrl)}/tasks/${encodeURIComponent(
+        taskId
+      )}?language=en`,
+      {
+        method: "GET",
+        redirect: "manual",
+        signal,
+        cache: "no-store",
+        headers: getHeaders(config, {}),
+      }
+    );
+    const parsed = await parseTaskStatusResponse(response);
+    if (parsed.error) return { error: parsed.error };
+
+    const data = parsed.payload?.data;
+    if (!data) return { error: "Task status response missing data" };
+    const status = data.status?.toLowerCase();
+    if (status === "completed") return toTaskImageResult(data);
+    if (status === "failed" || status === "cancelled") {
+      return { error: taskStatusErrorMessage(data) };
+    }
+
+    await waitForTaskPoll(TASK_IMAGE_POLL_INTERVAL_MS, signal);
+  }
+
+  return { error: `Task image generation timed out: ${taskId}` };
+}
+
+async function postTaskImageGeneration(
+  config: ApiConfig,
+  requestBody: Record<string, unknown>,
+  signal?: AbortSignal
+): Promise<GenerateImageResult> {
+  const response = await fetch(
+    `${stripTrailingSlash(config.baseUrl)}/images/generations`,
+    {
+      method: "POST",
+      redirect: "manual",
+      signal,
+      headers: getHeaders(config, {
+        "Content-Type": "application/json",
+      }),
+      body: JSON.stringify(requestBody),
+    }
+  );
+
+  if (!response.ok) {
+    const rawBody = await response.text().catch(() => "");
+    return { error: getHttpErrorMessage(response, rawBody, "Images API") };
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    const text = await response.text().catch(() => "");
+    return { error: getNonJsonErrorMessage(text, "Images API", response) };
+  }
+
+  const payload = (await response.json()) as TaskImageSubmissionPayload;
+  const directResult = extractImageFromPayload(payload as ImageResponsePayload);
+  if (directResult) return directResult;
+
+  const payloadError = payload.error ? getApiErrorMessage(payload.error) : null;
+  if (payloadError) return { error: payloadError };
+
+  const taskId = extractTaskSubmissionId(payload);
+  if (!taskId) {
+    return { error: "Task image generation response missing task_id" };
+  }
+  return await pollTaskImageResult(config, taskId, signal);
+}
+
 export async function getUserApiConfig(
   userId: string
 ): Promise<ApiConfig | null> {
@@ -4053,6 +4330,41 @@ export async function generateImage(
       )
     );
   }
+  if (isPoolApiTaskBackend(config)) {
+    try {
+      const prompt = getEffectivePrompt(params);
+      const size = params.size || DEFAULT_IMAGE_SIZE;
+      return requireImageOutput(
+        applyPromptOptimizationResultVisibility(
+          await postTaskImageGeneration(
+            config,
+            {
+              model,
+              prompt: appendImagesUpstreamNonce(prompt),
+              n: params.n || 1,
+              ...getTaskImageSizeFields(size),
+              ...(normalizeQuality(params.quality)
+                ? { quality: normalizeQuality(params.quality) }
+                : {}),
+            },
+            params.signal
+          )
+        )
+      );
+    } catch (error) {
+      logImageRequestError(error, {
+        operation: "generate",
+        baseUrl: config.baseUrl,
+        path: "/images/generations",
+        model,
+        useStream: config.useStream,
+      });
+      return {
+        error:
+          error instanceof Error ? error.message : "Unknown error occurred",
+      };
+    }
+  }
   if (
     isResponsesBackend(config) &&
     !shouldCodexUseDirectImagesEndpoint(config)
@@ -4234,6 +4546,41 @@ export async function editImage(
         })
       )
     );
+  }
+  if (isPoolApiTaskBackend(config)) {
+    try {
+      const size = params.size || DEFAULT_IMAGE_SIZE;
+      return requireImageOutput(
+        applyPromptOptimizationResultVisibility(
+          await postTaskImageGeneration(
+            config,
+            {
+              model,
+              prompt: appendImagesUpstreamNonce(effectiveEditPrompt),
+              n: params.n || 1,
+              ...getTaskImageSizeFields(size),
+              image_urls: params.images.map(imageInputFileToDataUri),
+              ...(normalizeQuality(params.quality)
+                ? { quality: normalizeQuality(params.quality) }
+                : {}),
+            },
+            params.signal
+          )
+        )
+      );
+    } catch (error) {
+      logImageRequestError(error, {
+        operation: "edit",
+        baseUrl: config.baseUrl,
+        path: "/images/generations",
+        model,
+        useStream: config.useStream,
+      });
+      return {
+        error:
+          error instanceof Error ? error.message : "Unknown error occurred",
+      };
+    }
   }
   // codex(pool-account responses)图生图:直连 JSON /images/edits(照 CPA codex 直连格式)。
   // 输入图/mask 用 images[].image_url / mask.image_url 的 base64 data URL,size 走顶层。

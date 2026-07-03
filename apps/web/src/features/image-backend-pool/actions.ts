@@ -87,7 +87,12 @@ const optionalGroupIdSchema = z
 const safetyOverrideSchema = z.enum(["inherit", "enabled", "disabled"]);
 const accountBackendSchema = z.enum(["web", "responses"]);
 const groupBackendTypeSchema = z.enum(["mixed", "web", "responses"]);
-const apiInterfaceModeSchema = z.enum(["images", "responses", "mixed"]);
+const apiInterfaceModeSchema = z.enum([
+  "images",
+  "responses",
+  "mixed",
+  "task",
+]);
 const chatCompletionsUpstreamModeSchema = z.enum([
   "responses",
   "chat_completions",

@@ -34,9 +34,9 @@ describe("image backend API interface mode", () => {
     expect(
       imageBackendApiInterfaceAllowsRequest("responses", "responses")
     ).toBe(true);
-    expect(imageBackendApiUsesResponsesEndpoint("responses", "image_edit")).toBe(
-      false
-    );
+    expect(
+      imageBackendApiUsesResponsesEndpoint("responses", "image_edit")
+    ).toBe(false);
     expect(
       imageBackendApiUsesResponsesEndpoint("responses", "image_generation")
     ).toBe(false);
@@ -105,6 +105,31 @@ describe("image backend API interface mode", () => {
     expect(imageBackendApiUsesResponsesEndpoint("mixed", "chat")).toBe(true);
     expect(imageBackendApiUsesResponsesEndpoint("mixed", "responses")).toBe(
       true
+    );
+  });
+
+  it("allows task API backends only for image requests", () => {
+    expect(normalizeImageBackendApiInterfaceMode("task")).toBe("task");
+    expect(
+      imageBackendApiInterfaceAllowsRequest("task", "image_generation")
+    ).toBe(true);
+    expect(imageBackendApiInterfaceAllowsRequest("task", "image_edit")).toBe(
+      true
+    );
+    expect(imageBackendApiInterfaceAllowsRequest("task", "chat")).toBe(false);
+    expect(imageBackendApiInterfaceAllowsRequest("task", "responses")).toBe(
+      false
+    );
+    expect(
+      imageBackendApiUsesResponsesEndpoint(
+        "task",
+        "image_generation",
+        false,
+        "responses"
+      )
+    ).toBe(false);
+    expect(imageBackendApiUsesResponsesEndpoint("task", "chat", true)).toBe(
+      false
     );
   });
 });

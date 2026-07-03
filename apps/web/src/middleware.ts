@@ -39,6 +39,20 @@ function setPrivateNoStore(response: NextResponse) {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // WHY: 品牌图标和 manifest 是运行时配置路由，不能被 next-intl 当成页面路由改写。
+  if (pathname === "/brand-icon" || pathname === "/manifest.webmanifest") {
+    return NextResponse.next();
+  }
+
+  // WHY: 浏览器会直接请求并强缓存 /favicon.ico；这里统一转到运行时品牌图标，
+  // 避免 public/favicon.ico 或旧构建产物继续覆盖管理员配置的 Logo。
+  if (pathname === "/favicon.ico") {
+    const rewrittenUrl = request.nextUrl.clone();
+    rewrittenUrl.pathname = "/brand-icon";
+    rewrittenUrl.search = "";
+    return NextResponse.rewrite(rewrittenUrl);
+  }
+
   if (VERSIONED_ASSET_PREFIX_PATTERN.test(pathname)) {
     const rewrittenUrl = request.nextUrl.clone();
     rewrittenUrl.pathname = pathname.replace(
@@ -159,7 +173,9 @@ export async function middleware(request: NextRequest) {
 
   // 执行国际化中间件
   const response = intlMiddleware(request);
-  return isProtectedRoute || isAuthRoute ? setPrivateNoStore(response) : response;
+  return isProtectedRoute || isAuthRoute
+    ? setPrivateNoStore(response)
+    : response;
 }
 
 /**
@@ -173,11 +189,11 @@ export const config = {
      * 匹配所有路径除了:
      * - _next/static (static files)
      * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
      * - public folder files
      *
      * 注意: 现在包含 /api 路由以便进行限流
      */
     "/((?!_next/static|_next/image|favicon.ico|site\\.webmanifest|sitemap\\.xml|robots\\.txt|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/favicon.ico",
   ],
 };

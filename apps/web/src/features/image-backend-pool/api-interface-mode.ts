@@ -8,6 +8,7 @@ import type {
 export function normalizeImageBackendApiInterfaceMode(
   value?: unknown
 ): ImageBackendApiInterfaceMode {
+  if (value === "task") return value;
   if (value === "responses" || value === "mixed") return value;
   return "images";
 }
@@ -35,10 +36,12 @@ export function imageBackendApiInterfaceAllowsRequest(
 ) {
   const mode = normalizeImageBackendApiInterfaceMode(value);
   if (isImageRequestKind(requestKind)) {
+    if (mode === "task") return true;
     const imageMode = normalizeImagesUpstreamMode(imagesUpstreamMode);
     if (imageMode === "responses") return mode !== "images";
     return mode !== "responses";
   }
+  if (mode === "task") return false;
   if (mode === "images") {
     return false;
   }
@@ -54,16 +57,17 @@ export function imageBackendApiUsesResponsesEndpoint(
   forceResponsesEndpoint = false,
   imagesUpstreamMode?: unknown
 ) {
+  const mode = normalizeImageBackendApiInterfaceMode(value);
   if (isImageRequestKind(requestKind)) {
     return (
       normalizeImagesUpstreamMode(imagesUpstreamMode) === "responses" &&
-      normalizeImageBackendApiInterfaceMode(value) !== "images"
+      mode !== "images" &&
+      mode !== "task"
     );
   }
   if (forceResponsesEndpoint) {
-    return normalizeImageBackendApiInterfaceMode(value) !== "images";
+    return mode !== "images" && mode !== "task";
   }
-  const mode = normalizeImageBackendApiInterfaceMode(value);
   if (mode === "responses") {
     return requestKind === "chat" || requestKind === "responses";
   }

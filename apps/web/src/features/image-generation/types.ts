@@ -308,7 +308,7 @@ export interface ApiConfig {
     apiKeyId?: string;
     requestKind?: "image_generation" | "image_edit" | "chat" | "responses";
     accountBackend?: "web" | "responses";
-    apiInterfaceMode?: "images" | "responses" | "mixed";
+    apiInterfaceMode?: "images" | "responses" | "mixed" | "task";
     chatCompletionsUpstreamMode?: "responses" | "chat_completions";
     imagesUpstreamMode?: "images" | "responses";
     apiForceResponsesEndpoint?: boolean;

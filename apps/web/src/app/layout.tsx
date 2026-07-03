@@ -5,6 +5,24 @@ import { siteConfig } from "@repo/shared/config";
 
 import "@repo/ui/globals.css";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+/**
+ * 为 favicon 链接生成随 Logo 地址变化的版本号。
+ *
+ * @param value - 管理员配置的 Logo 地址。
+ * @returns 短 hash，用于让浏览器在 Logo 变更后重新请求标签页图标。
+ * @sideEffects 无。
+ */
+function hashIconVersion(value: string) {
+  let hash = 5381;
+  for (let index = 0; index < value.length; index++) {
+    hash = (hash * 33) ^ value.charCodeAt(index);
+  }
+  return (hash >>> 0).toString(36);
+}
+
 /**
  * 生成全站默认 metadata。
  *
@@ -13,6 +31,7 @@ import "@repo/ui/globals.css";
  */
 export async function generateMetadata(): Promise<Metadata> {
   const branding = await getRuntimeBrandingConfig();
+  const iconHref = `/favicon.ico?v=${hashIconVersion(branding.logoUrl)}`;
 
   return {
     title: {
@@ -50,14 +69,14 @@ export async function generateMetadata(): Promise<Metadata> {
     icons: {
       icon: [
         {
-          url: "/brand-icon",
+          url: iconHref,
           sizes: "any",
         },
       ],
-      shortcut: ["/brand-icon"],
+      shortcut: [iconHref],
       apple: [
         {
-          url: "/brand-icon",
+          url: iconHref,
         },
       ],
     },

@@ -415,6 +415,12 @@ const API_INTERFACE_MODE_OPTIONS: Array<{
     detail: "只用于文生图和图生图，调用 /v1/images/generations 或 /edits。",
   },
   {
+    value: "task",
+    label: "Task 任务",
+    detail:
+      "只用于文生图和图生图，提交 /v1/images/generations 后轮询 /v1/tasks/{task_id} 取图。",
+  },
+  {
     value: "responses",
     label: "仅 Responses",
     detail:
@@ -4068,7 +4074,9 @@ export function ImageBackendPoolAdminPanel({
                       </Badge>
                       <Badge variant="outline">
                         Images:{" "}
-                        {api.imagesUpstreamMode === "responses"
+                        {api.interfaceMode === "task"
+                          ? "Task"
+                          : api.imagesUpstreamMode === "responses"
                           ? "Responses"
                           : "原生"}
                       </Badge>
@@ -4091,7 +4099,9 @@ export function ImageBackendPoolAdminPanel({
                     <p className="mt-1 text-xs text-muted-foreground">
                       {api.interfaceMode === "mixed"
                         ? `混合接口；文生图/图生图走 ${api.imagesUpstreamMode === "responses" ? "Responses" : "Images"}，Chat 按独立开关调度。`
-                        : api.interfaceMode === "responses"
+                        : api.interfaceMode === "task"
+                          ? "Task 任务接口；文生图/图生图先提交任务，再轮询任务结果，不参与 Chat/Agent/Responses 调度。"
+                          : api.interfaceMode === "responses"
                           ? `仅 Responses；${api.imagesUpstreamMode === "responses" ? "可承接文生图/图生图转换" : "默认不承接文生图/图生图"}。`
                           : "仅 Images；只用于文生图/图生图，不参与 Chat/Agent/Responses 调度。"}
                     </p>

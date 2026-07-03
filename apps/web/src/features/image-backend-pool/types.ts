@@ -7,7 +7,11 @@ export type ImageBackendRequestKind =
   | "responses";
 export type ImageBackendAccountBackend = "web" | "responses";
 export type ImageBackendGroupBackendType = "mixed" | "web" | "responses";
-export type ImageBackendApiInterfaceMode = "images" | "responses" | "mixed";
+export type ImageBackendApiInterfaceMode =
+  | "images"
+  | "responses"
+  | "mixed"
+  | "task";
 export type ChatCompletionsUpstreamMode = "responses" | "chat_completions";
 export type ImagesUpstreamMode = "images" | "responses";
 export type ImageBackendPreferenceMode = "always" | "mixed-only";
