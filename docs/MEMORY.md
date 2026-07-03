@@ -41,4 +41,5 @@
 - 5 个 v1 handler 最终汇入 `apps/web/src/features/image-generation/operations.ts` 同一管线（`runImageGenerationForUser`）
 - 财务真相在 `credits_transaction`（双重记账），不在 `generation` 行；`generation` 仅历史/画廊展示
 - 扣费幂等键：`consumeCredits(sourceRef)` + `credits_transaction (type, source_ref)` 偏唯一索引（opt-in，不传则行为不变）
+- [模型定价规则一阶段](plan/2026-07-04-model-pricing-rules.md)：采纳 New API 倍率结构但继续以 credits 为财务单位；新增 DB-free `@repo/shared/model-pricing` resolver，仅算价和快照，不接入扣费。
 - 发放/退款幂等键：`credits_batch (source_type, source_ref)` 偏唯一索引
