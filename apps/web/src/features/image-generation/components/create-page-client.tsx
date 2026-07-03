@@ -105,7 +105,6 @@ import {
 } from "../resolution";
 import type { VideoPricingInfo } from "../video-operations";
 import { ImageLightbox, type LightboxGeneration } from "./image-lightbox";
-import { ChatWebPanel } from "./chat-web-panel";
 import { VideoCreatePanel } from "./video-create-panel";
 
 type RecentGeneration = {
@@ -2590,11 +2589,6 @@ export function CreatePageClient({
   const [selectedRecentId, setSelectedRecentId] = useCreateRuntimeState<
     string | null
   >("selectedRecentId", null);
-  // chat(web) tab 的参考图(data URL);本地上传与"点最近生成作参考"共用。受控给 ChatWebPanel。
-  const [chatWebRefs, setChatWebRefs] = useCreateRuntimeState<string[]>(
-    "chatWebRefs",
-    []
-  );
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const chatImageInputRef = useRef<HTMLInputElement | null>(null);
   const batchImageInputRef = useRef<HTMLInputElement | null>(null);
@@ -3805,7 +3799,11 @@ export function CreatePageClient({
       if (promptOptimizationAllowed) {
         formData.append("prompt_optimization", String(promptOptimization));
       }
-      if (agentMode || hasPromptImageReference(prompt)) {
+      if (activeMode === "chat-web") {
+        // chat(web):强制优先 web 后端(ChatGPT 网页会话);web 也能处理图引用/编辑,
+        // 故不走 requires_responses_backend(那会强制 codex/responses)。
+        formData.append("mix_web_first", "true");
+      } else if (agentMode || hasPromptImageReference(prompt)) {
         formData.append("requires_responses_backend", "true");
       } else if (chatMixWebFirstActive) {
         formData.append("mix_web_first", "true");
@@ -8532,7 +8530,11 @@ export function CreatePageClient({
 
         <div
           role="tabpanel"
-          hidden={activeMode !== "chat" && activeMode !== "agent"}
+          hidden={
+            activeMode !== "chat" &&
+            activeMode !== "agent" &&
+            activeMode !== "chat-web"
+          }
           className="mt-0"
         >
           <div className="space-y-4">
@@ -9493,13 +9495,6 @@ export function CreatePageClient({
 
         <div role="tabpanel" hidden={activeMode !== "video"} className="mt-0">
           <VideoCreatePanel recent={recent} pricing={videoPricing} />
-        </div>
-
-        <div role="tabpanel" hidden={activeMode !== "chat-web"} className="mt-0">
-          <ChatWebPanel
-            attachments={chatWebRefs}
-            onAttachmentsChange={setChatWebRefs}
-          />
         </div>
       </Tabs>
 
