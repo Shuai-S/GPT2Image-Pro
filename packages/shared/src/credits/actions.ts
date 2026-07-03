@@ -20,18 +20,16 @@ import {
 import { creem } from "../payment/creem";
 import {
   createRuntimeEpayPurchase,
-  isRuntimeEpayPaymentProvider,
+  getRuntimePaymentProvider,
   saveEpayOrder,
 } from "../payment/epay";
+import { createRuntimeAlipayPurchase } from "../payment/alipay";
 import { logEvent } from "../logger/index";
 import { protectedAction } from "../safe-action";
 import { getUserPlanType } from "../subscription/services/user-plan";
 import { getRuntimeSettingNumber } from "../system-settings";
 
-import {
-  CREDIT_CONFIG_DEFAULTS,
-  isCreditPackageVisible,
-} from "./config";
+import { CREDIT_CONFIG_DEFAULTS, isCreditPackageVisible } from "./config";
 import {
   getRuntimeCreditPackageById,
   getRuntimeCreditPackages,
@@ -416,8 +414,10 @@ export const createCreditsPurchaseCheckout = withProtectedCreditsAction(
 
     const baseUrl = getBaseUrl();
 
-    const useEpay = await isRuntimeEpayPaymentProvider();
-    if (!useEpay && quantity > 1) {
+    const paymentProvider = await getRuntimePaymentProvider();
+    const useLocalOrderProvider =
+      paymentProvider === "epay" || paymentProvider === "alipay";
+    if (!useLocalOrderProvider && quantity > 1) {
       throw new Error("当前支付通道暂不支持数量购买，请分次购买");
     }
 
@@ -426,29 +426,34 @@ export const createCreditsPurchaseCheckout = withProtectedCreditsAction(
       packageId: pkg.id,
       credits: creditsAmount,
       quantity,
-      provider: useEpay ? "epay" : "creem",
+      provider: paymentProvider,
       checkoutType: "credits",
     });
 
-    if (useEpay) {
+    if (useLocalOrderProvider) {
       const outTradeNo = `CR${Date.now()}${crypto.randomUUID().slice(0, 8)}`;
       const metadata = {
         type: "credit_purchase" as const,
         userId,
         outTradeNo,
+        provider: paymentProvider,
         packageId: pkg.id,
         quantity,
         creditPlan: userPlan,
       };
       await saveEpayOrder(metadata, totalPrice);
-      const checkout = await createRuntimeEpayPurchase({
+      const purchaseInput = {
         outTradeNo,
         name:
           quantity > 1
             ? `GPT2IMAGE Credits ${pkg.credits} x ${quantity}`
             : `GPT2IMAGE Credits ${pkg.credits}`,
         money: totalPrice,
-      });
+      };
+      const checkout =
+        paymentProvider === "alipay"
+          ? await createRuntimeAlipayPurchase(purchaseInput)
+          : await createRuntimeEpayPurchase(purchaseInput);
 
       return {
         url: checkout.url,

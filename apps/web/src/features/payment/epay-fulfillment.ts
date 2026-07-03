@@ -41,7 +41,8 @@ interface FulfillEpayPaymentResult {
   metadata: EpayMetadata;
 }
 
-type EpayFulfillmentSource = "epay-webhook" | "epay-return";
+type EpayFulfillmentSource = "epay-webhook" | "epay-return" | "alipay-webhook";
+type LocalPaymentProvider = "epay" | "alipay";
 
 // 进程内去重表：仅为单实例下的最佳努力优化，合并同一订单的并发履约，
 // 避免重复的订阅写入等副作用。跨实例的正确性不依赖此表，而由
@@ -136,6 +137,7 @@ async function fulfillSuccessfulEpayPaymentInner(
         metadata.userId,
         metadata.packageId,
         metadata.quantity ?? 1,
+        metadata,
         verifyInfo,
         source
       );
@@ -161,15 +163,16 @@ async function handleCreditPurchase(
   userId: string,
   packageId: string | undefined,
   quantity: number,
+  metadata: EpayMetadata,
   verifyInfo: EpayVerifyResult,
   source: EpayFulfillmentSource
 ) {
+  const provider = getPaymentProviderFromMetadata(metadata);
   if (!packageId) {
     throw new Error("Missing credit package ID");
   }
 
   const currentPlan = await getUserPlanType(userId);
-  const metadata = await getEpayOrderMetadata(verifyInfo.outTradeNo);
   const purchasePlan = isSubscriptionPlan(metadata?.creditPlan)
     ? metadata.creditPlan
     : currentPlan;
@@ -199,7 +202,7 @@ async function handleCreditPurchase(
     throw new Error("Epay amount does not match credit package price");
   }
 
-  const sourceRef = `epay:${verifyInfo.outTradeNo}`;
+  const sourceRef = `${provider}:${verifyInfo.outTradeNo}`;
   const [existingBatch] = await db
     .select({ id: creditsBatch.id })
     .from(creditsBatch)
@@ -226,9 +229,9 @@ async function handleCreditPurchase(
     transactionType: "purchase",
     expiresAt,
     sourceRef,
-    description: `Epay credit pack purchase: ${creditsAmount} credits (${pkg.id})`,
+    description: `${provider} credit pack purchase: ${creditsAmount} credits (${pkg.id})`,
     metadata: {
-      provider: "epay",
+      provider,
       outTradeNo: verifyInfo.outTradeNo,
       tradeNo: verifyInfo.tradeNo,
       paymentMethod: verifyInfo.type,
@@ -244,7 +247,7 @@ async function handleCreditPurchase(
     userId,
     amount: creditsAmount,
     paymentId: verifyInfo.outTradeNo,
-    source: "epay",
+    source: provider,
     packageId: pkg.id,
     quantity: normalizedQuantity,
   });
@@ -261,6 +264,7 @@ async function handleSubscription(
   verifyInfo: EpayVerifyResult,
   source: EpayFulfillmentSource
 ) {
+  const provider = getPaymentProviderFromMetadata(metadata);
   if (!priceId) {
     throw new Error("Missing subscription price ID");
   }
@@ -285,7 +289,7 @@ async function handleSubscription(
     periodEnd.setMonth(periodEnd.getMonth() + 1);
   }
 
-  const subscriptionId = `epay_${verifyInfo.outTradeNo}`;
+  const subscriptionId = `${provider}_${verifyInfo.outTradeNo}`;
   const [existingBySubscriptionId] = await db
     .select({ id: subscription.id })
     .from(subscription)
@@ -341,11 +345,12 @@ async function handleSubscription(
     periodDays: metadata.periodDays ?? 0,
     upgradeFromPriceId: metadata.upgradeFromPriceId,
     source,
+    provider,
   });
 
   logEvent("payment.checkout.completed", {
     userId,
-    provider: "epay",
+    provider,
     priceId,
     planId: plan.id,
     subscriptionId,
@@ -374,8 +379,9 @@ async function grantSubscriptionCredits(params: {
   periodDays: number;
   upgradeFromPriceId?: string;
   source: EpayFulfillmentSource;
+  provider: LocalPaymentProvider;
 }) {
-  const sourceRef = `epay_subscription:${params.outTradeNo}`;
+  const sourceRef = `${params.provider}_subscription:${params.outTradeNo}`;
 
   const [existingBatch] = await db
     .select({
@@ -400,9 +406,9 @@ async function grantSubscriptionCredits(params: {
         upgradeFromPriceId: params.upgradeFromPriceId,
         upgradeToPriceId: params.priceId,
         issuedBefore: existingBatch.issuedAt,
-        description: `${params.planType} Epay upgrade voided previous subscription credits`,
+        description: `${params.planType} ${params.provider} upgrade voided previous subscription credits`,
         metadata: {
-          provider: "epay",
+          provider: params.provider,
           outTradeNo: params.outTradeNo,
           checkoutMode: params.checkoutMode,
         },
@@ -443,10 +449,10 @@ async function grantSubscriptionCredits(params: {
     expiresAt,
     sourceRef,
     description: params.isYearly
-      ? `${params.planType} Epay yearly subscription credits (${monthlyCredits} x 12)`
-      : `${params.planType} Epay monthly subscription credits`,
+      ? `${params.planType} ${params.provider} yearly subscription credits (${monthlyCredits} x 12)`
+      : `${params.planType} ${params.provider} monthly subscription credits`,
     metadata: {
-      provider: "epay",
+      provider: params.provider,
       subscriptionId: params.subscriptionId,
       priceId: params.priceId,
       planType: params.planType,
@@ -476,9 +482,9 @@ async function grantSubscriptionCredits(params: {
       upgradeFromPriceId: params.upgradeFromPriceId,
       upgradeToPriceId: params.priceId,
       issuedBefore: upgradeCutoff,
-      description: `${params.planType} Epay upgrade voided previous subscription credits`,
+      description: `${params.planType} ${params.provider} upgrade voided previous subscription credits`,
       metadata: {
-        provider: "epay",
+        provider: params.provider,
         outTradeNo: params.outTradeNo,
         checkoutMode: params.checkoutMode,
         newBatchId: result.batchId,
@@ -496,4 +502,8 @@ async function grantSubscriptionCredits(params: {
       "Previous subscription credits voided for upgrade"
     );
   }
+}
+
+function getPaymentProviderFromMetadata(metadata: EpayMetadata | null) {
+  return metadata?.provider === "alipay" ? "alipay" : "epay";
 }

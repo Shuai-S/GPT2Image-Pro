@@ -30,7 +30,7 @@ export type Principal =
     }
   | { type: "system"; reason: string }
   | { type: "cron"; job: string }
-  | { type: "webhook"; provider: "creem" | "epay" }
+  | { type: "webhook"; provider: "creem" | "epay" | "alipay" }
   | { type: "proxy"; secretKind: "proxy" | "gateway" };
 
 /**
@@ -53,10 +53,7 @@ export function getPrincipalUserId(p: Principal): string | null {
  * 仅 user 类型可能为管理员。
  */
 export function isPrincipalAdmin(p: Principal): boolean {
-  return (
-    p.type === "user" &&
-    (p.role === "admin" || p.role === "super_admin")
-  );
+  return p.type === "user" && (p.role === "admin" || p.role === "super_admin");
 }
 
 /**

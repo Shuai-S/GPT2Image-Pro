@@ -18,13 +18,14 @@ import { and, eq } from "drizzle-orm";
 
 export const EPAY_TRADE_SUCCESS = "TRADE_SUCCESS";
 
-export type PaymentProvider = "creem" | "epay";
+export type PaymentProvider = "creem" | "epay" | "alipay";
 export type EpayBusinessType = "subscription" | "credit_purchase";
 
 export interface EpayMetadata {
   type: EpayBusinessType;
   userId: string;
   outTradeNo: string;
+  provider?: "epay" | "alipay";
   priceId?: string;
   planId?: string;
   packageId?: string;
@@ -73,12 +74,11 @@ export function getPaymentProvider(): PaymentProvider {
     process.env.PAYMENT_PROVIDER,
     process.env.NEXT_PUBLIC_PAYMENT_PROVIDER,
   ];
+  const normalizedProvider = providerValues
+    .map((provider) => provider?.trim().toLowerCase())
+    .find((provider) => provider === "epay" || provider === "alipay");
 
-  return providerValues.some(
-    (provider) => provider?.trim().toLowerCase() === "epay"
-  )
-    ? "epay"
-    : "creem";
+  return normalizedProvider ?? "creem";
 }
 
 export function isEpayPaymentProvider(): boolean {
@@ -88,7 +88,7 @@ export function isEpayPaymentProvider(): boolean {
 export async function getRuntimePaymentProvider(): Promise<PaymentProvider> {
   return getRuntimeSettingSelect(
     "PAYMENT_PROVIDER",
-    ["creem", "epay"] as const,
+    ["creem", "epay", "alipay"] as const,
     getPaymentProvider()
   );
 }
@@ -160,7 +160,7 @@ export async function isRuntimeEpayConfigured(): Promise<boolean> {
   );
 }
 
-function formatMoney(money: number | string): string {
+export function formatEpayMoney(money: number | string): string {
   if (typeof money === "number") {
     return money.toFixed(2);
   }
@@ -233,7 +233,7 @@ export function createEpayPurchase(
     notify_url: notifyUrl ?? `${baseUrl}/api/webhooks/epay`,
     return_url: input.returnUrl ?? getEpayReturnUrl(baseUrl),
     name: input.name,
-    money: formatMoney(input.money),
+    money: formatEpayMoney(input.money),
     device: "pc",
     sign_type: "MD5",
   };
@@ -267,7 +267,7 @@ export async function createRuntimeEpayPurchase(
     notify_url: notifyUrl,
     return_url: input.returnUrl ?? getEpayReturnUrl(baseUrl),
     name: input.name,
-    money: formatMoney(input.money),
+    money: formatEpayMoney(input.money),
     device: "pc",
     sign_type: "MD5",
   };
@@ -295,7 +295,7 @@ export async function saveEpayOrder(
       outTradeNo: metadata.outTradeNo,
       userId: metadata.userId,
       businessType: metadata.type,
-      amount: Number(formatMoney(amount)),
+      amount: Number(formatEpayMoney(amount)),
       status: "pending",
       metadata: metadata as unknown as Record<string, unknown>,
       updatedAt: new Date(),
@@ -305,7 +305,7 @@ export async function saveEpayOrder(
       set: {
         userId: metadata.userId,
         businessType: metadata.type,
-        amount: Number(formatMoney(amount)),
+        amount: Number(formatEpayMoney(amount)),
         status: "pending",
         metadata: metadata as unknown as Record<string, unknown>,
         updatedAt: new Date(),
@@ -490,6 +490,7 @@ export function encodeEpayMetadata(metadata: EpayMetadata): string {
     o: metadata.outTradeNo,
   };
 
+  if (metadata.provider === "alipay") compact.v = "a";
   if (metadata.priceId) compact.p = metadata.priceId;
   if (metadata.planId) compact.l = metadata.planId;
   if (metadata.packageId) compact.g = metadata.packageId;
@@ -546,6 +547,9 @@ function normalizeEpayMetadata(
         : undefined);
   const userId = metadata.userId ?? metadata.u;
   const outTradeNo = metadata.outTradeNo ?? metadata.o;
+  const provider =
+    metadata.provider ??
+    (metadata.v === "a" ? "alipay" : metadata.v === "e" ? "epay" : undefined);
   const priceId = metadata.priceId ?? metadata.p;
   const planId = metadata.planId ?? metadata.l;
   const packageId = metadata.packageId ?? metadata.g;
@@ -583,6 +587,7 @@ function normalizeEpayMetadata(
     type,
     userId,
     outTradeNo,
+    ...((provider === "epay" || provider === "alipay") && { provider }),
     ...(typeof priceId === "string" && { priceId }),
     ...(typeof planId === "string" && { planId }),
     ...(typeof packageId === "string" && { packageId }),
@@ -597,22 +602,24 @@ function normalizeEpayMetadata(
     }),
     ...(typeof expectedAmount === "number" &&
       Number.isFinite(expectedAmount) && {
-      expectedAmount,
-    }),
+        expectedAmount,
+      }),
     ...(typeof originalAmount === "number" &&
       Number.isFinite(originalAmount) && {
-      originalAmount,
-    }),
+        originalAmount,
+      }),
     ...(typeof prorationCredit === "number" &&
       Number.isFinite(prorationCredit) && {
-      prorationCredit,
-    }),
-    ...(typeof remainingDays === "number" && Number.isFinite(remainingDays) && {
-      remainingDays,
-    }),
-    ...(typeof periodDays === "number" && Number.isFinite(periodDays) && {
-      periodDays,
-    }),
+        prorationCredit,
+      }),
+    ...(typeof remainingDays === "number" &&
+      Number.isFinite(remainingDays) && {
+        remainingDays,
+      }),
+    ...(typeof periodDays === "number" &&
+      Number.isFinite(periodDays) && {
+        periodDays,
+      }),
     ...(typeof upgradeFromPriceId === "string" && {
       upgradeFromPriceId,
     }),

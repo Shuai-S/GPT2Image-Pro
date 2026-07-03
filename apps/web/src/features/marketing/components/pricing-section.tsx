@@ -42,7 +42,7 @@ import { useRouter } from "@/i18n/routing";
 
 import { AnimatedPrice } from "./animated-price";
 
-function submitEpayForm(url: string, params: Record<string, string>) {
+function submitPaymentForm(url: string, params: Record<string, string>) {
   const form = document.createElement("form");
   form.action = url;
   form.method = "POST";
@@ -223,10 +223,8 @@ export function PricingSection({
   };
 
   const copy = (en: string, zh: string) => (isZh ? zh : en);
-  const formatNumber = (
-    value: number,
-    options?: Intl.NumberFormatOptions
-  ) => new Intl.NumberFormat(locale, options).format(value);
+  const formatNumber = (value: number, options?: Intl.NumberFormatOptions) =>
+    new Intl.NumberFormat(locale, options).format(value);
   const formatCredits = (value: number) =>
     formatNumber(value, { maximumFractionDigits: 0 });
   const formatCreditAmount = (value: number) =>
@@ -237,10 +235,7 @@ export function PricingSection({
     `${formatNumber(value, { maximumFractionDigits: 0 })}MB`;
   const getPlanLimits = (planId: string) =>
     capabilityMatrix.limits[planId as SubscriptionPlan];
-  const canUseCapability = (
-    planId: string,
-    capability: PlanCapabilityKey
-  ) => {
+  const canUseCapability = (planId: string, capability: PlanCapabilityKey) => {
     if (!isPricingPlanId(planId)) return false;
     return (
       PLAN_RANK[planId] >= PLAN_RANK[capabilityMatrix.features[capability]]
@@ -248,7 +243,8 @@ export function PricingSection({
   };
   const getPlanCredits = (planId: string) =>
     getPlanLimits(planId).monthlyCredits;
-  const normalizedImageBasePricing = getImageBaseCreditPricing(imageBasePricing);
+  const normalizedImageBasePricing =
+    getImageBaseCreditPricing(imageBasePricing);
   const textModerationCredits =
     TEXT_MODERATION_PRICE_CNY / REFERENCE_CREDIT_PRICE_CNY;
   const imageModerationCredits =
@@ -530,7 +526,10 @@ export function PricingSection({
     }
 
     items.push(
-      copy("Download, share, and saved gallery history", "下载、分享与画廊历史保存")
+      copy(
+        "Download, share, and saved gallery history",
+        "下载、分享与画廊历史保存"
+      )
     );
     return items;
   };
@@ -540,7 +539,9 @@ export function PricingSection({
     plan: SubscriptionPlan
   ) => {
     for (let i = PLAN_RANK[plan]; i >= 0; i -= 1) {
-      const candidate = SUBSCRIPTION_PLANS.find((item) => PLAN_RANK[item] === i);
+      const candidate = SUBSCRIPTION_PLANS.find(
+        (item) => PLAN_RANK[item] === i
+      );
       if (candidate && pkg.pricesByPlan?.[candidate]) {
         return pkg.pricesByPlan[candidate]!;
       }
@@ -598,7 +599,7 @@ export function PricingSection({
         });
         if (result?.data?.url) {
           if (result.data.method === "POST" && result.data.params) {
-            submitEpayForm(result.data.url, result.data.params);
+            submitPaymentForm(result.data.url, result.data.params);
           } else {
             window.location.href = result.data.url;
           }
@@ -656,8 +657,7 @@ export function PricingSection({
                 className={cn(
                   "relative flex flex-col rounded-xl",
                   popular && "border-foreground shadow-lg shadow-foreground/10",
-                  planId === "enterprise" &&
-                    "border-foreground/60 bg-muted/20",
+                  planId === "enterprise" && "border-foreground/60 bg-muted/20",
                   isCurrent && "ring-2 ring-foreground"
                 )}
               >

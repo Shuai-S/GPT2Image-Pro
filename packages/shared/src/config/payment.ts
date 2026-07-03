@@ -14,10 +14,14 @@ import {
 } from "../payment/types";
 
 const paymentProvider =
-  process.env.PAYMENT_PROVIDER?.trim().toLowerCase() === "epay" ||
-  process.env.NEXT_PUBLIC_PAYMENT_PROVIDER?.trim().toLowerCase() === "epay"
-    ? "epay"
-    : "creem";
+  process.env.PAYMENT_PROVIDER?.trim().toLowerCase() === "alipay" ||
+  process.env.NEXT_PUBLIC_PAYMENT_PROVIDER?.trim().toLowerCase() === "alipay"
+    ? "alipay"
+    : process.env.PAYMENT_PROVIDER?.trim().toLowerCase() === "epay" ||
+        process.env.NEXT_PUBLIC_PAYMENT_PROVIDER?.trim().toLowerCase() ===
+          "epay"
+      ? "epay"
+      : "creem";
 
 // ============================================
 // 环境变量中的价格 ID
@@ -37,8 +41,7 @@ export const PRICE_IDS = {
     process.env.NEXT_PUBLIC_CREEM_PRICE_STARTER_MONTHLY || "starter_monthly",
   STARTER_YEARLY:
     process.env.NEXT_PUBLIC_CREEM_PRICE_STARTER_YEARLY || "starter_yearly",
-  PRO_MONTHLY:
-    process.env.NEXT_PUBLIC_CREEM_PRICE_PRO_MONTHLY || "pro_monthly",
+  PRO_MONTHLY: process.env.NEXT_PUBLIC_CREEM_PRICE_PRO_MONTHLY || "pro_monthly",
   PRO_YEARLY: process.env.NEXT_PUBLIC_CREEM_PRICE_PRO_YEARLY || "pro_yearly",
   ULTRA_MONTHLY:
     process.env.NEXT_PUBLIC_CREEM_PRICE_ULTRA_MONTHLY || "ultra_monthly",

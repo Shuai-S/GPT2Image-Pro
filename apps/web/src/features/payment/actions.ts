@@ -3,10 +3,7 @@
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
-import {
-  getBaseUrl,
-  paymentConfig,
-} from "@repo/shared/config/payment";
+import { getBaseUrl, paymentConfig } from "@repo/shared/config/payment";
 import { findRuntimePlanByPriceId } from "@repo/shared/config/payment-runtime";
 import { db } from "@repo/database";
 import { subscription } from "@repo/database/schema";
@@ -15,9 +12,10 @@ import { logEvent } from "@repo/shared/logger";
 import { protectedAction } from "@repo/shared/safe-action";
 import {
   createRuntimeEpayPurchase,
-  isRuntimeEpayPaymentProvider,
+  getRuntimePaymentProvider,
   saveEpayOrder,
 } from "@repo/shared/payment/epay";
+import { createRuntimeAlipayPurchase } from "@repo/shared/payment/alipay";
 
 import { creem } from "./creem";
 import { createSubscriptionCheckoutQuote } from "./subscription-upgrade";
@@ -66,25 +64,28 @@ export const createCheckoutSession = protectedAction
     const upgradeQuote = hasActiveSub
       ? await createSubscriptionCheckoutQuote(existingSub, priceId)
       : null;
-    const useEpay = await isRuntimeEpayPaymentProvider();
+    const paymentProvider = await getRuntimePaymentProvider();
+    const useLocalOrderProvider =
+      paymentProvider === "epay" || paymentProvider === "alipay";
 
     logEvent("payment.checkout.started", {
       userId,
       priceId,
       planId: plan.id,
-      provider: useEpay ? "epay" : "creem",
+      provider: paymentProvider,
       checkoutMode: upgradeQuote ? "upgrade" : "new_subscription",
       amountDue: upgradeQuote?.amountDue ?? price.amount,
       prorationCredit: upgradeQuote?.prorationCredit,
     });
 
-    if (useEpay) {
+    if (useLocalOrderProvider) {
       const outTradeNo = `SUB${Date.now()}${crypto.randomUUID().slice(0, 8)}`;
       const amountDue = upgradeQuote?.amountDue ?? price.amount;
       const metadata = {
         type: "subscription" as const,
         userId,
         outTradeNo,
+        provider: paymentProvider,
         priceId,
         planId: plan.id,
         checkoutMode: upgradeQuote
@@ -98,13 +99,17 @@ export const createCheckoutSession = protectedAction
         upgradeFromPriceId: upgradeQuote?.upgradeFromPriceId,
       };
       await saveEpayOrder(metadata, amountDue);
-      const checkout = await createRuntimeEpayPurchase({
+      const purchaseInput = {
         outTradeNo,
         name: upgradeQuote
           ? `GPT2IMAGE upgrade to ${plan.name} ${price.interval ?? "subscription"}`
           : `GPT2IMAGE ${plan.name} ${price.interval ?? "subscription"}`,
         money: amountDue,
-      });
+      };
+      const checkout =
+        paymentProvider === "alipay"
+          ? await createRuntimeAlipayPurchase(purchaseInput)
+          : await createRuntimeEpayPurchase(purchaseInput);
 
       return {
         url: checkout.url,

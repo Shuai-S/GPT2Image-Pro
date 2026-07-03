@@ -46,6 +46,13 @@ export type SettingKey =
   | "NEXT_PUBLIC_CREEM_PRICE_ENTERPRISE_YEARLY"
   | "CREEM_API_KEY"
   | "CREEM_WEBHOOK_SECRET"
+  | "ALIPAY_APP_ID"
+  | "ALIPAY_APP_PRIVATE_KEY"
+  | "ALIPAY_PUBLIC_KEY"
+  | "ALIPAY_GATEWAY_URL"
+  | "ALIPAY_NOTIFY_URL"
+  | "ALIPAY_CHARSET"
+  | "ALIPAY_PAYMENT_MODE"
   | "EPAY_PID"
   | "EPAY_KEY"
   | "EPAY_API_URL"
@@ -537,6 +544,7 @@ export const SYSTEM_SETTING_DEFINITIONS = [
       { label: "不启用(自用)", value: "none" },
       { label: "Creem", value: "creem" },
       { label: "易支付", value: "epay" },
+      { label: "支付宝官方", value: "alipay" },
     ],
     defaultValue: "creem",
   },
@@ -551,6 +559,7 @@ export const SYSTEM_SETTING_DEFINITIONS = [
       { label: "不启用(自用)", value: "none" },
       { label: "Creem", value: "creem" },
       { label: "易支付", value: "epay" },
+      { label: "支付宝官方", value: "alipay" },
     ],
     defaultValue: "creem",
     requiresRebuild: true,
@@ -570,6 +579,64 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     category: "payment",
     valueType: "string",
     secret: true,
+  },
+  {
+    key: "ALIPAY_APP_ID",
+    label: "支付宝 AppID",
+    description: "支付宝开放平台应用 AppID。",
+    category: "payment",
+    valueType: "string",
+  },
+  {
+    key: "ALIPAY_APP_PRIVATE_KEY",
+    label: "支付宝应用私钥",
+    description: "支付宝开放平台 RSA2 应用私钥，支持 PEM 或单行 base64。",
+    category: "payment",
+    valueType: "string",
+    secret: true,
+  },
+  {
+    key: "ALIPAY_PUBLIC_KEY",
+    label: "支付宝公钥",
+    description: "支付宝开放平台公钥，支持 PEM 或单行 base64。",
+    category: "payment",
+    valueType: "string",
+    secret: true,
+  },
+  {
+    key: "ALIPAY_GATEWAY_URL",
+    label: "支付宝网关地址",
+    description: "留空使用正式网关；沙箱可填支付宝沙箱网关。",
+    category: "payment",
+    valueType: "string",
+    defaultValue: "https://openapi.alipay.com/gateway.do",
+  },
+  {
+    key: "ALIPAY_NOTIFY_URL",
+    label: "支付宝异步通知地址",
+    description: "留空则使用应用地址自动生成。",
+    category: "payment",
+    valueType: "string",
+  },
+  {
+    key: "ALIPAY_CHARSET",
+    label: "支付宝字符集",
+    description: "支付宝签名字符集，默认 utf-8。",
+    category: "payment",
+    valueType: "string",
+    defaultValue: "utf-8",
+  },
+  {
+    key: "ALIPAY_PAYMENT_MODE",
+    label: "支付宝支付模式",
+    description: "电脑网站支付 page 或手机网站支付 wap。",
+    category: "payment",
+    valueType: "select",
+    options: [
+      { label: "电脑网站支付", value: "page" },
+      { label: "手机网站支付", value: "wap" },
+    ],
+    defaultValue: "page",
   },
   {
     key: "EPAY_PID",

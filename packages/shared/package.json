@@ -67,6 +67,7 @@
     "./config/subscription-plan": "./src/config/subscription-plan.ts",
     "./payment/creem": "./src/payment/creem.ts",
     "./payment/creem-amount": "./src/payment/creem-amount.ts",
+    "./payment/alipay": "./src/payment/alipay.ts",
     "./payment/epay": "./src/payment/epay.ts",
     "./payment/types": "./src/payment/types.ts",
     "./monitoring": "./src/monitoring/index.ts",

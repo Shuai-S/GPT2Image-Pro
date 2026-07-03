@@ -53,8 +53,7 @@ const FALLBACK_PACKAGES: CreditPackageCard[] = CREDIT_PACKAGES.filter(
   price: pkg.price,
   description: pkg.description,
   popular: "popular" in pkg ? pkg.popular : false,
-  allowQuantity:
-    "allowQuantity" in pkg ? Boolean(pkg.allowQuantity) : false,
+  allowQuantity: "allowQuantity" in pkg ? Boolean(pkg.allowQuantity) : false,
   maxQuantity:
     "maxQuantity" in pkg && typeof pkg.maxQuantity === "number"
       ? pkg.maxQuantity
@@ -76,7 +75,7 @@ const PACKAGE_DESCRIPTIONS_ZH: Record<string, string> = {
 
 const DEFAULT_MAX_PACKAGE_QUANTITY = 999;
 
-function submitEpayForm(url: string, params: Record<string, string>) {
+function submitPaymentForm(url: string, params: Record<string, string>) {
   const form = document.createElement("form");
   form.action = url;
   form.method = "POST";
@@ -104,7 +103,10 @@ export function BuyCreditPackagesView() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const canceled = searchParams.get("canceled");
-  const copy = useCallback((en: string, zh: string) => (isZh ? zh : en), [isZh]);
+  const copy = useCallback(
+    (en: string, zh: string) => (isZh ? zh : en),
+    [isZh]
+  );
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const {
     execute: fetchPackages,
@@ -117,7 +119,7 @@ export function BuyCreditPackagesView() {
     onSuccess: ({ data }) => {
       if (data?.url) {
         if (data.method === "POST" && data.params) {
-          submitEpayForm(data.url, data.params);
+          submitPaymentForm(data.url, data.params);
         } else {
           window.location.href = data.url;
         }
@@ -149,10 +151,9 @@ export function BuyCreditPackagesView() {
   const handlePurchase = (packageId: string) => {
     execute({
       packageId,
-      quantity:
-        packages.find((pkg) => pkg.id === packageId)?.allowQuantity
-          ? (quantities[packageId] ?? 1)
-          : 1,
+      quantity: packages.find((pkg) => pkg.id === packageId)?.allowQuantity
+        ? (quantities[packageId] ?? 1)
+        : 1,
     });
   };
 
@@ -285,9 +286,7 @@ export function BuyCreditPackagesView() {
                         disabled={
                           quantity <= 1 || isPending || isPackagesLoading
                         }
-                        onClick={() =>
-                          setPackageQuantity(pkg.id, quantity - 1)
-                        }
+                        onClick={() => setPackageQuantity(pkg.id, quantity - 1)}
                       >
                         <Minus className="h-4 w-4" />
                       </Button>
@@ -299,10 +298,7 @@ export function BuyCreditPackagesView() {
                         className="h-8 border-0 text-center shadow-none focus-visible:ring-0"
                         disabled={isPending || isPackagesLoading}
                         onChange={(event) =>
-                          setPackageQuantity(
-                            pkg.id,
-                            Number(event.target.value)
-                          )
+                          setPackageQuantity(pkg.id, Number(event.target.value))
                         }
                       />
                       <Button
@@ -316,9 +312,7 @@ export function BuyCreditPackagesView() {
                           isPending ||
                           isPackagesLoading
                         }
-                        onClick={() =>
-                          setPackageQuantity(pkg.id, quantity + 1)
-                        }
+                        onClick={() => setPackageQuantity(pkg.id, quantity + 1)}
                       >
                         <Plus className="h-4 w-4" />
                       </Button>
@@ -341,7 +335,10 @@ export function BuyCreditPackagesView() {
                   </li>
                   <li className="flex items-center gap-2 text-muted-foreground">
                     <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />
-                    {copy("Batch expiry shown in Usage", "有效期可在用量页查看")}
+                    {copy(
+                      "Batch expiry shown in Usage",
+                      "有效期可在用量页查看"
+                    )}
                   </li>
                   <li className="flex items-center gap-2 text-muted-foreground">
                     <Check className="h-3.5 w-3.5 shrink-0 text-foreground" />¥

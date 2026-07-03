@@ -105,8 +105,9 @@ describe("verifyEpayParams", () => {
   });
 
   it("rejects a missing signature without throwing", () => {
-    expect(verifyEpayParams({ out_trade_no: "T1", money: "10.00" }).verifyStatus)
-      .toBe(false);
+    expect(
+      verifyEpayParams({ out_trade_no: "T1", money: "10.00" }).verifyStatus
+    ).toBe(false);
   });
 
   it("maps gateway fields and forwards param only when present", () => {
@@ -166,6 +167,7 @@ describe("encodeEpayMetadata / decodeEpayMetadata", () => {
       type: "credit_purchase",
       userId: "user-1",
       outTradeNo: "T1",
+      provider: "alipay",
       packageId: "pack-1",
       quantity: 3,
       creditPlan: "pro",
