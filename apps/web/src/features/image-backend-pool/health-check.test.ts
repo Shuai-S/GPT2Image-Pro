@@ -19,15 +19,19 @@ describe("interpretImageHealthResult", () => {
     expect(r.status).toBe("ok");
     expect(r.imageReturned).toBe(true);
     expect(r.latencyMs).toBe(120);
+    expect(r.previewImageUrl).toBe("data:image/png;base64,abc");
   });
 
   it("有 imageUrl 或 imageOutputs 判为 ok", () => {
     expect(
       interpretImageHealthResult({ imageUrl: "https://x/a.png" }, 1).status
     ).toBe("ok");
-    expect(
-      interpretImageHealthResult({ imageOutputs: [{}] }, 1).status
-    ).toBe("ok");
+    const outputResult = interpretImageHealthResult(
+      { imageOutputs: [{ imageUrl: "https://x/b.png" }] },
+      1
+    );
+    expect(outputResult.status).toBe("ok");
+    expect(outputResult.previewImageUrl).toBe("https://x/b.png");
   });
 
   it("无图但带 no image output 错误 → no_image", () => {
@@ -40,6 +44,18 @@ describe("interpretImageHealthResult", () => {
     );
     expect(r.ok).toBe(false);
     expect(r.status).toBe("no_image");
+    expect(r.diagnosticText).toContain("图像生成工具");
+  });
+
+  it("无图但有文本响应时展示响应内容", () => {
+    const r = interpretImageHealthResult(
+      { responseText: "I cannot generate images here." },
+      80
+    );
+    expect(r.ok).toBe(false);
+    expect(r.status).toBe("no_image");
+    expect(r.message).toBe("I cannot generate images here.");
+    expect(r.diagnosticText).toBe("I cannot generate images here.");
   });
 
   it("鉴权错误 → auth_failed", () => {
@@ -82,14 +98,16 @@ describe("classifyImageHealthError", () => {
 
   it("无图像产出/缺工具 → no_image", () => {
     expect(
-      classifyImageHealthError("Upstream returned no image output: 已生成图片。")
+      classifyImageHealthError(
+        "Upstream returned no image output: 已生成图片。"
+      )
     ).toBe("no_image");
     expect(classifyImageHealthError("API returned no image data")).toBe(
       "no_image"
     );
-    expect(classifyImageHealthError("未提供 image_generation 图像生成工具")).toBe(
-      "no_image"
-    );
+    expect(
+      classifyImageHealthError("未提供 image_generation 图像生成工具")
+    ).toBe("no_image");
   });
 
   it("超时/连接/网络 → unreachable", () => {

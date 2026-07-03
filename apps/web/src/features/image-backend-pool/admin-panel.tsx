@@ -58,6 +58,7 @@ import {
   Trash2,
   UserRound,
 } from "lucide-react";
+import Image from "next/image";
 import { useAction } from "next-safe-action/hooks";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -101,6 +102,7 @@ import {
   updateSub2ApiAutoSyncTaskOptionsAction,
 } from "./actions";
 import { ChatgptRegisterTab } from "./chatgpt-register-tab";
+import type { ImageApiHealthResult } from "./health-check";
 import { parseImportTokensText } from "./import-token-parser";
 import type {
   ImageBackendApiInterfaceMode,
@@ -245,6 +247,11 @@ type ChatCompletionsUpstreamModeFormValue = "responses" | "chat_completions";
 type ImagesUpstreamModeFormValue = ImagesUpstreamMode;
 type TokenSyncMode = "web" | "responses" | "both";
 type Sub2ApiPlanFilter = "all" | "free" | "plus" | "pro" | "non_free";
+
+type ApiHealthCheckView = {
+  result: ImageApiHealthResult;
+  checkedAt: string;
+};
 
 type Sub2ApiSourceGroup = {
   id: string;
@@ -574,6 +581,14 @@ function apiInterfaceModeLabel(value: ImageBackendApiInterfaceMode) {
     API_INTERFACE_MODE_OPTIONS.find((option) => option.value === value)
       ?.label || "仅 Images"
   );
+}
+
+function apiHealthStatusLabel(value: ImageApiHealthResult["status"]) {
+  if (value === "ok") return "成功";
+  if (value === "no_image") return "未返回图片";
+  if (value === "auth_failed") return "鉴权失败";
+  if (value === "unreachable") return "无法连接";
+  return "上游错误";
 }
 
 function childGroupNames(groups: Group[], childGroupIds: string[]) {
@@ -1767,35 +1782,12 @@ export function ImageBackendPoolAdminPanel({
       toast.error(error.serverError || "更新「遇错仍可用」失败"),
   });
 
-  // 测活：记录正在测试的成员 id，仅该行显示加载态；结果按状态提示并刷新列表。
-  const [testingApiId, setTestingApiId] = useState<string | null>(null);
-  const { execute: testApi } = useAction(testImageBackendApiAction, {
-    onSuccess: ({ data }) => {
-      setTestingApiId(null);
-      const result = data?.result;
-      const name = data?.name ?? "";
-      if (result?.ok) {
-        toast.success(
-          `测活成功：${name} 真实返回了图片（${result.latencyMs}ms）`
-        );
-      } else {
-        const detail =
-          result?.status === "no_image"
-            ? "连接成功但未返回图片（可能模型不支持出图）"
-            : result?.status === "auth_failed"
-              ? "密钥被拒绝"
-              : result?.status === "unreachable"
-                ? "无法连接或超时"
-                : "出图失败";
-        toast.error(`测活失败：${name} ${detail}`);
-      }
-      reload();
-    },
-    onError: ({ error }) => {
-      setTestingApiId(null);
-      toast.error(error.serverError || "测活失败");
-    },
-  });
+  // 测活：按 API id 分别记录进行中状态，避免多个渠道并行测试时互相覆盖加载态。
+  const [testingApiIds, setTestingApiIds] = useState<string[]>([]);
+  const [apiHealthChecks, setApiHealthChecks] = useState<
+    Record<string, ApiHealthCheckView>
+  >({});
+  const { executeAsync: testApi } = useAction(testImageBackendApiAction);
 
   const { executeAsync: runSub2ApiManualSync } = useAction(
     runSub2ApiManualSyncAction
@@ -1922,6 +1914,75 @@ export function ImageBackendPoolAdminPanel({
       onError: ({ error }) =>
         toast.error(error.serverError || "批量刷新账号远端信息失败"),
     });
+
+  /**
+   * 对单个 API 后端发起真实测活，并只更新该行的加载态。
+   *
+   * @param apiId 需要测活的 imageBackendApi id。
+   * @returns Promise<void>；成功或可识别失败会提示结果，服务端异常提示通用错误。
+   * @sideEffects 消耗一次上游出图额度、更新后端健康字段、触发列表刷新。
+   */
+  const runApiHealthCheck = async (apiId: string) => {
+    setTestingApiIds((current) =>
+      current.includes(apiId) ? current : [...current, apiId]
+    );
+
+    try {
+      const response = await testApi({ id: apiId });
+      if (response?.serverError) {
+        throw new Error(response.serverError);
+      }
+
+      const result = response?.data?.result;
+      const name = response?.data?.name ?? "";
+      if (!result) {
+        throw new Error("测活失败");
+      }
+      setApiHealthChecks((current) => ({
+        ...current,
+        [apiId]: {
+          result,
+          checkedAt: new Date().toISOString(),
+        },
+      }));
+
+      if (result.ok) {
+        toast.success(
+          `测活成功：${name} 真实返回了图片（${result.latencyMs}ms）`
+        );
+      } else {
+        const detail =
+          result.status === "no_image"
+            ? "连接成功但未返回图片（可能模型不支持出图）"
+            : result.status === "auth_failed"
+              ? "密钥被拒绝"
+              : result.status === "unreachable"
+                ? "无法连接或超时"
+                : "出图失败";
+        toast.error(`测活失败：${name} ${detail}`);
+      }
+      reload();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "测活失败";
+      setApiHealthChecks((current) => ({
+        ...current,
+        [apiId]: {
+          result: {
+            ok: false,
+            status: "error",
+            latencyMs: 0,
+            imageReturned: false,
+            message,
+            diagnosticText: message,
+          },
+          checkedAt: new Date().toISOString(),
+        },
+      }));
+      toast.error(message);
+    } finally {
+      setTestingApiIds((current) => current.filter((id) => id !== apiId));
+    }
+  };
 
   const runManualRefreshTokenImport = async () => {
     if (isImportingManualRefreshTokens) return;
@@ -4056,148 +4117,198 @@ export function ImageBackendPoolAdminPanel({
           )}
 
           <div className="grid gap-3">
-            {apis.map((api) => (
-              <Card key={api.id}>
-                <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Plug className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-medium">{api.name}</span>
-                      <Badge variant="outline">
-                        {apiInterfaceModeLabel(api.interfaceMode)}
-                      </Badge>
-                      <Badge variant="outline">
-                        Chat:{" "}
-                        {api.chatCompletionsUpstreamMode === "chat_completions"
-                          ? "原生"
-                          : "Responses"}
-                      </Badge>
-                      <Badge variant="outline">
-                        Images:{" "}
-                        {api.interfaceMode === "task"
-                          ? "Task"
-                          : api.imagesUpstreamMode === "responses"
-                          ? "Responses"
-                          : "原生"}
-                      </Badge>
-                      <Badge variant="secondary">{api.status}</Badge>
-                      {isCoolingDown(api.cooldownUntil) && (
-                        <Badge variant="secondary">冷却中</Badge>
+            {apis.map((api) => {
+              const healthCheck = apiHealthChecks[api.id];
+
+              return (
+                <Card key={api.id}>
+                  <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Plug className="h-4 w-4 text-muted-foreground" />
+                        <span className="font-medium">{api.name}</span>
+                        <Badge variant="outline">
+                          {apiInterfaceModeLabel(api.interfaceMode)}
+                        </Badge>
+                        <Badge variant="outline">
+                          Chat:{" "}
+                          {api.chatCompletionsUpstreamMode ===
+                          "chat_completions"
+                            ? "原生"
+                            : "Responses"}
+                        </Badge>
+                        <Badge variant="outline">
+                          Images:{" "}
+                          {api.interfaceMode === "task"
+                            ? "Task"
+                            : api.imagesUpstreamMode === "responses"
+                              ? "Responses"
+                              : "原生"}
+                        </Badge>
+                        <Badge variant="secondary">{api.status}</Badge>
+                        {isCoolingDown(api.cooldownUntil) && (
+                          <Badge variant="secondary">冷却中</Badge>
+                        )}
+                        {!api.isEnabled && (
+                          <Badge variant="secondary">停用</Badge>
+                        )}
+                        {api.alwaysActive && (
+                          <Badge variant="outline">遇错常驻</Badge>
+                        )}
+                      </div>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {api.baseUrl} · {groupNames(groups, apiGroupIds(api))} ·{" "}
+                        优先级 {api.priority} · 最大并发数 {api.concurrency} ·{" "}
+                        {formatDate(api.lastUsedAt, timeZone)}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {api.interfaceMode === "mixed"
+                          ? `混合接口；文生图/图生图走 ${api.imagesUpstreamMode === "responses" ? "Responses" : "Images"}，Chat 按独立开关调度。`
+                          : api.interfaceMode === "task"
+                            ? "Task 任务接口；文生图/图生图先提交任务，再轮询任务结果，不参与 Chat/Agent/Responses 调度。"
+                            : api.interfaceMode === "responses"
+                              ? `仅 Responses；${api.imagesUpstreamMode === "responses" ? "可承接文生图/图生图转换" : "默认不承接文生图/图生图"}。`
+                              : "仅 Images；只用于文生图/图生图，不参与 Chat/Agent/Responses 调度。"}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        成功 {api.successCount} · 失败 {api.failCount} · 冷却至{" "}
+                        {formatCooldown(api.cooldownUntil, timeZone)}
+                      </p>
+                      {api.lastError && (
+                        <p className="mt-1 line-clamp-2 text-xs text-destructive">
+                          {formatOptionalDate(api.lastErrorAt, timeZone)} ·{" "}
+                          {api.lastError}
+                        </p>
                       )}
-                      {!api.isEnabled && (
-                        <Badge variant="secondary">停用</Badge>
-                      )}
-                      {api.alwaysActive && (
-                        <Badge variant="outline">遇错常驻</Badge>
+                      {healthCheck && (
+                        <div
+                          className={cn(
+                            "mt-4 max-w-3xl rounded-md border p-3",
+                            healthCheck.result.ok
+                              ? "border-emerald-200 bg-emerald-50/60 dark:border-emerald-900 dark:bg-emerald-950/20"
+                              : "border-destructive/30 bg-destructive/5"
+                          )}
+                        >
+                          <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+                            <Badge
+                              variant={
+                                healthCheck.result.ok ? "outline" : "secondary"
+                              }
+                            >
+                              最近测活：
+                              {apiHealthStatusLabel(healthCheck.result.status)}
+                            </Badge>
+                            <span className="text-muted-foreground">
+                              {formatOptionalDate(
+                                healthCheck.checkedAt,
+                                timeZone
+                              )}
+                            </span>
+                            <span className="text-muted-foreground">
+                              {healthCheck.result.latencyMs}ms
+                            </span>
+                          </div>
+                          {healthCheck.result.ok &&
+                          healthCheck.result.previewImageUrl ? (
+                            <Image
+                              src={healthCheck.result.previewImageUrl}
+                              alt={`${api.name} 测活返回图片`}
+                              width={320}
+                              height={320}
+                              unoptimized
+                              className="h-auto max-h-72 w-full max-w-sm rounded-md border bg-background object-contain"
+                            />
+                          ) : (
+                            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-background p-3 text-xs text-foreground">
+                              {healthCheck.result.diagnosticText ||
+                                healthCheck.result.message}
+                            </pre>
+                          )}
+                        </div>
                       )}
                     </div>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {api.baseUrl} · {groupNames(groups, apiGroupIds(api))} ·{" "}
-                      优先级 {api.priority} · 最大并发数 {api.concurrency} ·{" "}
-                      {formatDate(api.lastUsedAt, timeZone)}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {api.interfaceMode === "mixed"
-                        ? `混合接口；文生图/图生图走 ${api.imagesUpstreamMode === "responses" ? "Responses" : "Images"}，Chat 按独立开关调度。`
-                        : api.interfaceMode === "task"
-                          ? "Task 任务接口；文生图/图生图先提交任务，再轮询任务结果，不参与 Chat/Agent/Responses 调度。"
-                          : api.interfaceMode === "responses"
-                          ? `仅 Responses；${api.imagesUpstreamMode === "responses" ? "可承接文生图/图生图转换" : "默认不承接文生图/图生图"}。`
-                          : "仅 Images；只用于文生图/图生图，不参与 Chat/Agent/Responses 调度。"}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      成功 {api.successCount} · 失败 {api.failCount} · 冷却至{" "}
-                      {formatCooldown(api.cooldownUntil, timeZone)}
-                    </p>
-                    {api.lastError && (
-                      <p className="mt-1 line-clamp-2 text-xs text-destructive">
-                        {formatOptionalDate(api.lastErrorAt, timeZone)} ·{" "}
-                        {api.lastError}
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {!readOnly && (
-                      <>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={testingApiId === api.id}
-                          onClick={() => {
-                            setTestingApiId(api.id);
-                            testApi({ id: api.id });
-                          }}
-                        >
-                          {testingApiId === api.id ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : (
-                            <Activity className="mr-2 h-4 w-4" />
-                          )}
-                          测活
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={isSettingApiEnabled}
-                          onClick={() =>
-                            setApiEnabled({
-                              id: api.id,
-                              isEnabled: !api.isEnabled,
-                            })
-                          }
-                        >
-                          {api.isEnabled ? (
-                            <>
-                              <Ban className="mr-2 h-4 w-4" />
-                              停用
-                            </>
-                          ) : (
-                            <>
-                              <CheckCircle2 className="mr-2 h-4 w-4" />
-                              启用
-                            </>
-                          )}
-                        </Button>
-                        <Button
-                          variant={api.alwaysActive ? "secondary" : "outline"}
-                          size="sm"
-                          disabled={isSettingApiAlwaysActive}
-                          onClick={() =>
-                            setApiAlwaysActive({
-                              id: api.id,
-                              alwaysActive: !api.alwaysActive,
-                            })
-                          }
-                          title="开启后该 API 遇错也不下线、永不冷却，始终参与调度"
-                        >
-                          <InfinityIcon className="mr-2 h-4 w-4" />
-                          {api.alwaysActive ? "取消常驻" : "遇错常驻"}
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => editApi(api)}
-                        >
-                          <Pencil className="mr-2 h-4 w-4" />
-                          编辑
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={isDeletingMember}
-                          onClick={() =>
-                            deleteMember({ type: "api", id: api.id })
-                          }
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          删除
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                    <div className="flex flex-wrap gap-2">
+                      {!readOnly && (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={testingApiIds.includes(api.id)}
+                            onClick={() => {
+                              void runApiHealthCheck(api.id);
+                            }}
+                          >
+                            {testingApiIds.includes(api.id) ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <Activity className="mr-2 h-4 w-4" />
+                            )}
+                            测活
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={isSettingApiEnabled}
+                            onClick={() =>
+                              setApiEnabled({
+                                id: api.id,
+                                isEnabled: !api.isEnabled,
+                              })
+                            }
+                          >
+                            {api.isEnabled ? (
+                              <>
+                                <Ban className="mr-2 h-4 w-4" />
+                                停用
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle2 className="mr-2 h-4 w-4" />
+                                启用
+                              </>
+                            )}
+                          </Button>
+                          <Button
+                            variant={api.alwaysActive ? "secondary" : "outline"}
+                            size="sm"
+                            disabled={isSettingApiAlwaysActive}
+                            onClick={() =>
+                              setApiAlwaysActive({
+                                id: api.id,
+                                alwaysActive: !api.alwaysActive,
+                              })
+                            }
+                            title="开启后该 API 遇错也不下线、永不冷却，始终参与调度"
+                          >
+                            <InfinityIcon className="mr-2 h-4 w-4" />
+                            {api.alwaysActive ? "取消常驻" : "遇错常驻"}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => editApi(api)}
+                          >
+                            <Pencil className="mr-2 h-4 w-4" />
+                            编辑
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={isDeletingMember}
+                            onClick={() =>
+                              deleteMember({ type: "api", id: api.id })
+                            }
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            删除
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         </TabsContent>
 

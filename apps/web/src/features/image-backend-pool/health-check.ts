@@ -41,6 +41,10 @@ export interface ImageApiHealthResult {
   latencyMs: number;
   imageReturned: boolean;
   message: string;
+  /** 成功时可直接用于前端预览的图片 URL；base64 会被包装成 data URL。 */
+  previewImageUrl?: string;
+  /** 失败时展示给管理员排查的上游响应摘要。 */
+  diagnosticText?: string;
 }
 
 /** 测活入参：足以构造与真实出图一致的上游路由。 */
@@ -65,6 +69,43 @@ const MIN_TIMEOUT_MS = 5_000;
 const MAX_TIMEOUT_MS = 180_000;
 const HEALTH_CHECK_PROMPT =
   "Health check: a small solid red circle centered on a plain white background.";
+const MAX_DIAGNOSTIC_TEXT_LENGTH = 4000;
+
+type HealthCheckImageOutput = {
+  imageBase64?: string;
+  imageUrl?: string;
+};
+
+/** 把裸 base64 包装成可预览 data URL；上游直接返回 URL 时原样使用。 */
+function normalizePreviewImageUrl(input: HealthCheckImageOutput | undefined) {
+  if (!input) return undefined;
+  if (input.imageUrl) return input.imageUrl;
+  if (!input.imageBase64) return undefined;
+  if (input.imageBase64.startsWith("data:image/")) return input.imageBase64;
+  return `data:image/png;base64,${input.imageBase64}`;
+}
+
+/** 从 generateImage 结果中提取第一张可预览图片。 */
+function getPreviewImageUrl(result: {
+  imageBase64?: string;
+  imageUrl?: string;
+  imageOutputs?: HealthCheckImageOutput[];
+}) {
+  return normalizePreviewImageUrl(
+    result.imageBase64 || result.imageUrl
+      ? { imageBase64: result.imageBase64, imageUrl: result.imageUrl }
+      : result.imageOutputs?.find((item) => item.imageBase64 || item.imageUrl)
+  );
+}
+
+/** 压缩失败响应文本，避免超长上游响应撑爆管理页。 */
+function compactDiagnosticText(value: string | undefined) {
+  const trimmed = (value || "").trim();
+  if (!trimmed) return undefined;
+  return trimmed.length > MAX_DIAGNOSTIC_TEXT_LENGTH
+    ? `${trimmed.slice(0, MAX_DIAGNOSTIC_TEXT_LENGTH)}...`
+    : trimmed;
+}
 
 /** 把上游错误文本归类为非 ok 的测活状态（纯函数，便于单测）。 */
 export function classifyImageHealthError(
@@ -111,19 +152,36 @@ export function interpretImageHealthResult(
   result: {
     imageBase64?: string;
     imageUrl?: string;
-    imageOutputs?: unknown[];
+    imageOutputs?: HealthCheckImageOutput[];
+    responseText?: string;
+    responseThinking?: string;
+    responseAgent?: string;
     error?: string;
   },
   latencyMs: number
 ): ImageApiHealthResult {
+  const previewImageUrl = getPreviewImageUrl(result);
   const imageReturned = Boolean(
     result.imageBase64 ||
       result.imageUrl ||
       (result.imageOutputs && result.imageOutputs.length > 0)
   );
   if (imageReturned) {
-    return { ok: true, status: "ok", latencyMs, imageReturned: true, message: "OK" };
+    return {
+      ok: true,
+      status: "ok",
+      latencyMs,
+      imageReturned: true,
+      message: "OK",
+      previewImageUrl,
+    };
   }
+  const diagnosticText = compactDiagnosticText(
+    result.error ||
+      result.responseText ||
+      result.responseAgent ||
+      result.responseThinking
+  );
   if (result.error) {
     return {
       ok: false,
@@ -131,14 +189,17 @@ export function interpretImageHealthResult(
       latencyMs,
       imageReturned: false,
       message: result.error,
+      diagnosticText,
     };
   }
+  const message = diagnosticText || "上游未返回图片数据";
   return {
     ok: false,
     status: "no_image",
     latencyMs,
     imageReturned: false,
-    message: "上游未返回图片数据",
+    message,
+    diagnosticText: message,
   };
 }
 
