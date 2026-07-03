@@ -2,12 +2,16 @@
  * v1 可编辑文件生成 handler:POST /v1/ppts、POST /v1/psds。
  *
  * 职责(薄传输适配):鉴权(Bearer)→ 能力门禁(export.ppt/export.psd)→ 解析 body →
- *   调 runEditableFileForUser(单一账号池/计费真相)→ 长任务用 keep-alive 撑到出结果返回。
+ *   调 runEditableFileForUser(单一账号池/计费真相)。
  * 契约对齐 basketikun/chatgpt2api:{ client_task_id?, prompt, base64_images[] }。PSD 强制非空图。
  * 计费/账号池/storage 全在 service;handler 不碰钱。
  *
- * 注:本期为同步(keep-alive)返回;异步任务态(queued→轮询 /v1/editable-file-tasks)+
- *   client_task_id 层幂等见后续迭代(DB 任务表)。当前 client_task_id 仅作计费 sourceRef 幂等键。
+ * 两种返回(与图像/视频 API 一致):
+ * - 同步(默认):keep-alive JSON 撑住长任务,跑完返回 editable_file_task 结果。
+ * - 异步(async:true 或 ?async=true):立即返回 task_<uuid>,后台跑完更新任务;可轮询
+ *   GET /v1/editable-file-tasks/{task_id} 或用 callback_url 完成回调。任务为进程内内存态、
+ *   30 分钟 TTL、多实例不共享(可编辑文件无 DB generation 行,故不作持久回退)。
+ * client_task_id 作计费 sourceRef 幂等键(防重复扣;任务级幂等为后续迭代)。
  */
 import { randomUUID } from "node:crypto";
 import { withApiLogging } from "@repo/shared/api-logger";
@@ -15,10 +19,18 @@ import { canUsePlanCapability } from "@repo/shared/subscription/services/plan-ca
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 
+import {
+  completeAsyncImageTask,
+  createAsyncEditableFileTask,
+  postAsyncImageCallback,
+  toAsyncImageTaskResponse,
+  validateCallbackUrl,
+} from "@/features/external-api/async-image-tasks";
 import { authenticateExternalApiRequest } from "@/features/external-api/auth";
 import {
   createJsonKeepAliveResponse,
   openAIImageError,
+  toOpenAIErrorPayload,
 } from "@/features/external-api/images";
 import type { EditableFileKind } from "@/features/image-generation/chatgpt-web";
 import { runEditableFileForUser } from "@/features/image-generation/editable-file-operations";
@@ -27,6 +39,8 @@ const editableFileSchema = z.object({
   client_task_id: z.string().max(200).optional(),
   prompt: z.string().min(1, "prompt is required").max(8000),
   base64_images: z.array(z.string()).default([]),
+  async: z.boolean().optional(),
+  callback_url: z.string().url().optional(),
 });
 
 function makeEditableFileHandler(
@@ -67,10 +81,28 @@ function makeEditableFileHandler(
       return openAIImageError("base64_images is empty");
     }
 
+    const clientTaskId = parsed.data.client_task_id?.trim();
     // client_task_id 作幂等/审计标识(计费 sourceRef);缺省用服务端 uuid。
-    const taskId = parsed.data.client_task_id?.trim() || randomUUID();
+    const taskId = clientTaskId || randomUUID();
 
-    return createJsonKeepAliveResponse(async () => {
+    const useAsync =
+      parsed.data.async === true ||
+      request.nextUrl.searchParams.get("async") === "true";
+
+    // 回调 URL 提交期校验(强制 https + 公网;完成时再逐跳复检投递)。
+    let callbackUrl: string | undefined;
+    if (parsed.data.callback_url) {
+      try {
+        callbackUrl = await validateCallbackUrl(parsed.data.callback_url);
+      } catch (error) {
+        return openAIImageError(
+          error instanceof Error ? error.message : "Invalid callback_url."
+        );
+      }
+    }
+
+    // 单次生成 + 成功结果构建(sync/async 共用同一产出结构)。
+    const runOnce = async () => {
       const result = await runEditableFileForUser({
         userId: auth.userId,
         apiKeyId: auth.apiKeyId,
@@ -80,10 +112,10 @@ function makeEditableFileHandler(
         taskId,
       });
       return {
-        object: "editable_file_task",
+        object: "editable_file_task" as const,
         id: taskId,
         taskId,
-        status: "success",
+        status: "success" as const,
         kind,
         result: {
           conversation_id: result.conversationId,
@@ -92,7 +124,48 @@ function makeEditableFileHandler(
         },
         credits_charged: result.creditsCharged,
       };
-    });
+    };
+
+    if (useAsync) {
+      const task = createAsyncEditableFileTask({
+        userId: auth.userId,
+        apiKeyId: auth.apiKeyId,
+        kind,
+        clientTaskId,
+      });
+      // 后台跑完更新内存任务 + 可选回调;fire-and-forget(常驻进程,promise 随进程存活)。
+      void (async () => {
+        try {
+          const payload = await runOnce();
+          const completed = completeAsyncImageTask(task.id, {
+            completedObject: "editable_file_task",
+            result: {
+              taskId: payload.taskId,
+              kind: payload.kind,
+              result: payload.result,
+              credits_charged: payload.credits_charged,
+            },
+          });
+          if (completed && callbackUrl) {
+            await postAsyncImageCallback(callbackUrl, completed);
+          }
+        } catch (error) {
+          const errorPayload = toOpenAIErrorPayload(
+            error instanceof Error ? error.message : `${label} generation failed`
+          );
+          const completed = completeAsyncImageTask(task.id, {
+            completedObject: "editable_file_task",
+            error: errorPayload,
+          });
+          if (completed && callbackUrl) {
+            await postAsyncImageCallback(callbackUrl, completed);
+          }
+        }
+      })();
+      return Response.json(toAsyncImageTaskResponse(task));
+    }
+
+    return createJsonKeepAliveResponse(runOnce);
   });
 }
 

@@ -13,6 +13,7 @@ vi.mock("@repo/shared/security/dns-pin", () => ({
 import { fetchWithDnsPin } from "@repo/shared/security/dns-pin";
 import {
   completeAsyncImageTask,
+  createAsyncEditableFileTask,
   createAsyncImageTask,
   type GenerationTaskRow,
   postAsyncImageCallback,
@@ -75,6 +76,44 @@ describe("external async image tasks", () => {
       credits_consumed: 1.2,
       generation_ids: ["gen_1", "gen_2"],
     });
+  });
+
+  it("creates + completes an editable file task keeping object=editable_file_task", () => {
+    const task = createAsyncEditableFileTask({
+      userId: "user_1",
+      apiKeyId: "key_1",
+      kind: "ppt",
+      clientTaskId: "ct_1",
+    });
+    expect(task).toMatchObject({
+      object: "editable_file_task",
+      status: "processing",
+      kind: "ppt",
+      client_task_id: "ct_1",
+    });
+    expect(task.id.startsWith("task_")).toBe(true);
+
+    const completed = completeAsyncImageTask(task.id, {
+      completedObject: "editable_file_task",
+      result: {
+        kind: "ppt",
+        result: { primary_url: "/api/storage/x.pptx", zip_url: null },
+        credits_charged: 25,
+      },
+    });
+    const publicTask = completed && toAsyncImageTaskResponse(completed);
+    expect(publicTask).toMatchObject({
+      id: task.id,
+      // 完成后仍是 editable_file_task(不被误标成 image)
+      object: "editable_file_task",
+      status: "completed",
+      kind: "ppt",
+      result: { primary_url: "/api/storage/x.pptx", zip_url: null },
+      credits_charged: 25,
+    });
+    // 归属字段被剥离,不外泄
+    expect(publicTask && "userId" in publicTask).toBe(false);
+    expect(publicTask && "apiKeyId" in publicTask).toBe(false);
   });
 
   it("maps a completed generation row to a task response with url + image_url", () => {

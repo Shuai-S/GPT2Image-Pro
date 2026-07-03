@@ -97,6 +97,11 @@ const sections = {
           path: "POST /v1/psds",
           kind: "image_generation",
         },
+        {
+          label: "外部可编辑文件异步任务",
+          path: "GET /v1/editable-file-tasks/{task_id}",
+          kind: "image_generation",
+        },
       ],
       resolver: [
         "校验登录态或外部 API Key",
@@ -248,8 +253,8 @@ const sections = {
         ],
         [
           "外接 API 入口",
-          "/v1/chat/completions、/v1/images/generations、/v1/images/edits、/v1/videos/generations、/v1/ppts、/v1/psds、/v1/images/{task_id}、/v1/responses、/v1/agents/images",
-          "/api/v1/* 是同一 handler 的别名；只负责 API Key、OpenAI 兼容请求和响应格式适配。/v1/ppts、/v1/psds 走独立的可编辑文件链路（付费级 web 账号 + 代码解释器），不汇入 runImageGenerationForUser。",
+          "/v1/chat/completions、/v1/images/generations、/v1/images/edits、/v1/videos/generations、/v1/ppts、/v1/psds、/v1/images/{task_id}、/v1/editable-file-tasks/{task_id}、/v1/responses、/v1/agents/images",
+          "/api/v1/* 是同一 handler 的别名；只负责 API Key、OpenAI 兼容请求和响应格式适配。/v1/ppts、/v1/psds 走独立的可编辑文件链路（付费级 web 账号 + 代码解释器），不汇入 runImageGenerationForUser；支持 async:true + GET /v1/editable-file-tasks/{task_id} 轮询与 callback_url。",
         ],
         [
           "共同核心",
@@ -507,6 +512,18 @@ const sections = {
               description:
                 "幂等/审计标识；作扣费 sourceRef（editable-file:{client_task_id}），缺省服务端生成。",
             },
+            {
+              name: "async",
+              requirement: "可选（body async:true 或 URL ?async=true）",
+              description:
+                "开启后立即返回 task_...，后台生成；用 GET /v1/editable-file-tasks/{task_id} 轮询或 callback_url 回调。分钟级长任务建议异步，避免同步连接被中途掐断。",
+            },
+            {
+              name: "callback_url",
+              requirement: "可选",
+              description:
+                "完成回调 webhook（强制 https + 公网）；任务结束时服务端把任务对象 POST 到该地址。",
+            },
           ],
           responses: [
             {
@@ -529,8 +546,59 @@ const sections = {
           ],
           notes: [
             "需付费级 Web 账号（代码解释器）；账号池无可用付费 Web 账号时返回 503 no_available_image_backend。",
-            "当前为同步 keep-alive；异步任务态（queued→轮询）与 client_task_id 任务级幂等为后续迭代（当前为计费层幂等）。",
+            "同步（默认）用 keep-alive JSON 撑到出结果；异步（async:true）立即返回 task_...，任务为进程内内存态（30 分钟 TTL、多实例不共享、重启即清；可编辑文件无 DB generation 行，故不作持久回退）。client_task_id 为计费层幂等（防重复扣），任务级幂等为后续迭代。",
             "/api/v1/ppts、/api/v1/psds 为同一 handler 别名；站内 chat(web) tab 走 session 版 /api/editable-file/generate（同一 service）。",
+          ],
+        },
+        {
+          title: "Get editable file task",
+          method: "GET",
+          path: "/v1/editable-file-tasks/{task_id}",
+          contentType: "无请求体",
+          description:
+            "查询 async:true 创建的可编辑文件（PPT/PSD）任务状态。processing / completed / failed；completed 时含 result.primary_url、result.zip_url 与 credits_charged。",
+          example: `curl https://gpt2image.superapi.buzz/v1/editable-file-tasks/task_xxx \\
+  -H "Authorization: Bearer $GPT2IMAGE_API_KEY"`,
+          responseExample: `{
+  "id": "task_xxx",
+  "object": "editable_file_task",
+  "kind": "ppt",
+  "status": "completed",
+  "result": {
+    "primary_url": "/api/storage/…/xxx.pptx?sig=…",
+    "zip_url": "/api/storage/…/xxx.zip?sig=…"
+  },
+  "credits_charged": 25
+}`,
+          fields: [
+            {
+              name: "Authorization",
+              requirement: "必填 header",
+              description: "Bearer <本站 API Key>；只返回归属本人的任务。",
+            },
+            {
+              name: "task_id",
+              requirement: "路径参数",
+              description: "async 生成返回的 task_...。",
+            },
+          ],
+          responses: [
+            {
+              name: "status",
+              description: "processing / completed / failed。",
+            },
+            {
+              name: "result.primary_url / zip_url",
+              description: "completed 时的主产物与素材 zip 签名下载 URL。",
+            },
+            {
+              name: "credits_charged",
+              description: "已扣积分（completed）。",
+            },
+          ],
+          notes: [
+            "内存任务 30 分钟 TTL、多实例不共享、重启即清；过期或跨实例即 404。",
+            "只返回 object=editable_file_task 的任务（与 /v1/images/{id}、/v1/videos/{id} 隔离）。",
           ],
         },
         {
