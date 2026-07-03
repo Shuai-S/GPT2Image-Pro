@@ -1,10 +1,5 @@
 "use client";
 
-import { Database, Download, Loader2, Plus, Save, Trash2 } from "lucide-react";
-import { useAction } from "next-safe-action/hooks";
-import { useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
-
 import { Badge } from "@repo/ui/components/badge";
 import { Button } from "@repo/ui/components/button";
 import {
@@ -23,8 +18,23 @@ import {
   SelectValue,
 } from "@repo/ui/components/select";
 import { Switch } from "@repo/ui/components/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@repo/ui/components/tabs";
 import { Textarea } from "@repo/ui/components/textarea";
+import { Database, Download, Loader2, Plus, Save, Trash2 } from "lucide-react";
+import { useAction } from "next-safe-action/hooks";
+import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
+import {
+  DEFAULT_MODEL_PRICING_RULES,
+  type ModelPricingRulesConfig,
+  normalizeModelPricingRulesConfig,
+  type PublicModelPricingRule,
+} from "../../model-pricing";
 import { formatDateInTimeZone } from "../../time-zone";
 
 import {
@@ -33,12 +43,12 @@ import {
   initializeSystemSettingsDefaultsAction,
   updateSystemSettingsAction,
 } from "../actions";
-import { SETTING_CATEGORIES } from "../definitions";
 import type {
   SettingCategory,
   SettingDefinition,
   SettingKey,
 } from "../definitions";
+import { SETTING_CATEGORIES } from "../definitions";
 
 type SettingSnapshotItem = SettingDefinition & {
   value: string;
@@ -307,6 +317,8 @@ type CreditPackageDraft = {
 type CreditPackageMatrixDraft = {
   packages: CreditPackageDraft[];
 };
+
+type ModelPricingRuleDraft = PublicModelPricingRule;
 
 function formatJsonExample(value: unknown) {
   return JSON.stringify(value ?? {}, null, 2);
@@ -640,7 +652,9 @@ function compactCreditPackageMatrixDraft(matrix: CreditPackageMatrixDraft) {
         price: Number(pkg.price) || 1,
         popular: pkg.popular,
         visible: pkg.visible,
-        ...(pkg.requiresPlan !== "none" ? { requiresPlan: pkg.requiresPlan } : {}),
+        ...(pkg.requiresPlan !== "none"
+          ? { requiresPlan: pkg.requiresPlan }
+          : {}),
         allowQuantity: pkg.allowQuantity,
         maxQuantity: Number(pkg.maxQuantity) || 1,
         ...(pkg.creemProductId.trim()
@@ -655,7 +669,40 @@ function compactCreditPackageMatrixDraft(matrix: CreditPackageMatrixDraft) {
   };
 }
 
+function compactModelPricingRulesConfig(config: ModelPricingRulesConfig) {
+  return {
+    version: 1,
+    rules: config.rules.map((rule) => ({
+      id: rule.id.trim(),
+      name: rule.name.trim() || rule.id.trim(),
+      ...(rule.description?.trim()
+        ? { description: rule.description.trim() }
+        : {}),
+      public: rule.public,
+      sortOrder: Number(rule.sortOrder) || 1000,
+      scope: Object.fromEntries(
+        Object.entries(rule.scope).filter(([, value]) => Boolean(value))
+      ),
+      billingMode: rule.billingMode,
+      ...(rule.billingMode !== "per_call" ? { token: rule.token ?? {} } : {}),
+      ...(rule.billingMode !== "token" ? { perCall: rule.perCall ?? {} } : {}),
+      ...(rule.multipliers ? { multipliers: rule.multipliers } : {}),
+      ...(rule.minimumChargeCredits
+        ? { minimumChargeCredits: rule.minimumChargeCredits }
+        : {}),
+      ...(rule.baseRoundingMode
+        ? { baseRoundingMode: rule.baseRoundingMode }
+        : {}),
+      roundingMode: rule.roundingMode,
+      enabled: rule.enabled,
+    })),
+  };
+}
+
 function getJsonSettingHint(key: string) {
+  if (key === "MODEL_PRICING_RULES") {
+    return "公开且启用的模型定价规则会展示给用户；实际扣费仍以生成管线和 credits_transaction 结算快照为准。";
+  }
   if (key === "PLAN_CAPABILITY_MATRIX") {
     return "留空表示使用代码默认矩阵，并继续兼容旧上传/月积分配置。后台矩阵保存后会写入 JSON；功能门槛按最低套餐生效，高级套餐自动包含低级套餐能力。";
   }
@@ -729,6 +776,16 @@ function SettingInput({
     );
   }
 
+  if (setting.key === "MODEL_PRICING_RULES") {
+    return (
+      <ModelPricingRulesInput
+        value={value}
+        disabled={disabled}
+        onChange={onChange}
+      />
+    );
+  }
+
   if (setting.valueType === "boolean") {
     return (
       <Switch
@@ -781,7 +838,9 @@ function SettingInput({
     <Input
       type={setting.valueType === "number" ? "number" : "text"}
       value={String(value)}
-      placeholder={setting.secret && setting.configured ? "已配置，留空不修改" : ""}
+      placeholder={
+        setting.secret && setting.configured ? "已配置，留空不修改" : ""
+      }
       disabled={disabled}
       onChange={(event) =>
         onChange(
@@ -852,11 +911,7 @@ function PlanCapabilityMatrixInput({
     });
   };
 
-  const updateLimit = (
-    plan: PlanValue,
-    key: LimitKey,
-    nextValue: string
-  ) => {
+  const updateLimit = (plan: PlanValue, key: LimitKey, nextValue: string) => {
     updateMatrix({
       ...matrix,
       limits: {
@@ -906,7 +961,9 @@ function PlanCapabilityMatrixInput({
   return (
     <div className="space-y-5">
       <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-        按最低套餐配置功能门槛；Starter/Pro/Ultra/Enterprise 自动包含更低套餐能力。并发、上传大小、月积分、批量张数、参考图数量、审核等级和 Chat/Agent 每轮计费都在这里统一配置。
+        按最低套餐配置功能门槛；Starter/Pro/Ultra/Enterprise
+        自动包含更低套餐能力。并发、上传大小、月积分、批量张数、参考图数量、审核等级和
+        Chat/Agent 每轮计费都在这里统一配置。
       </div>
 
       <section className="space-y-2">
@@ -955,7 +1012,8 @@ function PlanCapabilityMatrixInput({
         <div>
           <h4 className="text-sm font-semibold">对话计费</h4>
           <p className="text-xs text-muted-foreground">
-            配置页面 Chat/Agent 的每轮基础积分；生成图片时还会按实际成品图尺寸和数量追加图片积分。
+            配置页面 Chat/Agent
+            的每轮基础积分；生成图片时还会按实际成品图尺寸和数量追加图片积分。
           </p>
         </div>
         <div className="overflow-x-auto rounded-md border">
@@ -992,11 +1050,7 @@ function PlanCapabilityMatrixInput({
                         disabled={disabled}
                         className="h-9 min-w-28"
                         onChange={(event) =>
-                          updateBilling(
-                            plan.value,
-                            row.key,
-                            event.target.value
-                          )
+                          updateBilling(plan.value, row.key, event.target.value)
                         }
                       />
                     </td>
@@ -1148,6 +1202,467 @@ function PlanCapabilityMatrixInput({
   );
 }
 
+function ModelPricingRulesInput({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: DraftValue;
+  disabled: boolean;
+  onChange: (value: DraftValue) => void;
+}) {
+  const config = useMemo(
+    () => normalizeModelPricingRulesConfig(value),
+    [value]
+  );
+  const compactConfig = useMemo(
+    () => compactModelPricingRulesConfig(config),
+    [config]
+  );
+  const preview = useMemo(
+    () => JSON.stringify(compactConfig, null, 2),
+    [compactConfig]
+  );
+
+  const updateConfig = (next: ModelPricingRulesConfig) => {
+    onChange(JSON.stringify(compactModelPricingRulesConfig(next), null, 2));
+  };
+
+  const updateRule = (index: number, patch: Partial<ModelPricingRuleDraft>) => {
+    updateConfig({
+      version: 1,
+      rules: config.rules.map((rule, currentIndex) =>
+        currentIndex === index ? { ...rule, ...patch } : rule
+      ),
+    });
+  };
+
+  const updateScopeText = (
+    index: number,
+    key: "model" | "family" | "endpoint" | "groupId",
+    nextValue: string
+  ) => {
+    const rule = config.rules[index];
+    if (!rule) return;
+    updateRule(index, {
+      scope: {
+        ...rule.scope,
+        [key]: nextValue.trim() || undefined,
+      },
+    });
+  };
+
+  const updateTokenPrice = (
+    index: number,
+    key: keyof NonNullable<ModelPricingRuleDraft["token"]>,
+    nextValue: string
+  ) => {
+    const rule = config.rules[index];
+    if (!rule) return;
+    updateRule(index, {
+      token: {
+        ...rule.token,
+        [key]: Number(nextValue),
+      },
+    });
+  };
+
+  const updatePerCallPrice = (
+    index: number,
+    key: keyof NonNullable<ModelPricingRuleDraft["perCall"]>,
+    nextValue: string
+  ) => {
+    const rule = config.rules[index];
+    if (!rule) return;
+    updateRule(index, {
+      perCall: {
+        ...rule.perCall,
+        [key]: Number(nextValue),
+      },
+    });
+  };
+
+  const addRule = () => {
+    const nextIndex = config.rules.length + 1;
+    updateConfig({
+      version: 1,
+      rules: [
+        ...config.rules,
+        {
+          id: `custom-model-${nextIndex}`,
+          name: `Custom Model ${nextIndex}`,
+          description: "",
+          public: true,
+          sortOrder: nextIndex * 100,
+          scope: {
+            model: `custom-model-${nextIndex}`,
+            modality: "text",
+          },
+          billingMode: "token",
+          token: {
+            inputCreditsPer1M: 100,
+            outputCreditsPer1M: 400,
+          },
+          roundingMode: "ceil_2dp",
+          enabled: true,
+        },
+      ],
+    });
+  };
+
+  const removeRule = (index: number) => {
+    updateConfig({
+      version: 1,
+      rules: config.rules.filter((_, currentIndex) => currentIndex !== index),
+    });
+  };
+
+  const resetDefaults = () => {
+    updateConfig(DEFAULT_MODEL_PRICING_RULES);
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+        模型定价规则只负责展示和后续统一算价；真正扣费仍走现有积分流水和幂等
+        sourceRef。规则越具体越优先，公开且启用的规则会出现在用户定价页。
+      </div>
+
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          onClick={resetDefaults}
+        >
+          恢复示例规则
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          onClick={addRule}
+        >
+          <Plus className="mr-2 h-4 w-4" />
+          新增模型规则
+        </Button>
+      </div>
+
+      {config.rules.map((rule, index) => (
+        <section key={rule.id} className="space-y-4 rounded-md border p-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h4 className="text-sm font-semibold">{rule.name || rule.id}</h4>
+              <p className="text-xs text-muted-foreground">
+                {rule.scope.model || rule.scope.family || rule.scope.modality}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              disabled={disabled}
+              title="删除模型规则"
+              onClick={() => removeRule(index)}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="space-y-1.5">
+              <Label>规则 ID</Label>
+              <Input
+                value={rule.id}
+                disabled={disabled}
+                onChange={(event) =>
+                  updateRule(index, { id: event.target.value })
+                }
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>显示名称</Label>
+              <Input
+                value={rule.name}
+                disabled={disabled}
+                onChange={(event) =>
+                  updateRule(index, { name: event.target.value })
+                }
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>排序</Label>
+              <Input
+                type="number"
+                value={String(rule.sortOrder)}
+                disabled={disabled}
+                onChange={(event) =>
+                  updateRule(index, { sortOrder: Number(event.target.value) })
+                }
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>计费模式</Label>
+              <Select
+                value={rule.billingMode}
+                disabled={disabled}
+                onValueChange={(nextValue) =>
+                  updateRule(index, {
+                    billingMode:
+                      nextValue as ModelPricingRuleDraft["billingMode"],
+                  })
+                }
+              >
+                <SelectTrigger className="h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="token">Token</SelectItem>
+                  <SelectItem value="per_call">按次</SelectItem>
+                  <SelectItem value="composite">组合</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            {(["model", "family", "endpoint", "groupId"] as const).map(
+              (key) => (
+                <div key={key} className="space-y-1.5">
+                  <Label>{key}</Label>
+                  <Input
+                    value={String(rule.scope[key] ?? "")}
+                    disabled={disabled}
+                    placeholder="可选"
+                    onChange={(event) =>
+                      updateScopeText(index, key, event.target.value)
+                    }
+                  />
+                </div>
+              )
+            )}
+            <div className="space-y-1.5">
+              <Label>modality</Label>
+              <Select
+                value={rule.scope.modality ?? "text"}
+                disabled={disabled}
+                onValueChange={(nextValue) =>
+                  updateRule(index, {
+                    scope: {
+                      ...rule.scope,
+                      modality: nextValue as NonNullable<
+                        ModelPricingRuleDraft["scope"]["modality"]
+                      >,
+                    },
+                  })
+                }
+              >
+                <SelectTrigger className="h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="text">text</SelectItem>
+                  <SelectItem value="image">image</SelectItem>
+                  <SelectItem value="video">video</SelectItem>
+                  <SelectItem value="audio">audio</SelectItem>
+                  <SelectItem value="multimodal">multimodal</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>说明</Label>
+            <Textarea
+              value={rule.description ?? ""}
+              rows={2}
+              disabled={disabled}
+              className="resize-y"
+              onChange={(event) =>
+                updateRule(index, { description: event.target.value })
+              }
+            />
+          </div>
+
+          {rule.billingMode !== "per_call" && (
+            <div className="overflow-x-auto rounded-md border">
+              <table className="w-full min-w-[820px] text-sm">
+                <thead className="bg-muted/60 text-xs text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">输入/1M</th>
+                    <th className="px-3 py-2 text-left font-medium">输出/1M</th>
+                    <th className="px-3 py-2 text-left font-medium">
+                      缓存输入/1M
+                    </th>
+                    <th className="px-3 py-2 text-left font-medium">
+                      缓存写入/1M
+                    </th>
+                    <th className="px-3 py-2 text-left font-medium">
+                      图像输入/1M
+                    </th>
+                    <th className="px-3 py-2 text-left font-medium">
+                      音频输入/1M
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    {(
+                      [
+                        "inputCreditsPer1M",
+                        "outputCreditsPer1M",
+                        "cachedInputCreditsPer1M",
+                        "cacheWriteCreditsPer1M",
+                        "imageInputCreditsPer1M",
+                        "audioInputCreditsPer1M",
+                      ] as const
+                    ).map((key) => (
+                      <td key={key} className="px-3 py-2">
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={String(rule.token?.[key] ?? 0)}
+                          disabled={disabled}
+                          className="h-9 min-w-28"
+                          onChange={(event) =>
+                            updateTokenPrice(index, key, event.target.value)
+                          }
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {rule.billingMode !== "token" && (
+            <div className="overflow-x-auto rounded-md border">
+              <table className="w-full min-w-[620px] text-sm">
+                <thead className="bg-muted/60 text-xs text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">每次</th>
+                    <th className="px-3 py-2 text-left font-medium">每张图</th>
+                    <th className="px-3 py-2 text-left font-medium">每秒</th>
+                    <th className="px-3 py-2 text-left font-medium">
+                      每次工具
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    {(
+                      [
+                        "creditsPerCall",
+                        "creditsPerImage",
+                        "creditsPerSecond",
+                        "creditsPerToolCall",
+                      ] as const
+                    ).map((key) => (
+                      <td key={key} className="px-3 py-2">
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={String(rule.perCall?.[key] ?? 0)}
+                          disabled={disabled}
+                          className="h-9 min-w-28"
+                          onChange={(event) =>
+                            updatePerCallPrice(index, key, event.target.value)
+                          }
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="space-y-1.5">
+              <Label>最小扣费</Label>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={String(rule.minimumChargeCredits ?? 0)}
+                disabled={disabled}
+                onChange={(event) =>
+                  updateRule(index, {
+                    minimumChargeCredits: Number(event.target.value),
+                  })
+                }
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>最终取整</Label>
+              <Select
+                value={rule.roundingMode}
+                disabled={disabled}
+                onValueChange={(nextValue) =>
+                  updateRule(index, {
+                    roundingMode:
+                      nextValue as ModelPricingRuleDraft["roundingMode"],
+                  })
+                }
+              >
+                <SelectTrigger className="h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ceil_2dp">向上 2 位</SelectItem>
+                  <SelectItem value="ceil_integer">向上整数</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>开关</Label>
+              <div className="flex flex-wrap gap-4 rounded-md border px-3 py-2">
+                <span className="flex items-center gap-2 text-sm">
+                  <Switch
+                    checked={rule.enabled}
+                    disabled={disabled}
+                    onCheckedChange={(checked) =>
+                      updateRule(index, { enabled: checked })
+                    }
+                  />
+                  启用
+                </span>
+                <span className="flex items-center gap-2 text-sm">
+                  <Switch
+                    checked={rule.public}
+                    disabled={disabled}
+                    onCheckedChange={(checked) =>
+                      updateRule(index, { public: checked })
+                    }
+                  />
+                  公开
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
+      ))}
+
+      <details className="rounded-md border bg-muted/20 p-3">
+        <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+          查看当前 JSON 预览
+        </summary>
+        <Textarea
+          value={preview}
+          rows={12}
+          readOnly
+          className="mt-3 resize-y font-mono text-xs"
+        />
+      </details>
+    </div>
+  );
+}
+
 function CreditPackageMatrixInput({
   value,
   fallbackValue,
@@ -1176,10 +1691,7 @@ function CreditPackageMatrixInput({
     onChange(JSON.stringify(compactCreditPackageMatrixDraft(next), null, 2));
   };
 
-  const updatePackage = (
-    index: number,
-    patch: Partial<CreditPackageDraft>
-  ) => {
+  const updatePackage = (index: number, patch: Partial<CreditPackageDraft>) => {
     updateMatrix({
       packages: matrix.packages.map((pkg, currentIndex) =>
         currentIndex === index ? { ...pkg, ...patch } : pkg
@@ -1253,7 +1765,8 @@ function CreditPackageMatrixInput({
   return (
     <div className="space-y-5">
       <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-        管理一次性购买积分包。Epay 使用站内价格；Creem 如需按套餐定价，需要在对应套餐列填写预建产品 ID。
+        管理一次性购买积分包。Epay 使用站内价格；Creem
+        如需按套餐定价，需要在对应套餐列填写预建产品 ID。
       </div>
 
       <div className="flex justify-end">
@@ -1270,10 +1783,7 @@ function CreditPackageMatrixInput({
       </div>
 
       {matrix.packages.map((pkg, index) => (
-        <section
-          key={`${pkg.id}-${index}`}
-          className="space-y-3 rounded-md border p-3"
-        >
+        <section key={pkg.id} className="space-y-3 rounded-md border p-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h4 className="text-sm font-semibold">{pkg.name || pkg.id}</h4>
@@ -1382,7 +1892,7 @@ function CreditPackageMatrixInput({
             <div className="space-y-2">
               <Label>开关</Label>
               <div className="flex flex-wrap gap-4 rounded-md border px-3 py-2">
-                <label className="flex items-center gap-2 text-sm">
+                <span className="flex items-center gap-2 text-sm">
                   <Switch
                     checked={pkg.visible}
                     disabled={disabled}
@@ -1391,8 +1901,8 @@ function CreditPackageMatrixInput({
                     }
                   />
                   显示
-                </label>
-                <label className="flex items-center gap-2 text-sm">
+                </span>
+                <span className="flex items-center gap-2 text-sm">
                   <Switch
                     checked={pkg.popular}
                     disabled={disabled}
@@ -1401,8 +1911,8 @@ function CreditPackageMatrixInput({
                     }
                   />
                   推荐
-                </label>
-                <label className="flex items-center gap-2 text-sm">
+                </span>
+                <span className="flex items-center gap-2 text-sm">
                   <Switch
                     checked={pkg.allowQuantity}
                     disabled={disabled}
@@ -1414,7 +1924,7 @@ function CreditPackageMatrixInput({
                     }
                   />
                   允许数量购买
-                </label>
+                </span>
               </div>
             </div>
           </div>
@@ -1564,7 +2074,8 @@ export function SystemSettingsPanel() {
   }, [loadSettings]);
 
   useEffect(() => {
-    const loaded = (settingsResult.data?.settings ?? []) as SettingSnapshotItem[];
+    const loaded = (settingsResult.data?.settings ??
+      []) as SettingSnapshotItem[];
     if (!loaded.length) return;
     setSettings(loaded);
     setDrafts(
@@ -1585,7 +2096,8 @@ export function SystemSettingsPanel() {
       // 避免同一份数据出现两个入口造成"重复倍率"的误解。
       if (
         setting.key === "IMAGE_MODEL_MULTIPLIERS" ||
-        setting.key === "VIDEO_MODEL_MULTIPLIERS"
+        setting.key === "VIDEO_MODEL_MULTIPLIERS" ||
+        setting.key === "MODEL_PRICING_RULES"
       ) {
         continue;
       }
@@ -1653,6 +2165,9 @@ export function SystemSettingsPanel() {
   };
 
   const disabled = isLoading || isSaving || isImporting || isInitializing;
+  const modelPricingSetting = settings.find(
+    (setting) => setting.key === "MODEL_PRICING_RULES"
+  );
 
   return (
     <div className="space-y-6">
@@ -1690,7 +2205,10 @@ export function SystemSettingsPanel() {
             )}
             导入当前环境变量
           </Button>
-          <Button onClick={handleSave} disabled={disabled || settings.length === 0}>
+          <Button
+            onClick={handleSave}
+            disabled={disabled || settings.length === 0}
+          >
             {isSaving ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
@@ -1705,7 +2223,10 @@ export function SystemSettingsPanel() {
         已保存配置优先于环境变量；未保存时继续使用环境变量兜底。标记为“需重启”或“需重新构建”的配置，保存后要重启服务或重新部署后才完整生效。
       </div>
 
-      <Tabs defaultValue={SETTING_CATEGORIES[0]?.id ?? "general"} className="w-full">
+      <Tabs
+        defaultValue={SETTING_CATEGORIES[0]?.id ?? "general"}
+        className="w-full"
+      >
         <TabsList className="h-auto flex-wrap justify-start bg-transparent p-0">
           {SETTING_CATEGORIES.map((category) => (
             <TabsTrigger
@@ -1716,7 +2237,88 @@ export function SystemSettingsPanel() {
               {category.label}
             </TabsTrigger>
           ))}
+          <TabsTrigger
+            value="model-pricing"
+            className="rounded-md border border-transparent px-3 py-2 data-[state=active]:border-foreground/20 data-[state=active]:bg-foreground/5 data-[state=active]:text-foreground data-[state=active]:shadow-none"
+          >
+            模型定价
+          </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="model-pricing" className="mt-6 space-y-4">
+          <div>
+            <h3 className="text-lg font-semibold">模型定价</h3>
+            <p className="text-sm text-muted-foreground">
+              管理 token、按次和组合计费规则；公开规则会同步展示在用户定价页。
+            </p>
+          </div>
+
+          {modelPricingSetting ? (
+            <Card className="rounded-lg">
+              <CardHeader className="space-y-2">
+                <div className="flex items-start justify-between gap-3">
+                  <CardTitle className="text-base">
+                    {modelPricingSetting.label}
+                  </CardTitle>
+                  <div className="flex flex-wrap justify-end gap-1">
+                    {modelPricingSetting.stored ? (
+                      <Badge>后台</Badge>
+                    ) : modelPricingSetting.fromEnv ? (
+                      <Badge variant="secondary">环境变量</Badge>
+                    ) : (
+                      <Badge variant="outline">默认值</Badge>
+                    )}
+                  </div>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {modelPricingSetting.description}
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <SettingInput
+                  setting={modelPricingSetting}
+                  value={drafts[modelPricingSetting.key] ?? ""}
+                  disabled={disabled}
+                  onChange={(value) =>
+                    updateDraft(modelPricingSetting.key, value)
+                  }
+                />
+                <div className="flex items-center justify-between gap-3 border-t pt-3 text-xs text-muted-foreground">
+                  <span>
+                    更新时间：
+                    {modelPricingSetting.updatedAt
+                      ? formatDateInTimeZone(
+                          modelPricingSetting.updatedAt,
+                          "zh",
+                          {
+                            year: "numeric",
+                            month: "2-digit",
+                            day: "2-digit",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          },
+                          configuredTimeZone
+                        )
+                      : "未保存"}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={disabled}
+                    onClick={() => markClear(modelPricingSetting.key)}
+                  >
+                    清空并回退
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="rounded-lg border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+              未加载到模型定价设置，请先初始化默认配置。
+            </div>
+          )}
+        </TabsContent>
 
         {SETTING_CATEGORIES.map((category) => {
           const categorySettings = settingsByCategory.get(category.id) ?? [];
@@ -1778,10 +2380,7 @@ export function SystemSettingsPanel() {
                           {setting.key}
                         </Label>
                         <div className="flex items-center gap-2">
-                          <div
-                            id={`setting-${setting.key}`}
-                            className="flex-1"
-                          >
+                          <div id={`setting-${setting.key}`} className="flex-1">
                             <SettingInput
                               setting={setting}
                               value={drafts[setting.key] ?? ""}

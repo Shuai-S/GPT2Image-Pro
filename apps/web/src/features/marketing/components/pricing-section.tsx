@@ -7,6 +7,7 @@ import {
   type SubscriptionPlan,
 } from "@repo/shared/config/subscription-plan";
 import type { RuntimeCreditPackage } from "@repo/shared/credits/packages";
+import type { PublicModelPricingRule } from "@repo/shared/model-pricing";
 import type { PaymentConfig } from "@repo/shared/payment/types";
 import type {
   PlanCapabilityKey,
@@ -26,17 +27,17 @@ import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useState, useTransition } from "react";
 import { useCurrentSession } from "@/features/auth/hooks/use-current-session";
 import {
-  createCheckoutSession,
-  getUserSubscription,
-} from "@/features/payment/actions";
-import {
   getImageBaseCreditPricing,
   getImageCreditCostBreakdown,
   IMAGE_MODERATION_PRICE_CNY,
+  type ImageBaseCreditPricing,
   REFERENCE_CREDIT_PRICE_CNY,
   TEXT_MODERATION_PRICE_CNY,
-  type ImageBaseCreditPricing,
 } from "@/features/image-generation/resolution";
+import {
+  createCheckoutSession,
+  getUserSubscription,
+} from "@/features/payment/actions";
 import { PlanInterval } from "@/features/payment/types";
 import { useRouter } from "@/i18n/routing";
 
@@ -84,6 +85,7 @@ interface PricingSectionProps {
   creditPackages?: RuntimeCreditPackage[];
   creditPackageExpiryDays?: number;
   imageBasePricing?: ImageBaseCreditPricing;
+  modelPricingRules?: PublicModelPricingRule[];
 }
 
 /**
@@ -96,6 +98,7 @@ export function PricingSection({
   creditPackages = [],
   creditPackageExpiryDays,
   imageBasePricing,
+  modelPricingRules = [],
 }: PricingSectionProps) {
   const t = useTranslations("Pricing");
   const locale = useLocale();
@@ -256,6 +259,9 @@ export function PricingSection({
   }).totalCredits;
   const getEstimated4kCount = (credits: number) =>
     Math.max(0, Math.floor(credits / textTo4kCredits));
+  const publicModelPricingRules = modelPricingRules.filter(
+    (rule) => rule.enabled && rule.public
+  );
 
   const getRoundCreditSummary = (
     key: "chatRoundCredits" | "agentRoundCredits"
@@ -542,8 +548,9 @@ export function PricingSection({
       const candidate = SUBSCRIPTION_PLANS.find(
         (item) => PLAN_RANK[item] === i
       );
-      if (candidate && pkg.pricesByPlan?.[candidate]) {
-        return pkg.pricesByPlan[candidate]!;
+      const candidatePrice = candidate ? pkg.pricesByPlan?.[candidate] : null;
+      if (typeof candidatePrice === "number") {
+        return candidatePrice;
       }
     }
     return pkg.price;
@@ -570,6 +577,80 @@ export function PricingSection({
       );
     }
     return copy("Expiry follows the issued batch", "有效期按发放批次记录");
+  };
+
+  const getRuleScopeText = (rule: PublicModelPricingRule) => {
+    const parts = [
+      rule.scope.model,
+      rule.scope.family ? `family:${rule.scope.family}` : null,
+      rule.scope.endpoint,
+      rule.scope.groupId ? `group:${rule.scope.groupId}` : null,
+      rule.scope.modality,
+    ].filter(Boolean);
+    return parts.join(" / ") || rule.id;
+  };
+
+  const getRuleBillingModeText = (rule: PublicModelPricingRule) => {
+    if (rule.billingMode === "token") return copy("Token", "Token");
+    if (rule.billingMode === "per_call") return copy("Per call", "按次");
+    return copy("Composite", "组合");
+  };
+
+  const getRulePriceText = (rule: PublicModelPricingRule) => {
+    const tokenParts =
+      rule.billingMode !== "per_call"
+        ? [
+            rule.token?.inputCreditsPer1M
+              ? copy(
+                  `input ${formatCreditAmount(rule.token.inputCreditsPer1M)}/1M`,
+                  `输入 ${formatCreditAmount(rule.token.inputCreditsPer1M)}/百万`
+                )
+              : null,
+            rule.token?.outputCreditsPer1M
+              ? copy(
+                  `output ${formatCreditAmount(rule.token.outputCreditsPer1M)}/1M`,
+                  `输出 ${formatCreditAmount(rule.token.outputCreditsPer1M)}/百万`
+                )
+              : null,
+            rule.token?.cachedInputCreditsPer1M
+              ? copy(
+                  `cached ${formatCreditAmount(
+                    rule.token.cachedInputCreditsPer1M
+                  )}/1M`,
+                  `缓存 ${formatCreditAmount(
+                    rule.token.cachedInputCreditsPer1M
+                  )}/百万`
+                )
+              : null,
+          ].filter(Boolean)
+        : [];
+    const perCallParts =
+      rule.billingMode !== "token"
+        ? [
+            rule.perCall?.creditsPerCall
+              ? copy(
+                  `${formatCreditAmount(rule.perCall.creditsPerCall)}/call`,
+                  `${formatCreditAmount(rule.perCall.creditsPerCall)}/次`
+                )
+              : null,
+            rule.perCall?.creditsPerImage
+              ? copy(
+                  `${formatCreditAmount(rule.perCall.creditsPerImage)}/image`,
+                  `${formatCreditAmount(rule.perCall.creditsPerImage)}/张`
+                )
+              : null,
+            rule.perCall?.creditsPerSecond
+              ? copy(
+                  `${formatCreditAmount(rule.perCall.creditsPerSecond)}/second`,
+                  `${formatCreditAmount(rule.perCall.creditsPerSecond)}/秒`
+                )
+              : null,
+          ].filter(Boolean)
+        : [];
+    const parts = [...tokenParts, ...perCallParts];
+    return parts.length > 0
+      ? parts.join(copy(", ", "，"))
+      : copy("Configured by rule", "按规则配置");
   };
 
   /**
@@ -910,6 +991,68 @@ export function PricingSection({
                   </Card>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+        {publicModelPricingRules.length > 0 && (
+          <div className="mt-10">
+            <div className="mb-4">
+              <h3 className="text-xl font-semibold">
+                {copy("Model Pricing", "模型定价")}
+              </h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {copy(
+                  "Public model pricing rules from the admin model pricing tab. Group, backend, and parameter multipliers may adjust the final charge.",
+                  "以下读取后台模型定价 tab 的公开规则。分组、后端和参数倍率可能影响最终扣费。"
+                )}
+              </p>
+            </div>
+
+            <div className="overflow-x-auto rounded-lg border">
+              <table className="w-full min-w-[860px] text-left text-sm">
+                <thead className="bg-muted/60 text-xs text-muted-foreground">
+                  <tr>
+                    <th className="w-56 px-4 py-3 font-medium">
+                      {copy("Model", "模型")}
+                    </th>
+                    <th className="w-44 px-4 py-3 font-medium">
+                      {copy("Mode", "模式")}
+                    </th>
+                    <th className="px-4 py-3 font-medium">
+                      {copy("Price", "价格")}
+                    </th>
+                    <th className="px-4 py-3 font-medium">
+                      {copy("Scope", "作用域")}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {publicModelPricingRules.map((rule) => (
+                    <tr key={rule.id}>
+                      <td className="px-4 py-3 align-top">
+                        <div className="font-medium">{rule.name}</div>
+                        {rule.description ? (
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {rule.description}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-3 align-top">
+                        <Badge variant="outline" className="rounded-md">
+                          {getRuleBillingModeText(rule)}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 align-top text-muted-foreground">
+                        {getRulePriceText(rule)}
+                      </td>
+                      <td className="px-4 py-3 align-top text-xs text-muted-foreground">
+                        {getRuleScopeText(rule)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         )}

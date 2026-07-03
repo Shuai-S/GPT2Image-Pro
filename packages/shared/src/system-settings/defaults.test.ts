@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
-import { DEFAULT_PLAN_CAPABILITY_MATRIX } from "../subscription/services/plan-capabilities";
 import {
   CREDIT_PACKAGE_MATRIX_SETTING_KEY,
   getRuntimeCreditPackages,
 } from "../credits/packages";
+import { MODEL_PRICING_RULES_SETTING_KEY } from "../model-pricing";
+import { DEFAULT_PLAN_CAPABILITY_MATRIX } from "../subscription/services/plan-capabilities";
 import {
   clearSystemSettingsCache,
   getRuntimeSettingNumber,
@@ -119,6 +119,7 @@ describe("system setting default initialization", () => {
 
     expect(initializedKeys).toContain("PLAN_CAPABILITY_MATRIX");
     expect(initializedKeys).toContain(CREDIT_PACKAGE_MATRIX_SETTING_KEY);
+    expect(initializedKeys).toContain(MODEL_PRICING_RULES_SETTING_KEY);
     expect(initializedKeys).toContain("BILLING_YEARLY_ENABLED");
     expect(initializedKeys).toContain("APP_TIME_ZONE");
     expect(initializedKeys).toContain("MARKETING_SLA_STATUS_ENABLED");
@@ -148,6 +149,7 @@ describe("system setting default initialization", () => {
     expect(store.get("IMAGE_GENERATION_GLOBAL_CONCURRENCY")?.value).toBe(500);
     expect(store.get("IMAGE_BASE_CREDITS_1024")?.value).toBe(1.27);
     expect(store.get("IMAGE_BASE_CREDITS_4K")?.value).toBe(10);
+    expect(store.get(MODEL_PRICING_RULES_SETTING_KEY)?.value).toBeDefined();
     expect(store.get("RATE_LIMIT_GLOBAL_REQUESTS_PER_MINUTE")?.value).toBe(100);
     expect(store.get("RATE_LIMIT_AUTH_REQUESTS_PER_MINUTE")?.value).toBe(5);
     expect(store.get("RATE_LIMIT_AI_REQUESTS_PER_MINUTE")?.value).toBe(20);

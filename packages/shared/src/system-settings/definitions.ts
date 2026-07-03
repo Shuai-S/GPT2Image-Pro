@@ -1,3 +1,5 @@
+import { DEFAULT_MODEL_PRICING_RULES } from "../model-pricing";
+
 export type SettingCategory =
   | "general"
   | "auth"
@@ -155,6 +157,7 @@ export type SettingKey =
   | "CREDITS_EXPIRY_DAYS"
   | "IMAGE_BASE_CREDITS_1024"
   | "IMAGE_BASE_CREDITS_4K"
+  | "MODEL_PRICING_RULES"
   | "IMAGE_MODEL_MULTIPLIERS"
   | "IMAGE_SUPER_RESOLUTION_ENABLED"
   | "IMAGE_RESTORATION_ENABLED"
@@ -1467,6 +1470,15 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     category: "models",
     valueType: "boolean",
     defaultValue: false,
+  },
+  {
+    key: "MODEL_PRICING_RULES",
+    label: "模型定价规则",
+    description:
+      "统一模型定价规则 JSON。支持 token、按次、组合计费，可按模型、族、端点和分组覆盖；公开且启用的规则会展示在用户定价页面。",
+    category: "credits",
+    valueType: "json",
+    exampleValue: DEFAULT_MODEL_PRICING_RULES,
   },
   {
     key: "IMAGE_MODEL_MULTIPLIERS",
