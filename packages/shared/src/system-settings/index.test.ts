@@ -459,6 +459,7 @@ describe("runtime setting getters stored/env fallback (C-L29)", () => {
     delete process.env.APP_TIME_ZONE;
     delete process.env.PAYMENT_PROVIDER;
     delete process.env.PLAN_CAPABILITY_MATRIX;
+    delete process.env.GPT2IMAGE_SKIP_RUNTIME_SETTINGS_DB;
   });
 
   it("getRuntimeSettingBoolean reads stored boolean, then env truthy string, else fallback", async () => {
@@ -497,6 +498,17 @@ describe("runtime setting getters stored/env fallback (C-L29)", () => {
 
     store.clear();
     clearSystemSettingsCache();
+    await expect(getRuntimeSettingString("APP_TIME_ZONE")).resolves.toBe("UTC");
+  });
+
+  it("getRuntimeSettingString can skip DB during Docker build", async () => {
+    store.set("APP_TIME_ZONE", {
+      key: "APP_TIME_ZONE",
+      value: "Asia/Shanghai",
+    });
+    process.env.APP_TIME_ZONE = "UTC";
+    process.env.GPT2IMAGE_SKIP_RUNTIME_SETTINGS_DB = "1";
+
     await expect(getRuntimeSettingString("APP_TIME_ZONE")).resolves.toBe("UTC");
   });
 

@@ -56,6 +56,9 @@ ENV NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN
 ENV DATABASE_URL=$DATABASE_URL
 ENV BETTER_AUTH_SECRET=$BETTER_AUTH_SECRET
 ENV BETTER_AUTH_URL=$BETTER_AUTH_URL
+# Docker 构建阶段没有运行中的 Postgres；运行时配置在此阶段只读环境变量，
+# 避免静态预渲染 /_not-found 时连接 build-time 占位 DATABASE_URL。
+ENV GPT2IMAGE_SKIP_RUNTIME_SETTINGS_DB=1
 RUN pnpm turbo build --filter=@repo/web
 
 # --- Runner ---

@@ -23,6 +23,7 @@ export {
 } from "./definitions";
 
 const CACHE_TTL_MS = 10_000;
+const SKIP_RUNTIME_SETTINGS_DB_ENV = "GPT2IMAGE_SKIP_RUNTIME_SETTINGS_DB";
 
 let settingsCache:
   | {
@@ -68,6 +69,28 @@ async function loadSystemSettingsMap() {
   return values;
 }
 
+/**
+ * 判断当前进程是否只允许从环境变量读取运行时配置。
+ *
+ * @returns Docker/CI 构建期显式开启时返回 true。
+ * @sideEffects 无。
+ */
+function shouldSkipRuntimeSettingsDb() {
+  return process.env[SKIP_RUNTIME_SETTINGS_DB_ENV] === "1";
+}
+
+/**
+ * 读取运行时配置的 DB 值，构建期可显式跳过 DB。
+ *
+ * @param key - 系统配置键。
+ * @returns DB 中的配置值；构建期跳过时返回 undefined，由调用方回退环境变量或默认值。
+ * @sideEffects 正常运行时读取 system_setting 表；构建期不触碰数据库连接。
+ */
+async function getRuntimeSystemSettingValue(key: SettingKey) {
+  if (shouldSkipRuntimeSettingsDb()) return undefined;
+  return getSystemSettingValue(key);
+}
+
 export function clearSystemSettingsCache() {
   settingsCache = undefined;
 }
@@ -86,7 +109,7 @@ function parseJsonText(value: string) {
 }
 
 export async function getRuntimeSettingJson(key: SettingKey) {
-  const value = await getSystemSettingValue(key);
+  const value = await getRuntimeSystemSettingValue(key);
   if (value !== undefined) {
     if (typeof value === "string") return parseJsonText(value);
     return value;
@@ -107,15 +130,19 @@ export async function getSystemSettingString(key: SettingKey) {
 }
 
 export async function getRuntimeSettingString(key: SettingKey) {
-  const value = await getSystemSettingString(key);
-  return value ?? (process.env[key]?.trim() || undefined);
+  const value = await getRuntimeSystemSettingValue(key);
+  if (typeof value === "string") return value.trim() || undefined;
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return process.env[key]?.trim() || undefined;
 }
 
 export async function getRuntimeSettingBoolean(
   key: SettingKey,
   fallback = false
 ) {
-  const value = await getSystemSettingValue(key);
+  const value = await getRuntimeSystemSettingValue(key);
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value !== 0;
   if (typeof value === "string" && value.trim()) {
@@ -138,7 +165,7 @@ export async function getRuntimeSettingNumber(
     if (options?.nonNegative) return candidate >= 0;
     return true;
   };
-  const value = await getSystemSettingValue(key);
+  const value = await getRuntimeSystemSettingValue(key);
   const numericValue =
     typeof value === "number"
       ? value
