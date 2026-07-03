@@ -47,7 +47,21 @@ export async function generateMetadata(): Promise<Metadata> {
       images: [branding.ogImageUrl],
       creator: "@gpt2image",
     },
-    manifest: "/site.webmanifest",
+    icons: {
+      icon: [
+        {
+          url: "/brand-icon",
+          sizes: "any",
+        },
+      ],
+      shortcut: ["/brand-icon"],
+      apple: [
+        {
+          url: "/brand-icon",
+        },
+      ],
+    },
+    manifest: "/manifest.webmanifest",
   };
 }
 
