@@ -12,7 +12,11 @@
 import { randomUUID } from "node:crypto";
 import { withApiLogging } from "@repo/shared/api-logger";
 import { auth } from "@repo/shared/auth";
-import { canUsePlanCapability } from "@repo/shared/subscription/services/plan-capabilities";
+import { consumeCredits } from "@repo/shared/credits/core";
+import {
+  canUsePlanCapability,
+  getPlanBillingConfig,
+} from "@repo/shared/subscription/services/plan-capabilities";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -25,6 +29,8 @@ const generateSchema = z.object({
   prompt: z.string().min(1, "prompt is required").max(8000),
   // 输入图 data URL 数组(PSD 必须非空;PPT 可空)。
   base64Images: z.array(z.string().min(1).max(20_000_000)).default([]),
+  // chat(web) 会话内生成:除固定生成价外,额外按套餐轮次价扣一次(复用 chat 轮次费)。
+  chatRound: z.boolean().optional(),
 });
 
 function errorResponse(message: string, status = 400) {
@@ -48,7 +54,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
   if (!parsed.success) {
     return errorResponse(parsed.error.issues[0]?.message || "Invalid request");
   }
-  const { kind, prompt, base64Images } = parsed.data;
+  const { kind, prompt, base64Images, chatRound } = parsed.data;
 
   const capability = kind === "psd" ? "export.psd" : "export.ppt";
   const plan = await getUserPlan(userId);
@@ -73,6 +79,25 @@ export const POST = withApiLogging(async (request: NextRequest) => {
       base64Images,
       taskId,
     });
+    let creditsCharged = result.creditsCharged;
+    // chat(web) 会话内生成:成功后再按套餐轮次价扣一次(复用 chat 轮次费,幂等键防重复扣)。
+    // 只在生成成功后扣,失败不扣;与生成扣费是两笔独立幂等消费。
+    if (chatRound) {
+      const billing = await getPlanBillingConfig(plan.plan);
+      const roundFee = Math.max(0, Math.trunc(billing.chatRoundCredits || 0));
+      if (roundFee > 0) {
+        await consumeCredits({
+          userId,
+          amount: roundFee,
+          serviceName: "editable_file_chat_round",
+          description:
+            kind === "psd" ? "chat(web) PSD 轮次" : "chat(web) PPT 轮次",
+          sourceRef: `editable-file-round:${taskId}`,
+          metadata: { kind, taskId, chatRound: true },
+        });
+        creditsCharged += roundFee;
+      }
+    }
     return {
       object: "editable_file_task",
       taskId,
@@ -83,7 +108,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
         primary_url: result.primaryUrl,
         zip_url: result.zipUrl,
       },
-      credits_charged: result.creditsCharged,
+      credits_charged: creditsCharged,
     };
   });
 });

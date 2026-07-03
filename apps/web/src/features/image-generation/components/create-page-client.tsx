@@ -268,6 +268,8 @@ type ChatVariant = {
   creditsConsumed?: number;
   createdAt?: string;
   outputRole?: "final" | "agent_draft" | "choice";
+  // chat(web) 生成的可编辑文件(PPT/PSD)产物:下载链接。与图像 variant 并存于同一消息模型。
+  files?: Array<{ label: string; url: string }>;
 };
 
 type ChatRecentGeneration = RecentGeneration & {
@@ -1862,6 +1864,28 @@ async function urlToEditImageFile(
   };
 }
 
+/** File → base64 data URL(chat(web) PPT/PSD 参考图需 data URL 传给 /api/editable-file/generate)。 */
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+    reader.readAsDataURL(file);
+  });
+}
+
+/** 读 createJsonKeepAliveResponse 响应:剥掉 keep-alive 填充,解析尾部 JSON。 */
+async function readKeepAliveJson(response: Response): Promise<{
+  error?: { message?: string };
+  result?: { primary_url?: string; zip_url?: string | null };
+  credits_charged?: number;
+}> {
+  const text = await response.text();
+  const start = text.indexOf("{");
+  if (start < 0) throw new Error("空响应");
+  return JSON.parse(text.slice(start));
+}
+
 
 export function CreatePageClient({
   balance: initialBalance,
@@ -2091,6 +2115,11 @@ export function CreatePageClient({
     true
   );
   const [chatPrompt, setChatPrompt] = useCreateRuntimeState("chatPrompt", "");
+  // chat(web) 这一轮生成什么:image=对话式图像(走 chat 图像管线);ppt/psd=可编辑文件
+  // (走 /api/editable-file/generate)。仅 chat-web tab 展示选择器。
+  const [chatWebGenKind, setChatWebGenKind] = useCreateRuntimeState<
+    "image" | "ppt" | "psd"
+  >("chatWebGenKind", "image");
   const [editMention, setEditMention] =
     useCreateRuntimeState<MentionState | null>("editMention", null);
   const [chatMention, setChatMention] =
@@ -5608,6 +5637,37 @@ export function CreatePageClient({
           )}
         </div>
 
+        {activeMode === "chat-web" && (
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">
+              {copy("Generate", "生成")}:
+            </span>
+            {(
+              [
+                { value: "image", en: "Image", zh: "图像" },
+                { value: "ppt", en: "PPT", zh: "PPT" },
+                { value: "psd", en: "PSD", zh: "PSD" },
+              ] as const
+            ).map((opt) => (
+              <Button
+                key={opt.value}
+                type="button"
+                size="sm"
+                variant={chatWebGenKind === opt.value ? "default" : "outline"}
+                disabled={isChatGenerating}
+                onClick={() => setChatWebGenKind(opt.value)}
+              >
+                {copy(opt.en, opt.zh)}
+              </Button>
+            ))}
+            {chatWebGenKind === "psd" && (
+              <span className="text-xs text-muted-foreground">
+                {copy("(reference image required)", "(需参考图)")}
+              </span>
+            )}
+          </div>
+        )}
+
         <div className="relative flex items-end gap-2 rounded-lg border border-border bg-background p-2">
           {renderReferenceMentionMenu({
             open: Boolean(chatMention?.open) && canUseChatReferenceMentions,
@@ -6085,6 +6145,154 @@ export function CreatePageClient({
     void addChatAttachments(files);
   };
 
+  // chat(web) 会话内生成可编辑文件(PPT/PSD):独立于图像 SSE 提交自成一条链路——自建会话消息、
+  // 调 /api/editable-file/generate(session 鉴权、只选付费 web 账号)、把产物下载链接写回 assistant
+  // 消息。轮次费由后端 chatRound 补扣(复用套餐 chatRoundCredits)。单飞(isChatGenerating 阻并发)。
+  const submitEditableFileToChat = async (params: {
+    kind: "ppt" | "psd";
+    prompt: string;
+    attachments: Array<{ file: File; kind: "image" | "file" }>;
+    attachmentPreviews: NonNullable<ChatMessage["attachments"]>;
+    conversationMode: ConversationMode;
+  }) => {
+    const { kind, prompt, attachments, attachmentPreviews, conversationMode } =
+      params;
+    const imageFiles = attachments.filter((item) => item.kind === "image");
+    if (kind === "psd" && imageFiles.length === 0) {
+      toast.error(
+        copy("PSD needs a reference image", "生成 PSD 需要参考图")
+      );
+      return;
+    }
+
+    const userMessageId = createLocalId();
+    const assistantMessageId = createLocalId();
+    const createdAt = new Date().toISOString();
+    const pendingMessages: ChatMessage[] = [
+      ...chatMessages,
+      {
+        id: userMessageId,
+        role: "user",
+        text: prompt,
+        mode: conversationMode,
+        attachments: attachmentPreviews,
+        createdAt,
+      },
+      {
+        id: assistantMessageId,
+        role: "assistant",
+        mode: conversationMode,
+        text: "",
+        variants: [
+          {
+            generationId: createGenerationId(),
+            prompt,
+            model: "gpt-5-5-thinking",
+            size: "auto",
+            responseText:
+              kind === "psd"
+                ? copy(
+                    "Generating PSD (may take minutes)…",
+                    "正在生成 PSD(可能需几分钟)…"
+                  )
+                : copy(
+                    "Generating PPT (may take minutes)…",
+                    "正在生成 PPT(可能需几分钟)…"
+                  ),
+            pending: true,
+          },
+        ],
+        activeVariant: 0,
+        createdAt,
+      },
+    ];
+    setChatMessages(pendingMessages);
+    persistChatConversationSnapshot({
+      conversations: chatConversationsRef.current,
+      conversationId: chatConversationId,
+      mode: conversationMode,
+      messages: pendingMessages,
+      titleFallback: isZh ? "未命名对话" : "Untitled chat",
+    });
+    setChatPrompt("");
+    clearChatAttachments();
+    setIsChatGenerating(true);
+
+    // 完成/失败时把 assistant 消息定稿(单飞,pendingMessages 即当前状态)。
+    const applyFinal = (
+      assistantPatch: Partial<ChatMessage>,
+      variantPatch: Partial<ChatVariant>
+    ) => {
+      const finalMessages = pendingMessages.map((message) => {
+        if (message.id !== assistantMessageId) return message;
+        const baseVariant = message.variants?.[0] as ChatVariant;
+        return {
+          ...message,
+          ...assistantPatch,
+          variants: [{ ...baseVariant, pending: false, ...variantPatch }],
+        };
+      });
+      setChatMessages(finalMessages);
+      persistChatConversationSnapshot({
+        conversations: chatConversationsRef.current,
+        conversationId: chatConversationId,
+        mode: conversationMode,
+        messages: finalMessages,
+        titleFallback: isZh ? "未命名对话" : "Untitled chat",
+      });
+    };
+
+    try {
+      const base64Images = await Promise.all(
+        imageFiles.map((item) => fileToDataUrl(item.file))
+      );
+      const response = await fetch("/api/editable-file/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, prompt, base64Images, chatRound: true }),
+      });
+      const data = await readKeepAliveJson(response);
+      if (!response.ok || data.error) {
+        throw new Error(
+          data.error?.message || copy("Generation failed", "生成失败")
+        );
+      }
+      const files: Array<{ label: string; url: string }> = [];
+      if (data.result?.primary_url) {
+        files.push({
+          label: kind === "psd" ? "PSD" : "PPTX",
+          url: data.result.primary_url,
+        });
+      }
+      if (data.result?.zip_url) {
+        files.push({
+          label: copy("Assets ZIP", "素材 ZIP"),
+          url: data.result.zip_url,
+        });
+      }
+      applyFinal(
+        {},
+        {
+          files,
+          creditsConsumed: data.credits_charged,
+          pending: false,
+          responseText:
+            kind === "psd"
+              ? copy("PSD ready. Download below.", "PSD 已生成,可在下方下载。")
+              : copy("PPT ready. Download below.", "PPT 已生成,可在下方下载。"),
+        }
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : copy("Generation failed", "生成失败");
+      applyFinal({ error: message }, { pending: false });
+    } finally {
+      setIsChatGenerating(false);
+    }
+  };
+
   const handleChatSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (activeMode === "agent" && !effectiveAgentAllowed) {
@@ -6149,6 +6357,19 @@ export function CreatePageClient({
         item.kind === "image" ? URL.createObjectURL(item.file) : undefined,
       kind: item.kind,
     }));
+
+    // chat(web) 选了 PPT/PSD:走可编辑文件链路(独立于图像 SSE 提交),完成即返回。
+    if (activeMode === "chat-web" && chatWebGenKind !== "image") {
+      await submitEditableFileToChat({
+        kind: chatWebGenKind,
+        prompt: currentPrompt,
+        attachments,
+        attachmentPreviews,
+        conversationMode,
+      });
+      return;
+    }
+
     const generationId = createGenerationId();
     const userMessageId = createLocalId();
     const assistantMessageId = createLocalId();
@@ -8758,6 +8979,22 @@ export function CreatePageClient({
                                       {activeVariant.responseText}
                                     </p>
                                   )}
+                                  {activeVariant.files?.length ? (
+                                    <div className="mt-2 flex flex-col gap-2">
+                                      {activeVariant.files.map((chatFile) => (
+                                        <a
+                                          key={chatFile.url}
+                                          href={chatFile.url}
+                                          download
+                                          className="inline-flex items-center gap-2 rounded border border-border bg-background px-2 py-1 text-sm hover:bg-muted"
+                                        >
+                                          <FileText className="h-4 w-4" />
+                                          {copy("Download", "下载")}{" "}
+                                          {chatFile.label}
+                                        </a>
+                                      ))}
+                                    </div>
+                                  ) : null}
                                   {activeVariant.imageUrl && (
                                     <div className="overflow-hidden rounded-md border bg-background">
                                       <button
