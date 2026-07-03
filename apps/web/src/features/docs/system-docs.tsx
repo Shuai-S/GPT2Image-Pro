@@ -87,6 +87,16 @@ const sections = {
           path: "POST /v1/agents/images",
           kind: "agent",
         },
+        {
+          label: "外部可编辑 PPT 生成 API",
+          path: "POST /v1/ppts",
+          kind: "image_generation",
+        },
+        {
+          label: "外部可编辑 PSD 生成 API",
+          path: "POST /v1/psds",
+          kind: "image_generation",
+        },
       ],
       resolver: [
         "校验登录态或外部 API Key",
@@ -238,8 +248,8 @@ const sections = {
         ],
         [
           "外接 API 入口",
-          "/v1/chat/completions、/v1/images/generations、/v1/images/edits、/v1/videos/generations、/v1/images/{task_id}、/v1/responses、/v1/agents/images",
-          "/api/v1/* 是同一 handler 的别名；只负责 API Key、OpenAI 兼容请求和响应格式适配。",
+          "/v1/chat/completions、/v1/images/generations、/v1/images/edits、/v1/videos/generations、/v1/ppts、/v1/psds、/v1/images/{task_id}、/v1/responses、/v1/agents/images",
+          "/api/v1/* 是同一 handler 的别名；只负责 API Key、OpenAI 兼容请求和响应格式适配。/v1/ppts、/v1/psds 走独立的可编辑文件链路（付费级 web 账号 + 代码解释器），不汇入 runImageGenerationForUser。",
         ],
         [
           "共同核心",
@@ -449,6 +459,78 @@ const sections = {
             "命中用户自接 API 时不扣本站账户积分，也不增加 Key 已用额度。",
             "api_key 对象还含 id / name / key_prefix / last_four / is_active / last_used_at / created_at 等字段（示例从略）。",
             "生成失败退款、审核拦截结算和实际尺寸后修正会同步修正 Key 已用额度。",
+          ],
+        },
+        {
+          title: "Generate editable PPT / PSD",
+          method: "POST",
+          path: "/v1/ppts、/v1/psds",
+          contentType: "application/json",
+          description:
+            "对话式驱动 ChatGPT 代码解释器生成可编辑 .pptx / 分层 .psd（含素材 zip）。仅调付费级（Plus/Pro）Web 账号，按任务固定价扣积分（后台可配 EDITABLE_FILE_PPT_CREDITS / EDITABLE_FILE_PSD_CREDITS，默认 25，仅成功扣）。分钟级长任务，用 keep-alive JSON 撑住连接直到出结果。PSD 必须传 base64_images。",
+          example: `curl https://gpt2image.superapi.buzz/v1/ppts \\
+  -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"prompt":"2026 Q2 电商运营复盘 PPT，8 页以内"}'`,
+          responseExample: `{
+  "object": "editable_file_task",
+  "taskId": "…",
+  "status": "success",
+  "kind": "ppt",
+  "result": {
+    "conversation_id": "…",
+    "primary_url": "/api/storage/…/xxx.pptx?sig=…",
+    "zip_url": "/api/storage/…/xxx.zip?sig=…"
+  },
+  "credits_charged": 25
+}`,
+          fields: [
+            {
+              name: "Authorization",
+              requirement: "必填 header",
+              description:
+                "Bearer <本站 API Key>；需能力位 export.ppt / export.psd（默认对 free 开放）。",
+            },
+            {
+              name: "prompt",
+              requirement: "必填",
+              description: "生成需求描述。",
+            },
+            {
+              name: "base64_images",
+              requirement: "PSD 必填、PPT 可选",
+              description: "参考图 data URL 数组（PSD 至少一张）。",
+            },
+            {
+              name: "client_task_id",
+              requirement: "可选",
+              description:
+                "幂等/审计标识；作扣费 sourceRef（editable-file:{client_task_id}），缺省服务端生成。",
+            },
+          ],
+          responses: [
+            {
+              name: "object / kind / status",
+              description:
+                "固定 editable_file_task；kind 为 ppt / psd；status 为 success。",
+            },
+            {
+              name: "result.primary_url",
+              description: "主产物（.pptx / .psd）签名下载 URL。",
+            },
+            {
+              name: "result.zip_url",
+              description: "素材 zip 签名下载 URL（可能为空）。",
+            },
+            {
+              name: "credits_charged",
+              description: "本次扣除积分。",
+            },
+          ],
+          notes: [
+            "需付费级 Web 账号（代码解释器）；账号池无可用付费 Web 账号时返回 503 no_available_image_backend。",
+            "当前为同步 keep-alive；异步任务态（queued→轮询）与 client_task_id 任务级幂等为后续迭代（当前为计费层幂等）。",
+            "/api/v1/ppts、/api/v1/psds 为同一 handler 别名；站内 chat(web) tab 走 session 版 /api/editable-file/generate（同一 service）。",
           ],
         },
         {
