@@ -26,7 +26,11 @@ const DEFAULT_CLIENT_VERSION = "prod-be885abbfcfe7b1f511e88b3003d9ee44757fbad";
 const DEFAULT_CLIENT_BUILD_NUMBER = "5955942";
 const DEFAULT_POW_SCRIPT = "https://chatgpt.com/backend-api/sentinel/sdk.js";
 const IMAGE_POLL_TIMEOUT_MS = 120_000;
-const IMAGE_POLL_INTERVAL_MS = 4_000;
+const IMAGE_POLL_INTERVAL_MS = 6_000;
+// 生成结果轮询前的静默期:web 出图是分钟级异步任务,发起后头 ~45s 几乎不可能就绪,期间每
+// IMAGE_POLL_INTERVAL_MS 拉一次会话状态纯属无谓请求,还会把同一账号的会话查询端点打到 429。
+// 故发起后至少等这么久再开始轮询,大幅削减状态查询量、降低 429。
+const IMAGE_POLL_INITIAL_DELAY_MS = 45_000;
 const WEB_PROXY_REQUEST_TIMEOUT_MS = 310_000;
 
 type ChatRequirements = {
@@ -1659,6 +1663,11 @@ function latestConversationMessageId(text: string) {
   return idMatches.at(-1)?.[1] || "";
 }
 
+// 会话查询是否被限流(429/too many requests):供轮询容错时加大退避。
+function isWebRateLimited(message: string) {
+  return /429|too many requests|rate limit/i.test(message);
+}
+
 async function pollImageIds(
   config: ApiConfig,
   conversationId: string,
@@ -1668,7 +1677,17 @@ async function pollImageIds(
   const deadline = Date.now() + IMAGE_POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
     throwIfAborted(signal);
-    const text = await getConversationText(config, conversationId, signal);
+    let text: string;
+    try {
+      text = await getConversationText(config, conversationId, signal);
+    } catch (error) {
+      // 单次状态查询失败(典型 429 会话查询限流 / 交接期瞬时错误)不该拖垮整次生成:
+      // 真 abort/超时上抛;否则按是否限流决定退避时长后继续轮询。
+      throwIfAborted(signal);
+      const message = error instanceof Error ? error.message : String(error);
+      await sleep(IMAGE_POLL_INTERVAL_MS * (isWebRateLimited(message) ? 3 : 1));
+      continue;
+    }
     const scopedText = requestMessageId
       ? scopedConversationTextAfterMessage(text, requestMessageId)
       : text;
@@ -1695,7 +1714,17 @@ async function pollImageCandidates(
   const deadline = Date.now() + IMAGE_POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
     throwIfAborted(signal);
-    const text = await getConversationText(config, conversationId, signal);
+    let text: string;
+    try {
+      text = await getConversationText(config, conversationId, signal);
+    } catch (error) {
+      // 单次状态查询失败(典型 429 会话查询限流 / 交接期瞬时错误)不该拖垮整次生成:
+      // 真 abort/超时上抛;否则按是否限流决定退避时长后继续轮询。
+      throwIfAborted(signal);
+      const message = error instanceof Error ? error.message : String(error);
+      await sleep(IMAGE_POLL_INTERVAL_MS * (isWebRateLimited(message) ? 3 : 1));
+      continue;
+    }
     const candidates = imageCandidatesAfterMessage(text, requestMessageId);
     if (candidates.length) {
       const selection = imageSelectionAfterMessage(text, requestMessageId);
@@ -2046,6 +2075,7 @@ async function runWebImage(
         requestMessageId,
       }
     );
+    const launchedAt = Date.now();
     const response = await startImageGeneration(
       configWithSignal,
       prompt,
@@ -2070,6 +2100,15 @@ async function runWebImage(
     let parentMessageId = extractLastMessageId(text);
     const selectionMessageIdFromStream = extractSelectionMessageId(text);
     const ids = extractImageIds(text);
+    // 发起后至少静默 IMAGE_POLL_INITIAL_DELAY_MS 再开始轮询状态:web 出图头 ~45s 几乎不可能就绪,
+    // 期间轮询纯属无谓请求且会把会话查询端点打到 429。流里已直接带出图则跳过等待(无需轮询)。
+    if (!hasImageIds(ids)) {
+      const waitMs = IMAGE_POLL_INITIAL_DELAY_MS - (Date.now() - launchedAt);
+      if (waitMs > 0) {
+        await sleep(waitMs);
+        throwIfAborted(abortController.signal);
+      }
+    }
     const resolved = await resolveImageCandidateUrls(
       configWithSignal,
       conversationId,
@@ -2080,13 +2119,18 @@ async function runWebImage(
     const candidateImages = resolved.outputs;
     parentMessageId = resolved.parentMessageId || parentMessageId;
     if (conversationId && !parentMessageId) {
-      parentMessageId = latestConversationMessageId(
-        await getConversationText(
-          configWithSignal,
-          conversationId,
-          abortController.signal
-        )
-      );
+      // best-effort:仅为补续接用的 parentMessageId,此处 429/瞬时失败不该拖垮已出图的成功单。
+      try {
+        parentMessageId = latestConversationMessageId(
+          await getConversationText(
+            configWithSignal,
+            conversationId,
+            abortController.signal
+          )
+        );
+      } catch {
+        throwIfAborted(abortController.signal);
+      }
     }
     if (!candidateImages[0]?.url) {
       return { error: "ChatGPT Web backend returned no image output" };
@@ -2351,13 +2395,18 @@ async function runWebChat(
       return { error: "ChatGPT Web chat returned no response" };
     }
     if (conversationId && !parentMessageId) {
-      parentMessageId = latestConversationMessageId(
-        await getConversationText(
-          configWithSignal,
-          conversationId,
-          abortController.signal
-        )
-      );
+      // best-effort:同上,补 parentMessageId 的兜底查询失败不该拖垮已完成的回复/出图。
+      try {
+        parentMessageId = latestConversationMessageId(
+          await getConversationText(
+            configWithSignal,
+            conversationId,
+            abortController.signal
+          )
+        );
+      } catch {
+        throwIfAborted(abortController.signal);
+      }
     }
     return {
       ...(responseText ? { responseText } : {}),
