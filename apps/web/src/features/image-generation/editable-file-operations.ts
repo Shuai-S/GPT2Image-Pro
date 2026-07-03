@@ -117,6 +117,9 @@ export async function runEditableFileForUser(params: {
         accountBackendPreference: "web",
         // PPT/PSD 需代码解释器,限付费账号:池只在付费级 web 账号里选(见 planType 回填/导入 check)。
         accountPlanFilter: "paid",
+        // 跨组直取付费 web,忽略 API key/偏好的分组作用域——PPT/PSD 像站内 UI 一样必须命中付费
+        // web 账号,不受外部 key 绑定的(可能是 api-only 的)分组限制。apiKeyId 仍用于计费归属。
+        spanGroupsForWeb: true,
         excludedMemberKeys: excluded,
       });
     } catch (error) {

@@ -142,6 +142,11 @@ type ResolveBackendOptions = {
   // 仅 adobe。供 force_firefly 请求标志使用（用户可对任意模型强制改用 adobe 出图）。
   forceFirefly?: boolean;
   allowAnyResponsesBackend?: boolean;
+  // 跨组选真 web 账号(忽略 apiKeyId/用户偏好的分组作用域):PPT/PSD 可编辑文件生成必须用
+  // ChatGPT 网页(付费)账号,而付费 web 账号集中在专用分组(如 Pro-Web),外部 API key 绑定
+  // 的分组往往够不到。开启后遍历全部启用分组、只取 accountBackend==="web" 的成员(配合
+  // accountPlanFilter="paid"),使 editable-file 像站内 UI 一样稳定命中付费 web,不受 key 分组限制。
+  spanGroupsForWeb?: boolean;
 };
 
 type StickyBindingMember = {
@@ -3174,6 +3179,10 @@ async function resolvePoolMember(
   options: ResolveBackendOptions & { excluded?: Set<string> }
 ) {
   const userPlan = await getUserPlan(options.userId);
+  // PPT/PSD:跨组直取付费 web,绕过 apiKeyId/偏好的分组作用域(像站内 UI 一样命中付费 web)。
+  if (options.spanGroupsForWeb) {
+    return await resolveAnyWebPoolMember(options, userPlan.plan);
+  }
   const requestedGroup = await resolveRequestedGroup(options, userPlan.plan);
   const canFallbackToAnyResponses =
     options.allowAnyResponsesBackend && options.requestKind === "responses";
@@ -3251,6 +3260,62 @@ async function resolvePoolMember(
   }
 
   return { group, member };
+}
+
+/**
+ * 跨组选一个真 web 账号(accountBackend==="web"),忽略 apiKeyId/用户偏好的分组作用域。
+ * 供 PPT/PSD 可编辑文件生成用:付费 web 账号集中在专用分组,外部 key 绑定组常够不到;这里
+ * 遍历全部启用分组(按 priority),对每组按 web 偏好选号,只接受真 web 成员;选到非 web(混合组
+ * 里的 api/responses)则释放其租约、继续下一组,避免占着不放。
+ */
+async function resolveAnyWebPoolMember(
+  options: ResolveBackendOptions & { excluded?: Set<string> },
+  plan: SubscriptionPlan
+) {
+  const groups = await db
+    .select()
+    .from(imageBackendGroup)
+    .where(eq(imageBackendGroup.isEnabled, true))
+    .orderBy(asc(imageBackendGroup.priority), asc(imageBackendGroup.createdAt));
+
+  for (const group of groups) {
+    if (!canUseBackendGroupForPlan(group.metadata, plan)) continue;
+    if (!groupBackendAllowsRequest(group.metadata, options.requestKind)) {
+      continue;
+    }
+    const member = await selectPoolMember(
+      group.id,
+      group.metadata,
+      group.contentSafetyEnabled,
+      await listSelectableGroupContexts(group, plan, options.requestKind),
+      options.requestKind,
+      options.excluded,
+      options.preferredMemberId,
+      options.preferredMemberType,
+      null,
+      null,
+      "web",
+      options.accountBackendPreferenceMode,
+      options.requestedModel,
+      options.forceFirefly,
+      0,
+      0,
+      options.accountPlanFilter ?? "any"
+    );
+    if (!member) continue;
+    if (member.type === "account" && member.implementationMode === "web") {
+      return { group, member };
+    }
+    // 非 web 成员(混合组里的 api/responses、或非 web 的 account):释放租约后试下一组。
+    await releaseImageBackendInflightLease({
+      memberType: member.type,
+      memberId: member.id,
+      leaseId: member.leaseId,
+      leasePersisted: member.leasePersisted,
+    }).catch(() => {});
+  }
+
+  return null;
 }
 
 async function resolveAnyResponsesPoolMember(
