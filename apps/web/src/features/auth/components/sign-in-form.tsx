@@ -6,6 +6,7 @@ import {
   signInWithGoogle,
 } from "@repo/shared/auth/client";
 import { GoogleIcon } from "@repo/shared/components/icons";
+import type { BrandingConfig } from "@repo/shared/config/branding";
 import { Button } from "@repo/ui/components/button";
 import { Input } from "@repo/ui/components/input";
 import { Label } from "@repo/ui/components/label";
@@ -25,12 +26,21 @@ import { AuthLogo } from "./auth-logo";
  * 功能:
  * - Google OAuth 登录
  * - 邮箱密码登录
+ *
+ * @param googleAuthEnabled - Google OAuth 是否已配置。
+ * @param branding - 管理员配置的应用名称与 Logo。
+ * @returns 登录表单。
+ * @sideEffects 调用认证 API、重发验证邮件、触发路由跳转。
  */
 interface SignInFormProps {
   googleAuthEnabled?: boolean;
+  branding: BrandingConfig;
 }
 
-export function SignInForm({ googleAuthEnabled = false }: SignInFormProps) {
+export function SignInForm({
+  googleAuthEnabled = false,
+  branding,
+}: SignInFormProps) {
   const locale = useLocale();
   const t = useTranslations("Auth.signIn");
   const tCommon = useTranslations("Auth.common");
@@ -123,7 +133,7 @@ export function SignInForm({ googleAuthEnabled = false }: SignInFormProps) {
     <div className="w-full max-w-md space-y-6">
       {/* Logo 和标题 */}
       <div className="flex flex-col items-center space-y-2 text-center">
-        <AuthLogo />
+        <AuthLogo branding={branding} />
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
         <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
       </div>

@@ -1,12 +1,15 @@
 export const siteConfig = {
-  name: "GPT2IMAGE",
+  name: process.env.NEXT_PUBLIC_APP_NAME?.trim() || "GPT2IMAGE",
 
   description:
+    process.env.NEXT_PUBLIC_APP_DESCRIPTION?.trim() ||
     "AI-powered chat-to-image generation platform. Transform your words into stunning visuals through natural conversation.",
 
   url: process.env.NEXT_PUBLIC_APP_URL || "https://gpt2image.com",
 
-  ogImage: "/og-image.png",
+  logo: process.env.NEXT_PUBLIC_APP_LOGO_URL?.trim() || "/assets/icon.png",
+
+  ogImage: process.env.NEXT_PUBLIC_APP_OG_IMAGE?.trim() || "/og-image.png",
 
   author: {
     name: "GPT2IMAGE Team",

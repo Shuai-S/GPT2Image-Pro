@@ -13,6 +13,7 @@ import {
   evaluateVerificationAttempt,
   getResendCooldownRemainingSeconds,
 } from "./registration-verification-core";
+import { getRuntimeBrandingConfig } from "../config/branding";
 import { RegistrationVerificationCodeEmail } from "../mail/templates/primary-action-email";
 import { sendEmail } from "../mail/utils";
 import { isSelfUseModeEnabled } from "./self-use-mode";
@@ -78,12 +79,14 @@ export async function sendRegistrationVerificationCode(email: string) {
     expiresAt,
   });
 
+  const branding = await getRuntimeBrandingConfig();
   const result = await sendEmail({
     to: normalizedEmail,
-    subject: "Your GPT2IMAGE verification code",
+    subject: `Your ${branding.name} verification code`,
     react: RegistrationVerificationCodeEmail({
       code,
       expiresIn: `${EXPIRES_IN_MINUTES} minutes`,
+      appName: branding.name,
     }),
   });
 

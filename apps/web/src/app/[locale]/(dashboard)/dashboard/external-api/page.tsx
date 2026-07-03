@@ -1,14 +1,26 @@
+import type { Metadata } from "next";
 import { getServerSession } from "@repo/shared/auth/server";
+import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
 import { getLocale, getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { getAppTimeZone } from "@repo/shared/time-zone/server";
 
 import { ExternalApiKeySection } from "@/features/settings/components";
 
-export const metadata = {
-  title: "External API | GPT2IMAGE",
-  description: "Create and manage GPT2IMAGE external API keys",
-};
+/**
+ * 生成外部 API 页面 metadata。
+ *
+ * @returns 带管理员应用名称的页面标题与描述。
+ * @sideEffects 读取 system_settings 表。
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const branding = await getRuntimeBrandingConfig();
+
+  return {
+    title: `External API | ${branding.name}`,
+    description: `Create and manage ${branding.name} external API keys`,
+  };
+}
 
 export default async function ExternalApiPage() {
   const session = await getServerSession();

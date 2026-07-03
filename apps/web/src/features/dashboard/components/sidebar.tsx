@@ -18,7 +18,11 @@ import { useTranslations } from "next-intl";
 import { useAction } from "next-safe-action/hooks";
 import { useEffect, useState } from "react";
 
-import { Avatar, AvatarFallback, AvatarImage } from "@repo/ui/components/avatar";
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+} from "@repo/ui/components/avatar";
 import {
   Popover,
   PopoverContent,
@@ -27,11 +31,9 @@ import {
 import { Separator } from "@repo/ui/components/separator";
 import { Sheet, SheetContent, SheetTitle } from "@repo/ui/components/sheet";
 import { dashboardConfig } from "@repo/shared/config";
+import type { BrandingConfig } from "@repo/shared/config/branding";
 import { CreditBalanceBadge } from "@repo/shared/credits/components";
-import {
-  isAdminRole,
-  isObserverAdminRole,
-} from "@repo/shared/auth/roles";
+import { isAdminRole, isObserverAdminRole } from "@repo/shared/auth/roles";
 import { useSidebar } from "@/features/dashboard/context";
 import { ModeToggle } from "@repo/shared/components";
 import { getMyUnreadAnnouncementCountAction } from "@repo/shared/announcements/actions";
@@ -58,12 +60,21 @@ import {
  * - 设置入口
  * - 登出功能
  * - 支持折叠/展开
+ *
+ * @param initialSession - 服务端预取的当前会话，用于避免首屏闪烁。
+ * @param branding - 管理员配置的应用名称与 Logo。
+ * @returns Dashboard 侧边栏。
+ * @sideEffects 读取会话、套餐、未读消息并执行登出/路由跳转。
  */
 type DashboardSidebarProps = {
   initialSession?: CurrentSession;
+  branding: BrandingConfig;
 };
 
-export function DashboardSidebar({ initialSession }: DashboardSidebarProps) {
+export function DashboardSidebar({
+  initialSession,
+  branding,
+}: DashboardSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const locale = useLocale();
@@ -83,10 +94,8 @@ export function DashboardSidebar({ initialSession }: DashboardSidebarProps) {
   // 获取用户订阅计划
   const { execute: fetchPlan, result: planResult } = useAction(getMyPlanAction);
   const userPlan = (planResult.data?.plan as PlanType) || "free";
-  const {
-    execute: fetchUnreadTickets,
-    result: unreadTicketsResult,
-  } = useAction(getMyUnreadTicketCountAction);
+  const { execute: fetchUnreadTickets, result: unreadTicketsResult } =
+    useAction(getMyUnreadTicketCountAction);
   const {
     execute: fetchUnreadAnnouncements,
     result: unreadAnnouncementsResult,
@@ -201,11 +210,12 @@ export function DashboardSidebar({ initialSession }: DashboardSidebarProps) {
             }}
           >
             <Image
-              src="/assets/icon.png"
-              alt="GPT2IMAGE"
+              src={branding.logoUrl}
+              alt={branding.name}
               width={24}
               height={24}
-              className="shrink-0"
+              className="h-6 w-6 shrink-0 object-contain"
+              unoptimized
             />
             <span
               className={cn(
@@ -213,7 +223,7 @@ export function DashboardSidebar({ initialSession }: DashboardSidebarProps) {
                 collapsed && "opacity-0"
               )}
             >
-              GPT2IMAGE
+              {branding.name}
             </span>
           </Link>
         </div>
@@ -278,8 +288,7 @@ export function DashboardSidebar({ initialSession }: DashboardSidebarProps) {
                   const Icon = item.icon;
                   const translatedTitle = getNavTitle(item.title);
                   const showSupportUnread =
-                    item.href === "/dashboard/support" &&
-                    unreadTicketCount > 0;
+                    item.href === "/dashboard/support" && unreadTicketCount > 0;
                   const unreadCount =
                     item.href === "/dashboard/announcements"
                       ? unreadAnnouncementCount

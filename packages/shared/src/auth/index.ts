@@ -2,6 +2,7 @@ import { db } from "@repo/database";
 import * as schema from "@repo/database/schema";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { getRuntimeBrandingConfig } from "../config/branding";
 import { isEmailConfigured } from "../mail/client";
 import {
   ResetPasswordEmail,
@@ -127,12 +128,14 @@ export const auth = betterAuth({
     enabled: true,
     requireEmailVerification: false,
     sendResetPassword: async ({ user, url }) => {
+      const branding = await getRuntimeBrandingConfig();
       await sendEmail({
         to: user.email,
-        subject: "Reset your password - GPT2IMAGE",
+        subject: `Reset your password - ${branding.name}`,
         react: ResetPasswordEmail({
           resetUrl: url,
           name: user.name || "there",
+          appName: branding.name,
         }),
       });
     },
@@ -146,12 +149,14 @@ export const auth = betterAuth({
         emailVerification: {
           sendOnSignUp: false,
           sendVerificationEmail: async ({ user, url }) => {
+            const branding = await getRuntimeBrandingConfig();
             await sendEmail({
               to: user.email,
-              subject: "Verify your email - GPT2IMAGE",
+              subject: `Verify your email - ${branding.name}`,
               react: VerifyEmailEmail({
                 verifyUrl: url,
                 name: user.name || "there",
+                appName: branding.name,
               }),
             });
           },

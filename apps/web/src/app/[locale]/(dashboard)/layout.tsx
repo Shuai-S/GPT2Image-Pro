@@ -6,6 +6,7 @@ import { SidebarProvider } from "@/features/dashboard/context";
 import { CreateRuntimeProvider } from "@/features/image-generation/create-runtime-store";
 import { getUserRoleById } from "@repo/shared/auth/role-server";
 import { getServerSession } from "@repo/shared/auth/server";
+import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
 import type { CurrentSession } from "@/features/auth/hooks/use-current-session";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +17,10 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const serverSession = await getServerSession();
+  const [serverSession, branding] = await Promise.all([
+    getServerSession(),
+    getRuntimeBrandingConfig(),
+  ]);
   const initialSession: CurrentSession = serverSession?.user?.id
     ? {
         user: {
@@ -33,7 +37,10 @@ export default async function DashboardLayout({
     <SidebarProvider>
       <CreateRuntimeProvider>
         <div className="min-h-screen bg-muted">
-          <DashboardSidebar initialSession={initialSession} />
+          <DashboardSidebar
+            initialSession={initialSession}
+            branding={branding}
+          />
           <DashboardMainWrapper>{children}</DashboardMainWrapper>
         </div>
       </CreateRuntimeProvider>

@@ -153,7 +153,7 @@ Chat 模式和 Agent 模式分开：Chat 更适合用户主动对话和上下文
 
 - 运行时优先读取数据库 `system_setting`，未配置时回退环境变量。
 - 首次启动会初始化缺失的非密钥默认配置，包括套餐能力矩阵、套餐价格、按量积分包、审核和后端冷却默认值；已有数据库配置不会被覆盖。
-- 默认启用自用模式：公开注册关闭；如果没有超管，启动时会创建本地超管并随机生成密码。初始密码写入启动日志和 `.gpt2image/super-admin-credentials.txt`，可用 `GPT2IMAGE_BOOTSTRAP_CREDENTIALS_PATH` 覆盖路径。
+- 默认启用自用模式：公开注册关闭；如果没有超管，启动时会创建本地超管并随机生成密码。初始密码只写入 `.gpt2image/super-admin-credentials.txt`，日志只打印文件路径；可用 `GPT2IMAGE_BOOTSTRAP_CREDENTIALS_PATH` 覆盖路径。
 
 ## 本地开发
 
@@ -214,7 +214,23 @@ docker compose pull
 docker compose up -d
 ```
 
-默认 compose 会启动 PostgreSQL、Web 应用、数据库迁移任务和 ChatGPT Web sidecar。首次启动默认自用模式，超管密码会写入 `app-bootstrap` volume 内的 `super-admin-credentials.txt`，也可通过日志查看。
+默认 compose 会启动 PostgreSQL、Web 应用、数据库迁移任务和 ChatGPT Web sidecar。首次启动默认自用模式，超管密码会写入 `app-bootstrap` volume 内的 `super-admin-credentials.txt`。为避免密钥泄露，日志只显示凭据文件路径，不打印明文密码。
+
+Web 镜像启动时会先修正 `/app/storage`、`/app/.gpt2image` 和 `.next/cache` 的顶层目录属主，再降权运行应用。官方 compose 使用 named volume；如果自定义 compose 改成 `./data/app-storage:/app/storage`、`./data/app-bootstrap:/app/.gpt2image` 这类 bind mount，也不需要手工 `chown`。
+
+如果旧镜像首次启动已经出现过 `EACCES: permission denied, open '/app/.gpt2image/super-admin-credentials.txt'`，数据库里可能已有本地超管但密码文件缺失。升级到包含修复的镜像后，在 `web` 环境变量里临时加入：
+
+```yaml
+GPT2IMAGE_BOOTSTRAP_RESET_LOCAL_ADMIN_PASSWORD: "true"
+```
+
+然后执行 `docker compose up -d --force-recreate web`，通过下面命令读取凭据文件：
+
+```bash
+docker compose exec web cat /app/.gpt2image/super-admin-credentials.txt
+```
+
+确认登录后把该变量删除或改回 `false`，再重建一次 `web`。
 
 `GPT2IMAGE_IMAGE_NAMESPACE` 控制镜像命名空间，默认是上游发布仓库 `ghcr.io/meowfree`；fork 自行通过 GitHub Actions 发布镜像时，可改为自己的 GHCR 命名空间，例如 `ghcr.io/shuai-s`。`GPT2IMAGE_IMAGE_TAG` 同时控制 Web、数据库迁移和两个 sidecar 镜像版本。升级时不要只改其中一个镜像；让四个应用镜像使用同一个 tag，避免 Web 新版本启动但迁移任务仍停留在旧版本，导致运行时缺表或字段。
 

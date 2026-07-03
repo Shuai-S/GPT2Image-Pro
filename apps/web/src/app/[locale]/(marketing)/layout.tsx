@@ -3,18 +3,21 @@
 // .md:inline-flex,导致整个营销组(含首页)Header 的 `hidden md:flex` 导航与按钮在所有
 // 宽度被永久 display:none。fumadocs CSS 只有 blog/[slug]、legal/[slug] 的 .prose 需要,
 // 故下沉到这两个页面各自引入,避免污染首页等无关页面。
+import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
 import { Footer, Header } from "@/features/marketing/components";
 
-export default function MarketingLayout({
+export default async function MarketingLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const branding = await getRuntimeBrandingConfig();
+
   return (
     <div className="flex min-h-screen flex-col">
-      <Header />
+      <Header branding={branding} />
       <main className="flex-1">{children}</main>
-      <Footer />
+      <Footer branding={branding} />
     </div>
   );
 }

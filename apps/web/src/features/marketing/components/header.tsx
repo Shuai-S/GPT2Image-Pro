@@ -1,6 +1,7 @@
 "use client";
 
 import { ModeToggle } from "@repo/shared/components";
+import type { BrandingConfig } from "@repo/shared/config/branding";
 import { mainNav, productsNav } from "@repo/shared/config/nav";
 import {
   Avatar,
@@ -33,12 +34,20 @@ const productsTitleMap: Record<string, string> = {
   "Credits System": "productsMenu.platform.credits",
 };
 
+interface HeaderProps {
+  branding: BrandingConfig;
+}
+
 /**
  * Marketing 页面顶部导航栏
  *
+ * @param branding - 管理员配置的应用名称与 Logo。
+ * @returns 顶部导航栏。
+ * @sideEffects 读取当前会话 hook，用于显示登录态入口。
+ *
  * 布局: [Logo + Nav 靠左] -------- [Actions 靠右]
  */
-export function Header() {
+export function Header({ branding }: HeaderProps) {
   // 获取当前用户会话状态
   const { data: session, isPending } = useCurrentSession();
   const user = session?.user;
@@ -78,13 +87,15 @@ export function Header() {
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2">
             <Image
-              src="/assets/icon.png"
-              alt="GPT2IMAGE"
+              src={branding.logoUrl}
+              alt={branding.name}
               width={28}
               height={28}
+              className="h-7 w-7 shrink-0 object-contain"
+              unoptimized
             />
             <span className="font-serif text-xl font-medium tracking-tight">
-              GPT2IMAGE
+              {branding.name}
             </span>
           </Link>
 

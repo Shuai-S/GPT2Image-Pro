@@ -2,6 +2,7 @@ import { Github, Twitter } from "lucide-react";
 import Link from "next/link";
 import { getLocale } from "next-intl/server";
 
+import type { BrandingConfig } from "@repo/shared/config/branding";
 import { footerNav, siteConfig } from "@repo/shared/config";
 
 const footerTitleMap = {
@@ -17,15 +18,21 @@ const footerTitleMap = {
   },
 } as const;
 
+interface FooterProps {
+  branding: BrandingConfig;
+}
+
 function getFooterLinkTitle(
   title: string,
   group: keyof typeof footerTitleMap,
   isZh: boolean
 ) {
   if (!isZh) return title;
-  return footerTitleMap[group][
-    title as keyof (typeof footerTitleMap)[typeof group]
-  ] || title;
+  return (
+    footerTitleMap[group][
+      title as keyof (typeof footerTitleMap)[typeof group]
+    ] || title
+  );
 }
 
 /**
@@ -36,8 +43,12 @@ function getFooterLinkTitle(
  * - 产品、法律链接
  * - 社交媒体链接
  * - 版权信息
+ *
+ * @param branding - 管理员配置的应用名称和描述。
+ * @returns Marketing 页面底部。
+ * @sideEffects 读取当前 locale。
  */
-export async function Footer() {
+export async function Footer({ branding }: FooterProps) {
   const isZh = (await getLocale()) === "zh";
 
   return (
@@ -47,12 +58,12 @@ export async function Footer() {
           {/* 品牌区 */}
           <div>
             <Link href="/" className="mb-4 inline-block">
-              <span className="font-serif text-xl font-medium">GPT2IMAGE</span>
+              <span className="font-serif text-xl font-medium">
+                {branding.name}
+              </span>
             </Link>
             <p className="text-sm text-muted-foreground">
-              {isZh
-                ? "AI 驱动的对话生图平台。"
-                : "AI-powered chat-to-image generation platform."}
+              {branding.description}
             </p>
           </div>
 
@@ -105,8 +116,8 @@ export async function Footer() {
         <div className="mt-12 flex flex-col items-center justify-between gap-4 border-t pt-8 sm:flex-row">
           <p className="text-sm text-muted-foreground">
             {isZh
-              ? `© ${new Date().getFullYear()} ${siteConfig.name}。保留所有权利。`
-              : `© ${new Date().getFullYear()} ${siteConfig.name}. All rights reserved.`}
+              ? `© ${new Date().getFullYear()} ${branding.name}。保留所有权利。`
+              : `© ${new Date().getFullYear()} ${branding.name}. All rights reserved.`}
           </p>
 
           {/* 社交链接 */}

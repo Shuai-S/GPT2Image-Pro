@@ -1,22 +1,50 @@
 import { siteConfig } from "@repo/shared/config";
+import type { BrandingConfig } from "@repo/shared/config/branding";
 
 type LocaleType = "en" | "zh";
+type JsonLdBranding = Pick<BrandingConfig, "name" | "description" | "logoUrl">;
 
 // Base URL helper
 const getBaseUrl = () => siteConfig.url;
 
+function getBranding(branding?: JsonLdBranding): JsonLdBranding {
+  return {
+    name: branding?.name || siteConfig.name,
+    description: branding?.description || siteConfig.description,
+    logoUrl: branding?.logoUrl || siteConfig.logo,
+  };
+}
+
+function toAbsoluteUrl(url: string) {
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    return url;
+  }
+
+  return `${getBaseUrl()}${url.startsWith("/") ? url : `/${url}`}`;
+}
+
 /**
  * WebSite Schema - for site-wide search/branding
+ *
+ * @param locale - 当前页面语言。
+ * @param branding - 管理员配置的品牌信息；未传入时使用静态兜底配置。
+ * @returns WebSite 结构化数据。
+ * @sideEffects 无。
  */
-export function generateWebSiteSchema(locale: LocaleType) {
+export function generateWebSiteSchema(
+  locale: LocaleType,
+  branding?: JsonLdBranding
+) {
+  const brand = getBranding(branding);
+
   return {
     "@context": "https://schema.org",
     "@type": "WebSite",
-    name: siteConfig.name,
+    name: brand.name,
     url: getBaseUrl(),
     description:
       locale === "en"
-        ? "AI-powered chat-to-image generation platform. Transform your words into stunning visuals through natural conversation."
+        ? brand.description
         : "AI驱动的对话生图平台，通过自然对话将你的想法转化为精美视觉图片。",
     inLanguage: locale === "en" ? "en-US" : "zh-CN",
     potentialAction: {
@@ -32,14 +60,20 @@ export function generateWebSiteSchema(locale: LocaleType) {
 
 /**
  * Organization Schema - for brand identity
+ *
+ * @param branding - 管理员配置的品牌信息；未传入时使用静态兜底配置。
+ * @returns Organization 结构化数据。
+ * @sideEffects 无。
  */
-export function generateOrganizationSchema() {
+export function generateOrganizationSchema(branding?: JsonLdBranding) {
+  const brand = getBranding(branding);
+
   return {
     "@context": "https://schema.org",
     "@type": "Organization",
-    name: siteConfig.name,
+    name: brand.name,
     url: getBaseUrl(),
-    logo: `${getBaseUrl()}/logo.png`,
+    logo: toAbsoluteUrl(brand.logoUrl),
     sameAs: [siteConfig.links.twitter, siteConfig.links.github].filter(Boolean),
     contactPoint: {
       "@type": "ContactPoint",
@@ -68,6 +102,7 @@ export interface ArticleSchemaInput {
  * Article Schema - for blog posts
  */
 export function generateArticleSchema(input: ArticleSchemaInput) {
+  const brand = getBranding();
   const {
     title,
     description,
@@ -95,10 +130,10 @@ export function generateArticleSchema(input: ArticleSchemaInput) {
     },
     publisher: {
       "@type": "Organization",
-      name: siteConfig.name,
+      name: brand.name,
       logo: {
         "@type": "ImageObject",
-        url: `${getBaseUrl()}/logo.png`,
+        url: toAbsoluteUrl(brand.logoUrl),
       },
     },
     ...(image && {
@@ -165,18 +200,28 @@ export function generateBreadcrumbSchema(items: BreadcrumbItem[]) {
 
 /**
  * SoftwareApplication Schema - for the product itself
+ *
+ * @param locale - 当前页面语言。
+ * @param branding - 管理员配置的品牌信息；未传入时使用静态兜底配置。
+ * @returns SoftwareApplication 结构化数据。
+ * @sideEffects 无。
  */
-export function generateSoftwareApplicationSchema(locale: LocaleType) {
+export function generateSoftwareApplicationSchema(
+  locale: LocaleType,
+  branding?: JsonLdBranding
+) {
+  const brand = getBranding(branding);
+
   return {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
-    name: siteConfig.name,
+    name: brand.name,
     applicationCategory: "MultimediaApplication",
     operatingSystem: "Web",
     url: getBaseUrl(),
     description:
       locale === "en"
-        ? "AI-powered chat-to-image generation platform for creating stunning visuals from natural conversation"
+        ? brand.description
         : "AI驱动的对话生图平台，通过自然对话创建精美视觉图片",
     offers: {
       "@type": "Offer",

@@ -1,20 +1,26 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
-import { ChevronDown } from "lucide-react";
-import { usePathname } from "next/navigation";
-import { useTranslations } from "next-intl";
-import { useRef, useState } from "react";
-
+import { mainNav, productsNav } from "@repo/shared/config";
 import {
   NavigationMenu,
   NavigationMenuItem,
   NavigationMenuLink,
   NavigationMenuList,
 } from "@repo/ui/components/navigation-menu";
-import { mainNav, productsNav } from "@repo/shared/config";
-import { Link } from "@/i18n/routing";
 import { cn } from "@repo/ui/utils";
+import { AnimatePresence, motion } from "framer-motion";
+import { ChevronDown } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { useTranslations } from "next-intl";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "@/i18n/routing";
+
+/**
+ * 营销页桌面导航菜单。
+ *
+ * 使用方: Header 顶部导航。关键依赖: next-intl 文案、共享导航配置、
+ * Framer Motion 悬浮动画，以及 @repo/ui 的 NavigationMenu 基础结构。
+ */
 
 /**
  * Products 下拉菜单翻译映射 key
@@ -40,6 +46,15 @@ const productsDescMap: Record<string, string> = {
   "Credits System": "productsMenu.platform.creditsDesc",
 };
 
+const PRODUCTS_MENU_MAX_WIDTH = 640;
+const PRODUCTS_MENU_VIEWPORT_GUTTER = 24;
+
+interface ProductsMenuPosition {
+  left: number;
+  top: number;
+  width: number;
+}
+
 /**
  * 导航菜单组件
  *
@@ -50,7 +65,10 @@ export function NavMenu() {
   const t = useTranslations("Navigation");
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const [productsOpen, setProductsOpen] = useState(false);
+  const [productsMenuPosition, setProductsMenuPosition] =
+    useState<ProductsMenuPosition | null>(null);
   const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const productsTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const navTitleMap: Record<string, string> = {
     Features: t("features"),
@@ -64,6 +82,41 @@ export function NavMenu() {
     const cleanPath = pathname.replace(/^\/[a-z]{2}/, "") || "/";
     return cleanPath === href || cleanPath.startsWith(`${href}/`);
   };
+
+  /**
+   * 按触发按钮中心定位下拉层，并用视口边距兜底。
+   *
+   * 返回: 无。副作用: 更新固定定位坐标。失败模式: 触发按钮尚未挂载时跳过，
+   * 下次 hover/open 或 resize 会重新计算。
+   */
+  const updateProductsMenuPosition = useCallback(() => {
+    const triggerElement = productsTriggerRef.current;
+    if (!triggerElement) {
+      return;
+    }
+
+    const triggerRect = triggerElement.getBoundingClientRect();
+    const availableWidth = Math.max(
+      0,
+      window.innerWidth - PRODUCTS_MENU_VIEWPORT_GUTTER * 2
+    );
+    const menuWidth = Math.min(PRODUCTS_MENU_MAX_WIDTH, availableWidth);
+    const centeredLeft =
+      triggerRect.left + triggerRect.width / 2 - menuWidth / 2;
+    const maxLeft = Math.max(
+      PRODUCTS_MENU_VIEWPORT_GUTTER,
+      window.innerWidth - menuWidth - PRODUCTS_MENU_VIEWPORT_GUTTER
+    );
+
+    setProductsMenuPosition({
+      left: Math.min(
+        Math.max(centeredLeft, PRODUCTS_MENU_VIEWPORT_GUTTER),
+        maxLeft
+      ),
+      top: triggerRect.bottom,
+      width: menuWidth,
+    });
+  }, []);
 
   const handleClick = (
     e: React.MouseEvent<HTMLAnchorElement>,
@@ -87,6 +140,7 @@ export function NavMenu() {
       clearTimeout(closeTimeoutRef.current);
       closeTimeoutRef.current = null;
     }
+    updateProductsMenuPosition();
     setProductsOpen(true);
   };
 
@@ -96,8 +150,23 @@ export function NavMenu() {
     }, 150);
   };
 
+  useEffect(() => {
+    if (!productsOpen) {
+      return;
+    }
+
+    updateProductsMenuPosition();
+    window.addEventListener("resize", updateProductsMenuPosition);
+    window.addEventListener("scroll", updateProductsMenuPosition, true);
+
+    return () => {
+      window.removeEventListener("resize", updateProductsMenuPosition);
+      window.removeEventListener("scroll", updateProductsMenuPosition, true);
+    };
+  }, [productsOpen, updateProductsMenuPosition]);
+
   return (
-    <NavigationMenu onMouseLeave={() => setHoveredItem(null)}>
+    <NavigationMenu viewport={false} onMouseLeave={() => setHoveredItem(null)}>
       <NavigationMenuList className="gap-0">
         {/* Products 下拉菜单 */}
         <NavigationMenuItem
@@ -107,6 +176,7 @@ export function NavMenu() {
         >
           <button
             type="button"
+            ref={productsTriggerRef}
             className={cn(
               "relative inline-flex h-9 items-center justify-center gap-1 px-4 py-2 text-sm font-medium transition-colors",
               productsOpen
@@ -139,12 +209,18 @@ export function NavMenu() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 8 }}
                 transition={{ duration: 0.15 }}
-                className="absolute left-1/2 top-full z-50 -translate-x-1/2 pt-2"
+                className="fixed z-50 pt-2"
+                style={{
+                  left: productsMenuPosition?.left ?? 0,
+                  top: productsMenuPosition?.top ?? 0,
+                  visibility: productsMenuPosition ? "visible" : "hidden",
+                  width: productsMenuPosition?.width ?? PRODUCTS_MENU_MAX_WIDTH,
+                }}
                 onMouseEnter={handleProductsEnter}
                 onMouseLeave={handleProductsLeave}
               >
-                <div className="w-[640px] rounded-xl border bg-popover p-4 shadow-lg">
-                  <div className="grid grid-cols-3 gap-4">
+                <div className="w-full rounded-xl border bg-popover p-4 shadow-lg">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     {productsNav.map((group) => (
                       <div key={group.title}>
                         <h4 className="mb-3 px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">

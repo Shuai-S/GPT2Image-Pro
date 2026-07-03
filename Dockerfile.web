@@ -78,14 +78,16 @@ RUN groupadd --system --gid 1001 nodejs && \
 COPY --from=builder /app/apps/web/.next/standalone ./
 COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder /app/apps/web/public ./apps/web/public
+COPY scripts/docker-web-entrypoint.cjs /usr/local/bin/gpt2image-web-entrypoint.cjs
 
 RUN mkdir -p /app/storage /app/.gpt2image /app/apps/web/.next/cache && \
     chown -R nextjs:nodejs /app/storage /app/.gpt2image /app/apps/web/.next
 
-USER nextjs
 EXPOSE 3000
 ENV HOSTNAME="0.0.0.0"
 ENV PORT=3000
 ENV GPT2IMAGE_BOOTSTRAP_CREDENTIALS_PATH=/app/.gpt2image/super-admin-credentials.txt
 
+# entrypoint 先以 root 修正 bind mount 权限，再 setuid/setgid 到 nextjs。
+ENTRYPOINT ["node", "/usr/local/bin/gpt2image-web-entrypoint.cjs"]
 CMD ["node", "apps/web/server.js"]

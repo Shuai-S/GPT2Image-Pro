@@ -20,6 +20,9 @@ export type SettingValueType =
 export type SettingKey =
   | "NEXT_PUBLIC_APP_URL"
   | "NEXT_PUBLIC_APP_NAME"
+  | "NEXT_PUBLIC_APP_DESCRIPTION"
+  | "NEXT_PUBLIC_APP_LOGO_URL"
+  | "NEXT_PUBLIC_APP_OG_IMAGE"
   | "NEXT_PUBLIC_ASSET_PREFIX"
   | "APP_TIME_ZONE"
   | "MARKETING_SLA_STATUS_ENABLED"
@@ -388,7 +391,33 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     category: "general",
     valueType: "string",
     defaultValue: "GPT2IMAGE",
-    requiresRebuild: true,
+  },
+  {
+    key: "NEXT_PUBLIC_APP_DESCRIPTION",
+    label: "应用描述",
+    description: "公开展示的应用描述，用于首页、页脚和 SEO 描述。",
+    category: "general",
+    valueType: "string",
+    defaultValue:
+      "AI-powered chat-to-image generation platform. Transform your words into stunning visuals through natural conversation.",
+  },
+  {
+    key: "NEXT_PUBLIC_APP_LOGO_URL",
+    label: "应用 Logo 地址",
+    description:
+      "顶部导航、侧栏和登录页使用的 Logo。支持以 / 开头的站内路径或 http(s) URL。",
+    category: "general",
+    valueType: "string",
+    defaultValue: "/assets/icon.png",
+  },
+  {
+    key: "NEXT_PUBLIC_APP_OG_IMAGE",
+    label: "社交分享图地址",
+    description:
+      "Open Graph 和 Twitter 分享图。支持以 / 开头的站内路径或 http(s) URL。",
+    category: "general",
+    valueType: "string",
+    defaultValue: "/og-image.png",
   },
   {
     key: "NEXT_PUBLIC_ASSET_PREFIX",
@@ -514,7 +543,8 @@ export const SYSTEM_SETTING_DEFINITIONS = [
   {
     key: "NEXT_PUBLIC_PAYMENT_PROVIDER",
     label: "前端支付通道",
-    description: "前端展示用支付通道，应与支付通道保持一致;自用模式可选「不启用」。",
+    description:
+      "前端展示用支付通道，应与支付通道保持一致;自用模式可选「不启用」。",
     category: "payment",
     valueType: "select",
     options: [
@@ -1542,8 +1572,7 @@ export const SYSTEM_SETTING_DEFINITIONS = [
   {
     key: "RATE_LIMIT_PAYMENT_REQUESTS_PER_MINUTE",
     label: "支付限流（次/分钟）",
-    description:
-      "支付相关接口的每分钟请求阈值。配置 Upstash Redis 后生效。",
+    description: "支付相关接口的每分钟请求阈值。配置 Upstash Redis 后生效。",
     category: "general",
     valueType: "number",
     defaultValue: 10,
@@ -1552,8 +1581,7 @@ export const SYSTEM_SETTING_DEFINITIONS = [
   {
     key: "RATE_LIMIT_UPLOAD_REQUESTS_PER_MINUTE",
     label: "上传限流（次/分钟）",
-    description:
-      "文件上传接口的每分钟请求阈值。配置 Upstash Redis 后生效。",
+    description: "文件上传接口的每分钟请求阈值。配置 Upstash Redis 后生效。",
     category: "general",
     valueType: "number",
     defaultValue: 30,
@@ -1562,8 +1590,7 @@ export const SYSTEM_SETTING_DEFINITIONS = [
   {
     key: "RATE_LIMIT_STRICT_REQUESTS_PER_MINUTE",
     label: "严格限流（次/分钟）",
-    description:
-      "敏感操作的严格每分钟请求阈值。配置 Upstash Redis 后生效。",
+    description: "敏感操作的严格每分钟请求阈值。配置 Upstash Redis 后生效。",
     category: "general",
     valueType: "number",
     defaultValue: 3,
@@ -1580,7 +1607,8 @@ export const SYSTEM_SETTING_DEFINITIONS = [
   {
     key: "CHATGPT_REGISTER_MOEMAIL_BASE_URL",
     label: "注册机 Moemail 服务地址",
-    description: "Moemail 临时邮箱服务的 API 地址，默认 https://mail.52ai.org。",
+    description:
+      "Moemail 临时邮箱服务的 API 地址，默认 https://mail.52ai.org。",
     category: "models",
     valueType: "string",
     defaultValue: "https://mail.52ai.org",
@@ -1629,8 +1657,7 @@ export const SYSTEM_SETTING_DEFINITIONS = [
   {
     key: "CHATGPT_REGISTER_REFRESH_URL",
     label: "注册机代理 IP 刷新地址",
-    description:
-      "动态代理 IP 刷新端点（GET 请求即换 IP）。留空则不刷新。",
+    description: "动态代理 IP 刷新端点（GET 请求即换 IP）。留空则不刷新。",
     category: "models",
     valueType: "string",
     secret: true,

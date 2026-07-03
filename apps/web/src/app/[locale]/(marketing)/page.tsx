@@ -4,6 +4,7 @@ import { isAdminRole } from "@repo/shared/auth/roles";
 import { getServerSession } from "@repo/shared/auth/server";
 import { SiteJsonLd, SoftwareAppJsonLd } from "@/components/seo/json-ld";
 import { siteConfig } from "@repo/shared/config";
+import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
 import { getRuntimePaymentConfig } from "@repo/shared/config/payment-runtime";
 import { CREDIT_CONFIG_DEFAULTS } from "@repo/shared/credits/config";
 import { getRuntimeCreditPackages } from "@repo/shared/credits/packages";
@@ -39,14 +40,15 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { locale } = await params;
   const isZh = locale === "zh";
+  const branding = await getRuntimeBrandingConfig();
 
   const title = isZh
-    ? "GPT2IMAGE - AI 对话生图平台"
-    : "GPT2IMAGE - AI Chat-to-Image Generation Platform";
+    ? `${branding.name} - AI 对话生图平台`
+    : `${branding.name} - AI Chat-to-Image Generation Platform`;
 
   const description = isZh
     ? "通过自然对话将你的想法转化为精美视觉图片。由最先进的 AI 模型驱动，支持批量生成、画廊管理与灵活积分系统。"
-    : "Transform your ideas into stunning visuals through natural conversation. Powered by state-of-the-art AI models with batch generation, gallery management, and flexible credits.";
+    : branding.description;
 
   return {
     title,
@@ -56,7 +58,7 @@ export async function generateMetadata({
       "chat to image",
       "text to image",
       "AI art",
-      "GPT2IMAGE",
+      branding.name,
       "image generation API",
       "creative AI",
       ...(isZh ? ["AI图像生成", "对话生图", "文字转图片", "AI艺术"] : []),
@@ -66,13 +68,13 @@ export async function generateMetadata({
       description,
       type: "website",
       url: `${siteConfig.url}/${locale}`,
-      siteName: siteConfig.name,
+      siteName: branding.name,
       images: [
         {
-          url: `${siteConfig.url}${siteConfig.ogImage}`,
+          url: branding.ogImageUrl,
           width: 1200,
           height: 630,
-          alt: siteConfig.name,
+          alt: branding.name,
         },
       ],
     },
@@ -80,7 +82,7 @@ export async function generateMetadata({
       card: "summary_large_image",
       title,
       description,
-      images: [`${siteConfig.url}${siteConfig.ogImage}`],
+      images: [branding.ogImageUrl],
     },
   };
 }
@@ -100,6 +102,7 @@ export default async function HomePage({
     slaEnabled,
     slaStats,
     session,
+    branding,
   ] = await Promise.all([
     getRuntimePaymentConfig(),
     getPlanCapabilityMatrix(),
@@ -113,6 +116,7 @@ export default async function HomePage({
     getRuntimeSettingBoolean("MARKETING_SLA_STATUS_ENABLED", true),
     getRecentGenerationSlaStats(1000),
     getServerSession(),
+    getRuntimeBrandingConfig(),
   ]);
   const role = session?.user?.id
     ? await getUserRoleById(session.user.id)
@@ -122,8 +126,8 @@ export default async function HomePage({
   return (
     <>
       {/* JSON-LD Structured Data */}
-      <SiteJsonLd locale={locale as "en" | "zh"} />
-      <SoftwareAppJsonLd locale={locale as "en" | "zh"} />
+      <SiteJsonLd locale={locale as "en" | "zh"} branding={branding} />
+      <SoftwareAppJsonLd locale={locale as "en" | "zh"} branding={branding} />
 
       {/* Page Sections */}
       <HeroSection />

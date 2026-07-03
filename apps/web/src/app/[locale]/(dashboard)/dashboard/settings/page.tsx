@@ -1,17 +1,26 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getLocale } from "next-intl/server";
 import { SettingsProfileView } from "@/features/settings/components";
 import { getServerSession } from "@repo/shared/auth/server";
+import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
 import { db, user } from "@repo/database";
 import { eq } from "drizzle-orm";
 
 /**
- * 设置页面元数据
+ * 生成设置页面 metadata。
+ *
+ * @returns 带管理员应用名称的页面标题。
+ * @sideEffects 读取 system_settings 表。
  */
-export const metadata = {
-  title: "Settings | GPT2IMAGE",
-  description: "Manage your account settings and preferences",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const branding = await getRuntimeBrandingConfig();
+
+  return {
+    title: `Settings | ${branding.name}`,
+    description: "Manage your account settings and preferences",
+  };
+}
 
 /**
  * 用户设置页面
@@ -25,7 +34,7 @@ export default async function SettingsPage() {
   const locale = await getLocale();
 
   // 如果用户未登录，重定向到登录页
-  if (!session || !session.user) {
+  if (!session?.user) {
     redirect(`/${locale}/sign-in`);
   }
 

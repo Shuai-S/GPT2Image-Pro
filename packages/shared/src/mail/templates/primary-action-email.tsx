@@ -24,6 +24,8 @@ import type { ReactNode } from "react";
  */
 
 interface PrimaryActionEmailProps {
+  /** 应用名称，未传入时使用默认品牌名 */
+  appName?: string;
   /** 预览文本 (显示在收件箱列表中) */
   preview?: string;
   /** 操作按钮文本 */
@@ -40,6 +42,7 @@ interface PrimaryActionEmailProps {
  * 通用操作邮件组件
  */
 export function PrimaryActionEmail({
+  appName = "GPT2IMAGE",
   preview,
   actionLabel,
   actionUrl,
@@ -56,7 +59,7 @@ export function PrimaryActionEmail({
             {/* Logo / 品牌区域 */}
             <Section className="mb-8 text-center">
               <Heading className="m-0 text-2xl font-bold text-gray-900">
-                GPT2IMAGE
+                {appName}
               </Heading>
             </Section>
 
@@ -100,7 +103,7 @@ export function PrimaryActionEmail({
 
             {/* 页脚 */}
             <Text className="m-0 mt-4 text-center text-xs text-gray-400">
-              &copy; {new Date().getFullYear()} GPT2IMAGE. All rights reserved.
+              &copy; {new Date().getFullYear()} {appName}. All rights reserved.
             </Text>
           </Container>
         </Body>
@@ -124,19 +127,22 @@ export default PrimaryActionEmail;
 export function MagicLinkEmail({
   magicLinkUrl,
   email,
+  appName = "GPT2IMAGE",
 }: {
   magicLinkUrl: string;
   email: string;
+  appName?: string;
 }) {
   return (
     <PrimaryActionEmail
-      preview="Sign in to GPT2IMAGE with this magic link"
+      appName={appName}
+      preview={`Sign in to ${appName} with this magic link`}
       actionLabel="Sign In"
       actionUrl={magicLinkUrl}
       expiresIn="15 minutes"
     >
       <Heading className="mb-4 text-xl font-semibold text-gray-900">
-        Sign in to GPT2IMAGE
+        Sign in to {appName}
       </Heading>
       <Text className="mb-4 text-base leading-relaxed text-gray-600">
         Click the button below to sign in to your account ({email}). No password
@@ -152,13 +158,16 @@ export function MagicLinkEmail({
 export function ResetPasswordEmail({
   resetUrl,
   name,
+  appName = "GPT2IMAGE",
 }: {
   resetUrl: string;
   name: string;
+  appName?: string;
 }) {
   return (
     <PrimaryActionEmail
-      preview="Reset your GPT2IMAGE password"
+      appName={appName}
+      preview={`Reset your ${appName} password`}
       actionLabel="Reset Password"
       actionUrl={resetUrl}
       expiresIn="1 hour"
@@ -180,12 +189,15 @@ export function ResetPasswordEmail({
 export function VerifyEmailEmail({
   verifyUrl,
   name,
+  appName = "GPT2IMAGE",
 }: {
   verifyUrl: string;
   name: string;
+  appName?: string;
 }) {
   return (
     <PrimaryActionEmail
+      appName={appName}
       preview="Verify your email address"
       actionLabel="Verify Email"
       actionUrl={verifyUrl}
@@ -208,20 +220,24 @@ export function VerifyEmailEmail({
 export function RegistrationVerificationCodeEmail({
   code,
   expiresIn = "10 minutes",
+  appName = "GPT2IMAGE",
 }: {
   code: string;
   expiresIn?: string;
+  appName?: string;
 }) {
   return (
     <Html>
       <Head />
-      <Preview>Your GPT2IMAGE verification code is {code}</Preview>
+      <Preview>
+        Your {appName} verification code is {code}
+      </Preview>
       <Tailwind>
         <Body className="mx-auto my-auto bg-white font-sans">
           <Container className="mx-auto my-10 max-w-xl rounded-lg border border-solid border-gray-200 p-8">
             <Section className="mb-8 text-center">
               <Heading className="m-0 text-2xl font-bold text-gray-900">
-                GPT2IMAGE
+                {appName}
               </Heading>
             </Section>
 
@@ -252,7 +268,7 @@ export function RegistrationVerificationCodeEmail({
             </Text>
 
             <Text className="m-0 mt-4 text-center text-xs text-gray-400">
-              &copy; {new Date().getFullYear()} GPT2IMAGE. All rights reserved.
+              &copy; {new Date().getFullYear()} {appName}. All rights reserved.
             </Text>
           </Container>
         </Body>

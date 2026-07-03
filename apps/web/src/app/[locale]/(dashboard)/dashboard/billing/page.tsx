@@ -1,16 +1,33 @@
+import type { Metadata } from "next";
 import { getServerSession } from "@repo/shared/auth/server";
+import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
 import { CreditUsageSection } from "@repo/shared/credits/components";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@repo/ui/components/tabs";
 import { getLocale, getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
 import { getAppTimeZone } from "@repo/shared/time-zone/server";
 
 import { BillingSection } from "@/features/settings/components/billing-section";
 
-export const metadata = {
-  title: "Billing & Usage | GPT2IMAGE",
-  description: "Manage subscriptions, billing history, and credit usage",
-};
+/**
+ * 生成账单页面 metadata。
+ *
+ * @returns 带管理员应用名称的页面标题。
+ * @sideEffects 读取 system_settings 表。
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const branding = await getRuntimeBrandingConfig();
+
+  return {
+    title: `Billing & Usage | ${branding.name}`,
+    description: "Manage subscriptions, billing history, and credit usage",
+  };
+}
 
 export default async function BillingPage() {
   const session = await getServerSession();
@@ -28,9 +45,7 @@ export default async function BillingPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <div>
-        <h1 className="font-serif text-2xl font-medium">
-          {t("pageTitle")}
-        </h1>
+        <h1 className="font-serif text-2xl font-medium">{t("pageTitle")}</h1>
         <p className="text-sm text-muted-foreground">{t("description")}</p>
       </div>
 

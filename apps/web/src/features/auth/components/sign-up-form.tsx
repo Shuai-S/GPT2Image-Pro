@@ -11,6 +11,7 @@ import {
   isAllowedRegistrationEmail,
 } from "@repo/shared/auth/email-domain";
 import { GoogleIcon } from "@repo/shared/components/icons";
+import type { BrandingConfig } from "@repo/shared/config/branding";
 import { Button } from "@repo/ui/components/button";
 import { Input } from "@repo/ui/components/input";
 import { Label } from "@repo/ui/components/label";
@@ -72,7 +73,9 @@ function isEmailDomainError(error: unknown) {
   const code = getAuthErrorCode(error);
   const message = getErrorMessage(error).toLowerCase();
 
-  return code === "EMAIL_DOMAIN_NOT_ALLOWED" || message.includes("email domain");
+  return (
+    code === "EMAIL_DOMAIN_NOT_ALLOWED" || message.includes("email domain")
+  );
 }
 
 function isVerificationCodeError(error: unknown) {
@@ -91,12 +94,21 @@ function isVerificationCodeError(error: unknown) {
  * - Google OAuth 注册
  * - GitHub OAuth 注册
  * - 邮箱密码注册
+ *
+ * @param googleAuthEnabled - Google OAuth 是否已配置。
+ * @param branding - 管理员配置的应用名称与 Logo。
+ * @returns 注册表单。
+ * @sideEffects 调用认证 API、发送邮箱验证码、触发路由跳转。
  */
 interface SignUpFormProps {
   googleAuthEnabled?: boolean;
+  branding: BrandingConfig;
 }
 
-export function SignUpForm({ googleAuthEnabled = false }: SignUpFormProps) {
+export function SignUpForm({
+  googleAuthEnabled = false,
+  branding,
+}: SignUpFormProps) {
   const locale = useLocale();
   const t = useTranslations("Auth.signUp");
   const tCommon = useTranslations("Auth.common");
@@ -262,8 +274,8 @@ export function SignUpForm({ googleAuthEnabled = false }: SignUpFormProps) {
             : isVerificationCodeError(result.error)
               ? t("errors.invalidVerificationCode")
               : isEmailAlreadyRegistered(result.error)
-            ? t("errors.emailAlreadyRegistered")
-            : t("errors.emailInUse")
+                ? t("errors.emailAlreadyRegistered")
+                : t("errors.emailInUse")
         );
         setIsLoading(false);
         return;
@@ -333,7 +345,7 @@ export function SignUpForm({ googleAuthEnabled = false }: SignUpFormProps) {
     <div className="w-full max-w-md space-y-6">
       {/* Logo 和标题 */}
       <div className="flex flex-col items-center space-y-2 text-center">
-        <AuthLogo />
+        <AuthLogo branding={branding} />
         <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
         <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
       </div>
