@@ -110,7 +110,20 @@ async function consumeImageStream(response: Response): Promise<string[]> {
   return images;
 }
 
-export function ChatWebPanel() {
+/** 参考图上限(本地上传 + 从最近生成挑选合计)。 */
+const MAX_CHAT_WEB_REFS = 6;
+
+type ChatWebPanelProps = {
+  // 参考图(data URL 数组)受控于父组件:本地上传与"点最近生成作参考"共用同一份状态,
+  // 后者由创作页 handleRecentClick 在 chat-web 模式下写入(见 create-page-client)。
+  attachments: string[];
+  onAttachmentsChange: (next: string[]) => void;
+};
+
+export function ChatWebPanel({
+  attachments,
+  onAttachmentsChange,
+}: ChatWebPanelProps) {
   const isZh = useLocale() === "zh";
   const t = useCallback(
     (en: string, zh: string) => (isZh ? zh : en),
@@ -120,20 +133,24 @@ export function ChatWebPanel() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [kind, setKind] = useState<GenKind>("ppt");
   const [prompt, setPrompt] = useState("");
-  const [attachments, setAttachments] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const onPickFiles = useCallback(async (files: FileList | null) => {
-    if (!files?.length) return;
-    const urls = await Promise.all(
-      Array.from(files)
-        .filter((f) => f.type.startsWith("image/"))
-        .slice(0, 6)
-        .map(fileToDataUrl)
-    );
-    setAttachments((prev) => [...prev, ...urls].slice(0, 6));
-  }, []);
+  const onPickFiles = useCallback(
+    async (files: FileList | null) => {
+      if (!files?.length) return;
+      const urls = await Promise.all(
+        Array.from(files)
+          .filter((f) => f.type.startsWith("image/"))
+          .slice(0, MAX_CHAT_WEB_REFS)
+          .map(fileToDataUrl)
+      );
+      onAttachmentsChange(
+        [...attachments, ...urls].slice(0, MAX_CHAT_WEB_REFS)
+      );
+    },
+    [attachments, onAttachmentsChange]
+  );
 
   const send = useCallback(async () => {
     const text = prompt.trim();
@@ -165,7 +182,7 @@ export function ChatWebPanel() {
       { id: pendingId, role: "assistant", kind, pending: true },
     ]);
     setPrompt("");
-    setAttachments([]);
+    onAttachmentsChange([]);
     setBusy(true);
 
     try {
@@ -227,7 +244,7 @@ export function ChatWebPanel() {
     } finally {
       setBusy(false);
     }
-  }, [prompt, busy, kind, attachments, t]);
+  }, [prompt, busy, kind, attachments, onAttachmentsChange, t]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -329,11 +346,15 @@ export function ChatWebPanel() {
           <span className="text-xs text-muted-foreground">
             {kind === "psd"
               ? t("(reference image required)", "(需参考图)")
-              : kind === "image"
-                ? t("(reference optional)", "(参考图可选)")
-                : t("(reference optional)", "(参考图可选)")}
+              : t("(reference optional)", "(参考图可选)")}
           </span>
         </div>
+        <p className="text-xs text-muted-foreground">
+          {t(
+            "Add reference images below, or click any image in Recent to attach it.",
+            "在下方上传参考图,或直接点「最近生成」里的图片添加为参考。"
+          )}
+        </p>
 
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2">
@@ -348,7 +369,7 @@ export function ChatWebPanel() {
                 <button
                   type="button"
                   onClick={() =>
-                    setAttachments((prev) => prev.filter((_, j) => j !== i))
+                    onAttachmentsChange(attachments.filter((_, j) => j !== i))
                   }
                   className="-right-2 -top-2 absolute rounded-full bg-background p-0.5 shadow"
                   aria-label={t("Remove", "移除")}
