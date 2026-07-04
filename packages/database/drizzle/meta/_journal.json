@@ -330,6 +330,13 @@
       "when": 1780401020000,
       "tag": "0046_referral_commission",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1780401080000,
+      "tag": "0047_referral_commission_repair",
+      "breakpoints": true
     }
   ]
 }

@@ -2,7 +2,8 @@ import dotenv from "dotenv";
 import { defineConfig } from "drizzle-kit";
 
 // 检测测试环境 (通过命令行参数或环境变量)
-const isTestEnv = process.argv.includes("--test") || process.env.USE_TEST_DB === "true";
+const isTestEnv =
+  process.argv.includes("--test") || process.env.USE_TEST_DB === "true";
 
 // 根据环境加载对应的环境变量文件
 if (isTestEnv) {
@@ -26,11 +27,13 @@ if (!databaseUrl) {
  * 用于管理数据库迁移和 Schema 推送
  */
 export default defineConfig({
-  // 数据库 Schema 文件路径
-  schema: "./src/db/schema.ts",
+  // 数据库 Schema 文件路径。
+  // 根配置仅做兼容入口，实际 Schema 归 packages/database 管理。
+  schema: "./packages/database/src/schema.ts",
 
-  // 迁移文件输出目录
-  out: "./drizzle",
+  // 迁移文件输出目录。
+  // 避免误用根目录 legacy drizzle/，导致新模块迁移未执行。
+  out: "./packages/database/drizzle",
 
   // 数据库类型: PostgreSQL
   dialect: "postgresql",
