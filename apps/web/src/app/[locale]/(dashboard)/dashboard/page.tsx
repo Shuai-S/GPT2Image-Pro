@@ -213,7 +213,7 @@ export default async function DashboardPage({
             <CardContent className="flex h-full flex-col items-center justify-center gap-3 p-6">
               <ImagePlus className="h-8 w-8 text-muted-foreground" />
               <Button asChild>
-                <Link href="/dashboard/create" prefetch={false}>
+                <Link href="/dashboard/create">
                   {copy("Start Creating", "开始创作")}
                 </Link>
               </Button>
@@ -244,7 +244,7 @@ export default async function DashboardPage({
                 {copy("Recent Creations", "最近创作")}
               </h2>
               <Button variant="ghost" size="sm" asChild>
-                <Link href="/dashboard/gallery" prefetch={false}>
+                <Link href="/dashboard/gallery">
                   {copy("View All", "查看全部")}
                 </Link>
               </Button>

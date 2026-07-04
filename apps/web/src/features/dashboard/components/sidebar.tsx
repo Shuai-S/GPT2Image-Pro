@@ -42,7 +42,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useAction } from "next-safe-action/hooks";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type CurrentSession,
   useCurrentSession,
@@ -87,6 +87,7 @@ export function DashboardSidebar({
   const user = session?.user;
   const isAdmin = isAdminRole(user?.role);
   const isObserverAdmin = isObserverAdminRole(user?.role);
+  const lastUnreadRefreshAtRef = useRef(0);
 
   // Popover 开关状态
   const [open, setOpen] = useState(false);
@@ -111,23 +112,59 @@ export function DashboardSidebar({
 
   // 用户登录后获取计划
   useEffect(() => {
-    if (user) {
+    if (user?.id) {
       fetchPlan();
     }
-  }, [user, fetchPlan]);
-
-  useEffect(() => {
-    if (user) {
-      fetchUnreadTickets();
-      fetchUnreadAnnouncements();
-    }
-  }, [user, pathname, fetchUnreadTickets, fetchUnreadAnnouncements]);
+  }, [user?.id, fetchPlan]);
 
   /**
-   * 导航项标题映射到翻译键
+   * 刷新侧边栏角标计数。
+   *
+   * @returns 无返回值。
+   * @sideEffects 调用 server actions 读取未读工单与公告数量。
    */
-  const getNavTitle = (title: string): string => {
-    const titleMap: Record<string, string> = {
+  const refreshUnreadCounts = useCallback(() => {
+    const now = Date.now();
+    if (now - lastUnreadRefreshAtRef.current < 1000) return;
+    lastUnreadRefreshAtRef.current = now;
+    fetchUnreadTickets();
+    fetchUnreadAnnouncements();
+  }, [fetchUnreadTickets, fetchUnreadAnnouncements]);
+
+  useEffect(() => {
+    if (user?.id) {
+      refreshUnreadCounts();
+    }
+  }, [user?.id, refreshUnreadCounts]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    /**
+     * 页面从后台回到前台时刷新计数。
+     *
+     * @returns 无返回值。
+     * @sideEffects 触发未读计数查询；避免每次路由切换都抢占导航请求。
+     */
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") {
+        refreshUnreadCounts();
+      }
+    };
+
+    window.addEventListener("focus", refreshUnreadCounts);
+    window.addEventListener("pageshow", refreshUnreadCounts);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+
+    return () => {
+      window.removeEventListener("focus", refreshUnreadCounts);
+      window.removeEventListener("pageshow", refreshUnreadCounts);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [user?.id, refreshUnreadCounts]);
+
+  const titleMap = useMemo<Record<string, string>>(
+    () => ({
       Create: t("nav.create"),
       "Text to Image": t("nav.createTextToImage"),
       "Image to Image": t("nav.createImageToImage"),
@@ -153,7 +190,14 @@ export function DashboardSidebar({
       Support: t("nav.support"),
       "New Ticket": t("nav.newTicket"),
       "User Management": t("nav.userManagement"),
-    };
+    }),
+    [t]
+  );
+
+  /**
+   * 导航项标题映射到翻译键
+   */
+  const getNavTitle = (title: string): string => {
     return titleMap[title] || title;
   };
 
@@ -232,7 +276,6 @@ export function DashboardSidebar({
         <div className="flex h-14 items-center px-4">
           <Link
             href={`/${locale}`}
-            prefetch={false}
             className="flex items-center gap-2"
             onClick={(e) => {
               if (mobile) {
@@ -336,7 +379,6 @@ export function DashboardSidebar({
                     <div key={item.href}>
                       <Link
                         href={localizedHref(item.href)}
-                        prefetch={false}
                         title={collapsed ? translatedTitle : undefined}
                         onClick={() => mobile && setMobileOpen(false)}
                         className={cn(
@@ -376,7 +418,6 @@ export function DashboardSidebar({
                               <Link
                                 key={child.href}
                                 href={localizedHref(child.href)}
-                                prefetch={false}
                                 onClick={() => mobile && setMobileOpen(false)}
                                 className={cn(
                                   "flex items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
