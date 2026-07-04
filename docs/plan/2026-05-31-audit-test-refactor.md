@@ -131,7 +131,7 @@ api2 隔离栈 git pull 到 114054a、清 `.next` 后重启 next dev，本地隧
 保留 5 条（复核 accept / 真正闭合且不破坏行为），dev 提交 4208681..6f48522：
 
 - [x] **S-L2** Creem webhook grant 失败不再吞异常（catch throw→外层 500→Creem 重投；幂等 onConflictDoNothing + credits_batch 唯一索引保证不双发）。commit 4208681。
-- [x] **S-M11（软门闩 detect-only）** grant 前金额/币种比对；comparable=false 一律放行+告警，仅 `CREEM_WEBHOOK_ENFORCE_AMOUNT`(默认OFF) 开启才硬拒，绝不误拒真实支付。同 4208681。残留：纯函数无测试、币种映射待运维对齐（见 TODO）。
+- [x] **S-M11** grant 前金额/币种比对；comparable=false 一律放行+告警，comparable=true 且金额/币种不匹配默认硬拒，防止低价或跨币种支付套取高价权益。`CREEM_WEBHOOK_ENFORCE_AMOUNT=0/false/no/off` 仅作为临时软门闩。
 - [x] **S-L1** consumeCredits 两处幂等查询补 `eq(userId)` + 迁移 0029 偏唯一索引收窄为 per-user `(user_id,type,source_ref)` + schema.ts 同步。commit 7ecd855。
 - [x] **S-M8** 系统设置经济/安全数值键 per-key min/max 范围校验 + 5 DB-free 测试。commit b81601b。
 - [x] **M-H5** 新增 admin/layout.tsx 集中守卫（canViewImageBackendPool 并集粗门，保 observer_admin 合法访问）。commit b240ce7。需 UI 实测。

@@ -56,7 +56,7 @@
 - [x] **SSRF DNS 重绑定（已修复主路��）**：`packages/shared/src/security/dns-pin.ts` 实现无条件 node:http/https DNS pin（不依赖 globalThis.fetch 比较）。`fetchPublicImage`/`fetchPublicCallback` 已改用 `fetchWithDnsPin`。测试 mock dns-pin 模块。
   - [ ] **残留裸 fetch（对抗复核发现）**：`operations.ts toImageBuffer`（L291）和 `images.ts getImageBase64`（L158）直接 fetch 上游返回的 imageUrl 无 SSRF 防护——恶意自定义后端可返回内网 URL。需改为 fetchWithDnsPin 或 fetchPublicImage。
 - [x] **Creem 金额纯函数抽离（S-M11 已完成）**：`packages/shared/src/payment/creem-amount.ts` 导出 3 个纯函数 + 369 行��测覆盖（标准/零小数/三小数币种、金额匹配/不匹配、enforce/detect-only、边界值）。route.ts 已改为 import。
-  - [ ] **启用硬拒前置**：软门闩默认仍仅告警（`CREEM_WEBHOOK_ENFORCE_AMOUNT` 可开启硬拒），须运维对齐 Creem 产品价目确认 `order.amount` 单位（minor units 假设待验证）和实际币种（CNY vs USD）。
+  - [x] **启用硬拒前置**：可比的金额/币种不匹配默认硬拒；仅 `CREEM_WEBHOOK_ENFORCE_AMOUNT=0/false/no/off` 允许临时软门闩。字段缺失或金额无法换算的不可比场景仍放行并告警，避免误拒真实支付。
 
 ## Agent 集成 / 统一接口层实现路线图（来源：docs/plan/2026-05-31-agent-integration-architecture.md）
 
