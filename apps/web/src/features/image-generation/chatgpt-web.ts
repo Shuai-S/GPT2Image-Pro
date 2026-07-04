@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { logError } from "@repo/shared/logger";
 import { getRuntimeSettingString } from "@repo/shared/system-settings";
 import { parseImageSize } from "./resolution";
+import { isContentSafetyRejection } from "./sla-classification";
 import {
   buildWebHistoryTranscript,
   downloadWebHistoryImageReference,
@@ -2133,6 +2134,25 @@ async function runWebImage(
       }
     }
     if (!candidateImages[0]?.url) {
+      // 无图:web 对违规内容常"软拒绝"(picture_v2 不返图,只回一段拒绝文字)。抽出 assistant
+      // 文字,若命中内容安全拒绝 → 直接返回该拒绝文案:SLA 归 moderation(真实审核,而非事后
+      // 靠后端类型猜的"疑似审核"),且被 isUserRequestBackendError 判为不可切换 → 秒级失败、不再
+      // 逐个换号重试同样会被拒的内容一路 churn 到 20 分钟超时。抽不到/非拒绝则退回原 "no image output"。
+      try {
+        const answer = extractAssistantAnswer(
+          await getConversationText(
+            configWithSignal,
+            conversationId,
+            abortController.signal
+          ),
+          requestMessageId
+        );
+        if (answer.text && isContentSafetyRejection(answer.text)) {
+          return { error: answer.text.slice(0, 500) };
+        }
+      } catch {
+        throwIfAborted(abortController.signal);
+      }
       return { error: "ChatGPT Web backend returned no image output" };
     }
     const imageOutputs = await downloadImageOutputs(
