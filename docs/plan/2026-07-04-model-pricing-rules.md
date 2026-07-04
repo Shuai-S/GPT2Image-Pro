@@ -150,8 +150,18 @@ pricingSnapshot = {
 
 ## 后续接入顺序
 
+已完成：
+
+1. `MODEL_PRICING_RULES` 已接入系统设置默认项和后台“模型定价”tab，可视化维护
+   token、按次和组合计费规则。
+2. 营销定价页已展示公开且启用的模型规则，用户可看到 token/按次价格和作用域。
+3. UOL 已暴露只读公共操作：`modelPricing.listPublicRules` 与
+   `modelPricing.previewPublicCharge`。预览操作只使用公开规则，避免通过公共
+   Agent/MCP 接口探测隐藏内部定价。
+
+下一阶段：
+
 1. 把当前系统设置中的图片、视频价格在服务层转换成 `ModelPricingRule`。
-2. 在 UOL 中增加只读 `model_pricing.preview` operation，用于后台预览和测试。
-3. 将生成管线的“应扣积分”改为调用 resolver，但仍走原 `consumeCredits`。
-4. 接入 token usage 的完成后差额结算，沿用现有 `sourceRef` 后缀约定。
-5. 最后再做后台“模型定价”页面和分组覆盖矩阵。
+2. 将生成管线的“应扣积分”改为调用 resolver，但仍走原 `consumeCredits`。
+3. 接入 token usage 的完成后差额结算，沿用现有 `sourceRef` 后缀约定。
+4. 最后再做后台“模型定价”页面的分组覆盖矩阵和生产扣费快照查询。
