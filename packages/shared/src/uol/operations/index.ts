@@ -12,6 +12,8 @@
 import "./image-generation";
 // 积分域
 import "./credits";
+// 模型定价域
+import "./model-pricing";
 // 订阅域
 import "./subscription";
 // 用户认证域
