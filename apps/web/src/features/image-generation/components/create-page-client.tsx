@@ -572,13 +572,7 @@ type ImageAspectRatio =
   | "3:4"
   | "21:9";
 
-type ActiveMode =
-  | "text"
-  | "image"
-  | "chat"
-  | "agent"
-  | "waterfall"
-  | "video";
+type ActiveMode = "text" | "image" | "chat" | "agent" | "waterfall" | "video";
 type ReferenceTargetMode = Extract<ActiveMode, ReferenceHandoffMode>;
 type VisualOutputMode = "text-single" | "text-lines" | "image";
 
@@ -948,10 +942,7 @@ function ImageSizeDialog({
               />
               <span>
                 <span className="block text-sm font-medium text-foreground">
-                  {copy(
-                    "Mixed group Web-first routing",
-                    "混合分组优先走 Web"
-                  )}
+                  {copy("Mixed group Web-first routing", "混合分组优先走 Web")}
                 </span>
                 <span className="mt-1 block">
                   {copy(
@@ -1002,10 +993,8 @@ const shouldBypassImageOptimization = (imageUrl: string | undefined) =>
 // WHY:这些位置常以很小尺寸展示(最近面板 80px、变体 40px),但原本直接加载全分辨率原图
 // (单张可达 1.3MB),一屏多图严重拖卡前端;next/image 优化器对带签名 query 的本地图会 400,
 // 故沿用全站既有方案——直连 /w/ 路径段缩略图(CF/磁盘可缓存),非存储图原样返回。
-const thumbSrc = (
-  imageUrl: string | null | undefined,
-  width: number
-): string => buildStorageThumbnailUrl(imageUrl, width) || imageUrl || "";
+const thumbSrc = (imageUrl: string | null | undefined, width: number): string =>
+  buildStorageThumbnailUrl(imageUrl, width) || imageUrl || "";
 
 const DEFAULT_MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 const DEFAULT_MAX_EDIT_REQUEST_BYTES = 75 * 1024 * 1024;
@@ -1141,7 +1130,10 @@ function ConcurrencyNumberInput({
         disabled={disabled}
         onChange={(event) =>
           onChange(
-            Math.min(max, Math.max(1, Math.floor(Number(event.target.value) || 1)))
+            Math.min(
+              max,
+              Math.max(1, Math.floor(Number(event.target.value) || 1))
+            )
           )
         }
         className="w-full"
@@ -1203,12 +1195,30 @@ function readStoredCreateActiveMode(): ActiveMode {
       value === "image" ||
       value === "chat" ||
       value === "agent" ||
-      value === "waterfall"
+      value === "waterfall" ||
+      value === "video"
       ? value
       : "text";
   } catch {
     return "text";
   }
+}
+
+/**
+ * 从 URL 读取创作模式。
+ *
+ * @param value URL query 中的 mode 值。
+ * @returns 合法创作模式；非法值返回 null。
+ */
+function parseCreateModeParam(value: string | null): ActiveMode | null {
+  return value === "text" ||
+    value === "image" ||
+    value === "chat" ||
+    value === "agent" ||
+    value === "waterfall" ||
+    value === "video"
+    ? value
+    : null;
 }
 
 interface CreatePageClientProps {
@@ -1903,10 +1913,10 @@ export function CreatePageClient({
     getImageCreditCost(requestedSize, {
       ...options,
       basePricing: imageBasePricing,
-      quality: (options.quality ??
-        quality) as ImageQualityLevel | undefined,
-      thinking: (options.thinking ??
-        chatThinking) as ImageThinkingLevel | undefined,
+      quality: (options.quality ?? quality) as ImageQualityLevel | undefined,
+      thinking: (options.thinking ?? chatThinking) as
+        | ImageThinkingLevel
+        | undefined,
     });
   const activeBackendType = selectedBackendGroup?.backendType || "mixed";
   const isWebOnlyBackend = activeBackendType === "web";
@@ -2063,6 +2073,26 @@ export function CreatePageClient({
   const [activeMode, setActiveMode] = useCreateRuntimeState<ActiveMode>(
     "activeMode",
     readStoredCreateActiveMode()
+  );
+  /**
+   * 切换创作模式并同步到 URL。
+   *
+   * @param mode 目标创作模式。
+   * @sideEffects 更新共享运行时状态、localStorage 以及当前地址的 mode query。
+   */
+  const switchActiveMode = useCallback(
+    (mode: ActiveMode) => {
+      setActiveMode(mode);
+
+      const nextParams = new URLSearchParams(searchParams.toString());
+      if (nextParams.get("mode") === mode) return;
+
+      nextParams.set("mode", mode);
+      router.replace(`${pathname}?${nextParams.toString()}`, {
+        scroll: false,
+      });
+    },
+    [pathname, router, searchParams, setActiveMode]
   );
   const [prompt, setPrompt] = useCreateRuntimeState("prompt", "");
   const [textMode, setTextMode] = useCreateRuntimeState<TextGenerationMode>(
@@ -2296,7 +2326,9 @@ export function CreatePageClient({
     setLineBatchRepeatCount((value) => Math.min(value, batchCountMax));
     setEditBatchCount((value) => Math.min(value, batchCountMax));
     // 瀑布流 tier 也钳制到当前套餐允许上限(套餐切换/管理员调整并发时收紧)
-    setWaterfallTier((value) => Math.max(1, Math.min(value, waterfallTierLimit)));
+    setWaterfallTier((value) =>
+      Math.max(1, Math.min(value, waterfallTierLimit))
+    );
   }, [batchCountMax, waterfallTierLimit]);
 
   useEffect(() => {
@@ -2306,7 +2338,7 @@ export function CreatePageClient({
       value === "agent" || value === "waterfall" || value === "chat"
         ? value
         : "image";
-    const clearReferenceParams = () => {
+    const clearReferenceParams = (mode: ActiveMode) => {
       const nextParams = new URLSearchParams(searchParams.toString());
       for (const key of [
         "mode",
@@ -2318,6 +2350,7 @@ export function CreatePageClient({
       ]) {
         nextParams.delete(key);
       }
+      nextParams.set("mode", mode);
       const nextQuery = nextParams.toString();
       router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, {
         scroll: false,
@@ -2388,7 +2421,7 @@ export function CreatePageClient({
                 : chatAllowed;
           if (!modeAllowed) {
             revokePreview(item.previewUrl);
-            setActiveMode("image");
+            switchActiveMode("image");
             toast.error(
               copy(
                 "This mode is not enabled for your plan.",
@@ -2419,9 +2452,11 @@ export function CreatePageClient({
             }
             return [...prev, { ...item, kind: "image" }];
           });
-          setActiveMode(reference.mode);
+          switchActiveMode(reference.mode);
           toast.success(copy("Reference image attached", "参考图片已添加"));
-          if (reference.fromUrl && !cancelled) clearReferenceParams();
+          if (reference.fromUrl && !cancelled) {
+            clearReferenceParams(reference.mode);
+          }
           return;
         }
 
@@ -2442,9 +2477,9 @@ export function CreatePageClient({
           }
           return [...prev, item];
         });
-        setActiveMode("image");
+        switchActiveMode("image");
         toast.success(copy("Reference image selected", "参考图片已选择"));
-        if (reference.fromUrl && !cancelled) clearReferenceParams();
+        if (reference.fromUrl && !cancelled) clearReferenceParams("image");
       } catch (error) {
         toast.error(
           copy("Failed to load reference image", "参考图片加载失败"),
@@ -2458,7 +2493,7 @@ export function CreatePageClient({
         if (appliedReferenceParamKeyRef.current === referenceKey) {
           appliedReferenceParamKeyRef.current = null;
         }
-        if (reference.fromUrl && !cancelled) clearReferenceParams();
+        if (reference.fromUrl && !cancelled) clearReferenceParams("image");
       }
     };
 
@@ -2476,6 +2511,7 @@ export function CreatePageClient({
     pathname,
     router,
     searchParams,
+    switchActiveMode,
     waterfallAllowed,
   ]);
 
@@ -2616,7 +2652,10 @@ export function CreatePageClient({
     Map<string, AbortController>
   >("batchAbortControllersRef", () => new Map());
   // 里程碑警告期间阻塞自动续批；用户确认后解除并恢复生成
-  const warningBlockRef = useCreateRuntimeRef("waterfallWarningBlockRef", false);
+  const warningBlockRef = useCreateRuntimeRef(
+    "waterfallWarningBlockRef",
+    false
+  );
   // 本会话累计“已发起”的瀑布流张数，用于跨越里程碑阈值判断
   const sessionCountRef = useCreateRuntimeRef("waterfallSessionCountRef", 0);
   // 已展示过的里程碑阈值集合，避免同一阈值重复弹窗
@@ -2736,7 +2775,14 @@ export function CreatePageClient({
       applyBillingMultiplier(
         getPricedImageCreditCost(size, moderationCostOptions)
       ),
-    [activeBillingMultiplier, chatThinking, imageBasePricing, moderationCostOptions, quality, size]
+    [
+      activeBillingMultiplier,
+      chatThinking,
+      imageBasePricing,
+      moderationCostOptions,
+      quality,
+      size,
+    ]
   );
   const textBatchCreditCost = textImageCreditCost * batchCount;
   const linePromptItems = useMemo(
@@ -2836,6 +2882,23 @@ export function CreatePageClient({
       )
     : undefined;
   const effectiveAgentAllowed = agentAllowed && !agentBackendUnavailableReason;
+  /**
+   * 判断创作模式是否可访问。
+   *
+   * @param mode 待切换的创作模式。
+   * @returns 当前套餐与后端配置是否允许使用该模式。
+   */
+  const isActiveModeAllowed = useCallback(
+    (mode: ActiveMode) =>
+      mode === "agent"
+        ? effectiveAgentAllowed
+        : mode === "waterfall"
+          ? waterfallAllowed
+          : mode === "chat"
+            ? chatAllowed
+            : true,
+    [chatAllowed, effectiveAgentAllowed, waterfallAllowed]
+  );
   const currentModeMixWebFirstActive =
     activeMode === "image"
       ? editMixWebFirstActive
@@ -2858,6 +2921,37 @@ export function CreatePageClient({
       getModerationCostOptions(chatImageAttachmentCount)
     )
   );
+
+  useEffect(() => {
+    const requestedMode = parseCreateModeParam(searchParams.get("mode"));
+    const fallbackMode: ActiveMode = "text";
+
+    if (requestedMode && !isActiveModeAllowed(requestedMode)) {
+      toast.error(
+        copy(
+          "This mode is not enabled for your plan.",
+          "当前套餐未开启该模式。"
+        )
+      );
+      switchActiveMode(
+        isActiveModeAllowed(activeMode) ? activeMode : fallbackMode
+      );
+      return;
+    }
+
+    if (!isActiveModeAllowed(activeMode)) {
+      switchActiveMode(fallbackMode);
+      return;
+    }
+
+    if (!requestedMode) {
+      switchActiveMode(activeMode);
+      return;
+    }
+    if (requestedMode === activeMode) return;
+
+    switchActiveMode(requestedMode);
+  }, [activeMode, copy, isActiveModeAllowed, searchParams, switchActiveMode]);
   const formattedBalance = formatCredits(balance);
   const formattedTextBatchCreditCost = formatCredits(textBatchCreditCost);
   const formattedLineBatchCreditCost = formatCredits(lineBatchCreditCost);
@@ -3016,11 +3110,17 @@ export function CreatePageClient({
   }, [hasActiveRuntimeTask, initialBalance, initialRecent]);
   useEffect(() => {
     if (activeMode !== "agent" || effectiveAgentAllowed) return;
-    setActiveMode("chat");
+    switchActiveMode("chat");
     toast.error(copy("Agent is unavailable", "Agent 当前不可用"), {
       description: agentBackendUnavailableReason,
     });
-  }, [activeMode, agentBackendUnavailableReason, copy, effectiveAgentAllowed]);
+  }, [
+    activeMode,
+    agentBackendUnavailableReason,
+    copy,
+    effectiveAgentAllowed,
+    switchActiveMode,
+  ]);
   const firstPreviewUrl = editImages[0]?.previewUrl || null;
   const chatFirstPreviewUrl =
     chatAttachments.find((item) => item.kind === "image")?.previewUrl || null;
@@ -4782,7 +4882,7 @@ export function CreatePageClient({
       const item = await urlToEditImageFile(imageUrl, name, sourceId);
       setChatAttachments((prev) => [...prev, { ...item, kind: "image" }]);
       if (!isConversationMode(activeMode)) {
-        setActiveMode("chat");
+        switchActiveMode("chat");
       }
       toast.success(copy("Reference image attached", "参考图片已添加"));
     } catch (error) {
@@ -6954,7 +7054,7 @@ export function CreatePageClient({
       );
       clearEditImages();
       setEditImages([item]);
-      setActiveMode("image");
+      switchActiveMode("image");
       setEditPrompt("");
       toast.success(
         copy("Result added as reference image", "结果已作为参考图片")
@@ -7314,7 +7414,11 @@ export function CreatePageClient({
                     onValueChange={(value) =>
                       setOutputFormat(value as ImageOutputFormat)
                     }
-                    disabled={modeBusy || disableResponsesOnlyControls || textFireflyActive}
+                    disabled={
+                      modeBusy ||
+                      disableResponsesOnlyControls ||
+                      textFireflyActive
+                    }
                   >
                     <SelectTrigger
                       id={`image-output-format-${mode}`}
@@ -7358,7 +7462,11 @@ export function CreatePageClient({
                           )
                         )
                       }
-                      disabled={modeBusy || disableResponsesOnlyControls || textFireflyActive}
+                      disabled={
+                        modeBusy ||
+                        disableResponsesOnlyControls ||
+                        textFireflyActive
+                      }
                       title={outputCompressionHelpText}
                     />
                   </div>
@@ -7394,7 +7502,11 @@ export function CreatePageClient({
                     onValueChange={(value) =>
                       setModeration(value as ImageModeration)
                     }
-                    disabled={modeBusy || disableResponsesOnlyControls || textFireflyActive}
+                    disabled={
+                      modeBusy ||
+                      disableResponsesOnlyControls ||
+                      textFireflyActive
+                    }
                   >
                     <SelectTrigger
                       id={`image-oai-moderation-${mode}`}
@@ -7589,81 +7701,7 @@ export function CreatePageClient({
         </p>
       </header>
 
-      <Tabs
-        value={activeMode}
-        onValueChange={(value) => {
-          const modeAllowed =
-            value === "agent"
-              ? effectiveAgentAllowed
-              : value === "waterfall"
-                ? waterfallAllowed
-                : value === "chat"
-                  ? chatAllowed
-                  : true;
-          if (!modeAllowed) {
-            toast.error(
-              copy(
-                "This mode is not enabled for your plan.",
-                "当前套餐未开启该模式。"
-              )
-            );
-            return;
-          }
-          if (value === "agent" && agentBackendUnavailableReason) {
-            toast.error(copy("Agent is unavailable", "Agent 当前不可用"), {
-              description: agentBackendUnavailableReason,
-            });
-            return;
-          }
-          setActiveMode(value as ActiveMode);
-        }}
-        className="mb-10"
-      >
-        <TabsList className="mb-4 h-auto flex-wrap justify-start border border-border bg-muted/40">
-          <TabsTrigger value="text">
-            <Wand2 className="h-4 w-4" />
-            {copy("Text to image", "文生图")}
-          </TabsTrigger>
-          <TabsTrigger value="image">
-            <ImagePlus className="h-4 w-4" />
-            {copy("Image to image", "图生图")}
-          </TabsTrigger>
-          <TabsTrigger value="chat" disabled={!chatAllowed}>
-            <MessageSquare className="h-4 w-4" />
-            {copy("Chat", "对话")}
-            {!chatAllowed && (
-              <span className="text-[10px] text-muted-foreground">Pro</span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger
-            value="agent"
-            disabled={!effectiveAgentAllowed}
-            title={agentBackendUnavailableReason}
-          >
-            <Wand2 className="h-4 w-4" />
-            {copy("Agent", "Agent")}
-            {gpt55ChatAllowed && (
-              <span className="text-[10px] text-muted-foreground">GPT-5.5</span>
-            )}
-            {!agentAllowed ? (
-              <span className="text-[10px] text-muted-foreground">Locked</span>
-            ) : agentBackendUnavailableReason ? (
-              <span className="text-[10px] text-muted-foreground">Codex</span>
-            ) : null}
-          </TabsTrigger>
-          <TabsTrigger value="waterfall" disabled={!waterfallAllowed}>
-            <ImagePlus className="h-4 w-4" />
-            {copy("Waterfall", "瀑布流")}
-            {!waterfallAllowed && (
-              <span className="text-[10px] text-muted-foreground">Locked</span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="video">
-            <Wand2 className="h-4 w-4" />
-            {copy("Video", "视频")}
-          </TabsTrigger>
-        </TabsList>
-
+      <div className="mb-10">
         <div role="tabpanel" hidden={activeMode !== "text"} className="mt-0">
           <Tabs
             value={textMode}
@@ -8102,7 +8140,9 @@ export function CreatePageClient({
                     <Select
                       value={editModel}
                       onValueChange={setEditModel}
-                      disabled={isEditing || editMixWebFirstActive || editFireflyActive}
+                      disabled={
+                        isEditing || editMixWebFirstActive || editFireflyActive
+                      }
                     >
                       <SelectTrigger
                         id="edit-model"
@@ -8231,7 +8271,11 @@ export function CreatePageClient({
                         onValueChange={(value) =>
                           setOutputFormat(value as ImageOutputFormat)
                         }
-                        disabled={isEditing || editMixWebFirstActive || editFireflyActive}
+                        disabled={
+                          isEditing ||
+                          editMixWebFirstActive ||
+                          editFireflyActive
+                        }
                       >
                         <SelectTrigger
                           id="edit-output-format"
@@ -8285,7 +8329,11 @@ export function CreatePageClient({
                               )
                             )
                           }
-                          disabled={isEditing || editMixWebFirstActive || editFireflyActive}
+                          disabled={
+                            isEditing ||
+                            editMixWebFirstActive ||
+                            editFireflyActive
+                          }
                           title={outputCompressionHelpText}
                         />
                       </div>
@@ -8341,7 +8389,11 @@ export function CreatePageClient({
                         onValueChange={(value) =>
                           setModeration(value as ImageModeration)
                         }
-                        disabled={isEditing || editMixWebFirstActive || editFireflyActive}
+                        disabled={
+                          isEditing ||
+                          editMixWebFirstActive ||
+                          editFireflyActive
+                        }
                       >
                         <SelectTrigger
                           id="edit-oai-moderation"
@@ -8904,7 +8956,10 @@ export function CreatePageClient({
                                           )}
                                         >
                                           <Image
-                                            src={thumbSrc(variant.imageUrl, 256)}
+                                            src={thumbSrc(
+                                              variant.imageUrl,
+                                              256
+                                            )}
                                             alt={variant.prompt}
                                             fill
                                             sizes="40px"
@@ -9471,7 +9526,7 @@ export function CreatePageClient({
         <div role="tabpanel" hidden={activeMode !== "video"} className="mt-0">
           <VideoCreatePanel recent={recent} pricing={videoPricing} />
         </div>
-      </Tabs>
+      </div>
 
       {recent.length > 0 && (
         <section className="space-y-4">

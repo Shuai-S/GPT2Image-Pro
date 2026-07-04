@@ -1,23 +1,18 @@
 "use client";
 
+import { getMyUnreadAnnouncementCountAction } from "@repo/shared/announcements/actions";
+import { signOut } from "@repo/shared/auth/client";
+import { isAdminRole, isObserverAdminRole } from "@repo/shared/auth/roles";
+import { ModeToggle } from "@repo/shared/components";
+import { dashboardConfig } from "@repo/shared/config";
+import type { BrandingConfig } from "@repo/shared/config/branding";
+import { CreditBalanceBadge } from "@repo/shared/credits/components";
+import { getMyPlanAction } from "@repo/shared/subscription/actions/get-user-plan";
 import {
-  Activity,
-  ChevronsUpDown,
-  LogOut,
-  Megaphone,
-  Server,
-  Shield,
-  Settings,
-  Users,
-} from "lucide-react";
-import Image from "next/image";
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useLocale } from "next-intl";
-import { useTranslations } from "next-intl";
-import { useAction } from "next-safe-action/hooks";
-import { useEffect, useState } from "react";
-
+  PlanBadge,
+  type PlanType,
+} from "@repo/shared/subscription/components/plan-badge";
+import { getMyUnreadTicketCountAction } from "@repo/shared/support/actions/ticket";
 import {
   Avatar,
   AvatarFallback,
@@ -30,25 +25,29 @@ import {
 } from "@repo/ui/components/popover";
 import { Separator } from "@repo/ui/components/separator";
 import { Sheet, SheetContent, SheetTitle } from "@repo/ui/components/sheet";
-import { dashboardConfig } from "@repo/shared/config";
-import type { BrandingConfig } from "@repo/shared/config/branding";
-import { CreditBalanceBadge } from "@repo/shared/credits/components";
-import { isAdminRole, isObserverAdminRole } from "@repo/shared/auth/roles";
-import { useSidebar } from "@/features/dashboard/context";
-import { ModeToggle } from "@repo/shared/components";
-import { getMyUnreadAnnouncementCountAction } from "@repo/shared/announcements/actions";
-import { getMyPlanAction } from "@repo/shared/subscription/actions/get-user-plan";
-import { getMyUnreadTicketCountAction } from "@repo/shared/support/actions/ticket";
-import {
-  PlanBadge,
-  type PlanType,
-} from "@repo/shared/subscription/components/plan-badge";
-import { signOut } from "@repo/shared/auth/client";
 import { cn } from "@repo/ui/utils";
 import {
-  useCurrentSession,
+  Activity,
+  ChevronsUpDown,
+  Gift,
+  LogOut,
+  Megaphone,
+  Server,
+  Settings,
+  Shield,
+  Users,
+} from "lucide-react";
+import Image from "next/image";
+import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useLocale, useTranslations } from "next-intl";
+import { useAction } from "next-safe-action/hooks";
+import { useEffect, useState } from "react";
+import {
   type CurrentSession,
+  useCurrentSession,
 } from "@/features/auth/hooks/use-current-session";
+import { useSidebar } from "@/features/dashboard/context";
 
 /**
  * Dashboard 侧边栏组件
@@ -77,6 +76,7 @@ export function DashboardSidebar({
 }: DashboardSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const locale = useLocale();
   const { isCollapsed, isMobileOpen, setMobileOpen, toggleSidebar } =
     useSidebar();
@@ -129,18 +129,26 @@ export function DashboardSidebar({
   const getNavTitle = (title: string): string => {
     const titleMap: Record<string, string> = {
       Create: t("nav.create"),
+      "Text to Image": t("nav.createTextToImage"),
+      "Image to Image": t("nav.createImageToImage"),
+      Chat: t("nav.createChat"),
+      Agent: t("nav.createAgent"),
+      Waterfall: t("nav.createWaterfall"),
+      Video: t("nav.createVideo"),
       Dashboard: t("nav.dashboard"),
       Gallery: t("nav.gallery"),
       History: t("nav.history"),
       "System Docs": t("nav.backendHelp"),
       "External API": t("nav.externalApi"),
       "Billing & Usage": t("nav.billing"),
+      Referral: t("nav.referral"),
       Announcements: t("nav.announcements"),
       Settings: t("nav.settings"),
       "System Settings": t("nav.systemSettings"),
       "Global Status": t("nav.globalStatus"),
       "Announcement Management": t("nav.announcementManagement"),
       "Image Backend Pool": t("nav.imageBackendPool"),
+      "Referral Management": t("nav.referralManagement"),
       Support: t("nav.support"),
       "New Ticket": t("nav.newTicket"),
       "User Management": t("nav.userManagement"),
@@ -184,6 +192,31 @@ export function DashboardSidebar({
 
   const localizedHref = (href: string) =>
     href.startsWith("/") ? `/${locale}${href}` : href;
+
+  /**
+   * 判断导航项是否匹配当前地址。
+   *
+   * @param href 导航目标地址，可包含 query 参数。
+   * @returns 当前路径与查询参数是否命中该导航项。
+   */
+  const isNavItemActive = (href: string) => {
+    const normalizedPath = pathname.replace(/^\/[a-z]{2}\//, "/");
+    const [hrefPath, hrefQuery = ""] = href.split("?");
+    if (!hrefQuery) {
+      return (
+        normalizedPath === hrefPath ||
+        (hrefPath !== "/dashboard" && normalizedPath.startsWith(`${hrefPath}/`))
+      );
+    }
+    if (normalizedPath !== hrefPath) return false;
+
+    const currentParams = new URLSearchParams(searchParams.toString());
+    const hrefParams = new URLSearchParams(hrefQuery);
+    for (const [key, value] of hrefParams) {
+      if (currentParams.get(key) !== value) return false;
+    }
+    return true;
+  };
 
   /**
    * 渲染侧边栏内容（桌面和移动端共用）
@@ -259,6 +292,11 @@ export function DashboardSidebar({
                           icon: Megaphone,
                         },
                         {
+                          title: "Referral Management",
+                          href: "/dashboard/admin/referral",
+                          icon: Gift,
+                        },
+                        {
                           title: "System Settings",
                           href: "/dashboard/admin/settings",
                           icon: Shield,
@@ -279,12 +317,9 @@ export function DashboardSidebar({
                         ]
                       : []),
                 ].map((item) => {
-                  // 去掉 locale 前缀后比较路径
-                  const normalizedPath = pathname.replace(/^\/[a-z]{2}\//, "/");
-                  const isActive =
-                    normalizedPath === item.href ||
-                    (item.href !== "/dashboard" &&
-                      normalizedPath.startsWith(`${item.href}/`));
+                  const isActive = item.children
+                    ? item.children.some((child) => isNavItemActive(child.href))
+                    : isNavItemActive(item.href);
                   const Icon = item.icon;
                   const translatedTitle = getNavTitle(item.title);
                   const showSupportUnread =
@@ -297,39 +332,68 @@ export function DashboardSidebar({
                         : 0;
                   const showUnread = unreadCount > 0;
                   return (
-                    <Link
-                      key={item.href}
-                      href={localizedHref(item.href)}
-                      prefetch={false}
-                      title={collapsed ? translatedTitle : undefined}
-                      onClick={() => mobile && setMobileOpen(false)}
-                      className={cn(
-                        "flex items-center gap-3 rounded-md px-2 py-1.5 text-sm font-medium transition-colors",
-                        isActive
-                          ? "bg-accent text-foreground"
-                          : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",
-                        collapsed && "justify-center px-0"
+                    <div key={item.href}>
+                      <Link
+                        href={localizedHref(item.href)}
+                        prefetch={false}
+                        title={collapsed ? translatedTitle : undefined}
+                        onClick={() => mobile && setMobileOpen(false)}
+                        className={cn(
+                          "flex items-center gap-3 rounded-md px-2 py-1.5 text-sm font-medium transition-colors",
+                          isActive
+                            ? "bg-accent text-foreground"
+                            : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",
+                          collapsed && "justify-center px-0"
+                        )}
+                      >
+                        {Icon && (
+                          <span className="relative inline-flex shrink-0">
+                            <Icon className="h-4 w-4" />
+                            {showUnread && (
+                              <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-red-500 ring-2 ring-sidebar" />
+                            )}
+                          </span>
+                        )}
+                        {!collapsed && (
+                          <>
+                            <span className="flex-1">{translatedTitle}</span>
+                            {showUnread && (
+                              <span className="min-w-5 rounded-full bg-red-500 px-1.5 py-0.5 text-center text-[10px] font-semibold leading-none text-white">
+                                {unreadCount > 99 ? "99+" : unreadCount}
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </Link>
+                      {!collapsed && item.children && isActive && (
+                        <div className="mt-1 space-y-0.5 pl-7">
+                          {item.children.map((child) => {
+                            const ChildIcon = child.icon;
+                            const childTitle = getNavTitle(child.title);
+                            const childActive = isNavItemActive(child.href);
+                            return (
+                              <Link
+                                key={child.href}
+                                href={localizedHref(child.href)}
+                                prefetch={false}
+                                onClick={() => mobile && setMobileOpen(false)}
+                                className={cn(
+                                  "flex items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
+                                  childActive
+                                    ? "bg-accent/70 text-foreground"
+                                    : "text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                                )}
+                              >
+                                {ChildIcon && (
+                                  <ChildIcon className="h-3.5 w-3.5" />
+                                )}
+                                <span className="truncate">{childTitle}</span>
+                              </Link>
+                            );
+                          })}
+                        </div>
                       )}
-                    >
-                      {Icon && (
-                        <span className="relative inline-flex shrink-0">
-                          <Icon className="h-4 w-4" />
-                          {showUnread && (
-                            <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-red-500 ring-2 ring-sidebar" />
-                          )}
-                        </span>
-                      )}
-                      {!collapsed && (
-                        <>
-                          <span className="flex-1">{translatedTitle}</span>
-                          {showUnread && (
-                            <span className="min-w-5 rounded-full bg-red-500 px-1.5 py-0.5 text-center text-[10px] font-semibold leading-none text-white">
-                              {unreadCount > 99 ? "99+" : unreadCount}
-                            </span>
-                          )}
-                        </>
-                      )}
-                    </Link>
+                    </div>
                   );
                 })}
               </div>

@@ -1,20 +1,24 @@
 import {
-  Bot,
   BookOpen,
+  Bot,
   Clock,
   Coins,
-  KeyRound,
   GalleryHorizontalEnd,
+  Gift,
   Headset,
   Image,
   ImagePlus,
+  KeyRound,
   Layers,
   LayoutDashboard,
-  Megaphone,
   type LucideIcon,
+  Megaphone,
+  MessageSquare,
   Settings,
   Ticket,
   Users,
+  Video,
+  Wand2,
 } from "lucide-react";
 
 /**
@@ -27,6 +31,7 @@ export interface NavItem {
   external?: boolean;
   icon?: LucideIcon;
   description?: string;
+  children?: NavItem[];
 }
 
 /**
@@ -157,8 +162,40 @@ export const dashboardNav: NavGroup[] = [
       },
       {
         title: "Create",
-        href: "/dashboard/create",
+        href: "/dashboard/create?mode=text",
         icon: ImagePlus,
+        children: [
+          {
+            title: "Text to Image",
+            href: "/dashboard/create?mode=text",
+            icon: Wand2,
+          },
+          {
+            title: "Image to Image",
+            href: "/dashboard/create?mode=image",
+            icon: Image,
+          },
+          {
+            title: "Chat",
+            href: "/dashboard/create?mode=chat",
+            icon: MessageSquare,
+          },
+          {
+            title: "Agent",
+            href: "/dashboard/create?mode=agent",
+            icon: Bot,
+          },
+          {
+            title: "Waterfall",
+            href: "/dashboard/create?mode=waterfall",
+            icon: Layers,
+          },
+          {
+            title: "Video",
+            href: "/dashboard/create?mode=video",
+            icon: Video,
+          },
+        ],
       },
       {
         title: "Gallery",
@@ -184,6 +221,11 @@ export const dashboardNav: NavGroup[] = [
         title: "Billing & Usage",
         href: "/dashboard/billing",
         icon: Coins,
+      },
+      {
+        title: "Referral",
+        href: "/dashboard/referral",
+        icon: Gift,
       },
       {
         title: "Announcements",
