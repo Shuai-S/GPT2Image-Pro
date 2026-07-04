@@ -65,8 +65,12 @@ import {
 
 const STORAGE_KEY = "gpt2image.infinite-canvas.v1";
 const DEFAULT_NODE_POSITION = { x: 80, y: 80 };
+const GENERATION_STATUS_POLL_INTERVAL_MS = 1500;
+const GENERATION_STATUS_TIMEOUT_MS = 180_000;
 const GENERATION_RESULT_SCHEMA = z.object({
   error: z.string().optional(),
+  generationId: z.string().optional(),
+  status: z.enum(["pending", "completed", "failed"]).optional(),
   imageUrl: z.string().optional(),
   imageBase64: z.string().optional(),
   imageOutputs: z
@@ -78,6 +82,9 @@ const GENERATION_RESULT_SCHEMA = z.object({
     )
     .optional(),
   revisedPrompt: z.string().optional(),
+  model: z.string().optional(),
+  size: z.string().optional(),
+  creditsConsumed: z.number().optional(),
 });
 
 type ActiveTool = "select" | "pan" | "connect";
@@ -526,10 +533,11 @@ export function InfiniteCanvasClient() {
       })
     );
     try {
-      const result =
+      const initialResult =
         imageNodes.length > 0
           ? await runImageEdit(prompt, node, imageNodes)
           : await runTextToImage(prompt, node);
+      const result = await resolveGenerationResult(initialResult, copy);
       if (result.error) throw new Error(result.error);
       const imageUrl = firstImageUrl(result);
       if (!imageUrl) throw new Error(copy("No image returned", "未返回图片"));
@@ -549,6 +557,9 @@ export function InfiniteCanvasClient() {
           outputNode.id
         )
       );
+      patchState((current) =>
+        updateCanvasNode(current, node.id, { status: "idle", error: undefined })
+      );
       setSelectedIds([outputNode.id]);
       toast.success(copy("Image generated", "图片已生成"));
     } catch (error) {
@@ -564,9 +575,6 @@ export function InfiniteCanvasClient() {
       });
     } finally {
       setRunningNodeId(null);
-      patchState((current) =>
-        updateCanvasNode(current, node.id, { status: "idle" })
-      );
     }
   };
 
@@ -1167,6 +1175,90 @@ async function parseGenerationResponse(
   const parsed = GENERATION_RESULT_SCHEMA.safeParse(body);
   if (!parsed.success) throw new Error("Invalid generation response");
   return parsed.data;
+}
+
+/**
+ * 等待已提交的生成任务完成。
+ *
+ * WHY：部分后端会先返回 generationId，图片稍后写入 generation 表。
+ * 如果画布端直接要求首个响应带 imageUrl，就会误判失败，但图库稍后能看到成功结果。
+ *
+ * @param generationId 生成任务 ID。
+ * @param initialError 首次响应携带的错误，用于状态记录不存在时快速返回真实错误。
+ * @param copy 当前语言文本函数。
+ * @returns 最终生成结果。
+ * @sideEffects 轮询同源状态接口。
+ */
+async function pollGenerationResult(
+  generationId: string,
+  initialError: string | undefined,
+  copy: (en: string, zh: string) => string
+): Promise<GenerationResult> {
+  const deadline = Date.now() + GENERATION_STATUS_TIMEOUT_MS;
+  let lastError = initialError;
+
+  while (Date.now() < deadline) {
+    await delay(GENERATION_STATUS_POLL_INTERVAL_MS);
+    const response = await fetch(
+      `/api/images/status/${encodeURIComponent(generationId)}`
+    );
+
+    if (response.status === 404 && initialError) {
+      throw new Error(initialError);
+    }
+    if (!response.ok) {
+      lastError = `Status request failed: ${response.status}`;
+      continue;
+    }
+
+    const result = await parseGenerationResponse(response);
+    const imageUrl = firstImageUrl(result);
+    if (imageUrl) return result;
+    if (result.status === "failed") {
+      throw new Error(
+        result.error || initialError || copy("Generation failed", "生成失败")
+      );
+    }
+    if (result.error) {
+      lastError = result.error;
+    }
+  }
+
+  throw new Error(
+    lastError ||
+      copy(
+        "Generation is still running. Check the gallery later.",
+        "生成仍在进行中，请稍后到图库查看。"
+      )
+  );
+}
+
+/**
+ * 将首次生成响应解析为最终可渲染结果。
+ *
+ * @param result 首次生成响应。
+ * @param copy 当前语言文本函数。
+ * @returns 带图片地址的最终结果。
+ * @sideEffects 必要时轮询状态接口。
+ */
+async function resolveGenerationResult(
+  result: GenerationResult,
+  copy: (en: string, zh: string) => string
+) {
+  if (firstImageUrl(result)) return result;
+  if (!result.generationId) return result;
+  return await pollGenerationResult(result.generationId, result.error, copy);
+}
+
+/**
+ * 延迟指定毫秒数。
+ *
+ * @param ms 延迟时间。
+ * @returns 延迟 Promise。
+ * @sideEffects 设置计时器。
+ */
+function delay(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 }
 
 /**
