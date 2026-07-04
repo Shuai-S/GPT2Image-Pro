@@ -135,6 +135,7 @@ export function DashboardSidebar({
       Agent: t("nav.createAgent"),
       Waterfall: t("nav.createWaterfall"),
       Video: t("nav.createVideo"),
+      "Infinite Canvas": t("nav.infiniteCanvas"),
       Dashboard: t("nav.dashboard"),
       Gallery: t("nav.gallery"),
       History: t("nav.history"),

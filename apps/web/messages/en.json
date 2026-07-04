@@ -578,6 +578,7 @@
       "createAgent": "Agent",
       "createWaterfall": "Waterfall",
       "createVideo": "Video",
+      "infiniteCanvas": "Infinite Canvas",
       "gallery": "Gallery",
       "history": "History",
       "backendHelp": "System Docs",
@@ -598,6 +599,7 @@
     "pages": {
       "dashboard": "Dashboard",
       "create": "Create",
+      "infiniteCanvas": "Infinite Canvas",
       "generate": "Generate",
       "gallery": "Gallery",
       "history": "History",

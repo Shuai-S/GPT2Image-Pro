@@ -14,6 +14,7 @@ function getPageTitleKey(pathname: string): string {
   const keyMap: Record<string, string> = {
     "/dashboard": "dashboard",
     "/dashboard/create": "create",
+    "/dashboard/canvas": "infiniteCanvas",
     "/dashboard/gallery": "gallery",
     "/dashboard/history": "history",
     "/dashboard/generate": "generate",

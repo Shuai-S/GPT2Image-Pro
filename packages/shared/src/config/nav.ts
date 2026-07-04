@@ -19,6 +19,7 @@ import {
   Users,
   Video,
   Wand2,
+  Workflow,
 } from "lucide-react";
 
 /**
@@ -196,6 +197,11 @@ export const dashboardNav: NavGroup[] = [
             icon: Video,
           },
         ],
+      },
+      {
+        title: "Infinite Canvas",
+        href: "/dashboard/canvas",
+        icon: Workflow,
       },
       {
         title: "Gallery",
