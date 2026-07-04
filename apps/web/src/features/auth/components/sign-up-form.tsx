@@ -145,6 +145,8 @@ export function SignUpForm({
     domains: allowedEmailDomains,
   });
   const referralCode =
+    searchParams.get("aff") ??
+    searchParams.get("aff_code") ??
     searchParams.get("ref") ??
     searchParams.get("invite") ??
     readCookieValue(REFERRAL_ATTRIBUTION_COOKIE);
@@ -241,7 +243,7 @@ export function SignUpForm({
       setIsLoading(true);
       setError(null);
       const newUserCallbackURL = referralCode
-        ? `/dashboard?ref=${encodeURIComponent(referralCode)}`
+        ? `/dashboard?aff=${encodeURIComponent(referralCode)}`
         : "/dashboard";
       await signInWithGoogle("/dashboard", { newUserCallbackURL });
     } catch {

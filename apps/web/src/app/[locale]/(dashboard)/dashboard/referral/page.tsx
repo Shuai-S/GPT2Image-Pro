@@ -58,9 +58,11 @@ export default async function ReferralPage() {
     {},
     { type: "user", userId: session.user.id, role }
   );
+  const inviteUrl = new URL("/sign-up", origin || "https://local.invalid");
+  inviteUrl.searchParams.set("aff", overview.referralCode);
   const inviteLink = origin
-    ? `${origin}/${locale}/invite/${overview.referralCode}`
-    : `/${locale}/invite/${overview.referralCode}`;
+    ? inviteUrl.toString()
+    : `/sign-up?aff=${encodeURIComponent(overview.referralCode)}`;
 
   return (
     <ReferralDashboard

@@ -2,6 +2,7 @@ import { getUserRoleById } from "@repo/shared/auth/role-server";
 import { canAccessAdminArea } from "@repo/shared/auth/roles";
 import { getServerSession } from "@repo/shared/auth/server";
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
+import { logError } from "@repo/shared/logger";
 import type {
   ReferralAdminBindingRow,
   ReferralAdminCommissionRow,
@@ -16,6 +17,18 @@ import { redirect } from "next/navigation";
 import { getLocale } from "next-intl/server";
 
 import { AdminReferralDashboard } from "@/features/referral/components/admin-referral-dashboard";
+
+function emptyReferralList<T>(
+  page = 1,
+  pageSize = 20
+): ReferralAdminListResult<T> {
+  return {
+    items: [],
+    total: 0,
+    page,
+    pageSize,
+  };
+}
 
 /**
  * 生成邀请返佣管理页 metadata。
@@ -54,28 +67,48 @@ export default async function AdminReferralPage() {
   }
 
   const principal = { type: "user" as const, userId: session.user.id, role };
-  const [profiles, bindings, ledger, transfers] = await Promise.all([
-    invokeOperation<ReferralAdminListResult<ReferralAdminProfileRow>>(
-      "admin.referral.listProfiles",
-      { page: 1, pageSize: 20 },
-      principal
-    ),
-    invokeOperation<ReferralAdminListResult<ReferralAdminBindingRow>>(
-      "admin.referral.listBindings",
-      { page: 1, pageSize: 20 },
-      principal
-    ),
-    invokeOperation<ReferralAdminListResult<ReferralAdminCommissionRow>>(
-      "admin.referral.listCommissionLedger",
-      { page: 1, pageSize: 20, status: "all" },
-      principal
-    ),
-    invokeOperation<ReferralAdminListResult<ReferralAdminTransferRow>>(
-      "admin.referral.listTransfers",
-      { page: 1, pageSize: 20, status: "all" },
-      principal
-    ),
-  ]);
+  let loadError: string | null = null;
+  let profiles: ReferralAdminListResult<ReferralAdminProfileRow>;
+  let bindings: ReferralAdminListResult<ReferralAdminBindingRow>;
+  let ledger: ReferralAdminListResult<ReferralAdminCommissionRow>;
+  let transfers: ReferralAdminListResult<ReferralAdminTransferRow>;
+
+  try {
+    [profiles, bindings, ledger, transfers] = await Promise.all([
+      invokeOperation<ReferralAdminListResult<ReferralAdminProfileRow>>(
+        "admin.referral.listProfiles",
+        { page: 1, pageSize: 20 },
+        principal
+      ),
+      invokeOperation<ReferralAdminListResult<ReferralAdminBindingRow>>(
+        "admin.referral.listBindings",
+        { page: 1, pageSize: 20 },
+        principal
+      ),
+      invokeOperation<ReferralAdminListResult<ReferralAdminCommissionRow>>(
+        "admin.referral.listCommissionLedger",
+        { page: 1, pageSize: 20, status: "all" },
+        principal
+      ),
+      invokeOperation<ReferralAdminListResult<ReferralAdminTransferRow>>(
+        "admin.referral.listTransfers",
+        { page: 1, pageSize: 20, status: "all" },
+        principal
+      ),
+    ]);
+  } catch (error) {
+    // WHY: 邀请返佣是新增模块，生产库未执行迁移时不应让整个管理后台
+    // Server Component 崩溃。记录内部错误，首屏降级为空数据并提示管理员处理。
+    logError(error, {
+      source: "admin-referral-page-load",
+      adminUserId: session.user.id,
+    });
+    loadError = "邀请返佣数据暂时不可用，请确认数据库迁移已执行后刷新。";
+    profiles = emptyReferralList<ReferralAdminProfileRow>();
+    bindings = emptyReferralList<ReferralAdminBindingRow>();
+    ledger = emptyReferralList<ReferralAdminCommissionRow>();
+    transfers = emptyReferralList<ReferralAdminTransferRow>();
+  }
 
   return (
     <AdminReferralDashboard
@@ -84,6 +117,7 @@ export default async function AdminReferralPage() {
       ledger={ledger}
       transfers={transfers}
       locale={locale}
+      initialError={loadError}
     />
   );
 }

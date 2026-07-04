@@ -35,7 +35,10 @@ import { Link } from "@/i18n/routing";
 
 interface DashboardPageProps {
   searchParams?: Promise<{
+    aff?: string | string[];
+    aff_code?: string | string[];
     ref?: string | string[];
+    invite?: string | string[];
   }>;
 }
 
@@ -55,7 +58,11 @@ export default async function DashboardPage({
   const user = session.user;
   const userId = user.id;
   const resolvedSearchParams = await searchParams;
-  const referralCode = pickReferralCode(resolvedSearchParams?.ref);
+  const referralCode =
+    pickReferralCode(resolvedSearchParams?.aff) ??
+    pickReferralCode(resolvedSearchParams?.aff_code) ??
+    pickReferralCode(resolvedSearchParams?.ref) ??
+    pickReferralCode(resolvedSearchParams?.invite);
   if (referralCode) {
     // WHY: 绑定失败（码失效、已绑定、DB 抖动）不应让 dashboard 首页 500，
     // 记日志后照常跳转清除 query 即可。

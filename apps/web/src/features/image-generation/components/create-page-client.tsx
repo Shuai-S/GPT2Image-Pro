@@ -7217,10 +7217,21 @@ export function CreatePageClient({
       : batchCostSuffix(batchCount);
 
     return (
-      <div className="space-y-4 rounded-lg border border-border bg-background p-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+      <div className="space-y-4 rounded-lg border border-border bg-background p-4 shadow-sm lg:sticky lg:top-6">
+        <div className="space-y-4">
+          <div className="border-b border-border pb-3">
+            <h2 className="text-sm font-semibold text-foreground">
+              {copy("Parameters", "参数")}
+            </h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {copy(
+                "Models, size, output, and billing for this run.",
+                "本次生成的模型、尺寸、输出与费用。"
+              )}
+            </p>
+          </div>
           <div className="space-y-3">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
               {showImageModelControls && (
                 <div
                   className={`space-y-1.5 ${
@@ -7367,7 +7378,7 @@ export function CreatePageClient({
 
             {!isWebOnlyBackend && (
               <div
-                className={`grid gap-3 sm:grid-cols-2 ${
+                className={`grid gap-3 sm:grid-cols-2 lg:grid-cols-1 ${
                   disableResponsesOnlyControls ? "opacity-55" : ""
                 }`}
                 title={responsesOnlyDisabledReason}
@@ -7688,8 +7699,8 @@ export function CreatePageClient({
   };
 
   return (
-    <div className="container mx-auto max-w-5xl px-4 py-8 md:px-6 md:py-12">
-      <header className="mb-8 space-y-2">
+    <div className="mx-auto w-full max-w-[1680px] px-0 py-2 md:py-4">
+      <header className="mb-8 max-w-3xl space-y-2">
         <h1 className="font-serif text-3xl font-semibold tracking-tight md:text-4xl">
           {copy("Create", "创作")}
         </h1>
@@ -7706,7 +7717,7 @@ export function CreatePageClient({
           <Tabs
             value={textMode}
             onValueChange={(value) => setTextMode(value as TextGenerationMode)}
-            className="space-y-4"
+            className="space-y-5"
           >
             <TabsList className="border border-border bg-muted/40">
               <TabsTrigger value="single">
@@ -7722,27 +7733,34 @@ export function CreatePageClient({
               hidden={textMode !== "single"}
               className="mt-0"
             >
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <Textarea
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  placeholder={copy(
-                    "Describe the image you want to create...",
-                    "描述你想创作的图片..."
+              <form
+                onSubmit={handleSubmit}
+                className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]"
+              >
+                <div className="min-w-0 space-y-4">
+                  <Textarea
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    placeholder={copy(
+                      "Describe the image you want to create...",
+                      "描述你想创作的图片..."
+                    )}
+                    rows={5}
+                    disabled={isTextSingleGenerating}
+                    className="min-h-28 resize-none border-input bg-background text-base"
+                  />
+                  {promptOptimizationField(
+                    "text-prompt-optimization",
+                    isTextSingleGenerating
                   )}
-                  rows={5}
-                  disabled={isTextSingleGenerating}
-                  className="resize-none border-input bg-background text-base"
-                />
-                {promptOptimizationField(
-                  "text-prompt-optimization",
-                  isTextSingleGenerating
-                )}
-                {textSettingsPanel("single")}
-                <div className="flex justify-end">
+                  {renderVisualOutput("text-single")}
+                </div>
+                <aside className="space-y-4">
+                  {textSettingsPanel("single")}
                   <Button
                     type="submit"
                     disabled={isTextSingleGenerating || !prompt.trim()}
+                    className="w-full"
                   >
                     {isTextSingleGenerating ? (
                       <>
@@ -7756,49 +7774,55 @@ export function CreatePageClient({
                       </>
                     )}
                   </Button>
-                </div>
+                </aside>
               </form>
-              {renderVisualOutput("text-single")}
             </div>
 
             <div role="tabpanel" hidden={textMode !== "lines"} className="mt-0">
-              <form onSubmit={handleTextLineBatchSubmit} className="space-y-4">
-                <Textarea
-                  value={linePrompts}
-                  onChange={(e) => setLinePrompts(e.target.value)}
-                  placeholder={copy(
-                    "One prompt per line. Each line generates one image.",
-                    "每行一个提示词，每行生成一张图片。"
+              <form
+                onSubmit={handleTextLineBatchSubmit}
+                className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]"
+              >
+                <div className="min-w-0 space-y-4">
+                  <Textarea
+                    value={linePrompts}
+                    onChange={(e) => setLinePrompts(e.target.value)}
+                    placeholder={copy(
+                      "One prompt per line. Each line generates one image.",
+                      "每行一个提示词，每行生成一张图片。"
+                    )}
+                    rows={8}
+                    disabled={isTextLinesGenerating}
+                    className="min-h-48 resize-none border-input bg-background text-base"
+                  />
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <span>
+                      {copy("Prompt lines", "提示词行数")}:{" "}
+                      <span className="font-medium text-foreground">
+                        {linePromptItems.length}
+                      </span>
+                    </span>
+                    <span>
+                      {copy("Total images", "总图片数")}:{" "}
+                      <span className="font-medium text-foreground">
+                        {lineBatchTotalCount}
+                      </span>
+                    </span>
+                  </div>
+                  {promptOptimizationField(
+                    "text-line-prompt-optimization",
+                    isTextLinesGenerating
                   )}
-                  rows={8}
-                  disabled={isTextLinesGenerating}
-                  className="resize-none border-input bg-background text-base"
-                />
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                  <span>
-                    {copy("Prompt lines", "提示词行数")}:{" "}
-                    <span className="font-medium text-foreground">
-                      {linePromptItems.length}
-                    </span>
-                  </span>
-                  <span>
-                    {copy("Total images", "总图片数")}:{" "}
-                    <span className="font-medium text-foreground">
-                      {lineBatchTotalCount}
-                    </span>
-                  </span>
+                  {renderVisualOutput("text-lines")}
                 </div>
-                {promptOptimizationField(
-                  "text-line-prompt-optimization",
-                  isTextLinesGenerating
-                )}
-                {textSettingsPanel("lines")}
-                <div className="flex justify-end">
+                <aside className="space-y-4">
+                  {textSettingsPanel("lines")}
                   <Button
                     type="submit"
                     disabled={
                       isTextLinesGenerating || linePromptItems.length === 0
                     }
+                    className="w-full"
                   >
                     {isTextLinesGenerating ? (
                       <>
@@ -7812,9 +7836,8 @@ export function CreatePageClient({
                       </>
                     )}
                   </Button>
-                </div>
+                </aside>
               </form>
-              {renderVisualOutput("text-lines")}
             </div>
           </Tabs>
         </div>
@@ -7823,9 +7846,9 @@ export function CreatePageClient({
           <form
             onSubmit={handleEditSubmit}
             onPaste={handleImagePaste}
-            className="space-y-4"
+            className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_360px] xl:gap-6"
           >
-            <div className="relative">
+            <div className="relative xl:col-start-1">
               {renderReferenceMentionMenu({
                 open: Boolean(editMention?.open) && canUseEditReferenceMentions,
                 options: filteredEditReferenceOptions,
@@ -7875,12 +7898,14 @@ export function CreatePageClient({
                 }}
               />
             </div>
-            <p className="text-xs leading-snug text-muted-foreground">
+            <p className="text-xs leading-snug text-muted-foreground xl:col-start-1">
               {editReferenceMentionStatusText}
             </p>
-            {promptOptimizationField("edit-prompt-optimization", isEditing)}
+            <div className="xl:col-start-1">
+              {promptOptimizationField("edit-prompt-optimization", isEditing)}
+            </div>
 
-            <div className="space-y-4 rounded-lg border border-border bg-background p-4">
+            <div className="space-y-4 rounded-lg border border-border bg-background p-4 xl:col-start-1">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <span className="text-sm font-medium text-foreground">
@@ -7964,8 +7989,8 @@ export function CreatePageClient({
               )}
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-[1fr_260px]">
-              <div className="space-y-4 rounded-lg border border-border bg-background p-4">
+            <div className="grid gap-4 xl:contents">
+              <div className="space-y-4 rounded-lg border border-border bg-background p-4 xl:col-start-1">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <span className="text-sm font-medium text-foreground">
@@ -8116,7 +8141,18 @@ export function CreatePageClient({
                 )}
               </div>
 
-              <div className="space-y-4 rounded-lg border border-border bg-background p-4">
+              <div className="space-y-4 rounded-lg border border-border bg-background p-4 shadow-sm xl:sticky xl:top-6 xl:col-start-2 xl:row-start-1">
+                <div className="border-b border-border pb-3">
+                  <h2 className="text-sm font-semibold text-foreground">
+                    {copy("Parameters", "参数")}
+                  </h2>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {copy(
+                      "Reference, size, output, and billing for this edit.",
+                      "本次改图的参考、尺寸、输出与费用。"
+                    )}
+                  </p>
+                </div>
                 {showImageModelControls && (
                   <div
                     className={`space-y-2 ${
@@ -8535,12 +8571,13 @@ export function CreatePageClient({
               </div>
             </div>
 
-            <div className="flex justify-end">
+            <div className="flex justify-end xl:col-start-2">
               <Button
                 type="submit"
                 disabled={
                   isEditing || !editPrompt.trim() || editImages.length === 0
                 }
+                className="w-full xl:w-full"
               >
                 {isEditing ? (
                   <>

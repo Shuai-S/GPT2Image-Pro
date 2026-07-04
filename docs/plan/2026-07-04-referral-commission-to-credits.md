@@ -22,8 +22,8 @@
 
 ## 核心流程
 
-1. 用户访问 `/{locale}/invite/{code}`，服务端归一化邀请码，写入短期 Cookie，
-   并跳转到 `/{locale}/sign-up?ref={code}`。
+1. 用户分享链接只使用标准 `https://domain/sign-up?aff={code}` 格式，
+   不提供 `/{locale}/invite/{code}` 旧入口。
 2. 注册成功后，Better Auth user create hook 通过 UOL
    `referral.bindInviterByCode` 绑定邀请关系。绑定只允许一次，禁止自邀。
 3. Creem / Epay / Alipay 支付履约发放原有积分后，再通过 UOL

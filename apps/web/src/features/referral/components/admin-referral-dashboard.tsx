@@ -78,6 +78,7 @@ interface AdminReferralDashboardProps {
   ledger: ReferralAdminListResult<ReferralAdminCommissionRow>;
   transfers: ReferralAdminListResult<ReferralAdminTransferRow>;
   locale: string;
+  initialError?: string | null;
 }
 
 interface EditDialogState {
@@ -214,6 +215,7 @@ export function AdminReferralDashboard({
   ledger: initialLedger,
   transfers: initialTransfers,
   locale,
+  initialError = null,
 }: AdminReferralDashboardProps) {
   const [activeTab, setActiveTab] = useState<AdminReferralTab>("profiles");
   const [query, setQuery] = useState("");
@@ -231,6 +233,7 @@ export function AdminReferralDashboard({
   const [editValue, setEditValue] = useState("");
   const [editReason, setEditReason] = useState("");
   const [cancelReason, setCancelReason] = useState("");
+  const [loadError, setLoadError] = useState(initialError);
   const [isPending, startTransition] = useTransition();
 
   const { executeAsync: listProfiles } = useAction(
@@ -263,25 +266,37 @@ export function AdminReferralDashboard({
     }
   ) => {
     startTransition(async () => {
-      const base = { page, pageSize: PAGE_SIZE, query };
-      if (tab === "profiles") {
-        const result = await listProfiles(base);
-        if (result?.data) setProfiles(result.data);
-      } else if (tab === "bindings") {
-        const result = await listBindings(base);
-        if (result?.data) setBindings(result.data);
-      } else if (tab === "ledger") {
-        const result = await listLedger({
-          ...base,
-          status: overrides?.commissionStatus ?? commissionStatus,
-        });
-        if (result?.data) setLedger(result.data);
-      } else {
-        const result = await listTransfers({
-          ...base,
-          status: overrides?.transferStatus ?? transferStatus,
-        });
-        if (result?.data) setTransfers(result.data);
+      try {
+        const base = { page, pageSize: PAGE_SIZE, query };
+        if (tab === "profiles") {
+          const result = await listProfiles(base);
+          if (result?.serverError) throw new Error(result.serverError);
+          if (result?.data) setProfiles(result.data);
+        } else if (tab === "bindings") {
+          const result = await listBindings(base);
+          if (result?.serverError) throw new Error(result.serverError);
+          if (result?.data) setBindings(result.data);
+        } else if (tab === "ledger") {
+          const result = await listLedger({
+            ...base,
+            status: overrides?.commissionStatus ?? commissionStatus,
+          });
+          if (result?.serverError) throw new Error(result.serverError);
+          if (result?.data) setLedger(result.data);
+        } else {
+          const result = await listTransfers({
+            ...base,
+            status: overrides?.transferStatus ?? transferStatus,
+          });
+          if (result?.serverError) throw new Error(result.serverError);
+          if (result?.data) setTransfers(result.data);
+        }
+        setLoadError(null);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "邀请返佣数据加载失败";
+        setLoadError(message);
+        toast.error(message);
       }
     });
   };
@@ -418,6 +433,12 @@ export function AdminReferralDashboard({
           </Button>
         </div>
       </div>
+
+      {loadError ? (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {loadError}
+        </div>
+      ) : null}
 
       <Tabs
         value={activeTab}
