@@ -1,8 +1,6 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
-
 import { db, user } from "@repo/database";
 import {
   account,
@@ -12,7 +10,9 @@ import {
 } from "@repo/database/schema";
 import { normalizeEmail } from "@repo/shared/auth/email-domain";
 import { creem } from "@repo/shared/payment/creem";
+import { isLocalPaymentSubscriptionId } from "@repo/shared/payment/epay";
 import { protectedAction } from "@repo/shared/safe-action";
+import { eq } from "drizzle-orm";
 
 export const deleteAccountAction = protectedAction
   .metadata({ action: "settings.deleteAccount" })
@@ -29,6 +29,7 @@ export const deleteAccountAction = protectedAction
 
     if (
       activeSubscription?.subscriptionId &&
+      !isLocalPaymentSubscriptionId(activeSubscription.subscriptionId) &&
       !activeSubscription.cancelAtPeriodEnd &&
       ["active", "trialing", "past_due", "paused"].includes(
         activeSubscription.status

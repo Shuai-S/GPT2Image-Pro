@@ -19,7 +19,11 @@ vi.mock("@repo/database/schema", () => ({
 
 import type { EpayVerifyResult } from "@repo/shared/payment/epay";
 
-import { isExpectedEpayAmount } from "./epay-fulfillment";
+import {
+  isExpectedEpayAmount,
+  isMatchingPaymentProvider,
+  resolveExpectedLocalPaymentAmount,
+} from "./epay-fulfillment";
 
 function verifyInfoWithMoney(money: string): EpayVerifyResult {
   return {
@@ -61,5 +65,64 @@ describe("isExpectedEpayAmount", () => {
     expect(isExpectedEpayAmount(verifyInfoWithMoney("10.00"), Number.NaN)).toBe(
       false
     );
+  });
+});
+
+describe("isMatchingPaymentProvider", () => {
+  it("accepts epay callbacks only for epay orders", () => {
+    expect(
+      isMatchingPaymentProvider({
+        source: "epay-webhook",
+        metadata: {
+          type: "credit_purchase",
+          userId: "user-1",
+          outTradeNo: "T1",
+          provider: "epay",
+        },
+      })
+    ).toBe(true);
+  });
+
+  it("rejects cross-provider callback replay against an alipay order", () => {
+    expect(
+      isMatchingPaymentProvider({
+        source: "epay-webhook",
+        metadata: {
+          type: "credit_purchase",
+          userId: "user-1",
+          outTradeNo: "T1",
+          provider: "alipay",
+        },
+      })
+    ).toBe(false);
+  });
+});
+
+describe("resolveExpectedLocalPaymentAmount", () => {
+  it("uses the immutable order amount snapshot when present", () => {
+    expect(
+      resolveExpectedLocalPaymentAmount({
+        metadata: {
+          type: "credit_purchase",
+          userId: "user-1",
+          outTradeNo: "T1",
+          expectedAmount: 20,
+        },
+        fallbackAmount: 999,
+      })
+    ).toBe(20);
+  });
+
+  it("falls back to current runtime pricing only for legacy orders", () => {
+    expect(
+      resolveExpectedLocalPaymentAmount({
+        metadata: {
+          type: "credit_purchase",
+          userId: "user-1",
+          outTradeNo: "T1",
+        },
+        fallbackAmount: 30,
+      })
+    ).toBe(30);
   });
 });

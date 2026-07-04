@@ -198,12 +198,12 @@ describe("evaluateCreemAmountMatch", () => {
   });
 
   describe("currency mismatch", () => {
-    it("returns not comparable when currencies differ", () => {
+    it("returns comparable mismatch when currencies differ", () => {
       const result = evaluateCreemAmountMatch(
         { amount: 19.99, currency: "USD" },
         { amount: 1999, currency: "EUR" }
       );
-      expect(result.comparable).toBe(false);
+      expect(result.comparable).toBe(true);
       expect(result.matches).toBe(false);
       expect(result.currency).toBe("USD");
       expect(result.actualCurrency).toBe("EUR");
@@ -325,6 +325,15 @@ describe("shouldGrantAfterAmountCheck", () => {
     actualCurrency: "EUR",
   };
 
+  const currencyMismatchResult: CreemAmountMatchResult = {
+    comparable: true,
+    matches: false,
+    expectedMinor: 1999,
+    actualMinor: 1999,
+    currency: "USD",
+    actualCurrency: "EUR",
+  };
+
   describe("comparable + matches", () => {
     it("grants when enforce=true (match overrides enforcement)", () => {
       const decision = shouldGrantAfterAmountCheck(matchingResult, true);
@@ -348,6 +357,15 @@ describe("shouldGrantAfterAmountCheck", () => {
 
     it("rejects when enforce=true (hard reject)", () => {
       const decision = shouldGrantAfterAmountCheck(mismatchResult, true);
+      expect(decision.grant).toBe(false);
+      expect(decision.reason).toBe("mismatch-enforced-reject");
+    });
+
+    it("rejects currency mismatch when enforce=true", () => {
+      const decision = shouldGrantAfterAmountCheck(
+        currencyMismatchResult,
+        true
+      );
       expect(decision.grant).toBe(false);
       expect(decision.reason).toBe("mismatch-enforced-reject");
     });

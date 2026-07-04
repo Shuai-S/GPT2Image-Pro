@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
 import { getBaseUrl } from "@repo/shared/config/payment";
+import { logger } from "@repo/shared/logger";
 import {
   decodeEpayMetadata,
   EPAY_TRADE_SUCCESS,
@@ -9,7 +9,7 @@ import {
   parseEpayRequestParams,
   verifyRuntimeEpayParams,
 } from "@repo/shared/payment/epay";
-import { logger } from "@repo/shared/logger";
+import { NextResponse } from "next/server";
 
 export async function GET(req: Request) {
   return handleReturn(req);
@@ -37,17 +37,22 @@ async function handleReturn(req: Request) {
   const params = await parseEpayRequestParams(req);
   const verifyInfo = await verifyRuntimeEpayParams(params);
   const metadata = verifyInfo.verifyStatus
-    ? decodeEpayMetadata(verifyInfo.param) ??
-      (await getEpayOrderMetadata(verifyInfo.outTradeNo))
+    ? (decodeEpayMetadata(verifyInfo.param) ??
+      (await getEpayOrderMetadata(verifyInfo.outTradeNo)))
     : null;
+  const isProviderMatch = metadata?.provider !== "alipay";
   const redirectPath =
     metadata?.type === "subscription" ? "/dashboard" : "/dashboard/billing";
   const separator = redirectPath.includes("?") ? "&" : "?";
 
-  if (!verifyInfo.verifyStatus) {
+  if (!verifyInfo.verifyStatus || !isProviderMatch) {
     logger.warn(
-      { source: "epay-return", outTradeNo: verifyInfo.outTradeNo },
-      "Invalid Epay return signature"
+      {
+        source: "epay-return",
+        outTradeNo: verifyInfo.outTradeNo,
+        provider: metadata?.provider ?? "epay",
+      },
+      "Invalid Epay return"
     );
     return NextResponse.redirect(
       `${baseUrl}${redirectPath}${separator}pay=fail`

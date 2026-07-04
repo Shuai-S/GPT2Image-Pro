@@ -41,6 +41,7 @@ const dbMock = vi.hoisted(() => {
   const selectBuilder = {
     from: vi.fn(() => selectBuilder),
     where: vi.fn(async () => readRows()),
+    // biome-ignore lint/suspicious/noThenProperty: 这里需要模拟 Drizzle 查询构造器的 thenable 行为。
     then: vi.fn((resolve, reject) =>
       Promise.resolve(readRows()).then(resolve, reject)
     ),
@@ -144,7 +145,10 @@ describe("setSystemSettings", () => {
   });
 
   it("clear entry deletes stored setting", async () => {
-    store.set("APP_TIME_ZONE", { key: "APP_TIME_ZONE", value: "Asia/Shanghai" });
+    store.set("APP_TIME_ZONE", {
+      key: "APP_TIME_ZONE",
+      value: "Asia/Shanghai",
+    });
 
     const changed = await setSystemSettings(
       [{ key: "APP_TIME_ZONE", value: "", clear: true }],
@@ -199,10 +203,7 @@ describe("setSystemSettings", () => {
     expect(store.get("BETTER_AUTH_SECRET")?.isSecret).toBe(true);
 
     // APP_TIME_ZONE 非 secret，isSecret 必为 false。
-    await setSystemSettings(
-      [{ key: "APP_TIME_ZONE", value: "UTC" }],
-      "admin"
-    );
+    await setSystemSettings([{ key: "APP_TIME_ZONE", value: "UTC" }], "admin");
     expect(store.get("APP_TIME_ZONE")?.value).toBe("UTC");
     expect(store.get("APP_TIME_ZONE")?.isSecret).toBe(false);
   });
@@ -320,7 +321,9 @@ describe("setSystemSettings", () => {
       [{ key: "IMAGE_GENERATION_GLOBAL_CONCURRENCY", value: "999999" }],
       "admin"
     );
-    expect(store.get("IMAGE_GENERATION_GLOBAL_CONCURRENCY")?.value).toBe(999999);
+    expect(store.get("IMAGE_GENERATION_GLOBAL_CONCURRENCY")?.value).toBe(
+      999999
+    );
   });
 
   it("rejects malformed json and value not in select options (coerceValue, C-L25)", async () => {
@@ -353,7 +356,10 @@ describe("importSystemSettingsFromEnv", () => {
   });
 
   it("overwrite=false (importMissing) keeps existing stored value", async () => {
-    store.set("APP_TIME_ZONE", { key: "APP_TIME_ZONE", value: "Asia/Shanghai" });
+    store.set("APP_TIME_ZONE", {
+      key: "APP_TIME_ZONE",
+      value: "Asia/Shanghai",
+    });
     process.env.APP_TIME_ZONE = "UTC";
 
     await importSystemSettingsFromEnv({ overwrite: false });
@@ -362,7 +368,10 @@ describe("importSystemSettingsFromEnv", () => {
   });
 
   it("overwrite=true replaces stored value with env-derived value", async () => {
-    store.set("APP_TIME_ZONE", { key: "APP_TIME_ZONE", value: "Asia/Shanghai" });
+    store.set("APP_TIME_ZONE", {
+      key: "APP_TIME_ZONE",
+      value: "Asia/Shanghai",
+    });
     process.env.APP_TIME_ZONE = "UTC";
 
     await importSystemSettingsFromEnv({ overwrite: true });
@@ -521,7 +530,7 @@ describe("runtime setting getters stored/env fallback (C-L29)", () => {
     await expect(
       getRuntimeSettingSelect(
         "PAYMENT_PROVIDER",
-        ["creem", "epay"] as const,
+        ["creem", "epay", "alipay"] as const,
         "creem"
       )
     ).resolves.toBe("creem");
@@ -534,10 +543,23 @@ describe("runtime setting getters stored/env fallback (C-L29)", () => {
     await expect(
       getRuntimeSettingSelect(
         "PAYMENT_PROVIDER",
-        ["creem", "epay"] as const,
+        ["creem", "epay", "alipay"] as const,
         "creem"
       )
     ).resolves.toBe("epay");
+
+    store.set("PAYMENT_PROVIDER", {
+      key: "PAYMENT_PROVIDER",
+      value: "alipay",
+    });
+    clearSystemSettingsCache();
+    await expect(
+      getRuntimeSettingSelect(
+        "PAYMENT_PROVIDER",
+        ["creem", "epay", "alipay"] as const,
+        "creem"
+      )
+    ).resolves.toBe("alipay");
   });
 
   it("getRuntimeSettingJson parses stored string JSON and returns object directly", async () => {

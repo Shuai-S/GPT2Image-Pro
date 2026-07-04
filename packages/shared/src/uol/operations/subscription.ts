@@ -12,20 +12,20 @@
  */
 
 import { z } from "zod";
-import { defineOperation } from "../registry";
-import { getPrincipalUserId } from "../principal";
+import type { SubscriptionPlan } from "../../config/subscription-plan";
 import {
-  getPlanCapabilitySnapshot,
   canUsePlanCapability,
-  getPlanLimits,
   getPlanCapabilityMatrix,
+  getPlanCapabilitySnapshot,
+  getPlanLimits,
   type PlanCapabilityKey,
 } from "../../subscription/services/plan-capabilities";
 import {
-  getUserPlan,
   checkFileSizePrivilege,
+  getUserPlan,
 } from "../../subscription/services/user-plan";
-import type { SubscriptionPlan } from "../../config/subscription-plan";
+import { getPrincipalUserId } from "../principal";
+import { defineOperation } from "../registry";
 
 // ============================================
 // 1. subscription.createCheckout
@@ -36,14 +36,14 @@ defineOperation({
   domain: "subscription",
   title: "Create Subscription Checkout",
   description:
-    "创建订阅结账会话（Creem 或 Epay），返回 checkout URL 供前端跳转",
+    "创建订阅结账会话（Creem、Epay 或支付宝官方），返回 checkout URL 供前端跳转",
   access: { kind: "protected" },
   input: z.object({
     priceId: z.string().describe("目标套餐的价格 ID"),
     successUrl: z.string().url().optional().describe("支付成功后回调 URL"),
     cancelUrl: z.string().url().optional().describe("取消支付后回调 URL"),
     provider: z
-      .enum(["creem", "epay"])
+      .enum(["creem", "epay", "alipay"])
       .optional()
       .describe("支付渠道，未指定则使用系统默认"),
   }),

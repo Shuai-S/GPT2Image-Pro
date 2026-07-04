@@ -6,36 +6,28 @@
  * 提供积分系统的前端调用接口
  */
 
-import { z } from "zod";
-
-import { and, eq, inArray } from "drizzle-orm";
-
 import { db } from "@repo/database";
 import { creditsTransaction, externalApiKey } from "@repo/database/schema";
+import { and, eq, inArray } from "drizzle-orm";
+import { z } from "zod";
 import { getBaseUrl } from "../config/payment";
 import {
   isPlanAtLeast,
   type SubscriptionPlan,
 } from "../config/subscription-plan";
+import { logEvent } from "../logger/index";
+import { createRuntimeAlipayPurchase } from "../payment/alipay";
 import { creem } from "../payment/creem";
 import {
   createRuntimeEpayPurchase,
   getRuntimePaymentProvider,
   saveEpayOrder,
 } from "../payment/epay";
-import { createRuntimeAlipayPurchase } from "../payment/alipay";
-import { logEvent } from "../logger/index";
 import { protectedAction } from "../safe-action";
 import { getUserPlanType } from "../subscription/services/user-plan";
 import { getRuntimeSettingNumber } from "../system-settings";
 
 import { CREDIT_CONFIG_DEFAULTS, isCreditPackageVisible } from "./config";
-import {
-  getRuntimeCreditPackageById,
-  getRuntimeCreditPackages,
-  getCreditPackageCreemProductIdForPlan,
-  getCreditPackagePriceForPlan,
-} from "./packages";
 import {
   AccountFrozenError,
   consumeCredits,
@@ -48,11 +40,21 @@ import {
   grantCredits,
   InsufficientCreditsError,
 } from "./core";
+import {
+  getCreditPackageCreemProductIdForPlan,
+  getCreditPackagePriceForPlan,
+  getRuntimeCreditPackageById,
+  getRuntimeCreditPackages,
+} from "./packages";
 
 const withProtectedCreditsAction = (name: string) =>
   protectedAction.metadata({ action: `credits.${name}` });
 
 const CREDIT_PACKAGE_MAX_QUANTITY = 999;
+
+function createPaymentOrderNo(prefix: "SUB" | "CR"): string {
+  return `${prefix}${crypto.randomUUID().replaceAll("-", "")}`;
+}
 
 async function getRuntimeRegistrationBonusCredits() {
   return getRuntimeSettingNumber(
@@ -431,7 +433,7 @@ export const createCreditsPurchaseCheckout = withProtectedCreditsAction(
     });
 
     if (useLocalOrderProvider) {
-      const outTradeNo = `CR${Date.now()}${crypto.randomUUID().slice(0, 8)}`;
+      const outTradeNo = createPaymentOrderNo("CR");
       const metadata = {
         type: "credit_purchase" as const,
         userId,
@@ -440,6 +442,7 @@ export const createCreditsPurchaseCheckout = withProtectedCreditsAction(
         packageId: pkg.id,
         quantity,
         creditPlan: userPlan,
+        expectedAmount: totalPrice,
       };
       await saveEpayOrder(metadata, totalPrice);
       const purchaseInput = {
@@ -470,7 +473,7 @@ export const createCreditsPurchaseCheckout = withProtectedCreditsAction(
       success_url:
         successUrl ??
         `${baseUrl}/dashboard/billing?success=true&credits=${creditsAmount}`,
-      request_id: `credit_purchase_${userId}_${Date.now()}`,
+      request_id: `credit_purchase_${userId}_${crypto.randomUUID()}`,
       metadata: {
         userId,
         type: "credit_purchase", // 关键: Webhook 用此判断类型

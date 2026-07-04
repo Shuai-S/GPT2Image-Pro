@@ -10,24 +10,23 @@
  * ../../generation-maintenance（退款 service-fn）
  */
 import { z } from "zod";
-
-import { defineOperation } from "../registry";
-import { getPrincipalUserId } from "../principal";
 import {
-  getCreditsBalance,
-  grantCredits,
   consumeCredits,
-  freezeCreditsAccount,
-  unfreezeCreditsAccount,
-  processExpiredBatches,
+  ensureRegistrationBonus,
   getUserActiveBatches as fetchUserActiveBatches,
   getUserTransactions as fetchUserTransactions,
+  freezeCreditsAccount,
+  getCreditsBalance,
   getUserTransactionsCount,
+  grantCredits,
+  processExpiredBatches,
+  unfreezeCreditsAccount,
   voidActiveSubscriptionCreditsForUpgrade,
-  ensureRegistrationBonus,
 } from "../../credits/core";
 import { refundGenerationCredits } from "../../generation-maintenance";
 import { getRuntimeSettingNumber } from "../../system-settings";
+import { getPrincipalUserId } from "../principal";
+import { defineOperation } from "../registry";
 
 // ---------------------------------------------------------------------------
 // 1. credits.getBalance - 获取指定用户积分余额（含过期处理副作用）
@@ -85,7 +84,7 @@ export const getMyBalance = defineOperation({
     const bonusAmount = await getRuntimeSettingNumber(
       "REGISTRATION_BONUS_CREDITS",
       100,
-      { nonNegative: true },
+      { nonNegative: true }
     );
     await ensureRegistrationBonus(userId, bonusAmount);
 
@@ -139,9 +138,13 @@ export const grant = defineOperation({
     const params: Parameters<typeof grantCredits>[0] = {
       userId: input.userId,
       amount: input.amount,
-      sourceType: input.sourceType as Parameters<typeof grantCredits>[0]["sourceType"],
+      sourceType: input.sourceType as Parameters<
+        typeof grantCredits
+      >[0]["sourceType"],
       debitAccount: `SYSTEM:${input.sourceType}`,
-      transactionType: input.sourceType as Parameters<typeof grantCredits>[0]["transactionType"],
+      transactionType: input.sourceType as Parameters<
+        typeof grantCredits
+      >[0]["transactionType"],
       ...(input.reason != null ? { description: input.reason } : {}),
     };
     if (input.sourceRef) {
@@ -302,7 +305,7 @@ export const getMyActiveBatches = defineOperation({
         remaining: z.number(),
         expiresAt: z.string().datetime().nullable(),
         createdAt: z.string().datetime(),
-      }),
+      })
     ),
   }),
   access: { kind: "protected" },
@@ -348,7 +351,7 @@ export const getUserActiveBatches = defineOperation({
         remaining: z.number(),
         expiresAt: z.string().datetime().nullable(),
         createdAt: z.string().datetime(),
-      }),
+      })
     ),
   }),
   access: { kind: "admin" },
@@ -390,7 +393,7 @@ export const getMyTransactions = defineOperation({
         amount: z.number(),
         sourceRef: z.string().nullable(),
         createdAt: z.string().datetime(),
-      }),
+      })
     ),
     total: z.number().describe("总记录数"),
   }),
@@ -430,8 +433,7 @@ export const getUserTransactions = defineOperation({
   name: "credits.getUserTransactions",
   domain: "credits",
   title: "Get User Transactions",
-  description:
-    "获取指定用户的积分交易记录列表（管理员查询，分页）。纯读操作。",
+  description: "获取指定用户的积分交易记录列表（管理员查询，分页）。纯读操作。",
   input: z.object({
     userId: z.string().describe("目标用户 ID"),
     limit: z.number().int().positive().default(20).describe("每页条数"),
@@ -445,7 +447,7 @@ export const getUserTransactions = defineOperation({
         amount: z.number(),
         sourceRef: z.string().nullable(),
         createdAt: z.string().datetime(),
-      }),
+      })
     ),
     total: z.number().describe("总记录数"),
   }),
@@ -664,9 +666,7 @@ export const setStatus = defineOperation({
     "底层操作幂等，但审计日志每次追加。",
   input: z.object({
     userId: z.string().describe("目标用户 ID"),
-    status: z
-      .enum(["active", "frozen"])
-      .describe("目标状态"),
+    status: z.enum(["active", "frozen"]).describe("目标状态"),
   }),
   output: z.object({
     success: z.boolean(),
@@ -718,9 +718,7 @@ export const adminGrant = defineOperation({
   sideEffects: ["billing", "audit", "cache"],
   // Bound at app level - see apps/web/src/server/uol-bindings.ts
   execute: async () => {
-    throw new Error(
-      "credits.adminGrant must be bound at app level",
-    );
+    throw new Error("credits.adminGrant must be bound at app level");
   },
 });
 
@@ -758,9 +756,7 @@ export const adminAdjust = defineOperation({
   sideEffects: ["billing", "audit", "cache"],
   // Bound at app level - see apps/web/src/server/uol-bindings.ts
   execute: async () => {
-    throw new Error(
-      "credits.adminAdjust must be bound at app level",
-    );
+    throw new Error("credits.adminAdjust must be bound at app level");
   },
 });
 
@@ -827,13 +823,13 @@ export const createPurchaseCheckout = defineOperation({
   domain: "credits",
   title: "Create Credits Purchase Checkout",
   description:
-    "创建积分购买结账会话（Epay 落单 / Creem 外呼）。不直接发放积分，" +
+    "创建积分购买结账会话（本地订单或 Creem 外呼）。不直接发放积分，" +
     "积分在支付 webhook 确认后发放。每次调用创建新 checkout（非幂等）。" +
     "按用户套餐校验购买资格。",
   input: z.object({
     packageId: z.string().describe("积分包 ID"),
     paymentProvider: z
-      .enum(["creem", "epay"])
+      .enum(["creem", "epay", "alipay"])
       .optional()
       .describe("支付渠道（可选，默认按配置）"),
     successUrl: z.string().url().optional().describe("支付成功回跳 URL"),
@@ -851,7 +847,7 @@ export const createPurchaseCheckout = defineOperation({
   // Bound at app level - see apps/web/src/server/uol-bindings.ts
   execute: async () => {
     throw new Error(
-      "credits.createPurchaseCheckout must be bound at app level",
+      "credits.createPurchaseCheckout must be bound at app level"
     );
   },
 });

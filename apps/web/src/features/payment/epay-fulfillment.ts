@@ -1,5 +1,3 @@
-import { and, eq } from "drizzle-orm";
-
 import { db } from "@repo/database";
 import { creditsBatch, subscription } from "@repo/database/schema";
 import {
@@ -24,18 +22,19 @@ import {
   getCreditPackagePriceForPlan,
   getRuntimeCreditPackageById,
 } from "@repo/shared/credits/packages";
-import { getRuntimeSettingNumber } from "@repo/shared/system-settings";
-import { getUserPlanType } from "@repo/shared/subscription/services/user-plan";
+import { logEvent, logger } from "@repo/shared/logger";
 import {
   claimEpayOrderForFulfillment,
   decodeEpayMetadata,
-  getEpayOrderMetadata,
   type EpayMetadata,
   type EpayVerifyResult,
+  getEpayOrderMetadata,
   moneyToCents,
   updateEpayOrderStatus,
 } from "@repo/shared/payment/epay";
-import { logger, logEvent } from "@repo/shared/logger";
+import { getUserPlanType } from "@repo/shared/subscription/services/user-plan";
+import { getRuntimeSettingNumber } from "@repo/shared/system-settings";
+import { and, eq } from "drizzle-orm";
 
 interface FulfillEpayPaymentResult {
   metadata: EpayMetadata;
@@ -86,6 +85,30 @@ export function isExpectedEpayAmount(
   );
 }
 
+function getFulfillmentSourceProvider(
+  source: EpayFulfillmentSource
+): LocalPaymentProvider {
+  return source === "alipay-webhook" ? "alipay" : "epay";
+}
+
+export function isMatchingPaymentProvider(params: {
+  source: EpayFulfillmentSource;
+  metadata: EpayMetadata;
+}): boolean {
+  const expectedProvider = getFulfillmentSourceProvider(params.source);
+  return getPaymentProviderFromMetadata(params.metadata) === expectedProvider;
+}
+
+export function resolveExpectedLocalPaymentAmount(params: {
+  metadata: EpayMetadata;
+  fallbackAmount: number;
+}): number {
+  return typeof params.metadata.expectedAmount === "number" &&
+    Number.isFinite(params.metadata.expectedAmount)
+    ? params.metadata.expectedAmount
+    : params.fallbackAmount;
+}
+
 export async function fulfillSuccessfulEpayPayment(
   verifyInfo: EpayVerifyResult,
   source: EpayFulfillmentSource
@@ -118,15 +141,18 @@ async function fulfillSuccessfulEpayPaymentInner(
     await updateEpayOrderStatus(verifyInfo.outTradeNo, "failed");
     throw new Error("Invalid or mismatched Epay metadata");
   }
+  if (!isMatchingPaymentProvider({ source, metadata })) {
+    throw new Error("Payment provider mismatch");
+  }
 
-  // 原子领取订单（pending → success）。重复异步通知 / 并发回调将领取失败，
-  // 在此安全跳过，避免重复履约。即使后续发放因 A3 唯一约束幂等，
-  // 该门闩仍可避免重复的订阅写入等副作用。
+  // 原子领取订单（pending / stale processing → processing）。重复异步通知 /
+  // 并发回调将领取失败，在此安全跳过，避免重复履约。领取态不能直接写 success，
+  // 否则进程在“领取后、发放前”崩溃会让网关重投被误判为已完成。
   const claimed = await claimEpayOrderForFulfillment(verifyInfo.outTradeNo);
   if (!claimed) {
     logger.info(
       { source, outTradeNo: verifyInfo.outTradeNo },
-      "Epay order already fulfilled or not pending; skipping"
+      "Epay order already fulfilled or currently processing; skipping"
     );
     return { metadata };
   }
@@ -151,10 +177,12 @@ async function fulfillSuccessfulEpayPaymentInner(
       );
     }
   } catch (error) {
-    // 履约失败：释放领取（success → pending），以便后续异步通知重试。
+    // 履约失败：释放领取（processing → pending），以便后续异步通知重试。
     await updateEpayOrderStatus(verifyInfo.outTradeNo, "pending");
     throw error;
   }
+
+  await updateEpayOrderStatus(verifyInfo.outTradeNo, "success");
 
   return { metadata };
 }
@@ -195,8 +223,11 @@ async function handleCreditPurchase(
     throw new Error("Credit package purchase requires a higher plan");
   }
   const creditsAmount = pkg.credits * normalizedQuantity;
-  const expectedAmount =
-    getCreditPackagePriceForPlan(pkg, purchasePlan) * normalizedQuantity;
+  const expectedAmount = resolveExpectedLocalPaymentAmount({
+    metadata,
+    fallbackAmount:
+      getCreditPackagePriceForPlan(pkg, purchasePlan) * normalizedQuantity,
+  });
 
   if (!isExpectedEpayAmount(verifyInfo, expectedAmount)) {
     throw new Error("Epay amount does not match credit package price");

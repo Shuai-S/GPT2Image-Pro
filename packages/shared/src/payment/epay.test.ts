@@ -11,13 +11,28 @@
  */
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
-vi.mock("@repo/database", () => ({ db: {} }));
+const dbMock = vi.hoisted(() => {
+  const returning = vi.fn(async () => [{ outTradeNo: "T1" }]);
+  const where = vi.fn(() => ({ returning }));
+  const set = vi.fn(() => ({ where }));
+  const update = vi.fn(() => ({ set }));
+
+  return { update, set, where, returning };
+});
+
+vi.mock("@repo/database", () => ({
+  db: {
+    update: dbMock.update,
+  },
+}));
 vi.mock("@repo/database/schema", () => ({ epayOrder: {} }));
 
 import {
+  claimEpayOrderForFulfillment,
   decodeEpayMetadata,
-  encodeEpayMetadata,
   type EpayMetadata,
+  encodeEpayMetadata,
+  isLocalPaymentSubscriptionId,
   moneyToCents,
   signEpayParams,
   verifyEpayParams,
@@ -132,6 +147,33 @@ describe("verifyEpayParams", () => {
       param: "encoded",
     });
     expect(verifyEpayParams(withParam).param).toBe("encoded");
+  });
+});
+
+describe("claimEpayOrderForFulfillment", () => {
+  it("claims into processing instead of success so crashed fulfillment can retry", async () => {
+    dbMock.update.mockClear();
+    dbMock.set.mockClear();
+    dbMock.where.mockClear();
+    dbMock.returning.mockClear();
+    dbMock.returning.mockResolvedValueOnce([{ outTradeNo: "T1" }]);
+
+    await expect(claimEpayOrderForFulfillment("T1")).resolves.toBe(true);
+
+    expect(dbMock.set).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "processing" })
+    );
+    expect(dbMock.set).not.toHaveBeenCalledWith(
+      expect.objectContaining({ status: "success" })
+    );
+  });
+});
+
+describe("isLocalPaymentSubscriptionId", () => {
+  it("detects both Epay and official Alipay local subscription ids", () => {
+    expect(isLocalPaymentSubscriptionId("epay_T1")).toBe(true);
+    expect(isLocalPaymentSubscriptionId("alipay_T1")).toBe(true);
+    expect(isLocalPaymentSubscriptionId("sub_creem_1")).toBe(false);
   });
 });
 

@@ -1,25 +1,27 @@
-import { and, eq } from "drizzle-orm";
-import { headers } from "next/headers";
-import { NextResponse } from "next/server";
-import { getSubscriptionMonthlyCredits } from "@repo/shared/config/payment-runtime";
+import { db } from "@repo/database";
+import { creditsBatch, subscription, user } from "@repo/database/schema";
+import { withApiLogging } from "@repo/shared/api-logger";
+import { paymentConfig } from "@repo/shared/config/payment";
+import {
+  findRuntimePlanByPriceId,
+  getSubscriptionMonthlyCredits,
+} from "@repo/shared/config/payment-runtime";
 import {
   getPlanFromPriceId,
   isSubscriptionPlan,
 } from "@repo/shared/config/subscription-plan";
-import { db } from "@repo/database";
-import { creditsBatch, subscription, user } from "@repo/database/schema";
 import { CREDIT_CONFIG_DEFAULTS } from "@repo/shared/credits/config";
 import { grantCredits } from "@repo/shared/credits/core";
 import {
   getCreditPackagePriceForPlan,
   getRuntimeCreditPackageById,
 } from "@repo/shared/credits/packages";
-import { getRuntimeSettingNumber } from "@repo/shared/system-settings";
+import { logError, logEvent, logger } from "@repo/shared/logger";
 import {
+  buildSubscriptionPeriodKey,
   type CreemCheckoutCompletedData,
   type CreemSubscription,
   type CreemWebhookEvent,
-  buildSubscriptionPeriodKey,
   computeSubscriptionCreditsToGrant,
   constructRuntimeCreemEvent,
   getCreemPeriodDays,
@@ -29,10 +31,10 @@ import {
   evaluateCreemAmountMatch,
   shouldGrantAfterAmountCheck,
 } from "@repo/shared/payment/creem-amount";
-import { findRuntimePlanByPriceId } from "@repo/shared/config/payment-runtime";
-import { paymentConfig } from "@repo/shared/config/payment";
-import { withApiLogging } from "@repo/shared/api-logger";
-import { logger, logError, logEvent } from "@repo/shared/logger";
+import { getRuntimeSettingNumber } from "@repo/shared/system-settings";
+import { and, eq } from "drizzle-orm";
+import { headers } from "next/headers";
+import { NextResponse } from "next/server";
 
 /** 从 CreemSubscription 中安全提取产品 ID */
 function getProductId(sub: CreemSubscription): string {
@@ -42,18 +44,23 @@ function getProductId(sub: CreemSubscription): string {
 }
 
 // ============================================
-// 实付金额/币种反欺诈校验（软门闩）
+// 实付金额/币种反欺诈校验
 // 纯逻辑已抽离至 @repo/shared/payment/creem-amount，此处仅保留环境读取与日志适配。
 // ============================================
 
 /**
- * 是否对金额/币种不符的支付硬拒（不发放积分）。
+ * 是否对金额/币种不符的支付硬拒（不发放积分）。默认硬拒；只有显式配置
+ * CREEM_WEBHOOK_ENFORCE_AMOUNT=0/false/no/off 时才退回临时软门闩。
  *
- * WHY 读 env 而非 system-settings：system-settings 的 SettingKey 是受约束联合类型，
- * 新增键需改 definitions.ts（本单元不允许触碰），故此处以 env 软开关落地，默认关闭。
+ * WHY：可比金额/币种不匹配代表用户支付额与服务端应收额已经矛盾，继续发放会
+ * 让低价产品或跨币种配置套取高价权益；不可比场景仍由纯函数裁决为放行告警。
  */
 function isCreemAmountEnforced(): boolean {
   const raw = process.env.CREEM_WEBHOOK_ENFORCE_AMOUNT?.trim().toLowerCase();
+  if (raw === "0" || raw === "false" || raw === "no" || raw === "off") {
+    return false;
+  }
+  if (!raw) return true;
   return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
 }
 
@@ -72,12 +79,18 @@ function shouldGrantWithLogging(
     isCreemAmountEnforced()
   );
 
-  if (decision.grant && decision.reason === "not-comparable-grant-with-warning") {
+  if (
+    decision.grant &&
+    decision.reason === "not-comparable-grant-with-warning"
+  ) {
     logger.warn(
       { ...context, source: "creem-webhook", amountMatch, decision },
       "Creem amount check skipped (not comparable); granting credits"
     );
-  } else if (decision.grant && decision.reason === "mismatch-soft-gate-grant-with-warning") {
+  } else if (
+    decision.grant &&
+    decision.reason === "mismatch-soft-gate-grant-with-warning"
+  ) {
     logger.warn(
       { ...context, source: "creem-webhook", amountMatch, decision },
       "Creem amount mismatch detected (soft gate, not enforced); granting credits"
@@ -233,7 +246,11 @@ async function handleCheckoutCompleted(data: CreemCheckoutCompletedData) {
     // handleSubscriptionActive 因找不到订阅记录而跳过积分发放。
     // 此处也调用 grantSubscriptionCredits 确保至少一条路径成功发放。
     // grantCredits 的 sourceRef 幂等机制防止重复发放。
-    await grantSubscriptionCredits(userId, data.subscription, "subscription_create");
+    await grantSubscriptionCredits(
+      userId,
+      data.subscription,
+      "subscription_create"
+    );
   }
 
   logEvent("payment.checkout.completed", {
@@ -310,9 +327,9 @@ async function handleCreditPurchase(
     return;
   }
 
-  // 实付金额/币种校验（软门闩）：用服务端套餐重算期望金额（unitPrice * quantity），
+  // 实付金额/币种校验：用服务端套餐重算期望金额（unitPrice * quantity），
   // 与 Creem 实付额（order.amount，单位分）及 order.currency 比对，阻止 checkout
-  // 阶段被篡改的价格/数量套取高价积分包。配置不可比或未开启硬拒时仅告警照常发放。
+  // 阶段被篡改的价格/数量套取高价积分包。可比但不匹配默认硬拒；不可比仅告警放行。
   const expectedAmount = unitPrice * quantity;
   const amountMatch = evaluateCreemAmountMatch(
     {
@@ -662,10 +679,9 @@ async function grantSubscriptionCredits(
     isYearly
   );
 
-  // 实付金额/币种校验（软门闩）：用 priceId 反查服务端期望金额，与订阅 product 上的
+  // 实付金额/币种校验：用 priceId 反查服务端期望金额，与订阅 product 上的
   // price/currency 比对，阻止被篡改的订阅价套取高额积分。CreemSubscription 不带 order，
   // 仅当 product 为对象且带 price 时才有可比信息；缺失则裁决为不可比 → 放行 + 告警。
-  // WHY 软门闩：Creem product.price 的币种/单位（分 vs 元）映射尚未权威落地，避免误拒。
   const { price: runtimePrice } = await findRuntimePlanByPriceId(priceId);
   const productPriceMinorUnits =
     typeof sub.product === "object" &&

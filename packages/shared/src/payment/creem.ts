@@ -5,7 +5,7 @@
  * 文档: https://docs.creem.io/api-reference
  */
 
-import crypto from "crypto";
+import crypto from "node:crypto";
 import { z } from "zod";
 import { getRuntimeSettingString } from "../system-settings";
 
@@ -370,11 +370,14 @@ export const creem = {
    * @returns 客户信息
    */
   async getCustomer(customerId: string): Promise<CreemCustomer> {
-    const res = await fetch(`${await getRuntimeCreemApiBase()}/customers/${customerId}`, {
-      headers: {
-        "x-api-key": await getRuntimeCreemApiKey(),
-      },
-    });
+    const res = await fetch(
+      `${await getRuntimeCreemApiBase()}/customers/${customerId}`,
+      {
+        headers: {
+          "x-api-key": await getRuntimeCreemApiKey(),
+        },
+      }
+    );
 
     if (!res.ok) {
       const error = await res.text();

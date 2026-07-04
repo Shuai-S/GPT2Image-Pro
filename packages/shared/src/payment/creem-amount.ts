@@ -17,7 +17,7 @@
  * 实付金额/币种校验裁决结果。
  *
  * - comparable=false 表示输入缺失或无法解析（order 缺失、amount 非数字、期望价目不可用），
- *   调用方应放行 + 告警，绝不硬拒真实支付。
+ *   调用方应放行 + 告警，避免误拒无法核验的真实支付。
  * - comparable=true 时 matches 才有意义。
  */
 export interface CreemAmountMatchResult {
@@ -134,7 +134,7 @@ export function creemMajorToMinorUnits(
  *
  * WHY：webhook 仅经签名校验无法防止 checkout 阶段被篡改的价格/数量套取高价套餐，
  * 须在发放积分前用服务端套餐重算期望金额并与 Creem 实付额比对。本函数只判定，
- * 不决定放行/拒付；信息不可比时返回 comparable=false 由调用方放行 + 告警。
+ * 不决定放行/拒付；双方币种均存在但不同属于“可比但不匹配”，必须允许调用方硬拒。
  *
  * @param expected - 服务端期望（amount 为主单位，currency 为 ISO 4217）
  * @param actual - Creem 实付（amount 为最小货币单位，currency 为 ISO 4217）
@@ -177,11 +177,13 @@ export function evaluateCreemAmountMatch(
     };
   }
 
-  // 币种不匹配（双方均存在时才比对）：可比但不匹配
+  // 币种不匹配（双方均存在时才比对）：可比但不匹配。
+  // WHY：币种字段完整但不同不是“不可比”，继续按不可比放行会让 USD/CNY
+  // 等跨币种低价支付绕过金额门闩。
   if (expectedCurrency && actualCurrency) {
     if (expectedCurrency !== actualCurrency) {
       return {
-        comparable: false,
+        comparable: true,
         matches: false,
         expectedMinor,
         actualMinor,
@@ -211,10 +213,10 @@ export function evaluateCreemAmountMatch(
  * 对金额/币种裁决落地处置：决定是否发放积分。
  *
  * WHY 软门闩：
- * - comparable=false（信息缺失/价目未配置）一律放行 + 告警，避免误拒真实支付。
+ * - comparable=false（信息缺失/价目未配置）一律放行 + 告警，避免误拒无法核验的真实支付。
  * - comparable=true 且匹配 → 放行。
  * - comparable=true 且不匹配：
- *   - enforceReject=false → 放行 + 告警（软门闩，给运维核对窗口）。
+ *   - enforceReject=false → 放行 + 告警（仅用于临时兼容，给运维核对窗口）。
  *   - enforceReject=true → 拒绝发放（硬拒，阻止低价/篡改套取）。
  *
  * @param match - evaluateCreemAmountMatch 的裁决结果

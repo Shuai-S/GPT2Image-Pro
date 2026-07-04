@@ -1,24 +1,29 @@
 "use server";
 
-import { eq } from "drizzle-orm";
-import { z } from "zod";
+import { db } from "@repo/database";
+import { subscription } from "@repo/database/schema";
 
 import { getBaseUrl, paymentConfig } from "@repo/shared/config/payment";
 import { findRuntimePlanByPriceId } from "@repo/shared/config/payment-runtime";
-import { db } from "@repo/database";
-import { subscription } from "@repo/database/schema";
-import { PaymentType } from "@/features/payment/types";
 import { logEvent } from "@repo/shared/logger";
-import { protectedAction } from "@repo/shared/safe-action";
+import { createRuntimeAlipayPurchase } from "@repo/shared/payment/alipay";
+import { creem } from "@repo/shared/payment/creem";
 import {
   createRuntimeEpayPurchase,
   getRuntimePaymentProvider,
+  isLocalPaymentSubscriptionId,
   saveEpayOrder,
 } from "@repo/shared/payment/epay";
-import { createRuntimeAlipayPurchase } from "@repo/shared/payment/alipay";
+import { protectedAction } from "@repo/shared/safe-action";
+import { eq } from "drizzle-orm";
+import { z } from "zod";
+import { PaymentType } from "@/features/payment/types";
 
-import { creem } from "./creem";
 import { createSubscriptionCheckoutQuote } from "./subscription-upgrade";
+
+function createPaymentOrderNo(prefix: "SUB" | "CR"): string {
+  return `${prefix}${crypto.randomUUID().replaceAll("-", "")}`;
+}
 
 /**
  * 创建 Creem Checkout Session
@@ -79,7 +84,7 @@ export const createCheckoutSession = protectedAction
     });
 
     if (useLocalOrderProvider) {
-      const outTradeNo = `SUB${Date.now()}${crypto.randomUUID().slice(0, 8)}`;
+      const outTradeNo = createPaymentOrderNo("SUB");
       const amountDue = upgradeQuote?.amountDue ?? price.amount;
       const metadata = {
         type: "subscription" as const,
@@ -128,7 +133,7 @@ export const createCheckoutSession = protectedAction
       success_url:
         successUrl ??
         `${baseUrl}${paymentConfig.redirectAfterCheckout}?success=true`,
-      request_id: `${userId}_${Date.now()}`,
+      request_id: `subscription_${userId}_${crypto.randomUUID()}`,
       metadata: {
         userId,
         planId: plan?.id ?? "unknown",
@@ -194,8 +199,8 @@ export const cancelSubscription = protectedAction
       throw new Error("您还没有订阅任何计划");
     }
 
-    if (userSubscription.subscriptionId.startsWith("epay_")) {
-      throw new Error("易支付订阅不支持自动取消，请等待当前周期结束");
+    if (isLocalPaymentSubscriptionId(userSubscription.subscriptionId)) {
+      throw new Error("本地支付订阅不支持自动取消，请等待当前周期结束");
     }
 
     // 调用 Creem API 取消订阅

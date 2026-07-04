@@ -5,8 +5,8 @@
  * 绝不触发积分/订阅履约。真正履约只由 /api/webhooks/alipay 的异步通知完成。
  */
 
-import { NextResponse } from "next/server";
 import { getBaseUrl } from "@repo/shared/config/payment";
+import { logger } from "@repo/shared/logger";
 import {
   ALIPAY_TRADE_FINISHED,
   ALIPAY_TRADE_SUCCESS,
@@ -18,7 +18,7 @@ import {
   getEpayOrderMetadata,
   getEpayOrderStatus,
 } from "@repo/shared/payment/epay";
-import { logger } from "@repo/shared/logger";
+import { NextResponse } from "next/server";
 
 export async function GET(req: Request) {
   return handleReturn(req);
@@ -40,14 +40,19 @@ async function handleReturn(req: Request) {
   const metadata = verifyInfo.verifyStatus
     ? await getEpayOrderMetadata(verifyInfo.outTradeNo)
     : null;
+  const isProviderMatch = metadata?.provider === "alipay";
   const redirectPath =
     metadata?.type === "subscription" ? "/dashboard" : "/dashboard/billing";
   const separator = redirectPath.includes("?") ? "&" : "?";
 
-  if (!verifyInfo.verifyStatus) {
+  if (!verifyInfo.verifyStatus || !isProviderMatch) {
     logger.warn(
-      { source: "alipay-return", outTradeNo: verifyInfo.outTradeNo },
-      "Invalid Alipay return signature"
+      {
+        source: "alipay-return",
+        outTradeNo: verifyInfo.outTradeNo,
+        provider: metadata?.provider ?? "unknown",
+      },
+      "Invalid Alipay return"
     );
     return NextResponse.redirect(
       `${baseUrl}${redirectPath}${separator}pay=fail`

@@ -7,14 +7,14 @@
  */
 
 import crypto from "node:crypto";
+import { db } from "@repo/database";
+import { epayOrder } from "@repo/database/schema";
+import { and, eq, lt, or } from "drizzle-orm";
 import { getBaseUrl } from "../config/payment";
 import {
   getRuntimeSettingSelect,
   getRuntimeSettingString,
 } from "../system-settings";
-import { db } from "@repo/database";
-import { epayOrder } from "@repo/database/schema";
-import { and, eq } from "drizzle-orm";
 
 export const EPAY_TRADE_SUCCESS = "TRADE_SUCCESS";
 
@@ -67,7 +67,9 @@ export interface EpayVerifyResult {
   raw: Record<string, string>;
 }
 
-export type EpayOrderStatus = "pending" | "success" | "failed";
+export type EpayOrderStatus = "pending" | "processing" | "success" | "failed";
+
+const EPAY_PROCESSING_LOCK_TTL_MS = 5 * 60 * 1000;
 
 export function getPaymentProvider(): PaymentProvider {
   const providerValues = [
@@ -83,6 +85,12 @@ export function getPaymentProvider(): PaymentProvider {
 
 export function isEpayPaymentProvider(): boolean {
   return getPaymentProvider() === "epay";
+}
+
+export function isLocalPaymentSubscriptionId(subscriptionId: string): boolean {
+  return (
+    subscriptionId.startsWith("epay_") || subscriptionId.startsWith("alipay_")
+  );
 }
 
 export async function getRuntimePaymentProvider(): Promise<PaymentProvider> {
@@ -289,7 +297,7 @@ export async function saveEpayOrder(
   metadata: EpayMetadata,
   amount: number | string
 ): Promise<void> {
-  await db
+  const inserted = await db
     .insert(epayOrder)
     .values({
       outTradeNo: metadata.outTradeNo,
@@ -300,17 +308,14 @@ export async function saveEpayOrder(
       metadata: metadata as unknown as Record<string, unknown>,
       updatedAt: new Date(),
     })
-    .onConflictDoUpdate({
-      target: epayOrder.outTradeNo,
-      set: {
-        userId: metadata.userId,
-        businessType: metadata.type,
-        amount: Number(formatEpayMoney(amount)),
-        status: "pending",
-        metadata: metadata as unknown as Record<string, unknown>,
-        updatedAt: new Date(),
-      },
-    });
+    .onConflictDoNothing()
+    .returning({ outTradeNo: epayOrder.outTradeNo });
+
+  // outTradeNo 理论上由服务端随机生成，不应冲突。若冲突，绝不能覆盖旧订单
+  // 或把已完成订单重置为 pending，否则会制造重复履约窗口。
+  if (inserted.length === 0) {
+    throw new Error("Payment order already exists");
+  }
 }
 
 export async function getEpayOrderMetadata(
@@ -360,20 +365,36 @@ export async function getEpayOrderStatus(
 }
 
 /**
- * 原子领取订单进行发放：仅当订单仍为 pending 时将其置为 success。
- * 返回 true 表示本次成功领取（可继续发放），false 表示订单不存在或已被处理。
- * 用于防止异步通知与重复回调对同一订单的重复发放。
+ * 原子领取订单进行发放：pending 或超时 processing 才能置为 processing。
+ * 返回 true 表示本次成功领取（可继续发放），false 表示订单不存在、已完成
+ * 或仍在其他请求处理中。履约完成后调用方必须再显式置为 success。
+ *
+ * WHY：不能在领取时直接置 success，否则进程在“置 success 后、发放前”崩溃会让
+ * 网关重投被误判为已履约，造成永久漏发。processing + 超时重领能在崩溃后恢复，
+ * 而 credits_batch/sourceRef 唯一约束继续兜底重复发放。
  */
 export async function claimEpayOrderForFulfillment(
   outTradeNo: string
 ): Promise<boolean> {
   if (!outTradeNo) return false;
 
+  const staleProcessingBefore = new Date(
+    Date.now() - EPAY_PROCESSING_LOCK_TTL_MS
+  );
   const claimed = await db
     .update(epayOrder)
-    .set({ status: "success", updatedAt: new Date() })
+    .set({ status: "processing", updatedAt: new Date() })
     .where(
-      and(eq(epayOrder.outTradeNo, outTradeNo), eq(epayOrder.status, "pending"))
+      and(
+        eq(epayOrder.outTradeNo, outTradeNo),
+        or(
+          eq(epayOrder.status, "pending"),
+          and(
+            eq(epayOrder.status, "processing"),
+            lt(epayOrder.updatedAt, staleProcessingBefore)
+          )
+        )
+      )
     )
     .returning({ outTradeNo: epayOrder.outTradeNo });
 
@@ -496,12 +517,12 @@ export function encodeEpayMetadata(metadata: EpayMetadata): string {
   if (metadata.packageId) compact.g = metadata.packageId;
   if (metadata.quantity && metadata.quantity > 1) compact.q = metadata.quantity;
   if (metadata.creditPlan) compact.x = metadata.creditPlan;
+  if (typeof metadata.expectedAmount === "number") {
+    compact.e = metadata.expectedAmount;
+  }
 
   if (metadata.checkoutMode === "upgrade") {
     compact.m = "u";
-    if (typeof metadata.expectedAmount === "number") {
-      compact.e = metadata.expectedAmount;
-    }
     if (typeof metadata.originalAmount === "number") {
       compact.a = metadata.originalAmount;
     }
