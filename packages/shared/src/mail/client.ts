@@ -16,7 +16,7 @@ import {
 
 export type EmailProvider = "smtp" | "resend";
 
-interface SmtpConfig {
+export interface SmtpConfig {
   host: string;
   port: number;
   secure: boolean;
@@ -24,7 +24,20 @@ interface SmtpConfig {
   pass: string;
 }
 
-function getSmtpConfig(): SmtpConfig | null {
+export interface MailRuntimeConfigSnapshot {
+  provider: EmailProvider;
+  fromDomain?: string;
+  smtpConfigured: boolean;
+  resendConfigured: boolean;
+  smtp?: {
+    host: string;
+    port: number;
+    secure: boolean;
+    userDomain?: string;
+  };
+}
+
+export function getSmtpConfig(): SmtpConfig | null {
   const host = getProcessSettingString("SMTP_HOST");
   const user = getProcessSettingString("SMTP_USER");
   const pass = getProcessSettingString("SMTP_PASS");
@@ -33,7 +46,10 @@ function getSmtpConfig(): SmtpConfig | null {
     return null;
   }
 
-  const port = Number.parseInt(getProcessSettingString("SMTP_PORT") ?? "465", 10);
+  const port = Number.parseInt(
+    getProcessSettingString("SMTP_PORT") ?? "465",
+    10
+  );
   const resolvedPort = Number.isFinite(port) ? port : 465;
 
   return {
@@ -58,7 +74,8 @@ export function isEmailConfigured() {
 }
 
 export function getEmailProvider(): EmailProvider {
-  const configuredProvider = getProcessSettingString("EMAIL_PROVIDER")?.toLowerCase();
+  const configuredProvider =
+    getProcessSettingString("EMAIL_PROVIDER")?.toLowerCase();
 
   if (configuredProvider === "smtp" || configuredProvider === "resend") {
     return configuredProvider;
@@ -69,6 +86,56 @@ export function getEmailProvider(): EmailProvider {
   }
 
   return "resend";
+}
+
+function getEmailDomain(value: string | undefined) {
+  const match = value?.match(/@([^>\s]+)>?$/);
+  return match?.[1]?.toLowerCase();
+}
+
+function getSmtpConfigFingerprint(config: SmtpConfig) {
+  return JSON.stringify({
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
+    user: config.user,
+    pass: config.pass,
+  });
+}
+
+export function getDefaultFromEmail() {
+  return (
+    getProcessSettingString("EMAIL_FROM") ?? "GPT2IMAGE <noreply@gpt2image.com>"
+  );
+}
+
+export function getMailRuntimeConfigSnapshot(): MailRuntimeConfigSnapshot {
+  const smtpConfig = getSmtpConfig();
+  const emailFrom = getProcessSettingString("EMAIL_FROM");
+  const fromDomain = getEmailDomain(emailFrom);
+  const snapshot: MailRuntimeConfigSnapshot = {
+    provider: getEmailProvider(),
+    smtpConfigured: Boolean(smtpConfig),
+    resendConfigured: isResendConfigured(),
+  };
+
+  if (fromDomain) {
+    snapshot.fromDomain = fromDomain;
+  }
+
+  if (smtpConfig) {
+    const userDomain = getEmailDomain(smtpConfig.user);
+    snapshot.smtp = {
+      host: smtpConfig.host,
+      port: smtpConfig.port,
+      secure: smtpConfig.secure,
+    };
+    if (userDomain) {
+      snapshot.smtp.userDomain = userDomain;
+    }
+  }
+
+  return snapshot;
 }
 
 /**
@@ -90,6 +157,7 @@ function createResendClient() {
  * Resend 客户端单例
  */
 let resendClient: Resend | null = null;
+let resendClientApiKey: string | null = null;
 
 /**
  * 获取 Resend 客户端
@@ -97,8 +165,10 @@ let resendClient: Resend | null = null;
  * 单例模式，确保只创建一个客户端实例
  */
 export function getResendClient(): Resend {
-  if (!resendClient) {
+  const apiKey = getProcessSettingString("RESEND_API_KEY") ?? null;
+  if (!resendClient || resendClientApiKey !== apiKey) {
     resendClient = createResendClient();
+    resendClientApiKey = apiKey;
   }
   return resendClient;
 }
@@ -126,10 +196,22 @@ function createSmtpTransporter() {
 }
 
 let smtpTransporter: Transporter<SMTPTransport.SentMessageInfo> | null = null;
+let smtpTransporterFingerprint: string | null = null;
 
 export function getSmtpTransporter(): Transporter<SMTPTransport.SentMessageInfo> {
-  if (!smtpTransporter) {
+  const config = getSmtpConfig();
+
+  if (!config) {
+    throw new Error(
+      "SMTP is not configured. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS and SMTP_SECURE."
+    );
+  }
+
+  const fingerprint = getSmtpConfigFingerprint(config);
+  if (!smtpTransporter || smtpTransporterFingerprint !== fingerprint) {
+    smtpTransporter?.close();
     smtpTransporter = createSmtpTransporter();
+    smtpTransporterFingerprint = fingerprint;
   }
 
   return smtpTransporter;
@@ -141,5 +223,4 @@ export function getSmtpTransporter(): Transporter<SMTPTransport.SentMessageInfo>
  * 可以通过环境变量 EMAIL_FROM 配置
  * 格式: "Name <email@domain.com>"
  */
-export const DEFAULT_FROM_EMAIL =
-  getProcessSettingString("EMAIL_FROM") ?? "GPT2IMAGE <noreply@gpt2image.com>";
+export const DEFAULT_FROM_EMAIL = getDefaultFromEmail();

@@ -1,11 +1,13 @@
 import { render } from "@react-email/render";
 import type { ReactElement } from "react";
 import {
-  DEFAULT_FROM_EMAIL,
   getEmailProvider,
+  getDefaultFromEmail,
+  getMailRuntimeConfigSnapshot,
   getResendClient,
   getSmtpTransporter,
 } from "./client";
+import { logger } from "../logger";
 
 /**
  * 邮件发送工具
@@ -73,12 +75,13 @@ function logEmailPreview(params: SendEmailParams): void {
   const recipients = Array.isArray(params.to)
     ? params.to.join(", ")
     : params.to;
+  const defaultFromEmail = getDefaultFromEmail();
 
   console.log(`\n${"=".repeat(60)}`);
   console.log("EMAIL PREVIEW (Development Mode)");
   console.log("=".repeat(60));
   console.log(`To:      ${recipients}`);
-  console.log(`From:    ${params.from ?? DEFAULT_FROM_EMAIL}`);
+  console.log(`From:    ${params.from ?? defaultFromEmail}`);
   console.log(`Subject: ${params.subject}`);
   if (params.cc) {
     console.log(
@@ -98,6 +101,59 @@ function logEmailPreview(params: SendEmailParams): void {
   console.log("-".repeat(60));
   console.log("Set force: true to send real email in development");
   console.log(`${"=".repeat(60)}\n`);
+}
+
+function getAddressDomain(address: string) {
+  const match = address.match(/@([^>\s]+)>?$/);
+  return match?.[1]?.toLowerCase();
+}
+
+function getRecipientDomains(value: string | string[]) {
+  const recipients = Array.isArray(value) ? value : [value];
+  return Array.from(
+    new Set(
+      recipients
+        .map((recipient) => getAddressDomain(recipient))
+        .filter((domain): domain is string => Boolean(domain))
+    )
+  );
+}
+
+function getOptionalAddressDomains(value: string | string[] | undefined) {
+  if (!value) return [];
+  return getRecipientDomains(value);
+}
+
+function normalizeMailError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return {
+      message: "Unknown error",
+    };
+  }
+
+  const details = error as Error & {
+    code?: string;
+    command?: string;
+    response?: string;
+    responseCode?: number;
+    errno?: number;
+    syscall?: string;
+    address?: string;
+    port?: number;
+  };
+
+  return {
+    name: error.name,
+    message: error.message,
+    ...(details.code ? { code: details.code } : {}),
+    ...(details.command ? { command: details.command } : {}),
+    ...(details.response ? { response: details.response } : {}),
+    ...(details.responseCode ? { responseCode: details.responseCode } : {}),
+    ...(details.errno ? { errno: details.errno } : {}),
+    ...(details.syscall ? { syscall: details.syscall } : {}),
+    ...(details.address ? { address: details.address } : {}),
+    ...(details.port ? { port: details.port } : {}),
+  };
 }
 
 // ============================================
@@ -146,8 +202,23 @@ export async function sendEmail(
   }
 
   // 真实发送邮件
+  const startedAt = Date.now();
+  const defaultFromEmail = getDefaultFromEmail();
+  const resolvedFrom = from ?? defaultFromEmail;
+  const baseLogContext = {
+    source: "mail.sendEmail",
+    subject,
+    fromDomain: getAddressDomain(resolvedFrom),
+    toDomains: getRecipientDomains(to),
+    ccDomains: getOptionalAddressDomains(cc),
+    bccCount: Array.isArray(bcc) ? bcc.length : bcc ? 1 : 0,
+    replyToDomains: getOptionalAddressDomains(replyTo),
+    force,
+  };
+
   try {
     const provider = getEmailProvider();
+    const runtimeConfig = getMailRuntimeConfigSnapshot();
 
     if (provider === "smtp") {
       const transporter = getSmtpTransporter();
@@ -155,7 +226,7 @@ export async function sendEmail(
       const text = await render(react, { plainText: true });
 
       const info = await transporter.sendMail({
-        from: from ?? DEFAULT_FROM_EMAIL,
+        from: resolvedFrom,
         to,
         subject,
         html,
@@ -164,6 +235,21 @@ export async function sendEmail(
         ...(bcc ? { bcc } : {}),
         ...(replyTo ? { replyTo } : {}),
       });
+
+      logger.info(
+        {
+          ...baseLogContext,
+          provider,
+          runtimeConfig,
+          durationMs: Date.now() - startedAt,
+          messageId: info.messageId,
+          acceptedCount: info.accepted?.length ?? 0,
+          rejectedCount: info.rejected?.length ?? 0,
+          pendingCount: info.pending?.length ?? 0,
+          response: info.response,
+        },
+        "Email sent"
+      );
 
       return {
         success: true,
@@ -175,7 +261,7 @@ export async function sendEmail(
     const resend = getResendClient();
     // 构建邮件选项 (避免传递 undefined 值以满足 exactOptionalPropertyTypes)
     const emailOptions: Parameters<typeof resend.emails.send>[0] = {
-      from: from ?? DEFAULT_FROM_EMAIL,
+      from: resolvedFrom,
       to: Array.isArray(to) ? to : [to],
       subject,
       react,
@@ -195,12 +281,35 @@ export async function sendEmail(
     const { data, error } = await resend.emails.send(emailOptions);
 
     if (error) {
-      console.error("Failed to send email:", error);
+      logger.error(
+        {
+          ...baseLogContext,
+          provider,
+          runtimeConfig,
+          durationMs: Date.now() - startedAt,
+          error: {
+            name: error.name,
+            message: error.message,
+          },
+        },
+        "Email sending failed"
+      );
       return {
         success: false,
         error: error.message,
       };
     }
+
+    logger.info(
+      {
+        ...baseLogContext,
+        provider,
+        runtimeConfig,
+        durationMs: Date.now() - startedAt,
+        messageId: data?.id,
+      },
+      "Email sent"
+    );
 
     return {
       success: true,
@@ -210,7 +319,15 @@ export async function sendEmail(
   } catch (error) {
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error";
-    console.error("Email sending error:", errorMessage);
+    logger.error(
+      {
+        ...baseLogContext,
+        runtimeConfig: getMailRuntimeConfigSnapshot(),
+        durationMs: Date.now() - startedAt,
+        error: normalizeMailError(error),
+      },
+      "Email sending error"
+    );
     return {
       success: false,
       error: errorMessage,
