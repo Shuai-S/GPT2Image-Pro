@@ -1373,6 +1373,12 @@ function responseStatusLabel(response: Response) {
 function nonJsonResponseError(response: Response, text: string) {
   const snippet = responseTextSnippet(text);
   const status = responseStatusLabel(response);
+  if (
+    !response.ok &&
+    (response.status === 504 || /Gateway Time-out/i.test(snippet))
+  ) {
+    return "Image generation timed out at the gateway. Please retry, or lower the resolution/thinking level if it happens repeatedly.";
+  }
   if (!snippet) {
     return response.ok
       ? "API returned an empty response"
@@ -6578,7 +6584,8 @@ export function CreatePageClient({
           const data = await runTextGenerationRequest({
             prompt: itemPrompt,
             count: 1,
-            stream: false,
+            stream: true,
+            previewMode,
             generationIds: [
               generationIds[generationIndex] || createGenerationId(),
             ],
