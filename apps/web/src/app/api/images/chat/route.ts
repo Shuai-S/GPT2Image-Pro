@@ -9,12 +9,12 @@ import {
 import { getPlanUploadLimits } from "@repo/shared/subscription/services/upload-limits";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { type NextRequest, NextResponse } from "next/server";
+import { getImageBatchCountLimit } from "@/features/image-generation/batch-limits";
 import {
   firstBatchError,
   runBatchImageGeneration,
 } from "@/features/image-generation/batch-runner";
 import { runImageGenerationForUser } from "@/features/image-generation/operations";
-import { isFireflyModel } from "@/features/image-generation/resolution";
 import {
   normalizeImageBackground,
   normalizeOutputCompression,
@@ -33,6 +33,7 @@ import {
   DEFAULT_IMAGE_SIZE,
   IMAGE_PROMPT_MAX_CHARACTERS,
   IMAGE_PROMPT_TOO_LONG_MESSAGE,
+  isFireflyModel,
   validateImageSize,
 } from "@/features/image-generation/resolution";
 import { createImageStreamResponse } from "@/features/image-generation/streaming";
@@ -129,7 +130,8 @@ function getPreferredBackendMember(
     const backendMember = variant?.backendMember;
     if (backendMember?.id) return backendMember;
     const accountId = variant?.webConversation?.accountId;
-    if (accountId) return { type: "account", id: accountId, accountBackend: "web" };
+    if (accountId)
+      return { type: "account", id: accountId, accountBackend: "web" };
   }
   return undefined;
 }
@@ -156,15 +158,15 @@ function getText(formData: FormData, key: string) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function getCount(formData: FormData, maxBatchCount: number) {
+function getCount(formData: FormData, maxCount: number) {
   const value = getText(formData, "count");
   if (!value) return 1;
   if (!/^\d+$/.test(value)) {
     throw new Error("count must be an integer.");
   }
   const count = Number(value);
-  if (count < 1 || count > maxBatchCount) {
-    throw new Error(`count must be between 1 and ${maxBatchCount}.`);
+  if (count < 1 || count > maxCount) {
+    throw new Error(`count must be between 1 and ${maxCount}.`);
   }
   return count;
 }
@@ -736,6 +738,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
     );
   }
   const planLimits = await getPlanLimits(plan.plan);
+  const batchCountLimit = getImageBatchCountLimit(planLimits);
   let history: ChatHistoryMessage[] = [];
   try {
     history = getHistory(formData, planLimits.maxChatImages);
@@ -805,7 +808,8 @@ export const POST = withApiLogging(async (request: NextRequest) => {
   }
   history = normalizeHistoryImageUrls(request, limitedContext.history);
   const preferredBackendMember = getPreferredBackendMember(history);
-  const stickyPreviousResponseId = getLatestResponsesPreviousResponseId(history);
+  const stickyPreviousResponseId =
+    getLatestResponsesPreviousResponseId(history);
 
   let size = getText(formData, "size") || DEFAULT_IMAGE_SIZE;
   const sizeCheck = validateImageSize(size);
@@ -876,7 +880,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
 
   let count = 1;
   try {
-    count = getCount(formData, planLimits.maxBatchCount);
+    count = getCount(formData, batchCountLimit);
   } catch (error) {
     return errorResponse(
       error instanceof Error ? error.message : "Invalid count."

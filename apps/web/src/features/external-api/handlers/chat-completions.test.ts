@@ -117,6 +117,32 @@ describe("external chat completions handler streaming bridge", () => {
     expect(callbacks).toBeUndefined();
   });
 
+  it("uses imageGenerationConcurrency rather than legacy maxBatchCount for n", async () => {
+    mocks.getPlanLimits.mockResolvedValue({
+      maxBatchCount: 1,
+      imageGenerationConcurrency: 3,
+      maxChatContextChars: 10000,
+      maxChatImages: 16,
+      maxFileMb: 20,
+      maxUploadMb: 100,
+    });
+    const { postExternalChatCompletions } = await import("./chat-completions");
+
+    const response = await postExternalChatCompletions(
+      chatCompletionsRequest({
+        model: "gpt-5.4",
+        messages: [{ role: "user", content: "hello" }],
+        n: 3,
+      }) as never
+    );
+    await response.json();
+
+    expect(response.status).toBe(200);
+    expect(mocks.runBatchImageGeneration).toHaveBeenCalledWith(
+      expect.objectContaining({ count: 3 })
+    );
+  });
+
   it("treats a top-level gpt-image model as the image model", async () => {
     const { postExternalChatCompletions } = await import("./chat-completions");
 
@@ -206,5 +232,4 @@ describe("external chat completions handler streaming bridge", () => {
       undefined
     );
   });
-
 });

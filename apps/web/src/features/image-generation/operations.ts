@@ -1,8 +1,8 @@
 import { db } from "@repo/database";
 import { generation, user } from "@repo/database/schema";
 import { resolveImageModelMultiplier } from "@repo/shared/adobe";
-import { consumeCredits } from "@repo/shared/credits/core";
 import { GPT55_CHAT_MODEL } from "@repo/shared/config/subscription-plan";
+import { consumeCredits } from "@repo/shared/credits/core";
 import {
   IMAGE_GENERATION_PENDING_TIMEOUT_MS,
   refundGenerationCredits,
@@ -10,7 +10,6 @@ import {
 } from "@repo/shared/generation-maintenance";
 import { getFailedGenerationTargetCredits } from "@repo/shared/generation-settlement";
 import { logWarn } from "@repo/shared/logger";
-import { toClientErrorMessage } from "./error-sanitize";
 import {
   isContentModerationEnabled,
   moderateContent,
@@ -32,29 +31,34 @@ import {
 import { and, eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import {
+  refundExternalApiKeyCredits,
+  reserveExternalApiKeyCredits,
+} from "@/features/external-api/quota";
+import {
   ImageBackendPoolUnavailableError,
   releaseImageBackendInflightLease,
 } from "@/features/image-backend-pool/service";
 import type { ImageBackendRequestKind } from "@/features/image-backend-pool/types";
-import {
-  reserveExternalApiKeyCredits,
-  refundExternalApiKeyCredits,
-} from "@/features/external-api/quota";
+import { getImageBatchCountLimit } from "./batch-limits";
 import {
   buildGenerationBillingPolicy,
+  type GenerationBillingPolicy,
   getImageSuccessTargetCredits,
   getInitialGenerationCharge,
   getModerationFailureCharge,
   getTextChatSuccessTargetCredits,
-  type GenerationBillingPolicy,
 } from "./billing-policy";
+import { toClientErrorMessage } from "./error-sanitize";
+import { buildInputImagesMetadata } from "./generation-metadata";
+import { generativeRepairImage } from "./generative-repair";
+import { restoreImage } from "./image-restoration";
+import { maskedOutpaintImage } from "./masked-outpaint";
 import {
   detectImageOutputFormatFromBuffer,
   getOutputFormatContentType,
   getOutputFormatExtension,
   normalizeOutputFormat,
 } from "./output-format";
-import { buildInputImagesMetadata } from "./generation-metadata";
 import { getRuntimeImageBaseCreditPricing } from "./pricing-settings";
 import { withImageGenerationQueue } from "./queue";
 import {
@@ -73,11 +77,7 @@ import {
   roundCreditAmount,
   roundUpCreditAmount,
 } from "./resolution";
-import { generativeRepairImage } from "./generative-repair";
-import { maskedOutpaintImage } from "./masked-outpaint";
-import { restoreImage } from "./image-restoration";
 import { calibrateImageResolution } from "./resolution-calibration";
-import { superResolve } from "./super-resolution";
 import {
   editImage,
   generateChatImage,
@@ -89,13 +89,14 @@ import {
   repairModerationBlockedPromptWithResponses,
 } from "./service";
 import { isContentSafetyRejection } from "./sla-classification";
+import { superResolve } from "./super-resolution";
 import {
   applyTransparentMatte,
   isTransparentUnsupportedError,
 } from "./transparent-fallback";
 import type {
-  ApiConfig,
   AgentRunEvent,
+  ApiConfig,
   ChatHistoryMessage,
   ChatImageParams,
   EditImageParams,
@@ -1361,9 +1362,10 @@ export async function runImageGenerationForUser(
       generationId,
     };
   }
-  if (requestedCount > planCapabilities.limits.maxBatchCount) {
+  const batchCountLimit = getImageBatchCountLimit(planCapabilities.limits);
+  if (requestedCount > batchCountLimit) {
     return {
-      error: `Image count must be no more than ${planCapabilities.limits.maxBatchCount}.`,
+      error: `Image count must be no more than ${batchCountLimit}.`,
       generationId,
     };
   }
@@ -1487,8 +1489,7 @@ export async function runImageGenerationForUser(
             input.model,
             imageModelMultipliers
           );
-          const billingMultiplier =
-            backendBillingMultiplier * modelMultiplier;
+          const billingMultiplier = backendBillingMultiplier * modelMultiplier;
           const moderationEnabled =
             (await isContentModerationEnabled()) &&
             moderationBlockingEnabled &&

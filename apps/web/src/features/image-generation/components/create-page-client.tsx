@@ -11,6 +11,7 @@ import {
   type SubscriptionPlan,
 } from "@repo/shared/config/subscription-plan";
 import { formatCredits } from "@repo/shared/credits/format";
+import { buildStorageThumbnailUrl } from "@repo/shared/storage/signed-url";
 import type { PlanCapabilitySnapshot } from "@repo/shared/subscription/services/plan-capabilities";
 import { Button } from "@repo/ui/components/button";
 import { Checkbox } from "@repo/ui/components/checkbox";
@@ -28,17 +29,17 @@ import { Textarea } from "@repo/ui/components/textarea";
 import {
   Brush,
   Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   CircleHelp,
   Coins,
-  Info,
-  ChevronDown,
   Download,
   Eraser,
   Eye,
-  ChevronLeft,
-  ChevronRight,
-  ImagePlus,
   FileText,
+  ImagePlus,
+  Info,
   Loader2,
   Maximize2,
   MessageSquare,
@@ -52,48 +53,47 @@ import {
   Wand2,
   X,
 } from "lucide-react";
-import { buildStorageThumbnailUrl } from "@repo/shared/storage/signed-url";
+import { nanoid } from "nanoid";
 import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useLocale } from "next-intl";
-import { nanoid } from "nanoid";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-
-import {
-  useCreateRuntimeRef,
-  useCreateRuntimeState,
-  useResetCreateRuntimeKeys,
-} from "@/features/image-generation/create-runtime-store";
+import type { ImageBackendGroupBackendType } from "@/features/image-backend-pool/types";
+import { getImageBatchCountLimit } from "@/features/image-generation/batch-limits";
 import {
   hasSeenWaterfallFirstTimeWarning,
   WaterfallWarningPopup,
   type WaterfallWarningType,
 } from "@/features/image-generation/components/waterfall-warning-popup";
 import {
+  useCreateRuntimeRef,
+  useCreateRuntimeState,
+  useResetCreateRuntimeKeys,
+} from "@/features/image-generation/create-runtime-store";
+import {
   consumePendingReferenceHandoff,
   normalizeReferenceFetchUrl,
   type ReferenceHandoffMode,
 } from "@/features/image-generation/reference-handoff";
-import type { ImageBackendGroupBackendType } from "@/features/image-backend-pool/types";
 import {
+  type AgentTaskCard,
   agentEventToImageUrl,
   appendAgentRunEvent,
   buildAgentRoundCards,
   createOptimisticAgentRoundEvents,
   normalizeAgentEvent,
-  type AgentTaskCard,
 } from "../agent-round-cards";
 import {
   AUTO_IMAGE_SIZE,
   DEFAULT_IMAGE_MODEL,
   DEFAULT_IMAGE_SIZE,
   getImageCreditCost,
+  IMAGE_1K_BASE_EDGE,
+  IMAGE_DIMENSION_STEP,
   type ImageBaseCreditPricing,
   type ImageQualityLevel,
   type ImageThinkingLevel,
-  IMAGE_1K_BASE_EDGE,
-  IMAGE_DIMENSION_STEP,
   isFireflyModel,
   isImageSizeWithinPixelRange,
   MAX_IMAGE_DIMENSION,
@@ -2064,8 +2064,8 @@ export function CreatePageClient({
     capabilities.features["promptOptimization.control"];
   const maxEditImages = capabilities.limits.maxEditImages;
   const maxChatImages = capabilities.limits.maxChatImages;
-  // 单次生成张数上限由 maxBatchCount 控制；并发由 imageGenerationConcurrency 单独控制。
-  const batchCountMax = Math.max(1, capabilities.limits.maxBatchCount);
+  // 单次生成张数与服务端统一挂 imageGenerationConcurrency；maxBatchCount 是历史字段，不再拦截批量。
+  const batchCountMax = getImageBatchCountLimit(capabilities.limits);
   const maxImageBytes =
     uploadLimits.maxFileSizeBytes || DEFAULT_MAX_IMAGE_BYTES;
   const maxEditRequestBytes =

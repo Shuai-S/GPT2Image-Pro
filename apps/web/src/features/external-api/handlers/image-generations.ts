@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { withApiLogging } from "@repo/shared/api-logger";
 import {
-  MAX_PLAN_BATCH_COUNT,
   canUsePlanCapability,
   getPlanLimits,
+  MAX_PLAN_BATCH_COUNT,
 } from "@repo/shared/subscription/services/plan-capabilities";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import type { NextRequest } from "next/server";
@@ -31,6 +31,7 @@ import {
   toOpenAIImagesResponse,
   wantsImageStreamResponse,
 } from "@/features/external-api/images";
+import { getImageBatchCountLimit } from "@/features/image-generation/batch-limits";
 import { runBatchImageGeneration } from "@/features/image-generation/batch-runner";
 import { runImageGenerationForUser } from "@/features/image-generation/operations";
 import {
@@ -205,6 +206,7 @@ export const postExternalImageGenerations = withApiLogging(
 
     const plan = await getUserPlan(auth.userId);
     const limits = await getPlanLimits(plan.plan);
+    const batchCountLimit = getImageBatchCountLimit(limits);
     const count = parsed.data.n || 1;
     if (
       count > 1 &&
@@ -216,10 +218,8 @@ export const postExternalImageGenerations = withApiLogging(
         "insufficient_plan"
       );
     }
-    if (count > limits.maxBatchCount) {
-      return openAIImageError(
-        `n must be between 1 and ${limits.maxBatchCount}.`
-      );
+    if (count > batchCountLimit) {
+      return openAIImageError(`n must be between 1 and ${batchCountLimit}.`);
     }
     if (
       wantsImageStreamResponse(request, parsed.data.stream) &&

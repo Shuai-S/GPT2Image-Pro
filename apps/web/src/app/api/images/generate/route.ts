@@ -7,6 +7,7 @@ import {
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { getImageBatchCountLimit } from "@/features/image-generation/batch-limits";
 import {
   firstBatchError,
   runBatchImageGeneration,
@@ -111,6 +112,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
 
   const plan = await getUserPlan(session.user.id);
   const planLimits = await getPlanLimits(plan.plan);
+  const batchCountLimit = getImageBatchCountLimit(planLimits);
   const count = parsed.data.count || 1;
   if (
     count > 1 &&
@@ -121,10 +123,8 @@ export const POST = withApiLogging(async (request: NextRequest) => {
       403
     );
   }
-  if (count > planLimits.maxBatchCount) {
-    return errorResponse(
-      `count must be between 1 and ${planLimits.maxBatchCount}.`
-    );
+  if (count > batchCountLimit) {
+    return errorResponse(`count must be between 1 and ${batchCountLimit}.`);
   }
 
   const input = {

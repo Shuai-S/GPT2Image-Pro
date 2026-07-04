@@ -1,8 +1,8 @@
 import { withApiLogging } from "@repo/shared/api-logger";
 import {
-  MAX_PLAN_BATCH_COUNT,
   canUsePlanCapability,
   getPlanLimits,
+  MAX_PLAN_BATCH_COUNT,
 } from "@repo/shared/subscription/services/plan-capabilities";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import type { NextRequest } from "next/server";
@@ -10,21 +10,22 @@ import { z } from "zod";
 
 import { authenticateExternalApiRequest } from "@/features/external-api/auth";
 import {
-  fetchPublicImage,
-  readResponseBytesWithLimit,
-} from "@/features/external-api/safe-image-fetch";
-import {
   createExternalImageStreamResponse,
   createJsonKeepAliveResponse,
-  toExternalErrorStreamData,
   getExternalFinalImageOutputs,
   getImageBase64,
   getPublicImageUrl,
   openAIImageError,
+  toExternalErrorStreamData,
   toExternalGenerationUsage,
   toLoggedOpenAIErrorPayload,
   wantsImageStreamResponse,
 } from "@/features/external-api/images";
+import {
+  fetchPublicImage,
+  readResponseBytesWithLimit,
+} from "@/features/external-api/safe-image-fetch";
+import { getImageBatchCountLimit } from "@/features/image-generation/batch-limits";
 import { runBatchImageGeneration } from "@/features/image-generation/batch-runner";
 import { runImageGenerationForUser } from "@/features/image-generation/operations";
 import {
@@ -49,8 +50,8 @@ import type {
 
 import {
   buildChatCompletionAssistantContent,
-  chatCompletionMessagesToChatParams,
   type ChatCompletionImageData,
+  chatCompletionMessagesToChatParams,
 } from "./chat-completions-utils";
 
 const chatCompletionContentPartSchema = z
@@ -204,9 +205,11 @@ async function imageUrlToInputFile(params: {
     { type }
   );
   const uploaded = params.userId
-    ? await uploadTemporaryImageUrls(params.userId, params.requestId || "chat", [
-        file,
-      ])
+    ? await uploadTemporaryImageUrls(
+        params.userId,
+        params.requestId || "chat",
+        [file]
+      )
     : undefined;
 
   return {
@@ -411,6 +414,7 @@ export const postExternalChatCompletions = withApiLogging(
     }
 
     const limits = await getPlanLimits(plan.plan);
+    const batchCountLimit = getImageBatchCountLimit(limits);
     const id = completionId();
     const count = parsed.data.n || 1;
     if (
@@ -423,10 +427,8 @@ export const postExternalChatCompletions = withApiLogging(
         "insufficient_plan"
       );
     }
-    if (count > limits.maxBatchCount) {
-      return openAIImageError(
-        `n must be between 1 and ${limits.maxBatchCount}.`
-      );
+    if (count > batchCountLimit) {
+      return openAIImageError(`n must be between 1 and ${batchCountLimit}.`);
     }
 
     let images: ImageInputFile[] = [];

@@ -36,6 +36,7 @@ import {
   fetchPublicImage,
   readResponseBytesWithLimit,
 } from "@/features/external-api/safe-image-fetch";
+import { getImageBatchCountLimit } from "@/features/image-generation/batch-limits";
 import { runBatchImageGeneration } from "@/features/image-generation/batch-runner";
 import { runImageGenerationForUser } from "@/features/image-generation/operations";
 import {
@@ -190,15 +191,15 @@ function getText(formData: FormData, key: string) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function getCount(formData: FormData, maxBatchCount: number) {
+function getCount(formData: FormData, maxCount: number) {
   const value = getText(formData, "n");
   if (!value) return 1;
   if (!/^\d+$/.test(value)) {
     throw new Error("n must be an integer.");
   }
   const count = Number(value);
-  if (count < 1 || count > maxBatchCount) {
-    throw new Error(`n must be between 1 and ${maxBatchCount}.`);
+  if (count < 1 || count > maxCount) {
+    throw new Error(`n must be between 1 and ${maxCount}.`);
   }
   return count;
 }
@@ -547,6 +548,7 @@ export const postExternalImageEdits = withApiLogging(
 
     const plan = await getUserPlan(auth.userId);
     const planLimits = await getPlanLimits(plan.plan);
+    const batchCountLimit = getImageBatchCountLimit(planLimits);
     const uploadLimits = await getPlanUploadLimits(plan.plan);
     const maxImageBytes = uploadLimits.maxFileSizeBytes;
     const maxRequestBytes = uploadLimits.maxUploadBytes;
@@ -653,7 +655,7 @@ export const postExternalImageEdits = withApiLogging(
 
     let count = 1;
     try {
-      count = getCount(formData, planLimits.maxBatchCount);
+      count = getCount(formData, batchCountLimit);
     } catch (error) {
       return openAIImageError(
         error instanceof Error ? error.message : "Invalid n."
@@ -669,10 +671,8 @@ export const postExternalImageEdits = withApiLogging(
         "insufficient_plan"
       );
     }
-    if (count > planLimits.maxBatchCount) {
-      return openAIImageError(
-        `n must be between 1 and ${planLimits.maxBatchCount}.`
-      );
+    if (count > batchCountLimit) {
+      return openAIImageError(`n must be between 1 and ${batchCountLimit}.`);
     }
 
     const responseFormat =

@@ -8,6 +8,7 @@ import {
 import { getPlanUploadLimits } from "@repo/shared/subscription/services/upload-limits";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { type NextRequest, NextResponse } from "next/server";
+import { getImageBatchCountLimit } from "@/features/image-generation/batch-limits";
 import {
   firstBatchError,
   runBatchImageGeneration,
@@ -68,15 +69,15 @@ function getText(formData: FormData, key: string) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function getCount(formData: FormData, key: string, maxBatchCount: number) {
+function getCount(formData: FormData, key: string, maxCount: number) {
   const value = getText(formData, key);
   if (!value) return 1;
   if (!/^\d+$/.test(value)) {
     throw new Error(`${key} must be an integer.`);
   }
   const count = Number(value);
-  if (count < 1 || count > maxBatchCount) {
-    throw new Error(`${key} must be between 1 and ${maxBatchCount}.`);
+  if (count < 1 || count > maxCount) {
+    throw new Error(`${key} must be between 1 and ${maxCount}.`);
   }
   return count;
 }
@@ -154,6 +155,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
 
   const plan = await getUserPlan(session.user.id);
   const planLimits = await getPlanLimits(plan.plan);
+  const batchCountLimit = getImageBatchCountLimit(planLimits);
   const uploadLimits = await getPlanUploadLimits(plan.plan);
   const maxImageBytes = uploadLimits.maxFileSizeBytes;
   const maxRequestBytes = uploadLimits.maxUploadBytes;
@@ -262,7 +264,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
     typeof repairPromptRaw === "string" ? repairPromptRaw : undefined;
   let count = 1;
   try {
-    count = getCount(formData, "count", planLimits.maxBatchCount);
+    count = getCount(formData, "count", batchCountLimit);
   } catch (error) {
     return errorResponse(
       error instanceof Error ? error.message : "Invalid count."
