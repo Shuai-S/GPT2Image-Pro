@@ -34,6 +34,8 @@ import {
 } from "@repo/shared/payment/epay";
 import { getUserPlanType } from "@repo/shared/subscription/services/user-plan";
 import { getRuntimeSettingNumber } from "@repo/shared/system-settings";
+import { invokeOperation } from "@repo/shared/uol";
+import "@repo/shared/uol/operations/referral";
 import { and, eq } from "drizzle-orm";
 
 interface FulfillEpayPaymentResult {
@@ -246,6 +248,20 @@ async function handleCreditPurchase(
     .limit(1);
 
   if (existingBatch) {
+    await accrueReferralForLocalPayment({
+      userId,
+      provider,
+      orderId: sourceRef,
+      orderKind: "credit_purchase",
+      orderAmountCents: moneyToCents(verifyInfo.money),
+      metadata: {
+        outTradeNo: verifyInfo.outTradeNo,
+        tradeNo: verifyInfo.tradeNo,
+        packageId,
+        quantity: normalizedQuantity,
+        creditPlan: purchasePlan,
+      },
+    });
     logger.info({ source, sourceRef }, "Credit purchase already fulfilled");
     return;
   }
@@ -286,6 +302,21 @@ async function handleCreditPurchase(
     { source, batchId: result.batchId, userId },
     "Epay credit purchase fulfilled"
   );
+  await accrueReferralForLocalPayment({
+    userId,
+    provider,
+    orderId: sourceRef,
+    orderKind: "credit_purchase",
+    orderAmountCents: moneyToCents(verifyInfo.money),
+    metadata: {
+      outTradeNo: verifyInfo.outTradeNo,
+      tradeNo: verifyInfo.tradeNo,
+      packageId: pkg.id,
+      quantity: normalizedQuantity,
+      creditPlan: purchasePlan,
+      creditsAmount,
+    },
+  });
 }
 
 async function handleSubscription(
@@ -429,6 +460,20 @@ async function grantSubscriptionCredits(params: {
     .limit(1);
 
   if (existingBatch) {
+    await accrueReferralForLocalPayment({
+      userId: params.userId,
+      provider: params.provider,
+      orderId: sourceRef,
+      orderKind: "subscription",
+      orderAmountCents: moneyToCents(params.paidMoney),
+      metadata: {
+        subscriptionId: params.subscriptionId,
+        priceId: params.priceId,
+        planType: params.planType,
+        outTradeNo: params.outTradeNo,
+        checkoutMode: params.checkoutMode,
+      },
+    });
     if (params.checkoutMode === "upgrade") {
       const voidResult = await voidActiveSubscriptionCreditsForUpgrade({
         userId: params.userId,
@@ -531,6 +576,62 @@ async function grantSubscriptionCredits(params: {
         voidedAmount: voidResult.voidedAmount,
       },
       "Previous subscription credits voided for upgrade"
+    );
+  }
+  await accrueReferralForLocalPayment({
+    userId: params.userId,
+    provider: params.provider,
+    orderId: sourceRef,
+    orderKind: "subscription",
+    orderAmountCents: moneyToCents(params.paidMoney),
+    metadata: {
+      subscriptionId: params.subscriptionId,
+      priceId: params.priceId,
+      planType: params.planType,
+      outTradeNo: params.outTradeNo,
+      checkoutMode: params.checkoutMode,
+      creditsToGrant,
+    },
+  });
+}
+
+async function accrueReferralForLocalPayment(params: {
+  userId: string;
+  provider: LocalPaymentProvider;
+  orderId: string;
+  orderKind: "credit_purchase" | "subscription";
+  orderAmountCents: number;
+  metadata?: Record<string, unknown>;
+}) {
+  const result = await invokeOperation<{
+    applied: boolean;
+    commissionId?: string;
+    inviterUserId?: string;
+    commissionCredits?: number;
+  }>(
+    "referral.accrueCommissionForOrder",
+    {
+      inviteeUserId: params.userId,
+      provider: params.provider,
+      orderId: params.orderId,
+      orderKind: params.orderKind,
+      orderAmountCents: params.orderAmountCents,
+      currency: "CNY",
+      metadata: params.metadata,
+    },
+    { type: "system", reason: "local-payment-referral" }
+  );
+  if (result.applied) {
+    logger.info(
+      {
+        userId: params.userId,
+        orderId: params.orderId,
+        provider: params.provider,
+        commissionId: result.commissionId,
+        inviterUserId: result.inviterUserId,
+        commissionCredits: result.commissionCredits,
+      },
+      "Referral commission accrued for local payment"
     );
   }
 }

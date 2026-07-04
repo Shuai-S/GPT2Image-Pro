@@ -4,6 +4,7 @@ import {
   destroyGenerationPhotosByMaxCount,
   expireStalePendingGenerations,
 } from "@repo/shared/generation-maintenance";
+import { thawReferralCommissions } from "@repo/shared/referral";
 import {
   getRuntimeSettingBoolean,
   getRuntimeSettingNumber,
@@ -77,6 +78,16 @@ export async function runCreditsExpireJob() {
 
   return {
     ...buildCreditsExpireResponse(results),
+    timestamp: new Date().toISOString(),
+  };
+}
+
+export async function runReferralThawJob() {
+  const result = await thawReferralCommissions();
+
+  return {
+    success: true,
+    ...result,
     timestamp: new Date().toISOString(),
   };
 }

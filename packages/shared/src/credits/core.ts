@@ -4,8 +4,6 @@
  * 实现企业级双重记账和 FIFO 过期机制
  */
 
-import { and, asc, eq, gte, gt, isNull, lt, or, sql } from "drizzle-orm";
-
 import { db } from "@repo/database";
 import {
   type CreditsBatchSource,
@@ -14,6 +12,7 @@ import {
   creditsBatch,
   creditsTransaction,
 } from "@repo/database/schema";
+import { and, asc, eq, gt, gte, isNull, lt, or, sql } from "drizzle-orm";
 import { logEvent } from "../logger/index";
 import { getRuntimeSettingNumber } from "../system-settings";
 import { CREDIT_CONFIG_DEFAULTS } from "./config";
@@ -415,9 +414,35 @@ export async function grantCredits(params: GrantCreditsParams) {
     // 此时跳过记账与余额累加，避免支付 webhook 重放 / 并发回调 / 注册奖励
     // 重复领取导致的积分双重发放（薅羊毛）。
     if (insertedBatch.length === 0) {
+      const [existingBatch] = sourceRef
+        ? await tx
+            .select({ id: creditsBatch.id })
+            .from(creditsBatch)
+            .where(
+              and(
+                eq(creditsBatch.sourceType, sourceType),
+                eq(creditsBatch.sourceRef, sourceRef)
+              )
+            )
+            .limit(1)
+        : [];
+      const [existingTransaction] = sourceRef
+        ? await tx
+            .select({ id: creditsTransaction.id })
+            .from(creditsTransaction)
+            .where(
+              and(
+                eq(creditsTransaction.userId, userId),
+                eq(creditsTransaction.type, transactionType),
+                eq(creditsTransaction.sourceRef, sourceRef)
+              )
+            )
+            .limit(1)
+        : [];
+
       return {
-        batchId: null,
-        transactionId: null,
+        batchId: existingBatch?.id ?? null,
+        transactionId: existingTransaction?.id ?? null,
         amount: 0,
         newBalance: currentBalance.balance,
         alreadyGranted: true,
@@ -435,6 +460,7 @@ export async function grantCredits(params: GrantCreditsParams) {
       debitAccount,
       creditAccount,
       description,
+      sourceRef,
       metadata: {
         ...metadata,
         batchId,
@@ -561,7 +587,10 @@ export async function consumeCredits(
               eq(creditsBatch.userId, userId),
               eq(creditsBatch.status, "active"),
               gt(creditsBatch.remaining, 0),
-              or(isNull(creditsBatch.expiresAt), gt(creditsBatch.expiresAt, now))
+              or(
+                isNull(creditsBatch.expiresAt),
+                gt(creditsBatch.expiresAt, now)
+              )
             )
           )
           // 扣减顺序:最快到期的批次先扣(在过期作废前尽量用掉),无到期(永久)批次最后扣;
@@ -597,7 +626,10 @@ export async function consumeCredits(
               eq(creditsBatch.id, batch.id),
               eq(creditsBatch.status, "active"),
               gte(creditsBatch.remaining, consumeFromThisBatch),
-              or(isNull(creditsBatch.expiresAt), gt(creditsBatch.expiresAt, now))
+              or(
+                isNull(creditsBatch.expiresAt),
+                gt(creditsBatch.expiresAt, now)
+              )
             )
           )
           .returning({ id: creditsBatch.id });
@@ -746,9 +778,7 @@ export async function voidActiveSubscriptionCreditsForUpgrade(
           eq(creditsBatch.sourceType, "subscription"),
           eq(creditsBatch.status, "active"),
           gt(creditsBatch.remaining, 0),
-          issuedBefore
-            ? lt(creditsBatch.issuedAt, issuedBefore)
-            : sql`true`,
+          issuedBefore ? lt(creditsBatch.issuedAt, issuedBefore) : sql`true`,
           newBatchSourceRef
             ? sql`${creditsBatch.sourceRef} IS DISTINCT FROM ${newBatchSourceRef}`
             : sql`true`

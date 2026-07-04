@@ -10,6 +10,7 @@ export type SettingCategory =
   | "storage"
   | "mail"
   | "credits"
+  | "referral"
   | "analytics";
 
 export type SettingValueType =
@@ -165,6 +166,15 @@ export type SettingKey =
   | "IMAGE_MASK_OUTPAINT_ENABLED"
   | "VIDEO_BASE_CREDITS_PER_SECOND"
   | "VIDEO_MODEL_MULTIPLIERS"
+  | "REFERRAL_ENABLED"
+  | "REFERRAL_COMMISSION_RATE_BPS"
+  | "REFERRAL_FREEZE_HOURS"
+  | "REFERRAL_DURATION_DAYS"
+  | "REFERRAL_PER_INVITEE_CAP_CENTS"
+  | "REFERRAL_COOKIE_TTL_DAYS"
+  | "REFERRAL_REWARD_MODE"
+  | "REFERRAL_BINDING_WINDOW_HOURS"
+  | "REFERRAL_CNY_PER_USD"
   | "NEXT_PUBLIC_GA_ID"
   | "NEXT_PUBLIC_SENTRY_DSN"
   | "SENTRY_AUTH_TOKEN"
@@ -173,6 +183,7 @@ export type SettingKey =
   | "INTERNAL_JOB_SCHEDULER_ENABLED"
   | "INTERNAL_JOB_IMAGES_MAINTENANCE_INTERVAL_MINUTES"
   | "INTERNAL_JOB_CREDITS_EXPIRE_INTERVAL_MINUTES"
+  | "INTERNAL_JOB_REFERRAL_THAW_INTERVAL_MINUTES"
   | "INTERNAL_JOB_WEB_ACCOUNTS_REFRESH_INTERVAL_MINUTES"
   | "INTERNAL_JOB_WEB_ACCOUNTS_REPLENISH_INTERVAL_MINUTES"
   | "INTERNAL_JOB_SUB2API_SYNC_INTERVAL_MINUTES"
@@ -1520,6 +1531,99 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     exampleValue: CREDIT_PACKAGE_MATRIX_EXAMPLE,
   },
   {
+    key: "REFERRAL_ENABLED",
+    label: "邀请返佣",
+    description:
+      "控制邀请归因和返佣转积分功能总开关。关闭后不再绑定新邀请关系，也不产生新返佣。",
+    category: "referral",
+    valueType: "boolean",
+    defaultValue: false,
+  },
+  {
+    key: "REFERRAL_COMMISSION_RATE_BPS",
+    label: "全局返佣比例 bps",
+    description:
+      "被邀请用户真实支付后，邀请人获得的返佣比例。1000 表示 10%，用户专属比例优先。",
+    category: "referral",
+    valueType: "number",
+    min: 0,
+    max: 10000,
+    defaultValue: 1000,
+  },
+  {
+    key: "REFERRAL_FREEZE_HOURS",
+    label: "返佣冻结小时",
+    description:
+      "新产生返佣进入冻结期的小时数。0 表示立即可转积分；建议不小于支付渠道的退款窗口，避免退款后积分已被花掉无法冲正。",
+    category: "referral",
+    valueType: "number",
+    min: 0,
+    max: 720,
+    defaultValue: 168,
+  },
+  {
+    key: "REFERRAL_DURATION_DAYS",
+    label: "返佣有效天数",
+    description: "被邀请用户注册后多少天内的支付可产生返佣。0 表示永久有效。",
+    category: "referral",
+    valueType: "number",
+    min: 0,
+    max: 3650,
+    defaultValue: 0,
+  },
+  {
+    key: "REFERRAL_PER_INVITEE_CAP_CENTS",
+    label: "单用户返佣上限分",
+    description:
+      "每个被邀请用户最多为同一邀请人产生多少返佣，单位为归一后的 USD 分。0 表示无上限。",
+    category: "referral",
+    valueType: "number",
+    min: 0,
+    max: 10_000_000,
+    defaultValue: 0,
+  },
+  {
+    key: "REFERRAL_COOKIE_TTL_DAYS",
+    label: "邀请归因 Cookie 天数",
+    description: "邀请链接写入浏览器归因 Cookie 的有效天数。",
+    category: "referral",
+    valueType: "number",
+    min: 1,
+    max: 365,
+    defaultValue: 30,
+  },
+  {
+    key: "REFERRAL_REWARD_MODE",
+    label: "返佣奖励模式",
+    description: "MVP 仅支持转为站内积分，保留配置用于后续扩展现金模式。",
+    category: "referral",
+    valueType: "select",
+    options: [{ label: "转积分", value: "credits" }],
+    defaultValue: "credits",
+  },
+  {
+    key: "REFERRAL_BINDING_WINDOW_HOURS",
+    label: "邀请绑定窗口小时",
+    description:
+      "用户注册后多少小时内允许绑定邀请人。0 表示不限制；限制窗口可防止存量老用户被事后拉去绑码套取续费返佣。",
+    category: "referral",
+    valueType: "number",
+    min: 0,
+    max: 8760,
+    defaultValue: 72,
+  },
+  {
+    key: "REFERRAL_CNY_PER_USD",
+    label: "返佣 CNY 兑 USD 汇率",
+    description:
+      "1 美元等于多少人民币，用于把易支付/支付宝的 CNY 订单金额归一为 USD 分后计算返佣，避免跨币种返佣等值套利。",
+    category: "referral",
+    valueType: "number",
+    min: 1,
+    max: 100,
+    defaultValue: 7.2,
+  },
+  {
     key: "NEXT_PUBLIC_GA_ID",
     label: "Google Analytics ID",
     description: "GA Measurement ID。",
@@ -1585,6 +1689,14 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     category: "general",
     valueType: "number",
     defaultValue: 1440,
+  },
+  {
+    key: "INTERNAL_JOB_REFERRAL_THAW_INTERVAL_MINUTES",
+    label: "返佣解冻任务间隔（分钟）",
+    description: "邀请返佣冻结期到期后转为可用返佣的内置执行间隔。",
+    category: "general",
+    valueType: "number",
+    defaultValue: 60,
   },
   {
     key: "INTERNAL_JOB_WEB_ACCOUNTS_REFRESH_INTERVAL_MINUTES",
@@ -1862,6 +1974,11 @@ export const SETTING_CATEGORIES: Array<{
     id: "credits",
     label: "积分",
     description: "注册奖励和积分有效期规则。",
+  },
+  {
+    id: "referral",
+    label: "邀请返佣",
+    description: "邀请归因、返佣比例、冻结期和转积分设置。",
   },
   {
     id: "analytics",

@@ -12,12 +12,14 @@ import {
 } from "@repo/shared/auth/email-domain";
 import { GoogleIcon } from "@repo/shared/components/icons";
 import type { BrandingConfig } from "@repo/shared/config/branding";
+import { REFERRAL_ATTRIBUTION_COOKIE } from "@repo/shared/referral/rules";
 import { Button } from "@repo/ui/components/button";
 import { Input } from "@repo/ui/components/input";
 import { Label } from "@repo/ui/components/label";
 import { Separator } from "@repo/ui/components/separator";
 import { Eye, EyeOff, Mail } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -87,6 +89,16 @@ function isVerificationCodeError(error: unknown) {
   );
 }
 
+function readCookieValue(name: string) {
+  if (typeof document === "undefined") return undefined;
+  const prefix = `${name}=`;
+  const item = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(prefix));
+  return item ? decodeURIComponent(item.slice(prefix.length)) : undefined;
+}
+
 /**
  * 注册表单组件
  *
@@ -110,6 +122,7 @@ export function SignUpForm({
   branding,
 }: SignUpFormProps) {
   const locale = useLocale();
+  const searchParams = useSearchParams();
   const t = useTranslations("Auth.signUp");
   const tCommon = useTranslations("Auth.common");
 
@@ -131,6 +144,10 @@ export function SignUpForm({
   const emailDomainError = t("errors.emailDomainNotAllowed", {
     domains: allowedEmailDomains,
   });
+  const referralCode =
+    searchParams.get("ref") ??
+    searchParams.get("invite") ??
+    readCookieValue(REFERRAL_ATTRIBUTION_COOKIE);
   const trimmedEmail = email.trim();
   const showEmailDomainError =
     trimmedEmail.includes("@") && !isAllowedEmail(trimmedEmail);
@@ -223,7 +240,10 @@ export function SignUpForm({
     try {
       setIsLoading(true);
       setError(null);
-      await signInWithGoogle();
+      const newUserCallbackURL = referralCode
+        ? `/dashboard?ref=${encodeURIComponent(referralCode)}`
+        : "/dashboard";
+      await signInWithGoogle("/dashboard", { newUserCallbackURL });
     } catch {
       setError(t("errors.google"));
     } finally {
@@ -264,7 +284,8 @@ export function SignUpForm({
         email,
         password,
         name,
-        verificationCode
+        verificationCode,
+        referralCode
       );
 
       if (result.error) {

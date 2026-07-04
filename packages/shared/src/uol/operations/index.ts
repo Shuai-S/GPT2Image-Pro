@@ -28,3 +28,5 @@ import "./moderation";
 import "./external-api";
 // 客服支持域
 import "./support";
+// 邀请返佣域
+import "./referral";

@@ -10,6 +10,8 @@ vi.mock("../system-settings", () => ({
 }));
 
 import {
+  buildCreemReferralCancellationOrderIds,
+  buildReferralSubscriptionOrderId,
   buildSubscriptionPeriodKey,
   computeSubscriptionCreditsToGrant,
   getCreemPeriodDays,
@@ -23,6 +25,73 @@ describe("buildSubscriptionPeriodKey", () => {
     expect(buildSubscriptionPeriodKey("sub_1", "2026-01-01T00:00:00Z")).toBe(
       "sub_1:2026-01-01T00:00:00Z"
     );
+  });
+});
+
+describe("buildReferralSubscriptionOrderId", () => {
+  it("把日期字符串归一为 ISO 格式", () => {
+    expect(
+      buildReferralSubscriptionOrderId("sub_1", "2026-07-04T00:00:00Z")
+    ).toBe("sub_1:2026-07-04T00:00:00.000Z");
+  });
+
+  it("入账侧字符串与退款侧毫秒时间戳产生相同订单键", () => {
+    const fromString = buildReferralSubscriptionOrderId(
+      "sub_1",
+      "2026-07-04T08:30:00+08:00"
+    );
+    const fromMs = buildReferralSubscriptionOrderId(
+      "sub_1",
+      Date.parse("2026-07-04T08:30:00+08:00")
+    );
+    expect(fromString).toBe("sub_1:2026-07-04T00:30:00.000Z");
+    expect(fromMs).toBe(fromString);
+  });
+
+  it("非法日期或空订阅 ID 返回 null", () => {
+    expect(buildReferralSubscriptionOrderId("sub_1", "not-a-date")).toBeNull();
+    expect(
+      buildReferralSubscriptionOrderId("", "2026-07-04T00:00:00Z")
+    ).toBeNull();
+  });
+});
+
+describe("buildCreemReferralCancellationOrderIds", () => {
+  it("保留一次性订单 ID", () => {
+    expect(
+      buildCreemReferralCancellationOrderIds({
+        orderId: "ord_1",
+      })
+    ).toEqual(["ord_1"]);
+  });
+
+  it("用订阅 ID 和交易周期开始时间生成订阅返佣订单键", () => {
+    expect(
+      buildCreemReferralCancellationOrderIds({
+        subscriptionId: "sub_1",
+        periodStartMs: Date.parse("2026-07-04T00:00:00.000Z"),
+      })
+    ).toEqual(["sub_1:2026-07-04T00:00:00.000Z"]);
+  });
+
+  it("同时覆盖 Creem order ID 与本系统订阅周期键", () => {
+    expect(
+      buildCreemReferralCancellationOrderIds({
+        orderId: "ord_1",
+        subscriptionId: "sub_1",
+        periodStartMs: Date.parse("2026-07-04T00:00:00.000Z"),
+      })
+    ).toEqual(["ord_1", "sub_1:2026-07-04T00:00:00.000Z"]);
+  });
+
+  it("忽略空订单与非法周期时间", () => {
+    expect(
+      buildCreemReferralCancellationOrderIds({
+        orderId: " ",
+        subscriptionId: "sub_1",
+        periodStartMs: Number.NaN,
+      })
+    ).toEqual([]);
   });
 });
 
@@ -92,10 +161,36 @@ describe("parseCreemWebhookEvent", () => {
     ).toBe("u_1");
   });
 
-  it("拒绝非法 JSON", () => {
-    expect(() => parseCreemWebhookEvent("{not json")).toThrow(
-      /not valid JSON/
+  it("接受退款与拒付事件类型", () => {
+    const refund = parseCreemWebhookEvent(
+      JSON.stringify({
+        ...validEvent,
+        eventType: "refund.created",
+        object: {
+          id: "ref_1",
+          object: "refund",
+          transaction: { order: "ord_1" },
+        },
+      })
     );
+    const dispute = parseCreemWebhookEvent(
+      JSON.stringify({
+        ...validEvent,
+        eventType: "dispute.created",
+        object: {
+          id: "disp_1",
+          object: "dispute",
+          transaction: { order: "ord_1" },
+        },
+      })
+    );
+
+    expect(refund.eventType).toBe("refund.created");
+    expect(dispute.eventType).toBe("dispute.created");
+  });
+
+  it("拒绝非法 JSON", () => {
+    expect(() => parseCreemWebhookEvent("{not json")).toThrow(/not valid JSON/);
   });
 
   it("拒绝未知 eventType", () => {

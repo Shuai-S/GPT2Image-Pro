@@ -1,7 +1,10 @@
+import { db, user as userTable } from "@repo/database";
 import type { BetterAuthPlugin } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
-import { db, user as userTable } from "@repo/database";
 import { eq } from "drizzle-orm";
+import "../uol/operations/referral";
+import { logError } from "../logger";
+import { invokeOperation } from "../uol";
 import {
   getAllowedRegistrationEmailMessage,
   isAllowedRegistrationEmail,
@@ -159,8 +162,38 @@ export const registrationVerificationPlugin = (): BetterAuthPlugin => ({
                 },
               };
             },
-            after: async (user) => {
+            after: async (user, context) => {
               await recordRegistrationIdentity(user.email, user.id);
+              const referralCode =
+                typeof context?.body?.referralCode === "string"
+                  ? context.body.referralCode
+                  : typeof context?.body?.ref === "string"
+                    ? context.body.ref
+                    : "";
+              if (referralCode) {
+                // WHY: 邀请绑定是注册的附属动作，失败（DB 抖动、码失效）不应
+                // 中断已完成的注册流程，记错误日志供事后排查即可。
+                try {
+                  await invokeOperation(
+                    "referral.bindInviterByCode",
+                    {
+                      inviteeUserId: user.id,
+                      code: referralCode,
+                      metadata: {
+                        source: "sign-up",
+                        path: context?.path,
+                      },
+                    },
+                    { type: "system", reason: "registration-referral-binding" }
+                  );
+                } catch (error) {
+                  logError(error, {
+                    source: "registration-referral-binding",
+                    userId: user.id,
+                    referralCode,
+                  });
+                }
+              }
             },
           },
           delete: {

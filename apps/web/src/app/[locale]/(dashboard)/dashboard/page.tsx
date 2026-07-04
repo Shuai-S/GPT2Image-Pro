@@ -1,9 +1,15 @@
 import { db } from "@repo/database";
 import { creditsBalance, generation } from "@repo/database/schema";
 import { auth } from "@repo/shared/auth";
+import { getUserRoleById } from "@repo/shared/auth/role-server";
 import { formatCredits } from "@repo/shared/credits/format";
+import { logError } from "@repo/shared/logger";
 import { buildSignedStorageImageUrl } from "@repo/shared/storage/signed-url";
 import { getAppTimeZone } from "@repo/shared/time-zone/server";
+import { invokeOperation } from "@repo/shared/uol";
+import "@repo/shared/uol/operations/referral";
+import { getPlanCapabilitySnapshot } from "@repo/shared/subscription/services/plan-capabilities";
+import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { Button } from "@repo/ui/components/button";
 import {
   Card,
@@ -14,22 +20,32 @@ import {
 import { and, count, desc, eq } from "drizzle-orm";
 import { Coins, Image as ImageIcon, ImagePlus } from "lucide-react";
 import { headers } from "next/headers";
-import { getLocale } from "next-intl/server";
 import { redirect } from "next/navigation";
+import { getLocale } from "next-intl/server";
 import { ImagePricingChartCardLazy } from "@/features/dashboard/components/image-pricing-chart-card-lazy";
 import {
   getUserImageBackendPreference,
   listImageBackendGroupOptions,
 } from "@/features/image-backend-pool/service";
 import { RecentCreationsClient } from "@/features/image-generation/components/recent-creations-client";
-import { hasLayeredMeta } from "@/features/psd-export/layered-meta";
 import { getRuntimeImageBaseCreditPricing } from "@/features/image-generation/pricing-settings";
 import { getImageBaseCreditPricing } from "@/features/image-generation/resolution";
+import { hasLayeredMeta } from "@/features/psd-export/layered-meta";
 import { Link } from "@/i18n/routing";
-import { getPlanCapabilitySnapshot } from "@repo/shared/subscription/services/plan-capabilities";
-import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 
-export default async function DashboardPage() {
+interface DashboardPageProps {
+  searchParams?: Promise<{
+    ref?: string | string[];
+  }>;
+}
+
+function pickReferralCode(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function DashboardPage({
+  searchParams,
+}: DashboardPageProps) {
   const session = await auth.api.getSession({ headers: await headers() });
   const locale = await getLocale();
   if (!session?.user) {
@@ -38,6 +54,33 @@ export default async function DashboardPage() {
 
   const user = session.user;
   const userId = user.id;
+  const resolvedSearchParams = await searchParams;
+  const referralCode = pickReferralCode(resolvedSearchParams?.ref);
+  if (referralCode) {
+    // WHY: 绑定失败（码失效、已绑定、DB 抖动）不应让 dashboard 首页 500，
+    // 记日志后照常跳转清除 query 即可。
+    try {
+      const role = await getUserRoleById(userId);
+      await invokeOperation(
+        "referral.bindInviterByCode",
+        {
+          code: referralCode,
+          metadata: {
+            source: "oauth-sign-up",
+            path: "/dashboard",
+          },
+        },
+        { type: "user", userId, role }
+      );
+    } catch (error) {
+      logError(error, {
+        source: "dashboard-referral-binding",
+        userId,
+        referralCode,
+      });
+    }
+    redirect(`/${locale}/dashboard`);
+  }
   const isZh = locale === "zh";
   const copy = (en: string, zh: string) => (isZh ? zh : en);
 

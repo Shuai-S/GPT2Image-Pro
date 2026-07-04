@@ -90,13 +90,22 @@ export interface CreemWebhookEvent {
     | "checkout.completed"
     | "subscription.active"
     | "subscription.canceled"
+    | "subscription.scheduled_cancel"
     | "subscription.renewed"
     | "subscription.paused"
     | "subscription.past_due"
     | "subscription.paid"
-    | "subscription.expired";
+    | "subscription.expired"
+    | "subscription.update"
+    | "subscription.trialing"
+    | "refund.created"
+    | "dispute.created";
   /** 事件数据 (Creem 直接在顶层使用 object，不嵌套在 data 里) */
-  object: CreemCheckoutCompletedData | CreemSubscription;
+  object:
+    | CreemCheckoutCompletedData
+    | CreemSubscription
+    | CreemRefundCreatedData
+    | CreemDisputeCreatedData;
   /** 创建时间 (Unix 毫秒时间戳) */
   created_at: number;
 }
@@ -141,6 +150,98 @@ export interface CreemCheckoutCompletedData {
   mode?: "test" | "live";
 }
 
+export interface CreemTransactionReference {
+  id?: string;
+  order?: string;
+  subscription?: string;
+  period_start?: number;
+  period_end?: number;
+  status?: string;
+}
+
+export interface CreemOrderReference {
+  id?: string;
+  object?: "order";
+  amount?: number;
+  currency?: string;
+  status?: string;
+  type?: "onetime" | "recurring";
+  transaction?: string;
+}
+
+export interface CreemRefundCreatedData {
+  id: string;
+  object: "refund";
+  status?: string;
+  refund_amount?: number;
+  refund_currency?: string;
+  reason?: string;
+  transaction?: CreemTransactionReference;
+  subscription?: CreemSubscription;
+  checkout?: {
+    id?: string;
+    object?: "checkout";
+    request_id?: string;
+    metadata?: Record<string, string>;
+  };
+  order?: CreemOrderReference;
+  customer?: CreemCustomer;
+  created_at?: number;
+}
+
+export interface CreemDisputeCreatedData {
+  id: string;
+  object: "dispute";
+  amount?: number;
+  currency?: string;
+  transaction?: CreemTransactionReference;
+  subscription?: CreemSubscription;
+  checkout?: {
+    id?: string;
+    object?: "checkout";
+    request_id?: string;
+    metadata?: Record<string, string>;
+  };
+  order?: CreemOrderReference;
+  customer?: CreemCustomer;
+  created_at?: number;
+}
+
+/**
+ * 从 Creem 退款/拒付事件中推导本系统 referral 账本使用的订单键。
+ *
+ * @param params - Creem 事件中的订单、订阅与交易周期引用。
+ * @returns 去重后的 referral orderId 候选，包含一次性订单 ID 与订阅周期键。
+ * @sideEffects 无；纯函数，供 webhook handler 和单测共用。
+ */
+export function buildCreemReferralCancellationOrderIds(params: {
+  orderId?: string;
+  subscriptionId?: string;
+  periodStartMs?: number;
+}) {
+  const ids = new Set<string>();
+  const orderId = params.orderId?.trim();
+  if (orderId) {
+    ids.add(orderId);
+  }
+
+  if (
+    params.subscriptionId &&
+    typeof params.periodStartMs === "number" &&
+    Number.isFinite(params.periodStartMs)
+  ) {
+    const subscriptionOrderId = buildReferralSubscriptionOrderId(
+      params.subscriptionId,
+      params.periodStartMs
+    );
+    if (subscriptionOrderId) {
+      ids.add(subscriptionOrderId);
+    }
+  }
+
+  return Array.from(ids);
+}
+
 // ============================================
 // Webhook 事件运行时校验（Zod）
 // ============================================
@@ -155,11 +256,16 @@ const CREEM_WEBHOOK_EVENT_TYPES = [
   "checkout.completed",
   "subscription.active",
   "subscription.canceled",
+  "subscription.scheduled_cancel",
   "subscription.renewed",
   "subscription.paused",
   "subscription.past_due",
   "subscription.paid",
   "subscription.expired",
+  "subscription.update",
+  "subscription.trialing",
+  "refund.created",
+  "dispute.created",
 ] as const;
 
 /**
@@ -236,6 +342,30 @@ export function buildSubscriptionPeriodKey(
   periodStartDate: string
 ): string {
   return `${subscriptionId}:${periodStartDate}`;
+}
+
+/**
+ * 构造 referral 账本使用的订阅周期订单键。
+ *
+ * WHY: 入账来自订阅事件（period_start 为日期字符串），退款/拒付来自 refund/
+ * dispute 事件（period_start 为毫秒时间戳）。两侧必须先归一为同一 ISO 格式再
+ * 拼键，否则字符串格式差异（毫秒位、时区表示）会让退款侧查不到入账账本，
+ * 返佣取消静默失败。日期非法时返回 null，由调用方跳过并告警。
+ *
+ * @param subscriptionId - Creem 订阅 ID。
+ * @param periodStart - 周期开始时间，接受日期字符串或毫秒时间戳。
+ * @returns 归一化订单键；periodStart 无法解析时返回 null。
+ * @sideEffects 无；纯函数，供入账与退款取消两侧共用。
+ */
+export function buildReferralSubscriptionOrderId(
+  subscriptionId: string,
+  periodStart: string | number
+): string | null {
+  const time = new Date(periodStart).getTime();
+  if (!subscriptionId || Number.isNaN(time)) {
+    return null;
+  }
+  return `${subscriptionId}:${new Date(time).toISOString()}`;
 }
 
 /**

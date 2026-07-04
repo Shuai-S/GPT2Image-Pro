@@ -18,8 +18,12 @@ import {
 } from "@repo/shared/credits/packages";
 import { logError, logEvent, logger } from "@repo/shared/logger";
 import {
+  buildCreemReferralCancellationOrderIds,
+  buildReferralSubscriptionOrderId,
   buildSubscriptionPeriodKey,
   type CreemCheckoutCompletedData,
+  type CreemDisputeCreatedData,
+  type CreemRefundCreatedData,
   type CreemSubscription,
   type CreemWebhookEvent,
   computeSubscriptionCreditsToGrant,
@@ -32,6 +36,8 @@ import {
   shouldGrantAfterAmountCheck,
 } from "@repo/shared/payment/creem-amount";
 import { getRuntimeSettingNumber } from "@repo/shared/system-settings";
+import { invokeOperation } from "@repo/shared/uol";
+import "@repo/shared/uol/operations/referral";
 import { and, eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
@@ -183,6 +189,16 @@ export const POST = withApiLogging(async (req: Request) => {
         break;
       }
 
+      case "refund.created": {
+        await handleRefundCreated(event.object as CreemRefundCreatedData);
+        break;
+      }
+
+      case "dispute.created": {
+        await handleDisputeCreated(event.object as CreemDisputeCreatedData);
+        break;
+      }
+
       case "subscription.past_due": {
         await handleSubscriptionPastDue(event.object as CreemSubscription);
         break;
@@ -305,6 +321,7 @@ async function handleCreditPurchase(
   const quantity = 1;
   const creditsAmount = pkg.credits * quantity;
   const unitPrice = getCreditPackagePriceForPlan(pkg, purchasePlan);
+  const expectedAmount = unitPrice * quantity;
 
   // 幂等性检查：同一订单只发放一次积分
   const sourceRef = `credit_purchase:${orderId}`;
@@ -320,6 +337,21 @@ async function handleCreditPurchase(
     .limit(1);
 
   if (existingBatch) {
+    await accrueReferralForCreemPayment({
+      userId,
+      orderId,
+      orderKind: "credit_purchase",
+      orderAmountCents: getCreemOrderAmountCents(
+        data.order?.amount,
+        expectedAmount
+      ),
+      currency: data.order?.currency ?? paymentConfig.currency,
+      metadata: {
+        checkoutId: data.id,
+        packageId,
+        planId: purchasePlan,
+      },
+    });
     logger.info(
       { sourceRef },
       "Credits already granted for purchase, skipping"
@@ -330,7 +362,6 @@ async function handleCreditPurchase(
   // 实付金额/币种校验：用服务端套餐重算期望金额（unitPrice * quantity），
   // 与 Creem 实付额（order.amount，单位分）及 order.currency 比对，阻止 checkout
   // 阶段被篡改的价格/数量套取高价积分包。可比但不匹配默认硬拒；不可比仅告警放行。
-  const expectedAmount = unitPrice * quantity;
   const amountMatch = evaluateCreemAmountMatch(
     {
       amount: expectedAmount,
@@ -383,6 +414,22 @@ async function handleCreditPurchase(
       { userId, creditsAmount, packageId, quantity, batchId: result.batchId },
       "Credits granted for credit pack purchase"
     );
+    await accrueReferralForCreemPayment({
+      userId,
+      orderId,
+      orderKind: "credit_purchase",
+      orderAmountCents: getCreemOrderAmountCents(
+        data.order?.amount,
+        expectedAmount
+      ),
+      currency: data.order?.currency ?? paymentConfig.currency,
+      metadata: {
+        checkoutId: data.id,
+        packageId,
+        planId: purchasePlan,
+        creditsAmount,
+      },
+    });
   } catch (error) {
     logError(error, {
       source: "creem-webhook",
@@ -523,6 +570,123 @@ async function handleSubscriptionCanceled(sub: CreemSubscription) {
   });
 }
 
+function buildCreemReferralOrderIds(params: {
+  orderId?: string;
+  subscription?: CreemSubscription;
+  transaction?: { period_start?: number; period_end?: number };
+}) {
+  return buildCreemReferralCancellationOrderIds({
+    orderId: params.orderId,
+    subscriptionId: params.subscription?.id,
+    periodStartMs: params.transaction?.period_start,
+  });
+}
+
+async function cancelReferralForCreemOrders(params: {
+  orderIds: string[];
+  reason: "refund" | "chargeback";
+  metadata: Record<string, unknown>;
+}) {
+  for (const orderId of params.orderIds) {
+    const result = await invokeOperation<{
+      canceledCount: number;
+      reversedCount: number;
+      skippedCount: number;
+      alreadyCanceledCount: number;
+      errors: Array<{ commissionId: string; message: string }>;
+    }>(
+      "referral.cancelCommissionForOrder",
+      {
+        provider: "creem",
+        orderId,
+        reason: params.reason,
+        metadata: params.metadata,
+      },
+      { type: "system", reason: "creem-webhook-referral-cancel" }
+    );
+
+    // WHY: 冲正失败（如邀请人余额不足、瞬时 DB 错误）不能静默返回 200，
+    // 否则 Creem 不会重投，退款订单的返佣积分永远留在邀请人账上。
+    // 取消路径整体幂等（canceled 终态短路、冲正扣费带 sourceRef 幂等键），
+    // 上抛让外层返回 5xx 触发重投是安全的。
+    if (result.errors.length > 0) {
+      throw new Error(
+        `Referral commission cancellation failed for Creem order ${orderId}: ${result.errors
+          .map((item) => `${item.commissionId}: ${item.message}`)
+          .join("; ")}`
+      );
+    }
+
+    logger.info(
+      {
+        orderId,
+        reason: params.reason,
+        ...result,
+      },
+      "Referral commission canceled for Creem order"
+    );
+  }
+}
+
+async function handleRefundCreated(data: CreemRefundCreatedData) {
+  const orderIds = buildCreemReferralOrderIds({
+    orderId: data.order?.id ?? data.transaction?.order,
+    subscription: data.subscription,
+    transaction: data.transaction,
+  });
+
+  if (orderIds.length === 0) {
+    logger.warn(
+      { refundId: data.id },
+      "Missing order reference in Creem refund webhook"
+    );
+    return;
+  }
+
+  await cancelReferralForCreemOrders({
+    orderIds,
+    reason: "refund",
+    metadata: {
+      refundId: data.id,
+      refundStatus: data.status,
+      refundAmount: data.refund_amount,
+      refundCurrency: data.refund_currency,
+      refundReason: data.reason,
+      transactionId: data.transaction?.id,
+      subscriptionId: data.subscription?.id ?? data.transaction?.subscription,
+    },
+  });
+}
+
+async function handleDisputeCreated(data: CreemDisputeCreatedData) {
+  const orderIds = buildCreemReferralOrderIds({
+    orderId: data.order?.id ?? data.transaction?.order,
+    subscription: data.subscription,
+    transaction: data.transaction,
+  });
+
+  if (orderIds.length === 0) {
+    logger.warn(
+      { disputeId: data.id },
+      "Missing order reference in Creem dispute webhook"
+    );
+    return;
+  }
+
+  await cancelReferralForCreemOrders({
+    orderIds,
+    reason: "chargeback",
+    metadata: {
+      disputeId: data.id,
+      disputeAmount: data.amount,
+      disputeCurrency: data.currency,
+      transactionId: data.transaction?.id,
+      transactionStatus: data.transaction?.status,
+      subscriptionId: data.subscription?.id ?? data.transaction?.subscription,
+    },
+  });
+}
+
 /**
  * 处理订阅逾期事件
  */
@@ -632,8 +796,24 @@ async function grantSubscriptionCredits(
     return;
   }
 
+  const { price: runtimePrice } = await findRuntimePlanByPriceId(priceId);
+  const productPriceMinorUnits =
+    typeof sub.product === "object" &&
+    typeof sub.product.price === "number" &&
+    Number.isFinite(sub.product.price)
+      ? sub.product.price
+      : undefined;
+  const productCurrency =
+    typeof sub.product === "object" ? sub.product.currency : undefined;
+
   // 幂等性检查：同一订阅 + 同一周期只发放一次积分
   const periodKey = buildSubscriptionPeriodKey(
+    sub.id,
+    sub.current_period_start_date
+  );
+  // referral 账本的订单键须与退款/拒付侧（periodStartMs → ISO）格式一致，
+  // 用归一化构造器而非 credits 的 periodKey；日期非法时跳过返佣但不影响积分。
+  const referralOrderId = buildReferralSubscriptionOrderId(
     sub.id,
     sub.current_period_start_date
   );
@@ -649,6 +829,31 @@ async function grantSubscriptionCredits(
     .limit(1);
 
   if (existingBatch) {
+    if (referralOrderId) {
+      await accrueReferralForCreemPayment({
+        userId,
+        orderId: referralOrderId,
+        orderKind: "subscription",
+        orderAmountCents: getCreemOrderAmountCents(
+          productPriceMinorUnits,
+          runtimePrice?.amount ?? 0
+        ),
+        currency: productCurrency ?? paymentConfig.currency,
+        metadata: {
+          subscriptionId: sub.id,
+          priceId,
+          planType,
+          billingReason,
+          periodStart: sub.current_period_start_date,
+          periodEnd: sub.current_period_end_date,
+        },
+      });
+    } else {
+      logger.warn(
+        { subscriptionId: sub.id, periodStart: sub.current_period_start_date },
+        "Skipping referral accrual: invalid subscription period start"
+      );
+    }
     logger.info(
       { periodKey },
       "Credits already granted for subscription period, skipping"
@@ -682,15 +887,6 @@ async function grantSubscriptionCredits(
   // 实付金额/币种校验：用 priceId 反查服务端期望金额，与订阅 product 上的
   // price/currency 比对，阻止被篡改的订阅价套取高额积分。CreemSubscription 不带 order，
   // 仅当 product 为对象且带 price 时才有可比信息；缺失则裁决为不可比 → 放行 + 告警。
-  const { price: runtimePrice } = await findRuntimePlanByPriceId(priceId);
-  const productPriceMinorUnits =
-    typeof sub.product === "object" &&
-    typeof sub.product.price === "number" &&
-    Number.isFinite(sub.product.price)
-      ? sub.product.price
-      : undefined;
-  const productCurrency =
-    typeof sub.product === "object" ? sub.product.currency : undefined;
   const subscriptionAmountMatch = evaluateCreemAmountMatch(
     {
       // 年付期望额用 runtimePrice（按 priceId 反查到对应 interval 的金额），
@@ -755,6 +951,33 @@ async function grantSubscriptionCredits(
       },
       "Subscription credits granted"
     );
+    if (referralOrderId) {
+      await accrueReferralForCreemPayment({
+        userId,
+        orderId: referralOrderId,
+        orderKind: "subscription",
+        orderAmountCents: getCreemOrderAmountCents(
+          productPriceMinorUnits,
+          runtimePrice?.amount ?? 0
+        ),
+        currency: productCurrency ?? paymentConfig.currency,
+        metadata: {
+          subscriptionId: sub.id,
+          priceId,
+          planType,
+          billingReason,
+          interval: isYearly ? "year" : "month",
+          periodStart: sub.current_period_start_date,
+          periodEnd: sub.current_period_end_date,
+          creditsToGrant,
+        },
+      });
+    } else {
+      logger.warn(
+        { subscriptionId: sub.id, periodStart: sub.current_period_start_date },
+        "Skipping referral accrual: invalid subscription period start"
+      );
+    }
   } catch (error) {
     logError(error, {
       source: "creem-webhook",
@@ -766,5 +989,59 @@ async function grantSubscriptionCredits(
     // credits_batch (source_type, source_ref) 唯一索引保证 Creem 重投不会双发周期积分，
     // 因此上抛让外层返回 5xx 触发重投，避免静默漏发订阅积分。
     throw error;
+  }
+}
+
+function getCreemOrderAmountCents(
+  actualMinorUnits: number | undefined,
+  expectedMajorUnits: number
+) {
+  if (
+    typeof actualMinorUnits === "number" &&
+    Number.isFinite(actualMinorUnits) &&
+    actualMinorUnits > 0
+  ) {
+    return Math.trunc(actualMinorUnits);
+  }
+  return Math.max(0, Math.round(expectedMajorUnits * 100));
+}
+
+async function accrueReferralForCreemPayment(params: {
+  userId: string;
+  orderId: string;
+  orderKind: "credit_purchase" | "subscription";
+  orderAmountCents: number;
+  currency: string;
+  metadata?: Record<string, unknown>;
+}) {
+  const result = await invokeOperation<{
+    applied: boolean;
+    commissionId?: string;
+    inviterUserId?: string;
+    commissionCredits?: number;
+  }>(
+    "referral.accrueCommissionForOrder",
+    {
+      inviteeUserId: params.userId,
+      provider: "creem",
+      orderId: params.orderId,
+      orderKind: params.orderKind,
+      orderAmountCents: params.orderAmountCents,
+      currency: params.currency,
+      metadata: params.metadata,
+    },
+    { type: "system", reason: "creem-webhook-referral" }
+  );
+  if (result.applied) {
+    logger.info(
+      {
+        userId: params.userId,
+        orderId: params.orderId,
+        commissionId: result.commissionId,
+        inviterUserId: result.inviterUserId,
+        commissionCredits: result.commissionCredits,
+      },
+      "Referral commission accrued for Creem payment"
+    );
   }
 }

@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
   index,
@@ -10,7 +11,6 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
-import { sql } from "drizzle-orm";
 
 /**
  * Better Auth 核心表 Schema
@@ -292,8 +292,11 @@ export const epayOrder = pgTable("epay_order", {
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
   businessType: text("business_type").notNull(),
-  amount: numeric("amount", { precision: 12, scale: 2, mode: "number" })
-    .notNull(),
+  amount: numeric("amount", {
+    precision: 12,
+    scale: 2,
+    mode: "number",
+  }).notNull(),
   status: text("status").notNull().default("pending"),
   metadata: json("metadata").$type<Record<string, unknown>>().notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -332,6 +335,7 @@ export const creditsBatchSourceEnum = pgEnum("credits_batch_source", [
   "subscription",
   "bonus",
   "refund",
+  "referral",
 ]);
 
 /**
@@ -345,6 +349,7 @@ export const creditsTransactionTypeEnum = pgEnum("credits_transaction_type", [
   "admin_grant",
   "expiration",
   "refund",
+  "referral_bonus",
 ]);
 
 // ============================================
@@ -420,10 +425,16 @@ export const creditsBatch = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    amount: numeric("amount", { precision: 18, scale: 2, mode: "number" })
-      .notNull(),
-    remaining: numeric("remaining", { precision: 18, scale: 2, mode: "number" })
-      .notNull(),
+    amount: numeric("amount", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    }).notNull(),
+    remaining: numeric("remaining", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    }).notNull(),
     issuedAt: timestamp("issued_at").notNull().defaultNow(),
     expiresAt: timestamp("expires_at"),
     status: creditsBatchStatusEnum("status").notNull().default("active"),
@@ -469,8 +480,11 @@ export const creditsTransaction = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     type: creditsTransactionTypeEnum("type").notNull(),
-    amount: numeric("amount", { precision: 18, scale: 2, mode: "number" })
-      .notNull(),
+    amount: numeric("amount", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    }).notNull(),
     debitAccount: text("debit_account").notNull(),
     creditAccount: text("credit_account").notNull(),
     description: text("description"),
@@ -571,6 +585,195 @@ export type CreditsBatchSource =
 /** 积分交易类型 */
 export type CreditsTransactionType =
   (typeof creditsTransactionTypeEnum.enumValues)[number];
+
+// ============================================
+// 邀请返佣系统枚举
+// ============================================
+
+/**
+ * 返佣流水状态枚举
+ *
+ * frozen 表示仍在冻结期；available 表示可转积分；converting 是转积分领取中
+ * 的短暂状态；converted/canceled 为终态。
+ */
+export const referralCommissionStatusEnum = pgEnum(
+  "referral_commission_status",
+  ["frozen", "available", "converting", "converted", "canceled"]
+);
+
+/**
+ * 返佣转积分记录状态枚举
+ */
+export const referralTransferStatusEnum = pgEnum("referral_transfer_status", [
+  "pending",
+  "completed",
+  "failed",
+]);
+
+// ============================================
+// 邀请返佣系统 (Referral)
+// ============================================
+
+/**
+ * 邀请返佣档案表 - 每个用户一份可分享的邀请码与专属返佣配置。
+ *
+ * @field userId - 用户 ID，同时作为主键
+ * @field referralCode - 用户的邀请码，大小写归一为大写
+ * @field referralCodeCustom - 是否由管理员设置自定义码
+ * @field commissionRateBps - 用户作为邀请人时的专属返佣比例，空则使用全局配置
+ * @field invitedCount - 累计邀请成功绑定人数
+ * @field createdAt - 创建时间
+ * @field updatedAt - 更新时间
+ */
+export const referralProfile = pgTable(
+  "referral_profile",
+  {
+    userId: text("user_id")
+      .primaryKey()
+      .references(() => user.id, { onDelete: "cascade" }),
+    referralCode: text("referral_code").notNull().unique(),
+    referralCodeCustom: boolean("referral_code_custom")
+      .notNull()
+      .default(false),
+    commissionRateBps: integer("commission_rate_bps"),
+    invitedCount: integer("invited_count").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("referral_profile_referral_code_idx").on(table.referralCode),
+  ]
+);
+
+/**
+ * 邀请绑定表 - 记录被邀请人与邀请人的一次性归因关系。
+ *
+ * 一个 inviteeUserId 只能绑定一次，避免事后改绑和重复归因。
+ */
+export const referralBinding = pgTable(
+  "referral_binding",
+  {
+    id: text("id").primaryKey(),
+    inviterUserId: text("inviter_user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    inviteeUserId: text("invitee_user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    referralCode: text("referral_code").notNull(),
+    metadata: json("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("referral_binding_invitee_unique").on(table.inviteeUserId),
+    index("referral_binding_inviter_created_at_idx").on(
+      table.inviterUserId,
+      table.createdAt
+    ),
+  ]
+);
+
+/**
+ * 返佣权益账本 - 支付订单产生的返佣权益，不直接改变积分余额。
+ *
+ * 转积分前先进入该账本，便于冻结、审计、取消与幂等重放保护。
+ */
+export const referralCommissionLedger = pgTable(
+  "referral_commission_ledger",
+  {
+    id: text("id").primaryKey(),
+    inviterUserId: text("inviter_user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    inviteeUserId: text("invitee_user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    orderId: text("order_id").notNull(),
+    orderKind: text("order_kind").notNull(),
+    orderAmountCents: integer("order_amount_cents").notNull(),
+    currency: text("currency").notNull(),
+    commissionRateBps: integer("commission_rate_bps").notNull(),
+    commissionAmountCents: integer("commission_amount_cents").notNull(),
+    commissionCredits: numeric("commission_credits", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    }).notNull(),
+    status: referralCommissionStatusEnum("status").notNull(),
+    frozenUntil: timestamp("frozen_until"),
+    convertedAt: timestamp("converted_at"),
+    canceledAt: timestamp("canceled_at"),
+    metadata: json("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("referral_commission_order_inviter_unique").on(
+      table.provider,
+      table.orderId,
+      table.inviterUserId
+    ),
+    index("referral_commission_inviter_status_idx").on(
+      table.inviterUserId,
+      table.status
+    ),
+    index("referral_commission_invitee_idx").on(table.inviteeUserId),
+  ]
+);
+
+/**
+ * 返佣转积分记录表 - 记录一次用户手动将可用返佣转换为站内积分。
+ */
+export const referralTransfer = pgTable(
+  "referral_transfer",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    status: referralTransferStatusEnum("status").notNull().default("pending"),
+    amountCents: integer("amount_cents").notNull(),
+    creditsAmount: numeric("credits_amount", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    }).notNull(),
+    commissionIds: json("commission_ids").$type<string[]>().notNull(),
+    sourceRef: text("source_ref").notNull().unique(),
+    creditsBatchId: text("credits_batch_id"),
+    creditsTransactionId: text("credits_transaction_id"),
+    failureReason: text("failure_reason"),
+    metadata: json("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("referral_transfer_user_created_at_idx").on(
+      table.userId,
+      table.createdAt
+    ),
+  ]
+);
+
+export type ReferralProfile = typeof referralProfile.$inferSelect;
+export type NewReferralProfile = typeof referralProfile.$inferInsert;
+
+export type ReferralBinding = typeof referralBinding.$inferSelect;
+export type NewReferralBinding = typeof referralBinding.$inferInsert;
+
+export type ReferralCommissionLedger =
+  typeof referralCommissionLedger.$inferSelect;
+export type NewReferralCommissionLedger =
+  typeof referralCommissionLedger.$inferInsert;
+
+export type ReferralTransfer = typeof referralTransfer.$inferSelect;
+export type NewReferralTransfer = typeof referralTransfer.$inferInsert;
+
+export type ReferralCommissionStatus =
+  (typeof referralCommissionStatusEnum.enumValues)[number];
+export type ReferralTransferStatus =
+  (typeof referralTransferStatusEnum.enumValues)[number];
 
 // ============================================
 // Newsletter 订阅表
@@ -822,7 +1025,9 @@ export const imageBackendAccount = pgTable(
     refreshToken: text("refresh_token"),
     implementationMode: text("interface_mode").notNull().default("web"),
     model: text("model"),
-    contentSafetyEnabled: boolean("content_safety_enabled").notNull().default(true),
+    contentSafetyEnabled: boolean("content_safety_enabled")
+      .notNull()
+      .default(true),
     isEnabled: boolean("is_enabled").notNull().default(true),
     // 遇错也始终可用：与 isEnabled 同时为真时，该账号永不进入冷却、不因失败被
     // 调度器置 error 排除（失败仍记录 lastError/failCount，但始终留在候选里）。
@@ -894,7 +1099,9 @@ export const imageBackendApi = pgTable("image_backend_api", {
   // 计费倍率（与 image_backend_adobe.billing_multiplier 同义）；仅当 adobeSourced 为真时
   // 生效，与分组倍率相乘汇入 config.backend.billingMultiplier，作用于图像扣费。默认 1。
   billingMultiplier: numeric("billing_multiplier").notNull().default("1"),
-  contentSafetyEnabled: boolean("content_safety_enabled").notNull().default(true),
+  contentSafetyEnabled: boolean("content_safety_enabled")
+    .notNull()
+    .default(true),
   isEnabled: boolean("is_enabled").notNull().default(true),
   // 遇错也始终可用：与 isEnabled 同时为真时，该 API 永不进入冷却、不因失败被
   // 调度器置 error 排除（失败仍记录 lastError，但始终留在候选里）。
@@ -1116,9 +1323,10 @@ export const videoGeneration = pgTable(
     // pending / running / completed / failed。
     status: text("status").notNull().default("pending"),
     // 图生视频输入：引用历史生成（@ 历史图）或上传图的 storageKey / generationId。
-    inputImageRefs: json("input_image_refs").$type<
-      Array<{ generationId?: string; storageKey?: string; role?: string }>
-    >(),
+    inputImageRefs:
+      json("input_image_refs").$type<
+        Array<{ generationId?: string; storageKey?: string; role?: string }>
+      >(),
     // 完成后 re-host 到对象存储的 key；videoUrl 为上游 presigned（短期）。
     storageKey: text("storage_key"),
     videoUrl: text("video_url"),
@@ -1226,7 +1434,9 @@ export const imageBackendSchedulerMetric = pgTable(
       table.memberId,
       table.groupId
     ),
-    index("image_backend_scheduler_metric_bucket_idx").on(table.bucketStartedAt),
+    index("image_backend_scheduler_metric_bucket_idx").on(
+      table.bucketStartedAt
+    ),
   ]
 );
 
@@ -1257,8 +1467,7 @@ export type NewImageBackendAccountGroup =
 export type ImageBackendApi = typeof imageBackendApi.$inferSelect;
 export type NewImageBackendApi = typeof imageBackendApi.$inferInsert;
 export type ImageBackendApiGroup = typeof imageBackendApiGroup.$inferSelect;
-export type NewImageBackendApiGroup =
-  typeof imageBackendApiGroup.$inferInsert;
+export type NewImageBackendApiGroup = typeof imageBackendApiGroup.$inferInsert;
 export type ImageBackendInflightLease =
   typeof imageBackendInflightLease.$inferSelect;
 export type NewImageBackendInflightLease =
@@ -1329,39 +1538,46 @@ export const generationStatusEnum = pgEnum("generation_status", [
   "failed",
 ]);
 
-export const generation = pgTable("generation", {
-  id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-  prompt: text("prompt").notNull(),
-  revisedPrompt: text("revised_prompt"),
-  model: text("model").notNull(),
-  size: text("size").notNull().default("1024x1024"),
-  status: generationStatusEnum("status").notNull().default("pending"),
-  storageKey: text("storage_key"),
-  storageBucket: text("storage_bucket").default("generations"),
-  fileSize: integer("file_size"),
-  creditsConsumed: numeric("credits_consumed", {
-    precision: 18,
-    scale: 2,
-    mode: "number",
-  })
-    .notNull()
-    .default(0),
-  error: text("error"),
-  metadata: json("metadata").$type<Record<string, unknown>>(),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  completedAt: timestamp("completed_at"),
-}, (table) => [
-  // 画廊/历史/计数与每次读触发的 pending 过期维护扫描:在 686MB 的 generation 表上,
-  // 把按 user / status 维度的查询从顺序扫转为有序索引扫描(迁移 0035)。
-  index("generation_user_id_created_at_idx").on(table.userId, table.createdAt),
-  index("generation_status_created_at_idx").on(table.status, table.createdAt),
-  // 另有 generation_metadata_gin_idx —— metadata 的 jsonb_path_ops GIN 表达式索引,
-  // 加速画廊 draft/upload 的 @? jsonpath 过滤。表达式索引以迁移 0035 的 SQL 为准
-  // (Drizzle 对 (metadata::jsonb) 这类表达式索引声明支持不稳定,故此处仅注释登记)。
-]);
+export const generation = pgTable(
+  "generation",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    prompt: text("prompt").notNull(),
+    revisedPrompt: text("revised_prompt"),
+    model: text("model").notNull(),
+    size: text("size").notNull().default("1024x1024"),
+    status: generationStatusEnum("status").notNull().default("pending"),
+    storageKey: text("storage_key"),
+    storageBucket: text("storage_bucket").default("generations"),
+    fileSize: integer("file_size"),
+    creditsConsumed: numeric("credits_consumed", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    error: text("error"),
+    metadata: json("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    completedAt: timestamp("completed_at"),
+  },
+  (table) => [
+    // 画廊/历史/计数与每次读触发的 pending 过期维护扫描:在 686MB 的 generation 表上,
+    // 把按 user / status 维度的查询从顺序扫转为有序索引扫描(迁移 0035)。
+    index("generation_user_id_created_at_idx").on(
+      table.userId,
+      table.createdAt
+    ),
+    index("generation_status_created_at_idx").on(table.status, table.createdAt),
+    // 另有 generation_metadata_gin_idx —— metadata 的 jsonb_path_ops GIN 表达式索引,
+    // 加速画廊 draft/upload 的 @? jsonpath 过滤。表达式索引以迁移 0035 的 SQL 为准
+    // (Drizzle 对 (metadata::jsonb) 这类表达式索引声明支持不稳定,故此处仅注释登记)。
+  ]
+);
 
 export type Generation = typeof generation.$inferSelect;
 export type NewGeneration = typeof generation.$inferInsert;
@@ -1431,7 +1647,7 @@ export const mcpApiKey = pgTable(
   (table) => [
     index("mcp_api_key_key_hash_idx").on(table.keyHash),
     index("mcp_api_key_user_id_idx").on(table.userId),
-  ],
+  ]
 );
 
 export type McpApiKey = typeof mcpApiKey.$inferSelect;

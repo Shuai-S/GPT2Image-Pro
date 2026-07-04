@@ -114,11 +114,18 @@ export async function signInWithGitHub(callbackURL = "/dashboard") {
 /**
  * 使用 Google 登录
  * @param callbackURL - 登录成功后的跳转地址
+ * @param options - OAuth 新用户注册完成后的可选跳转配置
  */
-export async function signInWithGoogle(callbackURL = "/dashboard") {
+export async function signInWithGoogle(
+  callbackURL = "/dashboard",
+  options?: { newUserCallbackURL?: string }
+) {
   return signIn.social({
     provider: "google",
     callbackURL,
+    ...(options?.newUserCallbackURL
+      ? { newUserCallbackURL: options.newUserCallbackURL }
+      : {}),
   });
 }
 
@@ -150,14 +157,18 @@ export async function signUpWithEmail(
   email: string,
   password: string,
   name: string,
-  verificationCode: string
+  verificationCode: string,
+  referralCode?: string
 ) {
   return signUp.email({
     email,
     password,
     name,
     fetchOptions: {
-      body: { verificationCode },
+      body: {
+        verificationCode,
+        ...(referralCode ? { referralCode } : {}),
+      },
     },
   });
 }

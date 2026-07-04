@@ -1,14 +1,14 @@
 import { db, systemSetting } from "@repo/database";
-import { eq, sql } from "drizzle-orm";
-
 import {
   getRuntimeSettingBoolean,
   getRuntimeSettingNumber,
 } from "@repo/shared/system-settings";
+import { eq, sql } from "drizzle-orm";
 
 import {
   runCreditsExpireJob,
   runImageMaintenanceJob,
+  runReferralThawJob,
   runSub2ApiSyncJob,
   runWebAccountsRefreshJob,
   runWebAccountsReplenishJob,
@@ -20,6 +20,7 @@ type InternalJob = {
   intervalSettingKey:
     | "INTERNAL_JOB_IMAGES_MAINTENANCE_INTERVAL_MINUTES"
     | "INTERNAL_JOB_CREDITS_EXPIRE_INTERVAL_MINUTES"
+    | "INTERNAL_JOB_REFERRAL_THAW_INTERVAL_MINUTES"
     | "INTERNAL_JOB_WEB_ACCOUNTS_REFRESH_INTERVAL_MINUTES"
     | "INTERNAL_JOB_WEB_ACCOUNTS_REPLENISH_INTERVAL_MINUTES"
     | "INTERNAL_JOB_SUB2API_SYNC_INTERVAL_MINUTES";
@@ -56,6 +57,14 @@ const jobs: InternalJob[] = [
     defaultIntervalMinutes: 24 * 60,
     initialDelayMs: 60_000,
     run: runCreditsExpireJob,
+  },
+  {
+    name: "referral-thaw",
+    lockKey: 6,
+    intervalSettingKey: "INTERNAL_JOB_REFERRAL_THAW_INTERVAL_MINUTES",
+    defaultIntervalMinutes: 60,
+    initialDelayMs: 75_000,
+    run: runReferralThawJob,
   },
   {
     name: "web-accounts-refresh",
@@ -244,11 +253,6 @@ async function withJobLock<T>(
         });
       throw error;
     }
-
-    return {
-      locked: true as const,
-      skipped: false as const,
-    };
   });
 }
 
