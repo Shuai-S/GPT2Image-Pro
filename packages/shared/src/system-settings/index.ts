@@ -280,6 +280,20 @@ function getDefaultSettingValue(definition: SettingDefinition) {
   return undefined;
 }
 
+function syncProcessEnvSetting(key: SettingKey, value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    delete process.env[key];
+    return;
+  }
+
+  process.env[key] =
+    typeof value === "string"
+      ? value.trim()
+      : typeof value === "object"
+        ? JSON.stringify(value)
+        : String(value);
+}
+
 export async function importSystemSettingsFromEnv(options?: {
   updatedBy?: string;
   overwrite?: boolean;
@@ -331,21 +345,8 @@ export async function importSystemSettingsFromEnv(options?: {
 
   clearSystemSettingsCache();
 
-  // 同步进 process.env:同步读取器(getProcessSettingString,如邮件 SMTP/Resend、鉴权配置)只看
-  // process.env,而 process.env 仅在启动时由 bootstrap 从 DB 灌入。若保存后不同步,后台改完邮件/
-  // 配置要重启容器才生效(否则一直读旧值、SMTP 配了仍退回 resend、发码 400)。这里写回当前进程的
-  // process.env,使改动即时生效、无需重启(单实例部署如 docker compose)。
   for (const { key, value } of values) {
-    if (value === null || value === undefined || value === "") {
-      delete process.env[key];
-      continue;
-    }
-    process.env[key] =
-      typeof value === "string"
-        ? value.trim()
-        : typeof value === "object"
-          ? JSON.stringify(value)
-          : String(value);
+    syncProcessEnvSetting(key, value);
   }
 
   return values.map((value) => value.key);
@@ -599,6 +600,7 @@ export async function setSystemSettings(
 ) {
   const now = new Date();
   const changedKeys: SettingKey[] = [];
+  const processEnvUpdates: Array<{ key: SettingKey; value: unknown }> = [];
 
   await db.transaction(async (tx) => {
     for (const entry of entries) {
@@ -616,6 +618,7 @@ export async function setSystemSettings(
           .delete(systemSetting)
           .where(eq(systemSetting.key, entry.key));
         changedKeys.push(entry.key);
+        processEnvUpdates.push({ key: entry.key, value: undefined });
         continue;
       }
 
@@ -632,6 +635,7 @@ export async function setSystemSettings(
         await tx
           .delete(systemSetting)
           .where(eq(systemSetting.key, entry.key));
+        processEnvUpdates.push({ key: entry.key, value: undefined });
       } else {
         await tx
           .insert(systemSetting)
@@ -651,12 +655,20 @@ export async function setSystemSettings(
               updatedAt: now,
             },
           });
+        processEnvUpdates.push({ key: entry.key, value });
       }
       changedKeys.push(entry.key);
     }
   });
 
   clearSystemSettingsCache();
+
+  // 同步进 process.env:邮件、鉴权等同步读取器只看 process.env，后台保存后若只写
+  // DB/.env 文件，当前进程会继续使用旧配置，直到重启容器才生效。
+  for (const update of processEnvUpdates) {
+    syncProcessEnvSetting(update.key, update.value);
+  }
+
   return changedKeys;
 }
 

@@ -138,6 +138,12 @@ describe("setSystemSettings", () => {
     clearSystemSettingsCache();
   });
 
+  afterEach(() => {
+    delete process.env.EMAIL_PROVIDER;
+    delete process.env.SMTP_HOST;
+    delete process.env.RESEND_API_KEY;
+  });
+
   it("rejects unknown setting key throwing 未知配置项", async () => {
     await expect(
       setSystemSettings([{ key: "NOT_A_REAL_KEY", value: "x" }], "admin")
@@ -158,6 +164,39 @@ describe("setSystemSettings", () => {
     expect(changed).toEqual(["APP_TIME_ZONE"]);
     expect(store.has("APP_TIME_ZONE")).toBe(false);
     expect(deletedKeys.value).toContain("APP_TIME_ZONE");
+  });
+
+  it("syncs saved mail settings into process.env for sync readers", async () => {
+    process.env.EMAIL_PROVIDER = "resend";
+
+    const changed = await setSystemSettings(
+      [
+        { key: "EMAIL_PROVIDER", value: "smtp" },
+        { key: "SMTP_HOST", value: "smtp.example.com" },
+      ],
+      "admin"
+    );
+
+    expect(changed).toEqual(["EMAIL_PROVIDER", "SMTP_HOST"]);
+    expect(process.env.EMAIL_PROVIDER).toBe("smtp");
+    expect(process.env.SMTP_HOST).toBe("smtp.example.com");
+  });
+
+  it("clears process.env when stored setting is cleared", async () => {
+    process.env.RESEND_API_KEY = "re_old";
+    store.set("RESEND_API_KEY", {
+      key: "RESEND_API_KEY",
+      value: "re_old",
+      isSecret: true,
+    });
+
+    const changed = await setSystemSettings(
+      [{ key: "RESEND_API_KEY", value: "", clear: true }],
+      "admin"
+    );
+
+    expect(changed).toEqual(["RESEND_API_KEY"]);
+    expect(process.env.RESEND_API_KEY).toBeUndefined();
   });
 
   it("skips blank secret to avoid wiping stored secret", async () => {
