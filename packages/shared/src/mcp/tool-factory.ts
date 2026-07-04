@@ -66,14 +66,12 @@ export function operationNameToToolName(opName: string): string {
 
 /**
  * 将 MCP 工具名还原为操作名（下划线 → 点号）。
- * 注意：仅还原第一个下划线为点号（domain.operation 格式）。
+ * 注意：MCP 工具名由 operationNameToToolName 将所有点号替换为下划线。
+ * 当前 UOL 名称可能包含多段命名空间（如 admin.referral.listProfiles），
+ * 因此必须完整还原，不能只替换第一个下划线。
  */
 export function toolNameToOperationName(toolName: string): string {
-  // 操作名格式为 "domain.operation"，即只有一个点号
-  // 对应工具名为 "domain_operation"，只需还原第一个下划线
-  const idx = toolName.indexOf("_");
-  if (idx === -1) return toolName;
-  return `${toolName.slice(0, idx)}.${toolName.slice(idx + 1)}`;
+  return toolName.replace(/_/g, ".");
 }
 
 /**
@@ -88,7 +86,7 @@ export function toolNameToOperationName(toolName: string): string {
 function isOperationExposable(
   op: OperationDefinition,
   deniedOps: string[],
-  readOnlyMode: boolean,
+  readOnlyMode: boolean
 ): boolean {
   // 权限白名单过滤
   if (!ALLOWED_ACCESS_KINDS.has(op.access.kind)) return false;
@@ -115,18 +113,14 @@ function isOperationExposable(
  * 优先确保 MCP agent 能理解输入结构。
  * 对于无法解析的复杂 schema 回退为 object 类型。
  */
-function zodToSimpleJsonSchema(
-  zodSchema: unknown,
-): Record<string, unknown> {
+function zodToSimpleJsonSchema(zodSchema: unknown): Record<string, unknown> {
   // Zod v4 内部结构：尝试提取 _zod 元数据
   // 对于未知结构，回退为通用 object schema
   try {
     const schema = zodSchema as Record<string, unknown>;
 
     // Zod v4: schema._zod.def 包含类型信息
-    const zod = schema._zod as
-      | { def?: Record<string, unknown> }
-      | undefined;
+    const zod = schema._zod as { def?: Record<string, unknown> } | undefined;
     if (zod?.def) {
       return buildJsonSchemaFromZodDef(zod.def);
     }
@@ -147,15 +141,13 @@ function zodToSimpleJsonSchema(
  * 从 Zod 内部 def 构建 JSON Schema（尽力而为）。
  */
 function buildJsonSchemaFromZodDef(
-  def: Record<string, unknown>,
+  def: Record<string, unknown>
 ): Record<string, unknown> {
   const typeName = def.typeName as string | undefined;
 
   switch (typeName) {
     case "ZodObject": {
-      const shape = def.shape as
-        | Record<string, unknown>
-        | undefined;
+      const shape = def.shape as Record<string, unknown> | undefined;
       if (!shape) {
         return { type: "object", properties: {} };
       }
@@ -164,8 +156,9 @@ function buildJsonSchemaFromZodDef(
       for (const [key, fieldSchema] of Object.entries(shape)) {
         properties[key] = zodToSimpleJsonSchema(fieldSchema);
         // 检查是否为 optional
-        const fieldZod = (fieldSchema as Record<string, unknown>)
-          ._zod as { def?: Record<string, unknown> } | undefined;
+        const fieldZod = (fieldSchema as Record<string, unknown>)._zod as
+          | { def?: Record<string, unknown> }
+          | undefined;
         const fieldDef =
           fieldZod?.def ??
           ((fieldSchema as Record<string, unknown>)._def as
@@ -192,28 +185,20 @@ function buildJsonSchemaFromZodDef(
       const itemType = def.type as unknown;
       return {
         type: "array",
-        items: itemType
-          ? zodToSimpleJsonSchema(itemType)
-          : {},
+        items: itemType ? zodToSimpleJsonSchema(itemType) : {},
       };
     }
     case "ZodEnum": {
       const values = def.values as string[] | undefined;
-      return values
-        ? { type: "string", enum: values }
-        : { type: "string" };
+      return values ? { type: "string", enum: values } : { type: "string" };
     }
     case "ZodOptional": {
       const innerType = def.innerType as unknown;
-      return innerType
-        ? zodToSimpleJsonSchema(innerType)
-        : {};
+      return innerType ? zodToSimpleJsonSchema(innerType) : {};
     }
     case "ZodNullable": {
       const inner = def.innerType as unknown;
-      const base = inner
-        ? zodToSimpleJsonSchema(inner)
-        : {};
+      const base = inner ? zodToSimpleJsonSchema(inner) : {};
       return { ...base, nullable: true };
     }
     default:
@@ -231,9 +216,7 @@ function buildJsonSchemaFromZodDef(
  * @param _principal - 当前 MCP 调用者身份（预留扩展）
  * @returns 可暴露的 MCP 工具定义数组
  */
-export function buildAdminMcpTools(
-  _principal: Principal,
-): McpToolDefinition[] {
+export function buildAdminMcpTools(_principal: Principal): McpToolDefinition[] {
   const deniedOps = getMcpDeniedOps();
   const readOnlyMode = getMcpReadOnlyMode();
   const allOps = listOperations();

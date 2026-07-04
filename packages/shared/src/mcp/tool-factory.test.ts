@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-
-import { bindExecute, clearRegistry, defineOperation } from "../uol/registry";
 import type { Principal } from "../uol/principal";
+import { bindExecute, clearRegistry, defineOperation } from "../uol/registry";
 import type { AccessRequirement, OperationDefinition } from "../uol/types";
-import { buildAdminMcpTools } from "./tool-factory";
+import {
+  buildAdminMcpTools,
+  operationNameToToolName,
+  toolNameToOperationName,
+} from "./tool-factory";
 import { buildUserMcpTools } from "./user-tool-factory";
 
 const apiKeyPrincipal = {
@@ -25,7 +28,7 @@ function registerOperation(
   overrides: Partial<OperationDefinition> & {
     name: string;
     access: AccessRequirement;
-  },
+  }
 ) {
   return defineOperation({
     name: overrides.name,
@@ -64,9 +67,9 @@ describe("MCP tool factories", () => {
 
     bindExecute("image.generate", async () => ({ ok: true }));
 
-    expect(buildUserMcpTools(apiKeyPrincipal).map((tool) => tool.name)).toEqual([
-      "image.generate",
-    ]);
+    expect(buildUserMcpTools(apiKeyPrincipal).map((tool) => tool.name)).toEqual(
+      ["image.generate"]
+    );
   });
 
   it("hides admin tools until their UOL operation is bound", () => {
@@ -81,8 +84,16 @@ describe("MCP tool factories", () => {
 
     bindExecute("pool.getAdminPool", async () => ({ ok: true }));
 
-    expect(buildAdminMcpTools(adminPrincipal).map((tool) => tool.name)).toEqual([
-      "pool_getAdminPool",
-    ]);
+    expect(buildAdminMcpTools(adminPrincipal).map((tool) => tool.name)).toEqual(
+      ["pool_getAdminPool"]
+    );
+  });
+
+  it("round-trips multi-segment admin operation names", () => {
+    const operationName = "admin.referral.listProfiles";
+    const toolName = operationNameToToolName(operationName);
+
+    expect(toolName).toBe("admin_referral_listProfiles");
+    expect(toolNameToOperationName(toolName)).toBe(operationName);
   });
 });
