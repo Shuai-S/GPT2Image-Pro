@@ -11,11 +11,15 @@ import { z } from "zod";
 
 import { defineOperation } from "../registry";
 import { getPrincipalUserId } from "../principal";
+import { OperationError } from "../errors";
 import {
   destroyGenerationPhotosByMaxCount,
   shouldRunMaxCountCleanupOnSettingsChange,
 } from "../../generation-maintenance";
 import { logError } from "../../logger";
+import { getRuntimeBrandingConfig } from "../../config/branding";
+import { MailDeliveryTestEmail } from "../../mail/templates/primary-action-email";
+import { sendEmail } from "../../mail/utils";
 import {
   getAdminSystemSettingsSnapshot,
   setSystemSettings,
@@ -308,6 +312,58 @@ export const settingsGetValue = defineOperation({
       key: input.key,
       value: undefined,
       source: "default" as const,
+    };
+  },
+});
+
+/**
+ * settings.sendTestEmail - 发送邮件通道测试邮件
+ *
+ * 超级管理员输入测试邮箱后，按当前运行时邮件配置发送一封真实测试邮件。
+ * 该操作不写数据库，但会调用 SMTP/Resend 外部邮件服务。
+ */
+export const settingsSendTestEmail = defineOperation({
+  name: "settings.sendTestEmail",
+  domain: "system-settings",
+  title: "Send Test Email",
+  description:
+    "按当前已保存的 SMTP/Resend 邮件配置向指定邮箱发送一封测试邮件。",
+  input: z.object({
+    email: z.string().trim().email(),
+  }),
+  output: z.object({
+    success: z.boolean(),
+    provider: z.enum(["smtp", "resend"]).optional(),
+    id: z.string().optional(),
+    message: z.string(),
+  }),
+  access: { kind: "superAdmin" },
+  readOnly: false,
+  destructive: false,
+  idempotency: { kind: "none" },
+  sideEffects: ["email", "external-call"],
+  execute: async (input, _principal, _ctx) => {
+    const email = input.email.toLowerCase();
+    const branding = await getRuntimeBrandingConfig();
+    const result = await sendEmail({
+      to: email,
+      subject: `Mail delivery test - ${branding.name}`,
+      react: MailDeliveryTestEmail({ appName: branding.name }),
+      force: true,
+    });
+
+    if (!result.success) {
+      throw new OperationError(
+        "upstream_error",
+        result.error || "测试邮件发送失败"
+      );
+    }
+
+    return {
+      success: true,
+      ...(result.provider ? { provider: result.provider } : {}),
+      ...(result.id ? { id: result.id } : {}),
+      message: `测试邮件已发送到 ${email}`,
     };
   },
 });

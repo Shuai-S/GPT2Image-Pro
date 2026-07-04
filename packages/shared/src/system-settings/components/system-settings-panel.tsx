@@ -25,7 +25,15 @@ import {
   TabsTrigger,
 } from "@repo/ui/components/tabs";
 import { Textarea } from "@repo/ui/components/textarea";
-import { Database, Download, Loader2, Plus, Save, Trash2 } from "lucide-react";
+import {
+  Database,
+  Download,
+  Loader2,
+  Plus,
+  Save,
+  Send,
+  Trash2,
+} from "lucide-react";
 import { useAction } from "next-safe-action/hooks";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -41,6 +49,7 @@ import {
   getSystemSettingsAction,
   importSystemSettingsFromEnvAction,
   initializeSystemSettingsDefaultsAction,
+  sendSystemTestEmailAction,
   updateSystemSettingsAction,
 } from "../actions";
 import type {
@@ -2026,6 +2035,7 @@ export function SystemSettingsPanel() {
   const [settings, setSettings] = useState<SettingSnapshotItem[]>([]);
   const [drafts, setDrafts] = useState<Record<string, DraftValue>>({});
   const [clearKeys, setClearKeys] = useState<Record<string, boolean>>({});
+  const [testEmail, setTestEmail] = useState("");
 
   const {
     execute: loadSettings,
@@ -2041,6 +2051,26 @@ export function SystemSettingsPanel() {
       },
       onError: ({ error }) => {
         toast.error(error.serverError || "系统设置保存失败");
+      },
+    }
+  );
+  const { execute: sendTestEmail, isPending: isSendingTestEmail } = useAction(
+    sendSystemTestEmailAction,
+    {
+      onSuccess: ({ data }) => {
+        const result = data as
+          | { message?: string; provider?: "smtp" | "resend" }
+          | undefined;
+        if (result?.message) {
+          toast.success(
+            result.provider
+              ? `${result.message}，通道：${result.provider}`
+              : result.message
+          );
+        }
+      },
+      onError: ({ error }) => {
+        toast.error(error.serverError || "测试邮件发送失败");
       },
     }
   );
@@ -2154,6 +2184,15 @@ export function SystemSettingsPanel() {
     saveSettings({ settings: payload });
   };
 
+  const handleSendTestEmail = () => {
+    const email = testEmail.trim();
+    if (!email) {
+      toast.error("请输入测试邮箱");
+      return;
+    }
+    sendTestEmail({ email });
+  };
+
   const updateDraft = (key: SettingKey, value: DraftValue) => {
     setDrafts((current) => ({ ...current, [key]: value }));
     setClearKeys((current) => ({ ...current, [key]: false }));
@@ -2164,7 +2203,12 @@ export function SystemSettingsPanel() {
     setClearKeys((current) => ({ ...current, [key]: true }));
   };
 
-  const disabled = isLoading || isSaving || isImporting || isInitializing;
+  const disabled =
+    isLoading ||
+    isSaving ||
+    isImporting ||
+    isInitializing ||
+    isSendingTestEmail;
   const modelPricingSetting = settings.find(
     (setting) => setting.key === "MODEL_PRICING_RULES"
   );
@@ -2334,6 +2378,49 @@ export function SystemSettingsPanel() {
                   {category.description}
                 </p>
               </div>
+
+              {category.id === "mail" && (
+                <Card className="rounded-lg">
+                  <CardHeader className="space-y-2">
+                    <CardTitle className="text-base">邮件测试</CardTitle>
+                    <p className="text-xs text-muted-foreground">
+                      使用当前已保存的邮件配置发送一封测试邮件。
+                    </p>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <Label htmlFor="system-settings-test-email">
+                          测试邮箱
+                        </Label>
+                        <Input
+                          id="system-settings-test-email"
+                          type="email"
+                          inputMode="email"
+                          autoComplete="email"
+                          placeholder="admin@example.com"
+                          value={testEmail}
+                          disabled={disabled}
+                          onChange={(event) => setTestEmail(event.target.value)}
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={disabled || !testEmail.trim()}
+                        onClick={handleSendTestEmail}
+                      >
+                        {isSendingTestEmail ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Send className="mr-2 h-4 w-4" />
+                        )}
+                        发送测试邮件
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
               <div className="grid gap-4 lg:grid-cols-2">
                 {categorySettings.map((setting) => (

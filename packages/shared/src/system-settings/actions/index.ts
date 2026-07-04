@@ -7,7 +7,10 @@ import {
   shouldRunMaxCountCleanupOnSettingsChange,
 } from "../../generation-maintenance";
 import { logError } from "../../logger";
-import { superAdminAction } from "../../safe-action";
+import type { AppUserRole } from "../../auth/roles";
+import { ActionUserError, superAdminAction } from "../../safe-action";
+import { invokeOperation } from "../../uol";
+import "../../uol/operations/system-settings";
 import {
   getAdminSystemSettingsSnapshot,
   importSystemSettingsFromEnv,
@@ -21,6 +24,21 @@ const settingUpdateSchema = z.object({
   value: z.unknown().optional(),
   clear: z.boolean().optional(),
 });
+
+const testEmailSchema = z.object({
+  email: z.string().trim().email("请输入有效的测试邮箱"),
+});
+
+type TestEmailResult = {
+  success: boolean;
+  provider?: "smtp" | "resend";
+  id?: string;
+  message: string;
+};
+
+function superAdminPrincipal(ctx: { userId: string; role: AppUserRole }) {
+  return { type: "user" as const, userId: ctx.userId, role: ctx.role };
+}
 
 export const getSystemSettingsAction = superAdminAction
   .metadata({ action: "system-settings.get" })
@@ -113,4 +131,22 @@ export const initializeSystemSettingsDefaultsAction = superAdminAction
           ? `已初始化 ${initializedKeys.length} 个默认配置`
           : "默认配置已存在，无需初始化",
     };
+  });
+
+export const sendSystemTestEmailAction = superAdminAction
+  .metadata({ action: "system-settings.sendTestEmail" })
+  .schema(testEmailSchema)
+  .action(async ({ parsedInput, ctx }) => {
+    try {
+      return await invokeOperation<TestEmailResult>(
+        "settings.sendTestEmail",
+        parsedInput,
+        superAdminPrincipal(ctx)
+      );
+    } catch (error) {
+      if (error instanceof Error) {
+        throw new ActionUserError(error.message);
+      }
+      throw error;
+    }
   });

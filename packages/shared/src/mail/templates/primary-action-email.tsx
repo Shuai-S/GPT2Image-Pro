@@ -278,6 +278,53 @@ export function RegistrationVerificationCodeEmail({
 }
 
 /**
+ * 邮件通道测试邮件。
+ */
+export function MailDeliveryTestEmail({
+  appName = "GPT2IMAGE",
+}: {
+  appName?: string;
+}) {
+  return (
+    <Html>
+      <Head />
+      <Preview>{appName} mail delivery test</Preview>
+      <Tailwind>
+        <Body className="mx-auto my-auto bg-white font-sans">
+          <Container className="mx-auto my-10 max-w-xl rounded-lg border border-solid border-gray-200 p-8">
+            <Section className="mb-8 text-center">
+              <Heading className="m-0 text-2xl font-bold text-gray-900">
+                {appName}
+              </Heading>
+            </Section>
+
+            <Section className="mb-6">
+              <Heading className="mb-4 text-xl font-semibold text-gray-900">
+                Mail Delivery Test
+              </Heading>
+              <Text className="mb-4 text-base leading-relaxed text-gray-600">
+                This message confirms that your current mail configuration can
+                send email successfully.
+              </Text>
+              <Text className="mb-4 text-sm leading-relaxed text-gray-500">
+                Sent at {new Date().toISOString()}.
+              </Text>
+            </Section>
+
+            <Hr className="my-6 border-gray-200" />
+
+            <Text className="m-0 text-center text-xs text-gray-500">
+              You received this email because an administrator sent a test
+              message from the system settings panel.
+            </Text>
+          </Container>
+        </Body>
+      </Tailwind>
+    </Html>
+  );
+}
+
+/**
  * 预览 Props
  */
 PrimaryActionEmail.PreviewProps = {
