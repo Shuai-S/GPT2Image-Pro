@@ -113,7 +113,17 @@ function groupOptionLabel(group: ImageBackendGroupOption) {
   )}`;
 }
 
-export function ExternalApiKeySection({ timeZone }: { timeZone?: string }) {
+interface ExternalApiKeySectionProps {
+  /** 用户偏好的显示时区。 */
+  timeZone?: string;
+  /** 管理员在系统设置中配置的品牌名称。 */
+  brandName: string;
+}
+
+export function ExternalApiKeySection({
+  timeZone,
+  brandName,
+}: ExternalApiKeySectionProps) {
   const locale = useLocale();
   const t = useTranslations("Settings.externalApi");
   const baseUrl =
@@ -335,7 +345,7 @@ export function ExternalApiKeySection({ timeZone }: { timeZone?: string }) {
             <h4 className="text-sm font-medium">{t("title")}</h4>
           </div>
           <p className="text-xs text-muted-foreground">
-            {t("description")}
+            {t("description", { brandName })}
           </p>
           <p className="font-mono text-xs text-muted-foreground">
             {t("baseUrl", { url: baseUrl })}

@@ -75,7 +75,7 @@
   "UseCases": {
     "label": "Use Cases",
     "title": "Made for Every Creator",
-    "subtitle": "GPT2IMAGE fits the workflows of designers, marketers, developers, and storytellers alike.",
+    "subtitle": "{brandName} fits the workflows of designers, marketers, developers, and storytellers alike.",
     "items": {
       "designers": {
         "title": "Designers & Artists",
@@ -106,7 +106,7 @@
   "Testimonials": {
     "label": "Testimonials",
     "title": "What Creators Say",
-    "subtitle": "Designers, marketers, and developers around the world are using GPT2IMAGE every day.",
+    "subtitle": "Designers, marketers, and developers around the world are using {brandName} every day.",
     "items": [
       {
         "content": "The chat interface makes image generation feel effortless. I can describe what I'm imagining in plain language and iterate until it's perfect.",
@@ -134,7 +134,7 @@
         "role": "Illustrator"
       },
       {
-        "content": "GPT2IMAGE replaced three other tools in my workflow. Chat-based prompting, batch runs, and a stunning gallery — it's everything in one place.",
+        "content": "{brandName} replaced three other tools in my workflow. Chat-based prompting, batch runs, and a stunning gallery — it's everything in one place.",
         "author": "Kevin Zhao",
         "role": "Creative Director"
       }
@@ -143,15 +143,15 @@
   "FAQ": {
     "label": "FAQ",
     "title": "Questions You Might Have",
-    "subtitle": "Common questions about GPT2IMAGE and how it works.",
+    "subtitle": "Common questions about {brandName} and how it works.",
     "items": [
       {
-        "question": "What is GPT2IMAGE?",
-        "answer": "GPT2IMAGE is an AI-powered platform that turns natural-language conversations into high-quality images. Describe what you want, and our AI generates it — no prompt engineering required. Features include chat-to-image generation, a visual gallery, batch generation, and a flexible credits system."
+        "question": "What is {brandName}?",
+        "answer": "{brandName} is an AI-powered platform that turns natural-language conversations into high-quality images. Describe what you want, and our AI generates it — no prompt engineering required. Features include chat-to-image generation, a visual gallery, batch generation, and a flexible credits system."
       },
       {
         "question": "Which AI image models are supported?",
-        "answer": "GPT2IMAGE supports the leading image generation models on the market, including GPT Image 2. Just sign up, choose a plan, and start generating — the platform handles model routing and delivers results in a unified interface."
+        "answer": "{brandName} supports the leading image generation models on the market, including GPT Image 2. Just sign up, choose a plan, and start generating — the platform handles model routing and delivers results in a unified interface."
       },
       {
         "question": "How does the credits system work?",
@@ -167,7 +167,7 @@
       },
       {
         "question": "Can I download and use the images commercially?",
-        "answer": "Yes. Images you generate on GPT2IMAGE are yours to use — for personal, editorial, or commercial projects. Downloads are available in high resolution, and your full generation history stays in your gallery."
+        "answer": "Yes. Images you generate on {brandName} are yours to use — for personal, editorial, or commercial projects. Downloads are available in high resolution, and your full generation history stays in your gallery."
       }
     ]
   },
@@ -257,7 +257,7 @@
   "CTA": {
     "badge": "Start free, no credit card required",
     "title": "Start generating stunning images today",
-    "subtitle": "Sign up in seconds and get free credits to try GPT2IMAGE. Bring your ideas to life with AI-powered image generation.",
+    "subtitle": "Sign up in seconds and get free credits to try {brandName}. Bring your ideas to life with AI-powered image generation.",
     "getStarted": "Get Started Free",
     "seeDemo": "See Examples"
   },
@@ -673,7 +673,7 @@
     },
     "externalApi": {
       "title": "External API access",
-      "description": "Create GPT2IMAGE OpenAI-compatible API keys for other sites or applications. Image generation and image edits require Starter or higher; Responses requires Pro or higher. External calls use your account credits and appear in your generation history.",
+      "description": "Create {brandName} OpenAI-compatible API keys for other sites or applications. Image generation and image edits require Starter or higher; Responses requires Pro or higher. External calls use your account credits and appear in your generation history.",
       "requiresStarter": "Your current plan cannot create or use external API keys. Upgrade to Starter or higher.",
       "responsesRequiresPro": "POST /v1/responses requires Pro plan or higher.",
       "baseUrl": "Base URL: {url}",

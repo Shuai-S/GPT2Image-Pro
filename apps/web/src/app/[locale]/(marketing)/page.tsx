@@ -105,8 +105,8 @@ export default async function HomePage({
       <HeroSection />
       <FeatureGrid />
       <HowItWorks />
-      <UseCasesSection />
-      <Testimonials />
+      <UseCasesSection brandName={branding.name} />
+      <Testimonials brandName={branding.name} />
       {(slaEnabled || canToggleSlaStatus) && (
         <SlaStatusSection
           locale={locale}
@@ -115,8 +115,8 @@ export default async function HomePage({
           canToggleVisibility={canToggleSlaStatus}
         />
       )}
-      <FAQSection />
-      <CTASection />
+      <FAQSection brandName={branding.name} />
+      <CTASection brandName={branding.name} />
     </>
   );
 }

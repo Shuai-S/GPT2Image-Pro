@@ -1,8 +1,8 @@
 "use client";
 
-import { useTranslations } from "next-intl";
 import { Avatar, AvatarFallback } from "@repo/ui/components/avatar";
 import { Card, CardContent } from "@repo/ui/components/card";
+import { useTranslations } from "next-intl";
 
 const avatarInitialColors = [
   "bg-violet-100 text-violet-700",
@@ -13,7 +13,12 @@ const avatarInitialColors = [
   "bg-indigo-100 text-indigo-700",
 ];
 
-export function Testimonials() {
+interface TestimonialsProps {
+  /** 管理员在系统设置中配置的品牌名称。 */
+  brandName: string;
+}
+
+export function Testimonials({ brandName }: TestimonialsProps) {
   const t = useTranslations("Testimonials");
 
   const testimonialItems = t.raw("items") as Array<{
@@ -34,38 +39,52 @@ export function Testimonials() {
             {t("title")}
           </h2>
           <p className="mx-auto max-w-2xl text-muted-foreground">
-            {t("subtitle")}
+            {t("subtitle", { brandName })}
           </p>
         </div>
 
         {/* Testimonials Grid */}
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {testimonialItems.map((testimonial, index) => (
-            <Card key={index} className="rounded-xl border-0 bg-muted/50">
-              <CardContent className="p-6">
-                <p className="mb-6 text-sm leading-relaxed text-muted-foreground">
-                  &ldquo;{testimonial.content}&rdquo;
-                </p>
-                <div className="flex items-center gap-3">
-                  <Avatar className="h-10 w-10">
-                    <AvatarFallback
-                      className={
-                        avatarInitialColors[index % avatarInitialColors.length]
-                      }
-                    >
-                      {testimonial.author.charAt(0)}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <p className="text-sm font-medium">{testimonial.author}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {testimonial.role}
-                    </p>
+          {testimonialItems.map((testimonial, index) => {
+            const content = testimonial.content.replaceAll(
+              "{brandName}",
+              brandName
+            );
+
+            return (
+              <Card
+                key={testimonial.author}
+                className="rounded-xl border-0 bg-muted/50"
+              >
+                <CardContent className="p-6">
+                  <p className="mb-6 text-sm leading-relaxed text-muted-foreground">
+                    &ldquo;{content}&rdquo;
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <Avatar className="h-10 w-10">
+                      <AvatarFallback
+                        className={
+                          avatarInitialColors[
+                            index % avatarInitialColors.length
+                          ]
+                        }
+                      >
+                        {testimonial.author.charAt(0)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <p className="text-sm font-medium">
+                        {testimonial.author}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {testimonial.role}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       </div>
     </section>

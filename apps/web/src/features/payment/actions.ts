@@ -2,7 +2,7 @@
 
 import { db } from "@repo/database";
 import { subscription } from "@repo/database/schema";
-
+import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
 import { getBaseUrl, paymentConfig } from "@repo/shared/config/payment";
 import { findRuntimePlanByPriceId } from "@repo/shared/config/payment-runtime";
 import { logEvent } from "@repo/shared/logger";
@@ -91,6 +91,7 @@ export const createCheckoutSession = protectedAction
     });
 
     if (useLocalOrderProvider) {
+      const branding = await getRuntimeBrandingConfig();
       const outTradeNo = createPaymentOrderNo("SUB");
       const amountDue = upgradeQuote?.amountDue ?? price.amount;
       const metadata = {
@@ -114,8 +115,8 @@ export const createCheckoutSession = protectedAction
       const purchaseInput = {
         outTradeNo,
         name: upgradeQuote
-          ? `GPT2IMAGE upgrade to ${plan.name} ${price.interval ?? "subscription"}`
-          : `GPT2IMAGE ${plan.name} ${price.interval ?? "subscription"}`,
+          ? `${branding.name} upgrade to ${plan.name} ${price.interval ?? "subscription"}`
+          : `${branding.name} ${plan.name} ${price.interval ?? "subscription"}`,
         money: amountDue,
       };
       const checkout =

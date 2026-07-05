@@ -6,7 +6,12 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useCurrentSession } from "@/features/auth/hooks/use-current-session";
 
-export function CTASection() {
+interface CTASectionProps {
+  /** 管理员在系统设置中配置的品牌名称。 */
+  brandName: string;
+}
+
+export function CTASection({ brandName }: CTASectionProps) {
   const t = useTranslations("CTA");
   // 已登录用户点 CTA 应进创作页,而非注册/登录页(见 issue #20)。
   const { data: session } = useCurrentSession();
@@ -25,7 +30,7 @@ export function CTASection() {
               {t("title")}
             </h2>
             <p className="mx-auto mb-8 max-w-xl text-muted-foreground">
-              {t("subtitle")}
+              {t("subtitle", { brandName })}
             </p>
 
             <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">

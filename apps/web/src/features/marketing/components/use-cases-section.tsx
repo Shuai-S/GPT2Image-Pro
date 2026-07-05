@@ -1,8 +1,8 @@
 "use client";
 
+import { Card, CardContent } from "@repo/ui/components/card";
 import { Code, ImagePlus, Megaphone, Palette } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Card, CardContent } from "@repo/ui/components/card";
 
 const useCaseConfig = [
   { key: "designers" as const, icon: Palette },
@@ -11,7 +11,12 @@ const useCaseConfig = [
   { key: "developers" as const, icon: Code },
 ];
 
-export function UseCasesSection() {
+interface UseCasesSectionProps {
+  /** 管理员在系统设置中配置的品牌名称。 */
+  brandName: string;
+}
+
+export function UseCasesSection({ brandName }: UseCasesSectionProps) {
   const t = useTranslations("UseCases");
 
   return (
@@ -26,7 +31,7 @@ export function UseCasesSection() {
             {t("title")}
           </h2>
           <p className="mx-auto max-w-2xl text-muted-foreground">
-            {t("subtitle")}
+            {t("subtitle", { brandName })}
           </p>
         </div>
 

@@ -1,14 +1,19 @@
 "use client";
 
-import { useTranslations } from "next-intl";
 import {
   Accordion,
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
 } from "@repo/ui/components/accordion";
+import { useTranslations } from "next-intl";
 
-export function FAQSection() {
+interface FAQSectionProps {
+  /** 管理员在系统设置中配置的品牌名称。 */
+  brandName: string;
+}
+
+export function FAQSection({ brandName }: FAQSectionProps) {
   const t = useTranslations("FAQ");
   const faqItems = t.raw("items") as Array<{
     question: string;
@@ -27,19 +32,19 @@ export function FAQSection() {
             {t("title")}
           </h2>
           <p className="mx-auto max-w-2xl text-muted-foreground">
-            {t("subtitle")}
+            {t("subtitle", { brandName })}
           </p>
         </div>
 
         {/* FAQ Accordion */}
         <Accordion type="single" collapsible className="w-full">
           {faqItems.map((faq, index) => (
-            <AccordionItem key={index} value={`item-${index}`}>
+            <AccordionItem key={faq.question} value={`item-${index}`}>
               <AccordionTrigger className="text-left">
-                {faq.question}
+                {faq.question.replaceAll("{brandName}", brandName)}
               </AccordionTrigger>
               <AccordionContent className="text-muted-foreground">
-                {faq.answer}
+                {faq.answer.replaceAll("{brandName}", brandName)}
               </AccordionContent>
             </AccordionItem>
           ))}

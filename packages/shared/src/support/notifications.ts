@@ -1,7 +1,8 @@
-import { getRuntimeSettingString } from "../system-settings";
-import { sendEmail } from "../mail/utils";
-import { SupportTicketNotificationEmail } from "../mail/templates";
+import { getRuntimeBrandingConfig } from "../config/branding";
 import { logError, logger } from "../logger";
+import { SupportTicketNotificationEmail } from "../mail/templates";
+import { sendEmail } from "../mail/utils";
+import { getRuntimeSettingString } from "../system-settings";
 import { ticketCategories, ticketPriorities } from "./schemas";
 
 type TicketNotificationType = "created" | "user_reply";
@@ -55,16 +56,20 @@ export async function sendTicketAdminNotification(
 
   const title =
     input.type === "created" ? "有新的用户工单" : "用户追加了工单回复";
-  const ticketUrl = await getTicketUrl(input.ticketId);
+  const [ticketUrl, branding] = await Promise.all([
+    getTicketUrl(input.ticketId),
+    getRuntimeBrandingConfig(),
+  ]);
 
   try {
     const result = await sendEmail({
       to: recipients,
-      subject: `[GPT2IMAGE] ${title}: ${input.subject}`,
+      subject: `[${branding.name}] ${title}: ${input.subject}`,
       react: SupportTicketNotificationEmail({
         title,
         subject: input.subject,
         ticketUrl,
+        appName: branding.name,
         userName: input.userName,
         userEmail: input.userEmail,
         category: optionLabel(ticketCategories, input.category),

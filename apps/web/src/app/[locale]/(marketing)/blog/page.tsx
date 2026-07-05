@@ -1,4 +1,5 @@
 import { siteConfig } from "@repo/shared/config";
+import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
 import { isOperationFeatureEnabled } from "@repo/shared/system-settings";
 import { Separator } from "@repo/ui/components/separator";
 import type { Metadata } from "next";
@@ -18,11 +19,12 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { locale } = await params;
   const isZh = locale === "zh";
+  const branding = await getRuntimeBrandingConfig();
 
   const title = isZh ? "博客文章" : "Blog Posts";
   const description = isZh
-    ? "发现 GPT2IMAGE 团队的最新见解、教程和更新。了解产品最新动态。"
-    : "Discover the latest insights, tutorials, and updates from the GPT2IMAGE team. Learn about the latest product news.";
+    ? `发现 ${branding.name} 团队的最新见解、教程和更新。了解产品最新动态。`
+    : `Discover the latest insights, tutorials, and updates from the ${branding.name} team. Learn about the latest product news.`;
 
   return {
     title,
@@ -32,7 +34,7 @@ export async function generateMetadata({
       description,
       type: "website",
       url: `${siteConfig.url}/${locale}/blog`,
-      siteName: siteConfig.name,
+      siteName: branding.name,
     },
     alternates: {
       canonical: `${siteConfig.url}/${locale}/blog`,
@@ -59,6 +61,7 @@ export default async function BlogPage({
     notFound();
   }
 
+  const branding = await getRuntimeBrandingConfig();
   const posts = getBlogPosts(locale);
 
   // 按日期排序（最新的在前）
@@ -88,8 +91,8 @@ export default async function BlogPage({
         </h1>
         <p className="mx-auto mt-4 max-w-2xl text-lg text-muted-foreground">
           {locale === "zh"
-            ? "发现 GPT2IMAGE 团队的最新见解、教程和更新。了解产品最新动态。"
-            : "Discover the latest insights, tutorials, and updates from the GPT2IMAGE team. Learn about the latest product news."}
+            ? `发现 ${branding.name} 团队的最新见解、教程和更新。了解产品最新动态。`
+            : `Discover the latest insights, tutorials, and updates from the ${branding.name} team. Learn about the latest product news.`}
         </p>
       </div>
 

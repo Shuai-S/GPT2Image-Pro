@@ -10,6 +10,7 @@ import { db } from "@repo/database";
 import { creditsTransaction, externalApiKey } from "@repo/database/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
+import { getRuntimeBrandingConfig } from "../config/branding";
 import { getBaseUrl } from "../config/payment";
 import {
   isPlanAtLeast,
@@ -433,6 +434,7 @@ export const createCreditsPurchaseCheckout = withProtectedCreditsAction(
     });
 
     if (useLocalOrderProvider) {
+      const branding = await getRuntimeBrandingConfig();
       const outTradeNo = createPaymentOrderNo("CR");
       const metadata = {
         type: "credit_purchase" as const,
@@ -449,8 +451,8 @@ export const createCreditsPurchaseCheckout = withProtectedCreditsAction(
         outTradeNo,
         name:
           quantity > 1
-            ? `GPT2IMAGE Credits ${pkg.credits} x ${quantity}`
-            : `GPT2IMAGE Credits ${pkg.credits}`,
+            ? `${branding.name} Credits ${pkg.credits} x ${quantity}`
+            : `${branding.name} Credits ${pkg.credits}`,
         money: totalPrice,
       };
       const checkout =
