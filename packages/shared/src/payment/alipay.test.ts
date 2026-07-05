@@ -17,9 +17,14 @@ vi.mock("../system-settings", () => ({
 }));
 
 import {
+  getRuntimeSettingSelect,
+  getRuntimeSettingString,
+} from "../system-settings";
+import {
   ALIPAY_TRADE_SUCCESS,
   buildAlipayVerifyResult,
   createAlipayPurchase,
+  createRuntimeAlipayPurchase,
   signAlipayParams,
   verifyAlipayParams,
 } from "./alipay";
@@ -35,6 +40,8 @@ function configureAlipayEnv() {
   process.env.ALIPAY_APP_PRIVATE_KEY = keyPair.privateKey;
   process.env.ALIPAY_PUBLIC_KEY = keyPair.publicKey;
   process.env.ALIPAY_GATEWAY_URL = "https://openapi.alipay.test/gateway.do";
+  process.env.ALIPAY_NOTIFY_URL = "";
+  process.env.ALIPAY_RETURN_URL = "";
   process.env.NEXT_PUBLIC_APP_URL = "https://app.example.com";
 }
 
@@ -100,6 +107,53 @@ describe("createAlipayPurchase", () => {
       total_amount: "60.00",
       product_code: "FAST_INSTANT_TRADE_PAY",
     });
+  });
+
+  it("uses configured synchronous return URL from env", () => {
+    configureAlipayEnv();
+    process.env.ALIPAY_RETURN_URL = "https://pay.example.com/payment/result";
+
+    const result = createAlipayPurchase({
+      outTradeNo: "SUB_RETURN_ENV",
+      name: "GPT2IMAGE Pro monthly",
+      money: 60,
+    });
+
+    expect(result.params.return_url).toBe(
+      "https://pay.example.com/payment/result"
+    );
+    expect(verifyAlipayParams(result.params)).toBe(true);
+  });
+
+  it("uses configured synchronous return URL from runtime settings", async () => {
+    configureAlipayEnv();
+    const runtimeValues: Record<string, string> = {
+      ALIPAY_APP_ID: "2026000000000001",
+      ALIPAY_APP_PRIVATE_KEY: keyPair.privateKey,
+      ALIPAY_PUBLIC_KEY: keyPair.publicKey,
+      ALIPAY_GATEWAY_URL: "https://openapi.alipay.test/gateway.do",
+      ALIPAY_RETURN_URL: "https://admin.example.com/payment/result",
+    };
+    vi.mocked(getRuntimeSettingString).mockImplementation(async (key) => {
+      return runtimeValues[key] ?? undefined;
+    });
+    vi.mocked(getRuntimeSettingSelect).mockImplementation(
+      async (_key, _options, fallback) => fallback
+    );
+
+    const result = await createRuntimeAlipayPurchase({
+      outTradeNo: "SUB_RETURN_RUNTIME",
+      name: "GPT2IMAGE Pro monthly",
+      money: 60,
+    });
+
+    expect(result.params.notify_url).toBe(
+      "https://app.example.com/api/webhooks/alipay"
+    );
+    expect(result.params.return_url).toBe(
+      "https://admin.example.com/payment/result"
+    );
+    expect(verifyAlipayParams(result.params)).toBe(true);
   });
 
   it("creates wap pay params when requested", () => {

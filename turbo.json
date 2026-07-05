@@ -35,6 +35,7 @@
         "ALIPAY_PUBLIC_KEY",
         "ALIPAY_GATEWAY_URL",
         "ALIPAY_NOTIFY_URL",
+        "ALIPAY_RETURN_URL",
         "ALIPAY_CHARSET",
         "ALIPAY_PAYMENT_MODE",
         "EMAIL_PROVIDER",

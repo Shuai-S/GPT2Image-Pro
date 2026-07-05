@@ -54,6 +54,7 @@ export type SettingKey =
   | "ALIPAY_PUBLIC_KEY"
   | "ALIPAY_GATEWAY_URL"
   | "ALIPAY_NOTIFY_URL"
+  | "ALIPAY_RETURN_URL"
   | "ALIPAY_CHARSET"
   | "ALIPAY_PAYMENT_MODE"
   | "EPAY_PID"
@@ -629,6 +630,13 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     key: "ALIPAY_NOTIFY_URL",
     label: "支付宝异步通知地址",
     description: "留空则使用应用地址自动生成。",
+    category: "payment",
+    valueType: "string",
+  },
+  {
+    key: "ALIPAY_RETURN_URL",
+    label: "支付宝同步跳转地址",
+    description: "用户支付后浏览器回跳地址；留空则使用内置验签回跳路由。",
     category: "payment",
     valueType: "string",
   },

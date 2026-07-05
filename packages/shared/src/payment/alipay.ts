@@ -113,7 +113,9 @@ async function getRuntimeAlipayMode(): Promise<AlipayMode> {
 }
 
 function getAlipayReturnUrl(baseUrl: string): string {
-  return `${baseUrl}/api/payments/alipay/return`;
+  return (
+    getEnvValue("ALIPAY_RETURN_URL") || `${baseUrl}/api/payments/alipay/return`
+  );
 }
 
 function getAlipayNotifyUrl(baseUrl: string): string {
@@ -124,6 +126,13 @@ async function getRuntimeAlipayNotifyUrl(baseUrl: string): Promise<string> {
   return (
     (await getRuntimeSettingString("ALIPAY_NOTIFY_URL")) ??
     `${baseUrl}/api/webhooks/alipay`
+  );
+}
+
+async function getRuntimeAlipayReturnUrl(baseUrl: string): Promise<string> {
+  return (
+    (await getRuntimeSettingString("ALIPAY_RETURN_URL")) ??
+    getAlipayReturnUrl(baseUrl)
   );
 }
 
@@ -265,7 +274,7 @@ export async function createRuntimeAlipayPurchase(
     await getRuntimeAlipayConfig(),
     await getRuntimeAlipayMode(),
     input.notifyUrl ?? (await getRuntimeAlipayNotifyUrl(baseUrl)),
-    input.returnUrl ?? getAlipayReturnUrl(baseUrl)
+    input.returnUrl ?? (await getRuntimeAlipayReturnUrl(baseUrl))
   );
 }
 
