@@ -146,6 +146,7 @@ export const getMyReferralOverview = defineOperation({
         email: z.string(),
         name: z.string(),
         joinedAt: z.date(),
+        totalOrderAmountCents: z.number(),
         totalCommissionCredits: z.number(),
       })
     ),

@@ -45,7 +45,7 @@ export function isValidReferralCode(code: string) {
 /**
  * 将返佣金额分转换为积分。
  *
- * @param cents - 返佣金额，单位为归一后的 USD 分。
+ * @param cents - 返佣金额，单位为归一后的人民币分。
  * @returns 可发放的积分数量，保留两位小数。
  * @sideEffects 无。
  */
@@ -54,29 +54,30 @@ export function centsToCredits(cents: number) {
 }
 
 /**
- * 将订单金额按币种归一为 USD 分。
+ * 将订单金额按币种归一为人民币分。
  *
  * WHY: Creem 走 USD cents，易支付/支付宝走 CNY 分。返佣以分为单位计算积分，
- * 若不按币种换算，1 分 CNY 与 1 cent USD 会产生等量积分（约 7 倍价值差），
- * 形成跨支付通道刷返佣的套利点。未知币种返回 null，由调用方拒绝入账。
+ * 业务口径要求按人民币返利：充值 10 元、10% 返利即 1 元，再按 1 分对应
+ * 1 积分发放。美元订单先折成人民币分，保证跨支付通道价值一致。未知币种
+ * 返回 null，由调用方拒绝入账。
  *
  * @param amountCents - 订单实付金额，单位为原币种最小单位（分）。
  * @param currency - 订单币种代码，大小写不敏感。
  * @param cnyPerUsd - CNY 兑 USD 汇率（1 USD 等于多少 CNY）。
- * @returns 归一后的 USD 分（向下取整），入参非法或币种不支持时返回 null。
+ * @returns 归一后的人民币分（向下取整），入参非法或币种不支持时返回 null。
  * @sideEffects 无。
  */
-export function normalizeOrderAmountToUsdCents(
+export function normalizeOrderAmountToCnyCents(
   amountCents: number,
   currency: string,
   cnyPerUsd: number
 ) {
   if (!Number.isFinite(amountCents) || amountCents <= 0) return null;
   const code = currency.trim().toUpperCase();
-  if (code === "USD") return Math.trunc(amountCents);
-  if (code === "CNY") {
+  if (code === "CNY") return Math.trunc(amountCents);
+  if (code === "USD") {
     if (!Number.isFinite(cnyPerUsd) || cnyPerUsd <= 0) return null;
-    return Math.floor(Math.trunc(amountCents) / cnyPerUsd);
+    return Math.floor(Math.trunc(amountCents) * cnyPerUsd);
   }
   return null;
 }

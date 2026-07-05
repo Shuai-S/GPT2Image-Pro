@@ -46,6 +46,36 @@ function formatDate(value: Date, locale: string) {
 }
 
 /**
+ * 将积分数格式化为带单位的页面展示文本。
+ *
+ * @param value - 返佣积分数量。
+ * @param isZh - 当前页面是否为中文。
+ * @returns 带积分单位的展示文本。
+ * @sideEffects 无。
+ */
+function formatCreditAmount(value: number, isZh: boolean) {
+  const amount = formatCredits(value);
+  return isZh ? `${amount} 积分` : `${amount} credits`;
+}
+
+/**
+ * 将人民币分格式化为页面展示金额。
+ *
+ * @param cents - 已按人民币归一的金额分。
+ * @param locale - 当前页面语言，用于本地化货币格式。
+ * @returns 带人民币币种符号的金额文本。
+ * @sideEffects 无。
+ */
+function formatCnyFromCents(cents: number, locale: string) {
+  return new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency: "CNY",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(cents / 100);
+}
+
+/**
  * 展示邀请链接、返佣汇总和转积分操作。
  *
  * @param overview - 服务端读取的当前用户返佣概览。
@@ -70,18 +100,18 @@ export function ReferralDashboard({
   const stats = useMemo(
     () => [
       {
-        label: copy("Available", "可转积分"),
-        value: formatCredits(overview.availableCredits),
+        label: copy("Available credits", "可转积分"),
+        value: formatCreditAmount(overview.availableCredits, isZh),
         icon: Wallet,
       },
       {
-        label: copy("Frozen", "冻结中"),
-        value: formatCredits(overview.frozenCredits),
+        label: copy("Frozen credits", "冻结积分"),
+        value: formatCreditAmount(overview.frozenCredits, isZh),
         icon: RefreshCw,
       },
       {
-        label: copy("Converted", "已转积分"),
-        value: formatCredits(overview.convertedCredits),
+        label: copy("Converted credits", "已转积分"),
+        value: formatCreditAmount(overview.convertedCredits, isZh),
         icon: Check,
       },
       {
@@ -90,7 +120,7 @@ export function ReferralDashboard({
         icon: Gift,
       },
     ],
-    [copy, overview]
+    [copy, isZh, overview]
   );
 
   const { execute: convert, isPending } = useAction(
@@ -212,7 +242,7 @@ export function ReferralDashboard({
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-sm">
+              <table className="w-full min-w-[820px] text-sm">
                 <thead>
                   <tr className="border-b text-left text-muted-foreground">
                     <th className="py-3 pr-4 font-medium">
@@ -221,8 +251,11 @@ export function ReferralDashboard({
                     <th className="py-3 pr-4 font-medium">
                       {copy("Joined", "绑定时间")}
                     </th>
+                    <th className="py-3 pr-4 text-right font-medium">
+                      {copy("Total Recharge", "累计充值")}
+                    </th>
                     <th className="py-3 text-right font-medium">
-                      {copy("Total Reward", "累计返利")}
+                      {copy("Reward Credits", "返利积分")}
                     </th>
                   </tr>
                 </thead>
@@ -240,8 +273,17 @@ export function ReferralDashboard({
                       <td className="py-3 pr-4 text-muted-foreground">
                         {formatDate(invitee.joinedAt, locale)}
                       </td>
+                      <td className="py-3 pr-4 text-right font-medium">
+                        {formatCnyFromCents(
+                          invitee.totalOrderAmountCents,
+                          locale
+                        )}
+                      </td>
                       <td className="py-3 text-right font-medium">
-                        {formatCredits(invitee.totalCommissionCredits)}
+                        {formatCreditAmount(
+                          invitee.totalCommissionCredits,
+                          isZh
+                        )}
                       </td>
                     </tr>
                   ))}

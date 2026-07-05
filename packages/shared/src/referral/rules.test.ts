@@ -10,7 +10,7 @@ import {
   calculateReferralCommissionCents,
   centsToCredits,
   isValidReferralCode,
-  normalizeOrderAmountToUsdCents,
+  normalizeOrderAmountToCnyCents,
   normalizeReferralCode,
 } from "./rules";
 
@@ -43,17 +43,29 @@ describe("referral rules", () => {
     expect(centsToCredits(123.456)).toBe(123.46);
   });
 
-  it("normalizes order amounts to USD cents by currency", () => {
-    expect(normalizeOrderAmountToUsdCents(1000, "USD", 7.2)).toBe(1000);
-    expect(normalizeOrderAmountToUsdCents(1000, "usd", 7.2)).toBe(1000);
-    expect(normalizeOrderAmountToUsdCents(720, "CNY", 7.2)).toBe(100);
-    expect(normalizeOrderAmountToUsdCents(721, "cny", 7.2)).toBe(100);
-    expect(normalizeOrderAmountToUsdCents(1000, "EUR", 7.2)).toBeNull();
-    expect(normalizeOrderAmountToUsdCents(0, "USD", 7.2)).toBeNull();
-    expect(normalizeOrderAmountToUsdCents(-100, "CNY", 7.2)).toBeNull();
-    expect(normalizeOrderAmountToUsdCents(1000, "CNY", 0)).toBeNull();
+  it("normalizes order amounts to CNY cents by currency", () => {
+    expect(normalizeOrderAmountToCnyCents(1000, "CNY", 7.2)).toBe(1000);
+    expect(normalizeOrderAmountToCnyCents(1000, "cny", 7.2)).toBe(1000);
+    expect(normalizeOrderAmountToCnyCents(100, "USD", 7.2)).toBe(720);
+    expect(normalizeOrderAmountToCnyCents(101, "usd", 7.2)).toBe(727);
+    expect(normalizeOrderAmountToCnyCents(1000, "EUR", 7.2)).toBeNull();
+    expect(normalizeOrderAmountToCnyCents(0, "USD", 7.2)).toBeNull();
+    expect(normalizeOrderAmountToCnyCents(-100, "CNY", 7.2)).toBeNull();
+    expect(normalizeOrderAmountToCnyCents(1000, "USD", 0)).toBeNull();
     expect(
-      normalizeOrderAmountToUsdCents(1000, "CNY", Number.NaN)
+      normalizeOrderAmountToCnyCents(1000, "USD", Number.NaN)
     ).toBeNull();
+  });
+
+  it("rewards 10 percent of CNY payment as credits by CNY cents", () => {
+    const orderCnyCents = normalizeOrderAmountToCnyCents(1000, "CNY", 7.2);
+    const commissionCnyCents = calculateReferralCommissionCents(
+      orderCnyCents ?? 0,
+      1000
+    );
+
+    expect(orderCnyCents).toBe(1000);
+    expect(commissionCnyCents).toBe(100);
+    expect(centsToCredits(commissionCnyCents)).toBe(100);
   });
 });

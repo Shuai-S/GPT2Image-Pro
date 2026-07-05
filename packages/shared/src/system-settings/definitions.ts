@@ -1681,7 +1681,7 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     key: "REFERRAL_PER_INVITEE_CAP_CENTS",
     label: "单用户返佣上限分",
     description:
-      "每个被邀请用户最多为同一邀请人产生多少返佣，单位为归一后的 USD 分。0 表示无上限。",
+      "每个被邀请用户最多为同一邀请人产生多少返佣，单位为归一后的人民币分。0 表示无上限。",
     category: "referral",
     valueType: "number",
     min: 0,
@@ -1722,7 +1722,7 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     key: "REFERRAL_CNY_PER_USD",
     label: "返佣 CNY 兑 USD 汇率",
     description:
-      "1 美元等于多少人民币，用于把易支付/支付宝的 CNY 订单金额归一为 USD 分后计算返佣，避免跨币种返佣等值套利。",
+      "1 美元等于多少人民币，用于把 Creem 的 USD 订单金额归一为人民币分后计算返佣，避免跨币种返佣等值套利。",
     category: "referral",
     valueType: "number",
     min: 1,

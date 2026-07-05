@@ -32,7 +32,7 @@ import {
   calculateReferralCommissionCents,
   centsToCredits,
   isValidReferralCode,
-  normalizeOrderAmountToUsdCents,
+  normalizeOrderAmountToCnyCents,
   normalizeReferralCode,
   REFERRAL_CODE_ALPHABET,
   REFERRAL_CODE_LENGTH,
@@ -136,6 +136,7 @@ export interface ReferralOverview {
     email: string;
     name: string;
     joinedAt: Date;
+    totalOrderAmountCents: number;
     totalCommissionCredits: number;
   }>;
 }
@@ -458,11 +459,11 @@ export async function accrueReferralCommissionForPayment(
     return { applied: false, reason: "invalid_order" };
   }
 
-  // WHY: 各支付通道币种不同（Creem 为 USD cents，易支付/支付宝为 CNY 分），
-  // 返佣按分计算积分，必须先归一为 USD 分，否则等额数字的 CNY 订单会产生
-  // 与 USD 订单等量的积分，形成跨通道刷返佣套利。未知币种拒绝入账并告警，
-  // 而非按原值放行。
-  const normalizedAmountCents = normalizeOrderAmountToUsdCents(
+  // WHY: 业务口径按人民币返利（10 元订单、10% 返利即 1 元），
+  // 且 1 人民币分对应 1 积分。Creem 美元订单先折成人民币分，易支付/
+  // 支付宝订单直接使用人民币分；未知币种拒绝入账并告警，避免跨通道
+  // 金额口径不一致。
+  const normalizedAmountCents = normalizeOrderAmountToCnyCents(
     input.orderAmountCents,
     input.currency,
     await getReferralCnyPerUsd()
@@ -584,8 +585,9 @@ export async function accrueReferralCommissionForPayment(
       : "available";
     const commissionId = crypto.randomUUID();
 
-    // 账本金额统一以归一后的 USD 分记账，保证单 invitee 上限与返佣计算
-    // 跨支付通道可比；原始金额与币种保留在 metadata 供审计。
+    // 账本金额统一以归一后的人民币分记账，保证单 invitee 上限与返佣计算
+    // 均按“人民币返利、人民币分转积分”的业务口径执行；原始金额与币种
+    // 保留在 metadata 供审计。
     const inserted = await tx
       .insert(referralCommissionLedger)
       .values({
@@ -596,7 +598,7 @@ export async function accrueReferralCommissionForPayment(
         orderId: input.orderId,
         orderKind: input.orderKind,
         orderAmountCents: normalizedAmountCents,
-        currency: "USD",
+        currency: "CNY",
         commissionRateBps: rateBps,
         commissionAmountCents,
         commissionCredits,
@@ -689,6 +691,10 @@ export async function getReferralOverview(
       email: user.email,
       name: user.name,
       joinedAt: referralBinding.createdAt,
+      totalOrderAmountCents:
+        sql<number>`coalesce(sum(${referralCommissionLedger.orderAmountCents}), 0)`.mapWith(
+          Number
+        ),
       totalCommissionCredits:
         sql<number>`coalesce(sum(${referralCommissionLedger.commissionCredits}), 0)`.mapWith(
           Number
