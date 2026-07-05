@@ -231,6 +231,19 @@ function createAlipayRequestParams(input: {
   };
 }
 
+function buildAlipaySubmitUrl(
+  gatewayUrl: string,
+  params: Record<string, string>
+): string {
+  const submitUrl = new URL(gatewayUrl);
+  for (const [key, value] of Object.entries(params)) {
+    if (key !== "biz_content") {
+      submitUrl.searchParams.set(key, value);
+    }
+  }
+  return submitUrl.toString();
+}
+
 function createAlipayPurchaseWithConfig(
   input: EpayPurchaseInput,
   config: AlipayConfig,
@@ -247,8 +260,15 @@ function createAlipayPurchaseWithConfig(
     returnUrl,
     mode,
   });
+  const bizContent = params.biz_content;
+  if (!bizContent) {
+    throw new Error("Alipay biz_content must be generated before signing");
+  }
 
-  return { url: config.gatewayUrl, params };
+  return {
+    url: buildAlipaySubmitUrl(config.gatewayUrl, params),
+    params: { biz_content: bizContent },
+  };
 }
 
 export function createAlipayPurchase(

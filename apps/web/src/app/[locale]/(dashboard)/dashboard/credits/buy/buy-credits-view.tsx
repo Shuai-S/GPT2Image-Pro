@@ -27,8 +27,8 @@ import { Input } from "@repo/ui/components/input";
 import { Separator } from "@repo/ui/components/separator";
 import { cn } from "@repo/ui/utils";
 import { ArrowLeft, Check, Loader2, Minus, Plus } from "lucide-react";
-import { useLocale } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useLocale } from "next-intl";
 import { useAction } from "next-safe-action/hooks";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -79,6 +79,7 @@ function submitPaymentForm(url: string, params: Record<string, string>) {
   const form = document.createElement("form");
   form.action = url;
   form.method = "POST";
+  form.acceptCharset = "UTF-8";
   form.style.display = "none";
 
   for (const [key, value] of Object.entries(params)) {

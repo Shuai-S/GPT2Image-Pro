@@ -47,6 +47,7 @@ function submitPaymentForm(url: string, params: Record<string, string>) {
   const form = document.createElement("form");
   form.action = url;
   form.method = "POST";
+  form.acceptCharset = "UTF-8";
   form.style.display = "none";
 
   for (const [key, value] of Object.entries(params)) {

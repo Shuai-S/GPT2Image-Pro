@@ -45,6 +45,18 @@ function configureAlipayEnv() {
   process.env.NEXT_PUBLIC_APP_URL = "https://app.example.com";
 }
 
+function mergeAlipaySubmitParams(result: {
+  url: string;
+  params: Record<string, string>;
+}) {
+  const url = new URL(result.url);
+  const merged = Object.fromEntries(url.searchParams.entries());
+  return {
+    ...merged,
+    ...result.params,
+  };
+}
+
 describe("signAlipayParams / verifyAlipayParams", () => {
   it("signs and verifies RSA2 parameters while excluding sign fields", () => {
     configureAlipayEnv();
@@ -90,16 +102,21 @@ describe("createAlipayPurchase", () => {
       money: 60,
     });
 
-    expect(result.url).toBe("https://openapi.alipay.test/gateway.do");
-    expect(result.params.method).toBe("alipay.trade.page.pay");
-    expect(result.params.notify_url).toBe(
+    const submitParams = mergeAlipaySubmitParams(result);
+
+    expect(new URL(result.url).origin).toBe("https://openapi.alipay.test");
+    expect(submitParams.method).toBe("alipay.trade.page.pay");
+    expect(submitParams.charset).toBe("utf-8");
+    expect(new URL(result.url).searchParams.get("charset")).toBe("utf-8");
+    expect(result.params).toEqual({ biz_content: submitParams.biz_content });
+    expect(submitParams.notify_url).toBe(
       "https://app.example.com/api/webhooks/alipay"
     );
-    expect(result.params.return_url).toBe(
+    expect(submitParams.return_url).toBe(
       "https://app.example.com/api/payments/alipay/return"
     );
-    expect(verifyAlipayParams(result.params)).toBe(true);
-    const bizContent = result.params.biz_content;
+    expect(verifyAlipayParams(submitParams)).toBe(true);
+    const bizContent = submitParams.biz_content;
     expect(bizContent).toBeDefined();
     if (!bizContent) return;
     expect(JSON.parse(bizContent)).toMatchObject({
@@ -119,10 +136,12 @@ describe("createAlipayPurchase", () => {
       money: 60,
     });
 
-    expect(result.params.return_url).toBe(
+    const submitParams = mergeAlipaySubmitParams(result);
+
+    expect(submitParams.return_url).toBe(
       "https://pay.example.com/payment/result"
     );
-    expect(verifyAlipayParams(result.params)).toBe(true);
+    expect(verifyAlipayParams(submitParams)).toBe(true);
   });
 
   it("uses configured synchronous return URL from runtime settings", async () => {
@@ -147,13 +166,15 @@ describe("createAlipayPurchase", () => {
       money: 60,
     });
 
-    expect(result.params.notify_url).toBe(
+    const submitParams = mergeAlipaySubmitParams(result);
+
+    expect(submitParams.notify_url).toBe(
       "https://app.example.com/api/webhooks/alipay"
     );
-    expect(result.params.return_url).toBe(
+    expect(submitParams.return_url).toBe(
       "https://admin.example.com/payment/result"
     );
-    expect(verifyAlipayParams(result.params)).toBe(true);
+    expect(verifyAlipayParams(submitParams)).toBe(true);
   });
 
   it("creates wap pay params when requested", () => {
@@ -164,8 +185,10 @@ describe("createAlipayPurchase", () => {
       "wap"
     );
 
-    expect(result.params.method).toBe("alipay.trade.wap.pay");
-    const bizContent = result.params.biz_content;
+    const submitParams = mergeAlipaySubmitParams(result);
+
+    expect(submitParams.method).toBe("alipay.trade.wap.pay");
+    const bizContent = submitParams.biz_content;
     expect(bizContent).toBeDefined();
     if (!bizContent) return;
     expect(JSON.parse(bizContent)).toMatchObject({
