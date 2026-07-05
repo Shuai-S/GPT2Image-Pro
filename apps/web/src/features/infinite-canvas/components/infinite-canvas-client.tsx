@@ -374,6 +374,24 @@ export function InfiniteCanvasClient() {
         setSelectedIds([nodeId]);
         return;
       }
+      if (connectFromId === nodeId) {
+        toast.info(
+          copy("Pick another node to connect", "请选择另一个节点连接")
+        );
+        setSelectedIds([nodeId]);
+        return;
+      }
+      if (
+        state.edges.some(
+          (edge) => edge.from === connectFromId && edge.to === nodeId
+        )
+      ) {
+        toast.info(copy("Connection already exists", "这条连接已存在"));
+        setConnectFromId(null);
+        setActiveTool("select");
+        setSelectedIds([nodeId]);
+        return;
+      }
       patchState((current) => addCanvasEdge(current, connectFromId, nodeId));
       setConnectFromId(null);
       setActiveTool("select");
@@ -755,6 +773,7 @@ export function InfiniteCanvasClient() {
               key={node.id}
               node={node}
               selected={selectedIds.includes(node.id)}
+              connectMode={activeTool === "connect"}
               connectSource={connectFromId === node.id}
               onPointerDown={handleNodePointerDown}
               onPatch={(patch) =>
@@ -876,6 +895,7 @@ function ToolbarButton({
 type CanvasNodeViewProps = {
   node: CanvasNode;
   selected: boolean;
+  connectMode: boolean;
   connectSource: boolean;
   onPointerDown: (
     nodeId: string,
@@ -896,6 +916,7 @@ type CanvasNodeViewProps = {
 function CanvasNodeView({
   node,
   selected,
+  connectMode,
   connectSource,
   onPointerDown,
   onPatch,
@@ -924,6 +945,12 @@ function CanvasNodeView({
       }}
       onPointerDown={(event) => onPointerDown(node.id, event)}
     >
+      {connectMode && (
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 z-10 cursor-crosshair"
+        />
+      )}
       <div className="flex h-10 shrink-0 cursor-move items-center justify-between gap-2 border-b border-border px-3">
         <div className="flex min-w-0 items-center gap-2">
           <NodeIcon kind={node.kind} />
