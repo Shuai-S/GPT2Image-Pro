@@ -1,5 +1,11 @@
 "use client";
 
+/*
+ * 职责：提供后台系统设置与模型定价规则的可视化编辑面板。
+ * 使用方：web 管理后台系统设置一级菜单。
+ * 关键依赖：system-settings actions、设置定义、模型定价规则编辑器与 shadcn/ui 组件。
+ */
+
 import { Badge } from "@repo/ui/components/badge";
 import { Button } from "@repo/ui/components/button";
 import {
@@ -72,6 +78,13 @@ type SettingUpdate = {
   key: string;
   value?: DraftValue;
   clear?: boolean;
+};
+
+type SystemSettingsPanelMode = "system" | "model-pricing";
+
+type SystemSettingsPanelProps = {
+  // 系统设置与模型定价共用同一组读写 action；mode 负责把页面入口和保存范围隔离开。
+  mode?: SystemSettingsPanelMode;
 };
 
 const PLAN_OPTIONS = [
@@ -2031,7 +2044,16 @@ function CreditPackageMatrixInput({
   );
 }
 
-export function SystemSettingsPanel() {
+/**
+ * 渲染后台系统设置编辑器。
+ *
+ * @param props.mode 页面模式；system 只编辑通用系统设置，model-pricing 只编辑模型定价规则。
+ * @returns 可加载、编辑并保存对应设置范围的 React 面板。
+ * @sideEffects 通过 next-safe-action 读取和写入 system_setting，并在保存后同步环境文件。
+ */
+export function SystemSettingsPanel({
+  mode = "system",
+}: SystemSettingsPanelProps) {
   const [settings, setSettings] = useState<SettingSnapshotItem[]>([]);
   const [drafts, setDrafts] = useState<Record<string, DraftValue>>({});
   const [clearKeys, setClearKeys] = useState<Record<string, boolean>>({});
@@ -2147,10 +2169,15 @@ export function SystemSettingsPanel() {
     const payload: SettingUpdate[] = [];
     try {
       for (const setting of settings) {
+        if (mode === "model-pricing" && setting.key !== "MODEL_PRICING_RULES") {
+          continue;
+        }
         // 见上:模型计费倍率不在本面板编辑,跳过,避免覆盖 Adobe tab 的改动。
         if (
-          setting.key === "IMAGE_MODEL_MULTIPLIERS" ||
-          setting.key === "VIDEO_MODEL_MULTIPLIERS"
+          mode === "system" &&
+          (setting.key === "MODEL_PRICING_RULES" ||
+            setting.key === "IMAGE_MODEL_MULTIPLIERS" ||
+            setting.key === "VIDEO_MODEL_MULTIPLIERS")
         ) {
           continue;
         }
@@ -2212,43 +2239,127 @@ export function SystemSettingsPanel() {
   const modelPricingSetting = settings.find(
     (setting) => setting.key === "MODEL_PRICING_RULES"
   );
+  const isModelPricingMode = mode === "model-pricing";
+
+  const modelPricingContent = (
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-lg font-semibold">模型定价</h3>
+        <p className="text-sm text-muted-foreground">
+          管理 token、按次和组合计费规则；公开规则会同步展示在用户定价页。
+        </p>
+      </div>
+
+      {modelPricingSetting ? (
+        <Card className="rounded-lg">
+          <CardHeader className="space-y-2">
+            <div className="flex items-start justify-between gap-3">
+              <CardTitle className="text-base">
+                {modelPricingSetting.label}
+              </CardTitle>
+              <div className="flex flex-wrap justify-end gap-1">
+                {modelPricingSetting.stored ? (
+                  <Badge>后台</Badge>
+                ) : modelPricingSetting.fromEnv ? (
+                  <Badge variant="secondary">环境变量</Badge>
+                ) : (
+                  <Badge variant="outline">默认值</Badge>
+                )}
+              </div>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {modelPricingSetting.description}
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <SettingInput
+              setting={modelPricingSetting}
+              value={drafts[modelPricingSetting.key] ?? ""}
+              disabled={disabled}
+              onChange={(value) => updateDraft(modelPricingSetting.key, value)}
+            />
+            <div className="flex items-center justify-between gap-3 border-t pt-3 text-xs text-muted-foreground">
+              <span>
+                更新时间：
+                {modelPricingSetting.updatedAt
+                  ? formatDateInTimeZone(
+                      modelPricingSetting.updatedAt,
+                      "zh",
+                      {
+                        year: "numeric",
+                        month: "2-digit",
+                        day: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      },
+                      configuredTimeZone
+                    )
+                  : "未保存"}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={disabled}
+                onClick={() => markClear(modelPricingSetting.key)}
+              >
+                清空并回退
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="rounded-lg border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+          未加载到模型定价设置，请先初始化默认配置。
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">系统设置</h2>
+          <h2 className="text-2xl font-bold tracking-tight">
+            {isModelPricingMode ? "模型定价" : "系统设置"}
+          </h2>
           <p className="text-sm text-muted-foreground">
-            管理审核、登录、支付、套餐、模型、存储和邮件等全局配置。密钥不会在页面回显。
+            {isModelPricingMode
+              ? "管理模型定价规则，独立于其他系统设置保存。"
+              : "管理审核、登录、支付、套餐、模型、存储和邮件等全局配置。密钥不会在页面回显。"}
           </p>
         </div>
         <div className="flex flex-wrap justify-end gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => initializeDefaults()}
-            disabled={disabled}
-          >
-            {isInitializing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Database className="mr-2 h-4 w-4" />
-            )}
-            初始化默认配置
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => importEnvSettings({ overwrite: true })}
-            disabled={disabled}
-          >
-            {isImporting ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="mr-2 h-4 w-4" />
-            )}
-            导入当前环境变量
-          </Button>
+          {!isModelPricingMode ? (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => initializeDefaults()}
+                disabled={disabled}
+              >
+                {isInitializing ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Database className="mr-2 h-4 w-4" />
+                )}
+                初始化默认配置
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => importEnvSettings({ overwrite: true })}
+                disabled={disabled}
+              >
+                {isImporting ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="mr-2 h-4 w-4" />
+                )}
+                导入当前环境变量
+              </Button>
+            </>
+          ) : null}
           <Button
             onClick={handleSave}
             disabled={disabled || settings.length === 0}
@@ -2264,268 +2375,208 @@ export function SystemSettingsPanel() {
       </div>
 
       <div className="rounded-lg border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-        已保存配置优先于环境变量；未保存时继续使用环境变量兜底。标记为“需重启”或“需重新构建”的配置，保存后要重启服务或重新部署后才完整生效。
+        {isModelPricingMode
+          ? "模型定价保存后会写入后台配置；未保存时继续使用环境变量或代码默认规则兜底。"
+          : "已保存配置优先于环境变量；未保存时继续使用环境变量兜底。标记为“需重启”或“需重新构建”的配置，保存后要重启服务或重新部署后才完整生效。"}
       </div>
 
-      <Tabs
-        defaultValue={SETTING_CATEGORIES[0]?.id ?? "general"}
-        className="w-full"
-      >
-        <TabsList className="h-auto flex-wrap justify-start bg-transparent p-0">
-          {SETTING_CATEGORIES.map((category) => (
-            <TabsTrigger
-              key={category.id}
-              value={category.id}
-              className="rounded-md border border-transparent px-3 py-2 data-[state=active]:border-foreground/20 data-[state=active]:bg-foreground/5 data-[state=active]:text-foreground data-[state=active]:shadow-none"
-            >
-              {category.label}
-            </TabsTrigger>
-          ))}
-          <TabsTrigger
-            value="model-pricing"
-            className="rounded-md border border-transparent px-3 py-2 data-[state=active]:border-foreground/20 data-[state=active]:bg-foreground/5 data-[state=active]:text-foreground data-[state=active]:shadow-none"
-          >
-            模型定价
-          </TabsTrigger>
-        </TabsList>
+      {isModelPricingMode ? (
+        modelPricingContent
+      ) : (
+        <Tabs
+          defaultValue={SETTING_CATEGORIES[0]?.id ?? "general"}
+          className="w-full"
+        >
+          <TabsList className="h-auto flex-wrap justify-start bg-transparent p-0">
+            {SETTING_CATEGORIES.map((category) => (
+              <TabsTrigger
+                key={category.id}
+                value={category.id}
+                className="rounded-md border border-transparent px-3 py-2 data-[state=active]:border-foreground/20 data-[state=active]:bg-foreground/5 data-[state=active]:text-foreground data-[state=active]:shadow-none"
+              >
+                {category.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
 
-        <TabsContent value="model-pricing" className="mt-6 space-y-4">
-          <div>
-            <h3 className="text-lg font-semibold">模型定价</h3>
-            <p className="text-sm text-muted-foreground">
-              管理 token、按次和组合计费规则；公开规则会同步展示在用户定价页。
-            </p>
-          </div>
-
-          {modelPricingSetting ? (
-            <Card className="rounded-lg">
-              <CardHeader className="space-y-2">
-                <div className="flex items-start justify-between gap-3">
-                  <CardTitle className="text-base">
-                    {modelPricingSetting.label}
-                  </CardTitle>
-                  <div className="flex flex-wrap justify-end gap-1">
-                    {modelPricingSetting.stored ? (
-                      <Badge>后台</Badge>
-                    ) : modelPricingSetting.fromEnv ? (
-                      <Badge variant="secondary">环境变量</Badge>
-                    ) : (
-                      <Badge variant="outline">默认值</Badge>
-                    )}
-                  </div>
+          {SETTING_CATEGORIES.map((category) => {
+            const categorySettings = settingsByCategory.get(category.id) ?? [];
+            return (
+              <TabsContent
+                key={category.id}
+                value={category.id}
+                className="mt-6 space-y-4"
+              >
+                <div>
+                  <h3 className="text-lg font-semibold">{category.label}</h3>
+                  <p className="text-sm text-muted-foreground">
+                    {category.description}
+                  </p>
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  {modelPricingSetting.description}
-                </p>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <SettingInput
-                  setting={modelPricingSetting}
-                  value={drafts[modelPricingSetting.key] ?? ""}
-                  disabled={disabled}
-                  onChange={(value) =>
-                    updateDraft(modelPricingSetting.key, value)
-                  }
-                />
-                <div className="flex items-center justify-between gap-3 border-t pt-3 text-xs text-muted-foreground">
-                  <span>
-                    更新时间：
-                    {modelPricingSetting.updatedAt
-                      ? formatDateInTimeZone(
-                          modelPricingSetting.updatedAt,
-                          "zh",
-                          {
-                            year: "numeric",
-                            month: "2-digit",
-                            day: "2-digit",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          },
-                          configuredTimeZone
-                        )
-                      : "未保存"}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={disabled}
-                    onClick={() => markClear(modelPricingSetting.key)}
-                  >
-                    清空并回退
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="rounded-lg border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-              未加载到模型定价设置，请先初始化默认配置。
-            </div>
-          )}
-        </TabsContent>
 
-        {SETTING_CATEGORIES.map((category) => {
-          const categorySettings = settingsByCategory.get(category.id) ?? [];
-          return (
-            <TabsContent
-              key={category.id}
-              value={category.id}
-              className="mt-6 space-y-4"
-            >
-              <div>
-                <h3 className="text-lg font-semibold">{category.label}</h3>
-                <p className="text-sm text-muted-foreground">
-                  {category.description}
-                </p>
-              </div>
-
-              {category.id === "mail" && (
-                <Card className="rounded-lg">
-                  <CardHeader className="space-y-2">
-                    <CardTitle className="text-base">邮件测试</CardTitle>
-                    <p className="text-xs text-muted-foreground">
-                      使用当前已保存的邮件配置发送一封测试邮件。
-                    </p>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                      <div className="min-w-0 flex-1 space-y-2">
-                        <Label htmlFor="system-settings-test-email">
-                          测试邮箱
-                        </Label>
-                        <Input
-                          id="system-settings-test-email"
-                          type="email"
-                          inputMode="email"
-                          autoComplete="email"
-                          placeholder="admin@example.com"
-                          value={testEmail}
-                          disabled={disabled}
-                          onChange={(event) => setTestEmail(event.target.value)}
-                        />
-                      </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={disabled || !testEmail.trim()}
-                        onClick={handleSendTestEmail}
-                      >
-                        {isSendingTestEmail ? (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                          <Send className="mr-2 h-4 w-4" />
-                        )}
-                        发送测试邮件
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              <div className="grid gap-4 lg:grid-cols-2">
-                {categorySettings.map((setting) => (
-                  <Card
-                    key={setting.key}
-                    className={
-                      setting.key === "PLAN_CAPABILITY_MATRIX" ||
-                      setting.key === "CREDIT_PACKAGE_MATRIX"
-                        ? "rounded-lg lg:col-span-2"
-                        : "rounded-lg"
-                    }
-                  >
+                {category.id === "mail" && (
+                  <Card className="rounded-lg">
                     <CardHeader className="space-y-2">
-                      <div className="flex items-start justify-between gap-3">
-                        <CardTitle className="text-base">
-                          {setting.label}
-                        </CardTitle>
-                        <div className="flex flex-wrap justify-end gap-1">
-                          {setting.secret && (
-                            <Badge variant="secondary">密钥</Badge>
-                          )}
-                          {setting.stored ? (
-                            <Badge>后台</Badge>
-                          ) : setting.fromEnv ? (
-                            <Badge variant="secondary">环境变量</Badge>
-                          ) : (
-                            <Badge variant="outline">未配置</Badge>
-                          )}
-                          {setting.requiresRestart && (
-                            <Badge variant="outline">需重启</Badge>
-                          )}
-                          {setting.requiresRebuild && (
-                            <Badge variant="outline">需重新构建</Badge>
-                          )}
-                        </div>
-                      </div>
+                      <CardTitle className="text-base">邮件测试</CardTitle>
                       <p className="text-xs text-muted-foreground">
-                        {setting.description}
+                        使用当前已保存的邮件配置发送一封测试邮件。
                       </p>
                     </CardHeader>
-                    <CardContent className="space-y-3">
-                      <div className="space-y-2">
-                        <Label htmlFor={`setting-${setting.key}`}>
-                          {setting.key}
-                        </Label>
-                        <div className="flex items-center gap-2">
-                          <div id={`setting-${setting.key}`} className="flex-1">
-                            <SettingInput
-                              setting={setting}
-                              value={drafts[setting.key] ?? ""}
-                              disabled={disabled}
-                              onChange={(value) =>
-                                updateDraft(setting.key, value)
-                              }
-                            />
-                          </div>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            disabled={disabled || !setting.configured}
-                            title="清空后台配置"
-                            onClick={() => markClear(setting.key)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                    <CardContent>
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                        <div className="min-w-0 flex-1 space-y-2">
+                          <Label htmlFor="system-settings-test-email">
+                            测试邮箱
+                          </Label>
+                          <Input
+                            id="system-settings-test-email"
+                            type="email"
+                            inputMode="email"
+                            autoComplete="email"
+                            placeholder="admin@example.com"
+                            value={testEmail}
+                            disabled={disabled}
+                            onChange={(event) =>
+                              setTestEmail(event.target.value)
+                            }
+                          />
                         </div>
-                      </div>
-                      {clearKeys[setting.key] && (
-                        <p className="text-xs text-destructive">
-                          保存后将清空此项的后台配置，环境变量兜底仍可能生效。
-                        </p>
-                      )}
-                      {setting.valueType === "json" &&
-                        setting.exampleValue !== undefined &&
-                        !setting.configured && (
-                          <p className="text-xs text-muted-foreground">
-                            {getJsonSettingHint(setting.key)}
-                          </p>
-                        )}
-                      {setting.updatedAt && (
-                        <p className="text-xs text-muted-foreground">
-                          最近更新:{" "}
-                          {formatDateInTimeZone(
-                            setting.updatedAt,
-                            "zh",
-                            {
-                              year: "numeric",
-                              month: "2-digit",
-                              day: "2-digit",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            },
-                            configuredTimeZone
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={disabled || !testEmail.trim()}
+                          onClick={handleSendTestEmail}
+                        >
+                          {isSendingTestEmail ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Send className="mr-2 h-4 w-4" />
                           )}
-                        </p>
-                      )}
+                          发送测试邮件
+                        </Button>
+                      </div>
                     </CardContent>
                   </Card>
-                ))}
-              </div>
-            </TabsContent>
-          );
-        })}
-      </Tabs>
+                )}
+
+                <div className="grid gap-4 lg:grid-cols-2">
+                  {categorySettings.map((setting) => (
+                    <Card
+                      key={setting.key}
+                      className={
+                        setting.key === "PLAN_CAPABILITY_MATRIX" ||
+                        setting.key === "CREDIT_PACKAGE_MATRIX"
+                          ? "rounded-lg lg:col-span-2"
+                          : "rounded-lg"
+                      }
+                    >
+                      <CardHeader className="space-y-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <CardTitle className="text-base">
+                            {setting.label}
+                          </CardTitle>
+                          <div className="flex flex-wrap justify-end gap-1">
+                            {setting.secret && (
+                              <Badge variant="secondary">密钥</Badge>
+                            )}
+                            {setting.stored ? (
+                              <Badge>后台</Badge>
+                            ) : setting.fromEnv ? (
+                              <Badge variant="secondary">环境变量</Badge>
+                            ) : (
+                              <Badge variant="outline">未配置</Badge>
+                            )}
+                            {setting.requiresRestart && (
+                              <Badge variant="outline">需重启</Badge>
+                            )}
+                            {setting.requiresRebuild && (
+                              <Badge variant="outline">需重新构建</Badge>
+                            )}
+                          </div>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {setting.description}
+                        </p>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        <div className="space-y-2">
+                          <Label htmlFor={`setting-${setting.key}`}>
+                            {setting.key}
+                          </Label>
+                          <div className="flex items-center gap-2">
+                            <div
+                              id={`setting-${setting.key}`}
+                              className="flex-1"
+                            >
+                              <SettingInput
+                                setting={setting}
+                                value={drafts[setting.key] ?? ""}
+                                disabled={disabled}
+                                onChange={(value) =>
+                                  updateDraft(setting.key, value)
+                                }
+                              />
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              disabled={disabled || !setting.configured}
+                              title="清空后台配置"
+                              onClick={() => markClear(setting.key)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                        {clearKeys[setting.key] && (
+                          <p className="text-xs text-destructive">
+                            保存后将清空此项的后台配置，环境变量兜底仍可能生效。
+                          </p>
+                        )}
+                        {setting.valueType === "json" &&
+                          setting.exampleValue !== undefined &&
+                          !setting.configured && (
+                            <p className="text-xs text-muted-foreground">
+                              {getJsonSettingHint(setting.key)}
+                            </p>
+                          )}
+                        {setting.updatedAt && (
+                          <p className="text-xs text-muted-foreground">
+                            最近更新:{" "}
+                            {formatDateInTimeZone(
+                              setting.updatedAt,
+                              "zh",
+                              {
+                                year: "numeric",
+                                month: "2-digit",
+                                day: "2-digit",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              },
+                              configuredTimeZone
+                            )}
+                          </p>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </TabsContent>
+            );
+          })}
+        </Tabs>
+      )}
     </div>
   );
+}
+
+/**
+ * 渲染独立的模型定价后台菜单内容。
+ *
+ * @returns 仅编辑 MODEL_PRICING_RULES 的系统设置面板。
+ * @sideEffects 复用 SystemSettingsPanel 的读取和保存副作用。
+ */
+export function ModelPricingSettingsPanel() {
+  return <SystemSettingsPanel mode="model-pricing" />;
 }
