@@ -27,7 +27,7 @@ export const ALIPAY_GATEWAY_URL = "https://openapi.alipay.com/gateway.do";
 export const ALIPAY_SANDBOX_GATEWAY_URL =
   "https://openapi-sandbox.dl.alipaydev.com/gateway.do";
 
-type AlipayMode = "page" | "wap";
+type AlipayMode = "precreate" | "page" | "wap";
 
 interface AlipayConfig {
   appId: string;
@@ -107,8 +107,8 @@ export async function isRuntimeAlipayConfigured(): Promise<boolean> {
 async function getRuntimeAlipayMode(): Promise<AlipayMode> {
   return getRuntimeSettingSelect(
     "ALIPAY_PAYMENT_MODE",
-    ["page", "wap"] as const,
-    "page"
+    ["precreate", "page", "wap"] as const,
+    "precreate"
   );
 }
 
@@ -210,9 +210,17 @@ function createAlipayRequestParams(input: {
   mode: AlipayMode;
 }): Record<string, string> {
   const method =
-    input.mode === "wap" ? "alipay.trade.wap.pay" : "alipay.trade.page.pay";
+    input.mode === "precreate"
+      ? "alipay.trade.precreate"
+      : input.mode === "wap"
+        ? "alipay.trade.wap.pay"
+        : "alipay.trade.page.pay";
   const productCode =
-    input.mode === "wap" ? "QUICK_WAP_WAY" : "FAST_INSTANT_TRADE_PAY";
+    input.mode === "precreate"
+      ? "FACE_TO_FACE_PAYMENT"
+      : input.mode === "wap"
+        ? "QUICK_WAP_WAY"
+        : "FAST_INSTANT_TRADE_PAY";
   const bizContent = JSON.stringify({
     out_trade_no: input.outTradeNo,
     total_amount: input.totalAmount,
@@ -228,9 +236,11 @@ function createAlipayRequestParams(input: {
     timestamp: new Date().toISOString().slice(0, 19).replace("T", " "),
     version: "1.0",
     notify_url: input.notifyUrl,
-    return_url: input.returnUrl,
     biz_content: bizContent,
   };
+  if (input.mode !== "precreate") {
+    params.return_url = input.returnUrl;
+  }
 
   return {
     ...params,
@@ -240,6 +250,67 @@ function createAlipayRequestParams(input: {
       includeSignType: true,
     }),
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getStringField(source: Record<string, unknown>, key: string): string {
+  const value = source[key];
+  return typeof value === "string" ? value : "";
+}
+
+async function requestAlipayPrecreatePayment(input: {
+  purchase: EpayPurchaseInput;
+  config: AlipayConfig;
+  notifyUrl: string;
+}): Promise<EpayPurchaseResult> {
+  const params = createAlipayRequestParams({
+    config: input.config,
+    outTradeNo: input.purchase.outTradeNo,
+    subject: input.purchase.name,
+    totalAmount: formatEpayMoney(input.purchase.money),
+    notifyUrl: input.notifyUrl,
+    returnUrl: "",
+    mode: "precreate",
+  });
+  const response = await fetch(input.config.gatewayUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+    },
+    body: new URLSearchParams(params).toString(),
+  });
+  if (!response.ok) {
+    throw new Error(`Alipay precreate request failed: ${response.status}`);
+  }
+
+  const payload: unknown = await response.json();
+  if (!isRecord(payload)) {
+    throw new Error("Alipay precreate response must be an object");
+  }
+  const result = payload.alipay_trade_precreate_response;
+  if (!isRecord(result)) {
+    throw new Error("Alipay precreate response is missing result body");
+  }
+
+  const code = getStringField(result, "code");
+  const msg = getStringField(result, "msg");
+  const subCode = getStringField(result, "sub_code");
+  const subMsg = getStringField(result, "sub_msg");
+  if (code !== "10000") {
+    throw new Error(
+      `Alipay precreate failed: ${subCode || code} ${subMsg || msg}`.trim()
+    );
+  }
+
+  const qrCode = getStringField(result, "qr_code");
+  if (!qrCode) {
+    throw new Error("Alipay precreate response is missing qr_code");
+  }
+
+  return { url: qrCode, method: "GET" };
 }
 
 function buildAlipaySubmitUrl(
@@ -262,6 +333,10 @@ function createAlipayPurchaseWithConfig(
   notifyUrl: string,
   returnUrl: string
 ): EpayPurchaseResult {
+  if (mode === "precreate") {
+    throw new Error("Alipay precreate mode requires runtime purchase creation");
+  }
+
   const params = createAlipayRequestParams({
     config,
     outTradeNo: input.outTradeNo,
@@ -300,11 +375,23 @@ export async function createRuntimeAlipayPurchase(
   input: EpayPurchaseInput
 ): Promise<EpayPurchaseResult> {
   const baseUrl = getBaseUrl();
+  const config = await getRuntimeAlipayConfig();
+  const mode = await getRuntimeAlipayMode();
+  const notifyUrl =
+    input.notifyUrl ?? (await getRuntimeAlipayNotifyUrl(baseUrl));
+  if (mode === "precreate") {
+    return requestAlipayPrecreatePayment({
+      purchase: input,
+      config,
+      notifyUrl,
+    });
+  }
+
   return createAlipayPurchaseWithConfig(
     input,
-    await getRuntimeAlipayConfig(),
-    await getRuntimeAlipayMode(),
-    input.notifyUrl ?? (await getRuntimeAlipayNotifyUrl(baseUrl)),
+    config,
+    mode,
+    notifyUrl,
     input.returnUrl ?? (await getRuntimeAlipayReturnUrl(baseUrl))
   );
 }

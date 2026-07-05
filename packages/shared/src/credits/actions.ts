@@ -457,10 +457,13 @@ export const createCreditsPurchaseCheckout = withProtectedCreditsAction(
         paymentProvider === "alipay"
           ? await createRuntimeAlipayPurchase(purchaseInput)
           : await createRuntimeEpayPurchase(purchaseInput);
+      if (checkout.method === "GET") {
+        return { url: checkout.url };
+      }
 
       return {
         url: checkout.url,
-        params: checkout.params,
+        params: checkout.params ?? {},
         method: "POST" as const,
       };
     }

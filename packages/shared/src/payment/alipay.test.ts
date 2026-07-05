@@ -7,7 +7,7 @@
  */
 
 import crypto from "node:crypto";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@repo/database", () => ({ db: {} }));
 vi.mock("@repo/database/schema", () => ({ epayOrder: {} }));
@@ -35,6 +35,10 @@ const keyPair = crypto.generateKeyPairSync("rsa", {
   privateKeyEncoding: { type: "pkcs8", format: "pem" },
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 function configureAlipayEnv() {
   process.env.ALIPAY_APP_ID = "2026000000000001";
   process.env.ALIPAY_APP_PRIVATE_KEY = keyPair.privateKey;
@@ -47,13 +51,13 @@ function configureAlipayEnv() {
 
 function mergeAlipaySubmitParams(result: {
   url: string;
-  params: Record<string, string>;
+  params?: Record<string, string>;
 }) {
   const url = new URL(result.url);
   const merged = Object.fromEntries(url.searchParams.entries());
   return {
     ...merged,
-    ...result.params,
+    ...(result.params ?? {}),
   };
 }
 
@@ -169,9 +173,7 @@ describe("createAlipayPurchase", () => {
     vi.mocked(getRuntimeSettingString).mockImplementation(async (key) => {
       return runtimeValues[key] ?? undefined;
     });
-    vi.mocked(getRuntimeSettingSelect).mockImplementation(
-      async (_key, _options, fallback) => fallback
-    );
+    vi.mocked(getRuntimeSettingSelect).mockResolvedValue("page");
 
     const result = await createRuntimeAlipayPurchase({
       outTradeNo: "SUB_RETURN_RUNTIME",
@@ -188,6 +190,54 @@ describe("createAlipayPurchase", () => {
       "https://admin.example.com/payment/result"
     );
     expect(verifyAlipayRequestParams(submitParams)).toBe(true);
+  });
+
+  it("creates precreate payment and returns QR code URL from runtime settings", async () => {
+    configureAlipayEnv();
+    const runtimeValues: Record<string, string> = {
+      ALIPAY_APP_ID: "2026000000000001",
+      ALIPAY_APP_PRIVATE_KEY: keyPair.privateKey,
+      ALIPAY_PUBLIC_KEY: keyPair.publicKey,
+      ALIPAY_GATEWAY_URL: "https://openapi.alipay.test/gateway.do",
+    };
+    vi.mocked(getRuntimeSettingString).mockImplementation(async (key) => {
+      return runtimeValues[key] ?? undefined;
+    });
+    vi.mocked(getRuntimeSettingSelect).mockResolvedValue("precreate");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          alipay_trade_precreate_response: {
+            code: "10000",
+            msg: "Success",
+            out_trade_no: "CR_PRECREATE",
+            qr_code: "https://qr.alipay.com/bax-test",
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+
+    const result = await createRuntimeAlipayPurchase({
+      outTradeNo: "CR_PRECREATE",
+      name: "GPT2IMAGE Credits",
+      money: 1,
+    });
+
+    expect(result).toEqual({
+      url: "https://qr.alipay.com/bax-test",
+      method: "GET",
+    });
+    const body = fetchMock.mock.calls[0]?.[1]?.body;
+    expect(typeof body).toBe("string");
+    if (typeof body !== "string") return;
+    const requestParams = Object.fromEntries(new URLSearchParams(body));
+    expect(requestParams.method).toBe("alipay.trade.precreate");
+    expect(JSON.parse(requestParams.biz_content ?? "{}")).toMatchObject({
+      out_trade_no: "CR_PRECREATE",
+      product_code: "FACE_TO_FACE_PAYMENT",
+    });
+    expect(verifyAlipayRequestParams(requestParams)).toBe(true);
   });
 
   it("creates wap pay params when requested", () => {

@@ -52,7 +52,8 @@ export interface EpayPurchaseInput {
 
 export interface EpayPurchaseResult {
   url: string;
-  params: Record<string, string>;
+  params?: Record<string, string>;
+  method?: "GET" | "POST";
 }
 
 export interface EpayVerifyResult {

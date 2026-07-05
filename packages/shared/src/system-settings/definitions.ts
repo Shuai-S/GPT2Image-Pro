@@ -651,14 +651,15 @@ export const SYSTEM_SETTING_DEFINITIONS = [
   {
     key: "ALIPAY_PAYMENT_MODE",
     label: "支付宝支付模式",
-    description: "电脑网站支付 page 或手机网站支付 wap。",
+    description: "扫码支付 precreate、电脑网站支付 page 或手机网站支付 wap。",
     category: "payment",
     valueType: "select",
     options: [
+      { label: "扫码支付", value: "precreate" },
       { label: "电脑网站支付", value: "page" },
       { label: "手机网站支付", value: "wap" },
     ],
-    defaultValue: "page",
+    defaultValue: "precreate",
   },
   {
     key: "EPAY_PID",
