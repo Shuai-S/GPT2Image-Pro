@@ -88,6 +88,7 @@ const GENERATION_RESULT_SCHEMA = z.object({
 });
 
 type ActiveTool = "select" | "pan" | "connect";
+type ConnectorSide = "input" | "output";
 
 type DragState =
   | {
@@ -357,11 +358,39 @@ export function InfiniteCanvasClient() {
   };
 
   /**
-   * 选择或连接节点。
+   * 建立两个节点之间的有向连接。
+   *
+   * @param sourceId 输出侧节点 ID。
+   * @param targetId 输入侧节点 ID。
+   * @sideEffects 更新连线状态、连接工具状态与选区，并在无效连接时提示用户。
+   */
+  const connectCanvasNodes = (sourceId: string, targetId: string) => {
+    if (sourceId === targetId) {
+      toast.info(copy("Pick another node to connect", "请选择另一个节点连接"));
+      setSelectedIds([targetId]);
+      return;
+    }
+    if (
+      state.edges.some((edge) => edge.from === sourceId && edge.to === targetId)
+    ) {
+      toast.info(copy("Connection already exists", "这条连接已存在"));
+      setConnectFromId(null);
+      setActiveTool("select");
+      setSelectedIds([targetId]);
+      return;
+    }
+    patchState((current) => addCanvasEdge(current, sourceId, targetId));
+    setConnectFromId(null);
+    setActiveTool("select");
+    setSelectedIds([targetId]);
+  };
+
+  /**
+   * 选择、拖拽或在连接模式下连接整个节点卡片。
    *
    * @param nodeId 节点 ID。
    * @param event 指针事件。
-   * @sideEffects 更新选区或连线。
+   * @sideEffects 更新选区、拖拽状态或连线。
    */
   const handleNodePointerDown = (
     nodeId: string,
@@ -374,28 +403,7 @@ export function InfiniteCanvasClient() {
         setSelectedIds([nodeId]);
         return;
       }
-      if (connectFromId === nodeId) {
-        toast.info(
-          copy("Pick another node to connect", "请选择另一个节点连接")
-        );
-        setSelectedIds([nodeId]);
-        return;
-      }
-      if (
-        state.edges.some(
-          (edge) => edge.from === connectFromId && edge.to === nodeId
-        )
-      ) {
-        toast.info(copy("Connection already exists", "这条连接已存在"));
-        setConnectFromId(null);
-        setActiveTool("select");
-        setSelectedIds([nodeId]);
-        return;
-      }
-      patchState((current) => addCanvasEdge(current, connectFromId, nodeId));
-      setConnectFromId(null);
-      setActiveTool("select");
-      setSelectedIds([nodeId]);
+      connectCanvasNodes(connectFromId, nodeId);
       return;
     }
 
@@ -421,6 +429,35 @@ export function InfiniteCanvasClient() {
       nodeId,
       lastWorld,
     };
+  };
+
+  /**
+   * 处理节点左右连接点的点击。
+   *
+   * @param nodeId 连接点所属节点 ID。
+   * @param side 输入点或输出点。
+   * @param event 指针事件。
+   * @sideEffects 输出点会进入连接模式，输入点会尝试完成连线。
+   */
+  const handleConnectorPointerDown = (
+    nodeId: string,
+    side: ConnectorSide,
+    event: ReactPointerEvent<HTMLButtonElement>
+  ) => {
+    event.stopPropagation();
+    if (side === "output") {
+      setActiveTool("connect");
+      setConnectFromId(nodeId);
+      setSelectedIds([nodeId]);
+      return;
+    }
+    if (!connectFromId) {
+      toast.info(copy("Pick a source connector first", "请先选择右侧输出圆点"));
+      setActiveTool("connect");
+      setSelectedIds([nodeId]);
+      return;
+    }
+    connectCanvasNodes(connectFromId, nodeId);
   };
 
   /**
@@ -502,39 +539,65 @@ export function InfiniteCanvasClient() {
   };
 
   /**
-   * 根据已连接输入组装生成提示词。
+   * 根据已连接输入组装提示词或生成节点的生成参数。
    *
-   * @param node 生成节点。
+   * @param node 提示词节点或生成节点。
    * @returns 提示词文本与输入图节点。
    * @sideEffects 无。
    */
   const buildGenerationInput = (node: CanvasNode) => {
     const inputs = getInputNodesForNode(state, node.id);
+    const nestedInputs = inputs
+      .filter((input) => input.kind === "prompt")
+      .flatMap((input) => getInputNodesForNode(state, input.id));
     const promptTexts = inputs
       .filter((input) => input.kind === "prompt" && input.prompt?.trim())
       .map((input) => input.prompt?.trim() || "");
     const prompt = [node.prompt?.trim(), ...promptTexts]
       .filter(Boolean)
       .join("\n\n");
-    const imageNodes = inputs.filter(
-      (input) =>
-        (input.kind === "image" || input.kind === "output") && input.imageUrl
+    const imageNodeById = new Map(
+      [...inputs, ...nestedInputs]
+        .filter(
+          (input) =>
+            (input.kind === "image" || input.kind === "output") &&
+            input.imageUrl
+        )
+        .map((input) => [input.id, input])
     );
+    const imageNodes = Array.from(imageNodeById.values());
     return { prompt, imageNodes };
   };
 
   /**
-   * 运行当前选中的生成节点。
+   * 运行当前指定或选中的提示词/生成节点。
    *
    * @sideEffects 调用现有图片生成 API，并向画布追加输出节点。
    */
-  const runSelectedGenerator = async () => {
-    const node =
-      selectedNode?.kind === "generator"
+  const runSelectedGenerator = async (nodeId?: string) => {
+    const forcedNode = nodeId
+      ? state.nodes.find((item) => item.id === nodeId)
+      : undefined;
+    const forcedRunnableNode =
+      forcedNode?.kind === "generator" || forcedNode?.kind === "prompt"
+        ? forcedNode
+        : undefined;
+    const selectedRunnableNode =
+      selectedNode?.kind === "generator" || selectedNode?.kind === "prompt"
         ? selectedNode
-        : state.nodes.find((item) => item.kind === "generator");
+        : undefined;
+    const fallbackRunnableNode = state.nodes.find(
+      (item) => item.kind === "generator" || item.kind === "prompt"
+    );
+    const node =
+      forcedRunnableNode || selectedRunnableNode || fallbackRunnableNode;
     if (!node) {
-      toast.error(copy("Select a generator node first", "请先选择生成节点"));
+      toast.error(
+        copy(
+          "Select a prompt or generator node first",
+          "请先选择提示词或生成节点"
+        )
+      );
       return;
     }
     const { prompt, imageNodes } = buildGenerationInput(node);
@@ -690,7 +753,7 @@ export function InfiniteCanvasClient() {
           <Button
             type="button"
             size="sm"
-            onClick={runSelectedGenerator}
+            onClick={() => void runSelectedGenerator()}
             disabled={Boolean(runningNodeId)}
             className="h-9 gap-2"
           >
@@ -748,6 +811,19 @@ export function InfiniteCanvasClient() {
           className="pointer-events-none absolute inset-0 h-full w-full"
           aria-hidden="true"
         >
+          <defs>
+            <marker
+              id="canvas-edge-arrow"
+              markerHeight="8"
+              markerWidth="8"
+              orient="auto"
+              refX="7"
+              refY="4"
+              viewBox="0 0 8 8"
+            >
+              <path d="M 0 0 L 8 4 L 0 8 z" fill="rgb(52 211 153)" />
+            </marker>
+          </defs>
           <g
             transform={`translate(${state.viewport.x} ${state.viewport.y}) scale(${state.viewport.zoom})`}
           >
@@ -776,6 +852,7 @@ export function InfiniteCanvasClient() {
               connectMode={activeTool === "connect"}
               connectSource={connectFromId === node.id}
               onPointerDown={handleNodePointerDown}
+              onConnectorPointerDown={handleConnectorPointerDown}
               onPatch={(patch) =>
                 patchState((current) =>
                   updateCanvasNode(current, node.id, patch)
@@ -901,8 +978,13 @@ type CanvasNodeViewProps = {
     nodeId: string,
     event: ReactPointerEvent<HTMLDivElement>
   ) => void;
+  onConnectorPointerDown: (
+    nodeId: string,
+    side: ConnectorSide,
+    event: ReactPointerEvent<HTMLButtonElement>
+  ) => void;
   onPatch: (patch: Partial<Omit<CanvasNode, "id" | "kind">>) => void;
-  onRun: () => Promise<void>;
+  onRun: (nodeId?: string) => Promise<void>;
   copy: (en: string, zh: string) => string;
 };
 
@@ -919,6 +1001,7 @@ function CanvasNodeView({
   connectMode,
   connectSource,
   onPointerDown,
+  onConnectorPointerDown,
   onPatch,
   onRun,
   copy,
@@ -933,7 +1016,7 @@ function CanvasNodeView({
   return (
     <div
       className={cn(
-        "absolute flex flex-col overflow-hidden rounded-md border bg-background shadow-sm",
+        "group absolute flex flex-col overflow-visible rounded-md border bg-background shadow-sm",
         tone,
         selected && "outline outline-2 outline-foreground",
         connectSource && "ring-2 ring-emerald-500"
@@ -945,6 +1028,22 @@ function CanvasNodeView({
       }}
       onPointerDown={(event) => onPointerDown(node.id, event)}
     >
+      <CanvasConnectorHandle
+        side="input"
+        visible={connectMode || selected || connectSource}
+        label={copy("Input connector", "输入连接点")}
+        onPointerDown={(event) =>
+          onConnectorPointerDown(node.id, "input", event)
+        }
+      />
+      <CanvasConnectorHandle
+        side="output"
+        visible={connectMode || selected || connectSource}
+        label={copy("Output connector", "输出连接点")}
+        onPointerDown={(event) =>
+          onConnectorPointerDown(node.id, "output", event)
+        }
+      />
       {connectMode && (
         <div
           aria-hidden="true"
@@ -962,13 +1061,13 @@ function CanvasNodeView({
             onChange={(event) => onPatch({ title: event.target.value })}
           />
         </div>
-        {node.kind === "generator" && (
+        {(node.kind === "prompt" || node.kind === "generator") && (
           <button
             type="button"
             title={copy("Run", "运行")}
             aria-label={copy("Run", "运行")}
             onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => void onRun()}
+            onClick={() => void onRun(node.id)}
             className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
           >
             {node.status === "running" ? (
@@ -1037,6 +1136,52 @@ function CanvasNodeView({
 }
 
 /**
+ * 渲染节点输入或输出连接点。
+ *
+ * @param props 连接点方向、可见状态、可访问标签和点击回调。
+ * @returns 可点击的小圆形连接点。
+ * @sideEffects 点击时把节点作为连接起点或终点。
+ */
+function CanvasConnectorHandle({
+  side,
+  visible,
+  label,
+  onPointerDown,
+}: {
+  side: ConnectorSide;
+  visible: boolean;
+  label: string;
+  onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      onPointerDown={onPointerDown}
+      className={cn(
+        "absolute top-1/2 z-20 h-4 w-4 -translate-y-1/2 rounded-full",
+        "border border-emerald-300 bg-background transition-opacity",
+        "shadow-[0_0_0_3px_rgba(16,185,129,0.16)] hover:bg-emerald-400",
+        "focus-visible:opacity-100 focus-visible:outline-none",
+        "focus-visible:ring-2 focus-visible:ring-emerald-400",
+        side === "input"
+          ? "left-0 -translate-x-1/2"
+          : "right-0 translate-x-1/2",
+        visible ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+      )}
+    >
+      <span
+        className={cn(
+          "absolute left-1/2 top-1/2 h-1.5 w-1.5 rounded-full",
+          "-translate-x-1/2 -translate-y-1/2 bg-emerald-400"
+        )}
+      />
+    </button>
+  );
+}
+
+/**
  * 渲染节点类型图标。
  *
  * @param props 节点类型。
@@ -1075,17 +1220,26 @@ function CanvasEdgePath({
   const path = `M ${start.x} ${start.y} C ${start.x + curve} ${start.y}, ${
     end.x - curve
   } ${end.y}, ${end.x} ${end.y}`;
+  const stroke = selected ? "rgb(255 255 255)" : "rgb(52 211 153)";
   return (
-    <path
-      d={path}
-      fill="none"
-      stroke={
-        selected ? "hsl(var(--foreground))" : "hsl(var(--muted-foreground))"
-      }
-      strokeWidth={selected ? 3 : 2}
-      strokeLinecap="round"
-      opacity={selected ? 0.95 : 0.55}
-    />
+    <g>
+      <path
+        d={path}
+        fill="none"
+        markerEnd="url(#canvas-edge-arrow)"
+        stroke={stroke}
+        strokeWidth={selected ? 4 : 3}
+        strokeLinecap="round"
+        opacity={selected ? 0.98 : 0.9}
+      />
+      <circle cx={start.x} cy={start.y} r={5} fill="rgb(52 211 153)" />
+      <circle
+        cx={end.x}
+        cy={end.y}
+        r={5}
+        fill={selected ? "rgb(255 255 255)" : "rgb(52 211 153)"}
+      />
+    </g>
   );
 }
 
