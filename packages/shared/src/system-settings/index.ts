@@ -10,6 +10,7 @@ import {
   parseRegistrationEmailDomains,
   REGISTRATION_EMAIL_DOMAINS_SETTING_KEY,
 } from "../auth/email-domain";
+import { normalizeContactEmail } from "../config/contact";
 import {
   isSettingKey,
   SETTING_DEFINITION_BY_KEY,
@@ -340,6 +341,13 @@ function coerceValue(definition: SettingDefinition, value: unknown) {
       );
     }
     return domains.length > 0 ? formatRegistrationEmailDomains(domains) : "";
+  }
+  if (definition.key === "CONTACT_EMAIL" && text) {
+    const email = normalizeContactEmail(text);
+    if (!email) {
+      throw new Error(`${definition.label} 必须是有效邮箱地址`);
+    }
+    return email;
   }
   if (definition.valueType === "select") {
     const allowed = definition.options?.map((option) => option.value) ?? [];

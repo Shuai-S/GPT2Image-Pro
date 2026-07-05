@@ -1,6 +1,12 @@
 // 配置模块统一导出
 
 export {
+  DEFAULT_CONTACT_EMAIL,
+  getRuntimeContactEmail,
+  normalizeContactEmail,
+  resolveContactEmail,
+} from "./contact";
+export {
   adminConfig,
   // Admin 配置
   adminNav,

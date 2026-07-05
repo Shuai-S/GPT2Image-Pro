@@ -61,6 +61,7 @@
     "./moderation": "./src/moderation/index.ts",
     "./config": "./src/config/index.ts",
     "./config/branding": "./src/config/branding.ts",
+    "./config/contact": "./src/config/contact.ts",
     "./config/nav": "./src/config/nav.ts",
     "./config/payment": "./src/config/payment.ts",
     "./config/payment-runtime": "./src/config/payment-runtime.ts",

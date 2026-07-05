@@ -407,6 +407,19 @@ describe("setSystemSettings", () => {
       )
     ).rejects.toThrow(/包含无效域名/);
   });
+
+  it("normalizes and validates public contact email", async () => {
+    await setSystemSettings(
+      [{ key: "CONTACT_EMAIL", value: " Support@Example.COM " }],
+      "admin"
+    );
+
+    expect(store.get("CONTACT_EMAIL")?.value).toBe("support@example.com");
+
+    await expect(
+      setSystemSettings([{ key: "CONTACT_EMAIL", value: "not-email" }], "admin")
+    ).rejects.toThrow(/必须是有效邮箱地址/);
+  });
 });
 
 describe("importSystemSettingsFromEnv", () => {

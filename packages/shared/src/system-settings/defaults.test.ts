@@ -123,6 +123,7 @@ describe("system setting default initialization", () => {
     expect(initializedKeys).toContain(MODEL_PRICING_RULES_SETTING_KEY);
     expect(initializedKeys).toContain("BILLING_YEARLY_ENABLED");
     expect(initializedKeys).toContain("APP_TIME_ZONE");
+    expect(initializedKeys).toContain("CONTACT_EMAIL");
     expect(initializedKeys).toContain("MARKETING_SLA_STATUS_ENABLED");
     expect(initializedKeys).toContain("OPERATION_BLOG_ENABLED");
     expect(initializedKeys).toContain("OPERATION_TEXT_TO_IMAGE_ENABLED");
@@ -149,6 +150,7 @@ describe("system setting default initialization", () => {
     );
     expect(store.get("BILLING_YEARLY_ENABLED")?.value).toBe(true);
     expect(store.get("APP_TIME_ZONE")?.value).toBe("UTC");
+    expect(store.get("CONTACT_EMAIL")?.value).toBe("hello@gpt2image.com");
     expect(store.get("MARKETING_SLA_STATUS_ENABLED")?.value).toBe(true);
     expect(store.get("OPERATION_BLOG_ENABLED")?.value).toBe(true);
     expect(store.get("OPERATION_TEXT_TO_IMAGE_ENABLED")?.value).toBe(true);

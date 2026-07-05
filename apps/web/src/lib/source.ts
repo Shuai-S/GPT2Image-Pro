@@ -32,7 +32,7 @@ export const legalDocs = legal;
  */
 export function getBlogPosts(locale: string) {
   return blog.filter((post) => {
-    // 从文件路径中提取语言 (格式: en/hello-world.mdx)
+    // 从文件路径中提取语言 (格式: en/example.mdx)
     const pathLocale = post.info.path.split("/")[0];
     return pathLocale === locale;
   });

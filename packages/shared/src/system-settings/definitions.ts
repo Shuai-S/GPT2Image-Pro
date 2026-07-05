@@ -10,6 +10,7 @@ import {
   formatRegistrationEmailDomains,
   REGISTRATION_EMAIL_DOMAINS_SETTING_KEY,
 } from "../auth/email-domain";
+import { DEFAULT_CONTACT_EMAIL } from "../config/contact";
 import { DEFAULT_MODEL_PRICING_RULES } from "../model-pricing";
 
 export type SettingCategory =
@@ -40,6 +41,7 @@ export type SettingKey =
   | "NEXT_PUBLIC_APP_LOGO_URL"
   | "NEXT_PUBLIC_APP_OG_IMAGE"
   | "NEXT_PUBLIC_ASSET_PREFIX"
+  | "CONTACT_EMAIL"
   | "APP_TIME_ZONE"
   | "OPERATION_BLOG_ENABLED"
   | "OPERATION_TEXT_TO_IMAGE_ENABLED"
@@ -470,6 +472,14 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     category: "general",
     valueType: "string",
     requiresRebuild: true,
+  },
+  {
+    key: "CONTACT_EMAIL",
+    label: "联系邮箱",
+    description: "公开展示在首页页脚“联系我们”的邮箱地址。",
+    category: "general",
+    valueType: "string",
+    defaultValue: DEFAULT_CONTACT_EMAIL,
   },
   {
     key: "APP_TIME_ZONE",
