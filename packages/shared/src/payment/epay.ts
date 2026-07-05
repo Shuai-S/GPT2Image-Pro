@@ -55,6 +55,7 @@ export interface EpayPurchaseResult {
   params?: Record<string, string>;
   method?: "GET" | "POST" | "QR";
   qrCode?: string;
+  outTradeNo?: string;
 }
 
 export interface EpayVerifyResult {

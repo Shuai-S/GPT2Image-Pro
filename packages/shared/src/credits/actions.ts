@@ -461,6 +461,7 @@ export const createCreditsPurchaseCheckout = withProtectedCreditsAction(
         return {
           url: checkout.url,
           qrCode: checkout.qrCode,
+          outTradeNo: checkout.outTradeNo ?? outTradeNo,
           method: "QR" as const,
         };
       }
@@ -468,6 +469,7 @@ export const createCreditsPurchaseCheckout = withProtectedCreditsAction(
       return {
         url: checkout.url,
         params: checkout.params ?? {},
+        outTradeNo: checkout.outTradeNo ?? outTradeNo,
         method: "POST" as const,
       };
     }

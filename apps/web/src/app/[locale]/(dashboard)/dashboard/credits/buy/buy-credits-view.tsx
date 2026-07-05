@@ -32,6 +32,7 @@ import { useLocale } from "next-intl";
 import { useAction } from "next-safe-action/hooks";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { syncAlipayOrderStatus } from "@/features/payment/actions";
 import { AlipayQrDialog } from "@/features/payment/alipay-qr-dialog";
 
 type CreditPackageCard = {
@@ -43,6 +44,11 @@ type CreditPackageCard = {
   popular: boolean;
   allowQuantity?: boolean;
   maxQuantity?: number;
+};
+
+type AlipayPaymentState = {
+  qrCode: string;
+  outTradeNo: string;
 };
 
 const FALLBACK_PACKAGES: CreditPackageCard[] = CREDIT_PACKAGES.filter(
@@ -110,7 +116,11 @@ export function BuyCreditPackagesView() {
     [isZh]
   );
   const [quantities, setQuantities] = useState<Record<string, number>>({});
-  const [alipayQrCode, setAlipayQrCode] = useState<string | null>(null);
+  const [alipayPayment, setAlipayPayment] = useState<AlipayPaymentState | null>(
+    null
+  );
+  const [isCheckingAlipay, setIsCheckingAlipay] = useState(false);
+  const [alipayStatusText, setAlipayStatusText] = useState<string>("");
   const {
     execute: fetchPackages,
     result: packagesResult,
@@ -121,8 +131,17 @@ export function BuyCreditPackagesView() {
   const { execute, isPending } = useAction(createCreditsPurchaseCheckout, {
     onSuccess: ({ data }) => {
       if (data?.url) {
-        if (data.method === "QR" && data.qrCode) {
-          setAlipayQrCode(data.qrCode);
+        if (data.method === "QR" && data.qrCode && data.outTradeNo) {
+          setAlipayPayment({
+            qrCode: data.qrCode,
+            outTradeNo: data.outTradeNo,
+          });
+          setAlipayStatusText(
+            copy(
+              "Waiting for Alipay payment confirmation...",
+              "等待支付宝支付确认..."
+            )
+          );
         } else if (data.method === "POST" && data.params) {
           submitPaymentForm(data.url, data.params);
         } else {
@@ -149,6 +168,74 @@ export function BuyCreditPackagesView() {
       router.replace(`/${locale}/dashboard/credits/buy`);
     }
   }, [canceled, copy, locale, router]);
+
+  const syncCurrentAlipayPayment = useCallback(
+    async (options?: { manual?: boolean }) => {
+      if (!alipayPayment?.outTradeNo) return false;
+      if (options?.manual) setIsCheckingAlipay(true);
+
+      try {
+        const result = await syncAlipayOrderStatus({
+          outTradeNo: alipayPayment.outTradeNo,
+        });
+        const status = result?.data?.status;
+        if (status === "success") {
+          toast.success(copy("Credits delivered", "积分已到账"));
+          setAlipayPayment(null);
+          setAlipayStatusText("");
+          router.push(`/${locale}/dashboard/billing?pay=success`);
+          router.refresh();
+          return true;
+        }
+        if (status === "failed" || status === "not_found") {
+          toast.error(copy("Payment confirmation failed", "支付确认失败"));
+          setAlipayPayment(null);
+          setAlipayStatusText("");
+          return true;
+        }
+        setAlipayStatusText(
+          copy(
+            "Waiting for Alipay payment confirmation...",
+            "等待支付宝支付确认..."
+          )
+        );
+      } catch {
+        if (options?.manual) {
+          toast.error(copy("Payment confirmation failed", "支付确认失败"));
+        }
+      } finally {
+        if (options?.manual) setIsCheckingAlipay(false);
+      }
+
+      return false;
+    },
+    [alipayPayment?.outTradeNo, copy, locale, router]
+  );
+
+  useEffect(() => {
+    if (!alipayPayment?.outTradeNo) return;
+
+    let stopped = false;
+    let inFlight = false;
+    const poll = async () => {
+      if (stopped || inFlight) return;
+      inFlight = true;
+      try {
+        const completed = await syncCurrentAlipayPayment();
+        if (completed) stopped = true;
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const timeoutId = window.setTimeout(poll, 1500);
+    const intervalId = window.setInterval(poll, 3000);
+    return () => {
+      stopped = true;
+      window.clearTimeout(timeoutId);
+      window.clearInterval(intervalId);
+    };
+  }, [alipayPayment?.outTradeNo, syncCurrentAlipayPayment]);
 
   /**
    * 处理购买按钮点击
@@ -391,12 +478,17 @@ export function BuyCreditPackagesView() {
       </div>
 
       <AlipayQrDialog
-        open={Boolean(alipayQrCode)}
-        qrCode={alipayQrCode}
+        open={Boolean(alipayPayment)}
+        qrCode={alipayPayment?.qrCode ?? null}
         onOpenChange={(open) => {
-          if (!open) setAlipayQrCode(null);
+          if (!open) {
+            setAlipayPayment(null);
+            setAlipayStatusText("");
+          }
         }}
-        onCompleted={() => router.push(`/${locale}/dashboard/billing`)}
+        onCompleted={() => syncCurrentAlipayPayment({ manual: true })}
+        isChecking={isCheckingAlipay}
+        statusText={alipayStatusText}
       />
     </div>
   );

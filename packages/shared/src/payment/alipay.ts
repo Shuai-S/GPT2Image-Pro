@@ -37,6 +37,15 @@ interface AlipayConfig {
   charset: string;
 }
 
+export interface AlipayTradeQueryResult {
+  paid: boolean;
+  outTradeNo: string;
+  tradeNo: string;
+  tradeStatus: string;
+  totalAmount: string;
+  raw: Record<string, string>;
+}
+
 function getEnvValue(key: string): string {
   return process.env[key]?.trim() ?? "";
 }
@@ -261,6 +270,42 @@ function getStringField(source: Record<string, unknown>, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
+function toStringRecord(
+  source: Record<string, unknown>
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (typeof value === "string") {
+      result[key] = value;
+    } else if (typeof value === "number" || typeof value === "boolean") {
+      result[key] = String(value);
+    }
+  }
+  return result;
+}
+
+function createAlipayTradeQueryParams(
+  config: AlipayConfig,
+  outTradeNo: string
+): Record<string, string> {
+  const params: Record<string, string> = {
+    app_id: config.appId,
+    method: "alipay.trade.query",
+    charset: config.charset,
+    sign_type: "RSA2",
+    timestamp: new Date().toISOString().slice(0, 19).replace("T", " "),
+    version: "1.0",
+    biz_content: JSON.stringify({ out_trade_no: outTradeNo }),
+  };
+
+  return {
+    ...params,
+    sign: signAlipayParams(params, config.appPrivateKey, {
+      includeSignType: true,
+    }),
+  };
+}
+
 async function requestAlipayPrecreatePayment(input: {
   purchase: EpayPurchaseInput;
   config: AlipayConfig;
@@ -310,7 +355,69 @@ async function requestAlipayPrecreatePayment(input: {
     throw new Error("Alipay precreate response is missing qr_code");
   }
 
-  return { url: qrCode, method: "QR", qrCode };
+  return {
+    url: qrCode,
+    method: "QR",
+    qrCode,
+    outTradeNo: input.purchase.outTradeNo,
+  };
+}
+
+export async function queryRuntimeAlipayTrade(
+  outTradeNo: string
+): Promise<AlipayTradeQueryResult> {
+  if (!outTradeNo) {
+    throw new Error("Alipay out_trade_no is required for trade query");
+  }
+
+  const config = await getRuntimeAlipayConfig();
+  const params = createAlipayTradeQueryParams(config, outTradeNo);
+  const response = await fetch(config.gatewayUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+    },
+    body: new URLSearchParams(params).toString(),
+  });
+  if (!response.ok) {
+    throw new Error(`Alipay trade query request failed: ${response.status}`);
+  }
+
+  const payload: unknown = await response.json();
+  if (!isRecord(payload)) {
+    throw new Error("Alipay trade query response must be an object");
+  }
+  const result = payload.alipay_trade_query_response;
+  if (!isRecord(result)) {
+    throw new Error("Alipay trade query response is missing result body");
+  }
+
+  const raw = toStringRecord(result);
+  const code = getStringField(result, "code");
+  const tradeStatus = getStringField(result, "trade_status");
+  if (code !== "10000") {
+    return {
+      paid: false,
+      outTradeNo,
+      tradeNo: getStringField(result, "trade_no"),
+      tradeStatus: getStringField(result, "sub_code") || code,
+      totalAmount: getStringField(result, "total_amount"),
+      raw,
+    };
+  }
+
+  return {
+    paid:
+      tradeStatus === ALIPAY_TRADE_SUCCESS ||
+      tradeStatus === ALIPAY_TRADE_FINISHED,
+    outTradeNo: getStringField(result, "out_trade_no") || outTradeNo,
+    tradeNo: getStringField(result, "trade_no"),
+    tradeStatus,
+    totalAmount:
+      getStringField(result, "total_amount") ||
+      getStringField(result, "receipt_amount"),
+    raw,
+  };
 }
 
 function buildAlipaySubmitUrl(
@@ -354,6 +461,7 @@ function createAlipayPurchaseWithConfig(
   return {
     url: buildAlipaySubmitUrl(config.gatewayUrl, params),
     params: { biz_content: bizContent },
+    outTradeNo: input.outTradeNo,
   };
 }
 

@@ -6,10 +6,16 @@ import { subscription } from "@repo/database/schema";
 import { getBaseUrl, paymentConfig } from "@repo/shared/config/payment";
 import { findRuntimePlanByPriceId } from "@repo/shared/config/payment-runtime";
 import { logEvent } from "@repo/shared/logger";
-import { createRuntimeAlipayPurchase } from "@repo/shared/payment/alipay";
+import {
+  createRuntimeAlipayPurchase,
+  queryRuntimeAlipayTrade,
+} from "@repo/shared/payment/alipay";
 import { creem } from "@repo/shared/payment/creem";
 import {
   createRuntimeEpayPurchase,
+  type EpayVerifyResult,
+  getEpayOrderMetadata,
+  getEpayOrderStatus,
   getRuntimePaymentProvider,
   isLocalPaymentSubscriptionId,
   saveEpayOrder,
@@ -19,6 +25,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { PaymentType } from "@/features/payment/types";
 
+import { fulfillSuccessfulEpayPayment } from "./epay-fulfillment";
 import { createSubscriptionCheckoutQuote } from "./subscription-upgrade";
 
 function createPaymentOrderNo(prefix: "SUB" | "CR"): string {
@@ -119,6 +126,7 @@ export const createCheckoutSession = protectedAction
         return {
           url: checkout.url,
           qrCode: checkout.qrCode,
+          outTradeNo: checkout.outTradeNo ?? outTradeNo,
           method: "QR" as const,
         };
       }
@@ -126,6 +134,7 @@ export const createCheckoutSession = protectedAction
       return {
         url: checkout.url,
         params: checkout.params ?? {},
+        outTradeNo: checkout.outTradeNo ?? outTradeNo,
         method: "POST" as const,
       };
     }
@@ -148,6 +157,82 @@ export const createCheckoutSession = protectedAction
     });
 
     return { url: checkout.checkout_url };
+  });
+
+/**
+ * 同步支付宝本地订单状态。
+ *
+ * @param parsedInput.outTradeNo 商户订单号，只允许当前登录用户自己的订单。
+ * @returns 本地订单状态；支付宝已支付但异步通知未到时会主动触发履约。
+ * @sideEffects 可能调用支付宝查单、发放积分或订阅权益，并更新本地订单状态。
+ */
+export const syncAlipayOrderStatus = protectedAction
+  .metadata({ action: "payment.syncAlipayOrderStatus" })
+  .schema(
+    z.object({
+      outTradeNo: z
+        .string()
+        .min(8, "订单号不能为空")
+        .max(80, "订单号过长")
+        .regex(/^[A-Za-z0-9_-]+$/, "订单号格式不正确"),
+    })
+  )
+  .action(async ({ parsedInput, ctx }) => {
+    const { outTradeNo } = parsedInput;
+    const metadata = await getEpayOrderMetadata(outTradeNo);
+    if (
+      !metadata ||
+      metadata.userId !== ctx.userId ||
+      metadata.provider !== "alipay"
+    ) {
+      return { status: "not_found" as const };
+    }
+
+    const currentStatus = await getEpayOrderStatus(outTradeNo);
+    if (currentStatus === "success") {
+      return {
+        status: "success" as const,
+        businessType: metadata.type,
+      };
+    }
+    if (currentStatus === "failed") {
+      return {
+        status: "failed" as const,
+        businessType: metadata.type,
+      };
+    }
+
+    const queryResult = await queryRuntimeAlipayTrade(outTradeNo);
+    if (!queryResult.paid) {
+      return {
+        status:
+          currentStatus === "processing"
+            ? ("processing" as const)
+            : ("pending" as const),
+        businessType: metadata.type,
+        tradeStatus: queryResult.tradeStatus,
+      };
+    }
+
+    const verifyInfo: EpayVerifyResult = {
+      verifyStatus: true,
+      type: "alipay",
+      tradeNo: queryResult.tradeNo,
+      outTradeNo: queryResult.outTradeNo,
+      name: "",
+      money: queryResult.totalAmount,
+      tradeStatus: queryResult.tradeStatus,
+      raw: queryResult.raw,
+    };
+
+    await fulfillSuccessfulEpayPayment(verifyInfo, "alipay-query");
+    const syncedStatus = await getEpayOrderStatus(outTradeNo);
+
+    return {
+      status: syncedStatus === "success" ? ("success" as const) : "processing",
+      businessType: metadata.type,
+      tradeStatus: queryResult.tradeStatus,
+    };
   });
 
 /**

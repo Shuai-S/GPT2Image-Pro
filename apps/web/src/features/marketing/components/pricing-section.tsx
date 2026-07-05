@@ -24,7 +24,8 @@ import {
 import { cn } from "@repo/ui/utils";
 import { Check, Coins, ImageIcon, Loader2, ShoppingCart } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
+import { toast } from "sonner";
 import { useCurrentSession } from "@/features/auth/hooks/use-current-session";
 import {
   getImageBaseCreditPricing,
@@ -37,6 +38,7 @@ import {
 import {
   createCheckoutSession,
   getUserSubscription,
+  syncAlipayOrderStatus,
 } from "@/features/payment/actions";
 import { AlipayQrDialog } from "@/features/payment/alipay-qr-dialog";
 import { PlanInterval } from "@/features/payment/types";
@@ -69,6 +71,11 @@ function submitPaymentForm(url: string, params: Record<string, string>) {
  */
 const PLAN_IDS = ["free", "starter", "pro", "ultra", "enterprise"] as const;
 type PricingPlanId = (typeof PLAN_IDS)[number];
+
+type AlipayPaymentState = {
+  qrCode: string;
+  outTradeNo: string;
+};
 
 const PLAN_ID_SET: ReadonlySet<string> = new Set(PLAN_IDS);
 
@@ -107,7 +114,11 @@ export function PricingSection({
   const isZh = locale.startsWith("zh");
   const [isPending, startTransition] = useTransition();
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
-  const [alipayQrCode, setAlipayQrCode] = useState<string | null>(null);
+  const [alipayPayment, setAlipayPayment] = useState<AlipayPaymentState | null>(
+    null
+  );
+  const [isCheckingAlipay, setIsCheckingAlipay] = useState(false);
+  const [alipayStatusText, setAlipayStatusText] = useState<string>("");
   const router = useRouter();
   const { data: session } = useCurrentSession();
 
@@ -228,7 +239,10 @@ export function PricingSection({
     return config && "popular" in config && config.popular;
   };
 
-  const copy = (en: string, zh: string) => (isZh ? zh : en);
+  const copy = useCallback(
+    (en: string, zh: string) => (isZh ? zh : en),
+    [isZh]
+  );
   const formatNumber = (value: number, options?: Intl.NumberFormatOptions) =>
     new Intl.NumberFormat(locale, options).format(value);
   const formatCredits = (value: number) =>
@@ -682,8 +696,21 @@ export function PricingSection({
           type: price.type,
         });
         if (result?.data?.url) {
-          if (result.data.method === "QR" && result.data.qrCode) {
-            setAlipayQrCode(result.data.qrCode);
+          if (
+            result.data.method === "QR" &&
+            result.data.qrCode &&
+            result.data.outTradeNo
+          ) {
+            setAlipayPayment({
+              qrCode: result.data.qrCode,
+              outTradeNo: result.data.outTradeNo,
+            });
+            setAlipayStatusText(
+              copy(
+                "Waiting for Alipay payment confirmation...",
+                "等待支付宝支付确认..."
+              )
+            );
           } else if (result.data.method === "POST" && result.data.params) {
             submitPaymentForm(result.data.url, result.data.params);
           } else {
@@ -697,6 +724,74 @@ export function PricingSection({
       }
     });
   };
+
+  const syncCurrentAlipayPayment = useCallback(
+    async (options?: { manual?: boolean }) => {
+      if (!alipayPayment?.outTradeNo) return false;
+      if (options?.manual) setIsCheckingAlipay(true);
+
+      try {
+        const result = await syncAlipayOrderStatus({
+          outTradeNo: alipayPayment.outTradeNo,
+        });
+        const status = result?.data?.status;
+        if (status === "success") {
+          toast.success(copy("Subscription updated", "订阅已生效"));
+          setAlipayPayment(null);
+          setAlipayStatusText("");
+          router.push("/dashboard?pay=success");
+          router.refresh();
+          return true;
+        }
+        if (status === "failed" || status === "not_found") {
+          toast.error(copy("Payment confirmation failed", "支付确认失败"));
+          setAlipayPayment(null);
+          setAlipayStatusText("");
+          return true;
+        }
+        setAlipayStatusText(
+          copy(
+            "Waiting for Alipay payment confirmation...",
+            "等待支付宝支付确认..."
+          )
+        );
+      } catch {
+        if (options?.manual) {
+          toast.error(copy("Payment confirmation failed", "支付确认失败"));
+        }
+      } finally {
+        if (options?.manual) setIsCheckingAlipay(false);
+      }
+
+      return false;
+    },
+    [alipayPayment?.outTradeNo, copy, router]
+  );
+
+  useEffect(() => {
+    if (!alipayPayment?.outTradeNo) return;
+
+    let stopped = false;
+    let inFlight = false;
+    const poll = async () => {
+      if (stopped || inFlight) return;
+      inFlight = true;
+      try {
+        const completed = await syncCurrentAlipayPayment();
+        if (completed) stopped = true;
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const timeoutId = window.setTimeout(poll, 1500);
+    const intervalId = window.setInterval(poll, 3000);
+    return () => {
+      stopped = true;
+      window.clearTimeout(timeoutId);
+      window.clearInterval(intervalId);
+    };
+  }, [alipayPayment?.outTradeNo, syncCurrentAlipayPayment]);
 
   /**
    * 处理管理订阅按钮点击 — 跳转到账单设置页
@@ -1075,12 +1170,17 @@ export function PricingSection({
         </div>
       </div>
       <AlipayQrDialog
-        open={Boolean(alipayQrCode)}
-        qrCode={alipayQrCode}
+        open={Boolean(alipayPayment)}
+        qrCode={alipayPayment?.qrCode ?? null}
         onOpenChange={(open) => {
-          if (!open) setAlipayQrCode(null);
+          if (!open) {
+            setAlipayPayment(null);
+            setAlipayStatusText("");
+          }
         }}
-        onCompleted={() => router.push("/dashboard")}
+        onCompleted={() => syncCurrentAlipayPayment({ manual: true })}
+        isChecking={isCheckingAlipay}
+        statusText={alipayStatusText}
       />
     </section>
   );

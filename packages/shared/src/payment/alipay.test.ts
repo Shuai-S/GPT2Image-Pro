@@ -25,6 +25,7 @@ import {
   buildAlipayVerifyResult,
   createAlipayPurchase,
   createRuntimeAlipayPurchase,
+  queryRuntimeAlipayTrade,
   signAlipayParams,
   verifyAlipayParams,
 } from "./alipay";
@@ -228,6 +229,7 @@ describe("createAlipayPurchase", () => {
       url: "https://qr.alipay.com/bax-test",
       method: "QR",
       qrCode: "https://qr.alipay.com/bax-test",
+      outTradeNo: "CR_PRECREATE",
     });
     const body = fetchMock.mock.calls[0]?.[1]?.body;
     expect(typeof body).toBe("string");
@@ -237,6 +239,53 @@ describe("createAlipayPurchase", () => {
     expect(JSON.parse(requestParams.biz_content ?? "{}")).toMatchObject({
       out_trade_no: "CR_PRECREATE",
       product_code: "FACE_TO_FACE_PAYMENT",
+    });
+    expect(verifyAlipayRequestParams(requestParams)).toBe(true);
+  });
+
+  it("queries runtime trade status and detects paid Alipay orders", async () => {
+    configureAlipayEnv();
+    const runtimeValues: Record<string, string> = {
+      ALIPAY_APP_ID: "2026000000000001",
+      ALIPAY_APP_PRIVATE_KEY: keyPair.privateKey,
+      ALIPAY_PUBLIC_KEY: keyPair.publicKey,
+      ALIPAY_GATEWAY_URL: "https://openapi.alipay.test/gateway.do",
+    };
+    vi.mocked(getRuntimeSettingString).mockImplementation(async (key) => {
+      return runtimeValues[key] ?? undefined;
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          alipay_trade_query_response: {
+            code: "10000",
+            msg: "Success",
+            trade_no: "2026070522001",
+            out_trade_no: "CR_QUERY",
+            trade_status: "TRADE_SUCCESS",
+            total_amount: "20.50",
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+
+    const result = await queryRuntimeAlipayTrade("CR_QUERY");
+
+    expect(result).toMatchObject({
+      paid: true,
+      tradeNo: "2026070522001",
+      outTradeNo: "CR_QUERY",
+      tradeStatus: "TRADE_SUCCESS",
+      totalAmount: "20.50",
+    });
+    const body = fetchMock.mock.calls[0]?.[1]?.body;
+    expect(typeof body).toBe("string");
+    if (typeof body !== "string") return;
+    const requestParams = Object.fromEntries(new URLSearchParams(body));
+    expect(requestParams.method).toBe("alipay.trade.query");
+    expect(JSON.parse(requestParams.biz_content ?? "{}")).toMatchObject({
+      out_trade_no: "CR_QUERY",
     });
     expect(verifyAlipayRequestParams(requestParams)).toBe(true);
   });

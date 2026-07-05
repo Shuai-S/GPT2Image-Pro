@@ -15,6 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@repo/ui/components/dialog";
+import { Loader2 } from "lucide-react";
 import Image from "next/image";
 import QRCode from "qrcode";
 import { useEffect, useState } from "react";
@@ -24,6 +25,8 @@ type AlipayQrDialogProps = {
   qrCode: string | null;
   onOpenChange: (open: boolean) => void;
   onCompleted?: () => void;
+  isChecking?: boolean;
+  statusText?: string;
 };
 
 /**
@@ -32,15 +35,19 @@ type AlipayQrDialogProps = {
  * @param props.open 弹窗是否打开。
  * @param props.qrCode 支付宝 precreate 返回的二维码内容。
  * @param props.onOpenChange 弹窗开关回调。
- * @param props.onCompleted 用户点击已完成支付时触发的回调。
+ * @param props.onCompleted 用户点击已完成支付时触发主动查单。
+ * @param props.isChecking 是否正在查询支付宝订单状态。
+ * @param props.statusText 当前支付状态提示。
  * @returns 支付宝二维码弹窗。
- * @sideEffects qrCode 变化时在浏览器中生成 data URL；点击完成可触发页面刷新或导航。
+ * @sideEffects qrCode 变化时在浏览器中生成 data URL；点击完成可触发查单与履约。
  */
 export function AlipayQrDialog({
   open,
   qrCode,
   onOpenChange,
   onCompleted,
+  isChecking = false,
+  statusText,
 }: AlipayQrDialogProps) {
   const [qrImage, setQrImage] = useState<string>("");
   const [renderError, setRenderError] = useState<string>("");
@@ -79,7 +86,7 @@ export function AlipayQrDialog({
         <DialogHeader>
           <DialogTitle>支付宝扫码支付</DialogTitle>
           <DialogDescription>
-            请使用支付宝扫描二维码完成支付。
+            {statusText ?? "请使用支付宝扫描二维码完成支付。"}
           </DialogDescription>
         </DialogHeader>
 
@@ -108,8 +115,15 @@ export function AlipayQrDialog({
           >
             关闭
           </Button>
-          <Button type="button" onClick={onCompleted}>
-            我已完成支付
+          <Button type="button" disabled={isChecking} onClick={onCompleted}>
+            {isChecking ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                正在确认
+              </>
+            ) : (
+              "我已完成支付"
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -42,7 +42,11 @@ interface FulfillEpayPaymentResult {
   metadata: EpayMetadata;
 }
 
-type EpayFulfillmentSource = "epay-webhook" | "epay-return" | "alipay-webhook";
+type EpayFulfillmentSource =
+  | "epay-webhook"
+  | "epay-return"
+  | "alipay-webhook"
+  | "alipay-query";
 type LocalPaymentProvider = "epay" | "alipay";
 
 // 进程内去重表：仅为单实例下的最佳努力优化，合并同一订单的并发履约，
@@ -90,7 +94,9 @@ export function isExpectedEpayAmount(
 function getFulfillmentSourceProvider(
   source: EpayFulfillmentSource
 ): LocalPaymentProvider {
-  return source === "alipay-webhook" ? "alipay" : "epay";
+  return source === "alipay-webhook" || source === "alipay-query"
+    ? "alipay"
+    : "epay";
 }
 
 export function isMatchingPaymentProvider(params: {
