@@ -93,6 +93,8 @@ export function DashboardSidebar({
   const isAdmin = isAdminRole(user?.role);
   const isObserverAdmin = isObserverAdminRole(user?.role);
   const lastUnreadRefreshAtRef = useRef(0);
+  const paymentManagementTitle =
+    locale === "zh" ? "支付订单" : "Payment Orders";
 
   // Popover 开关状态
   const [open, setOpen] = useState(false);
@@ -192,12 +194,12 @@ export function DashboardSidebar({
       "Announcement Management": t("nav.announcementManagement"),
       "Image Backend Pool": t("nav.imageBackendPool"),
       "Referral Management": t("nav.referralManagement"),
-      "Payment Management": t("nav.paymentManagement"),
+      "Payment Management": paymentManagementTitle,
       Support: t("nav.support"),
       "New Ticket": t("nav.newTicket"),
       "User Management": t("nav.userManagement"),
     }),
-    [t]
+    [t, paymentManagementTitle]
   );
 
   /**
