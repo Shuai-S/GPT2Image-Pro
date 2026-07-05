@@ -26,6 +26,10 @@ interface HeaderProps {
   operationFlags: OperationFeatureFlags;
 }
 
+const desktopOnlyFlexClassName = "max-md:hidden md:flex";
+const desktopOnlyInlineFlexClassName = "max-md:hidden md:inline-flex";
+const desktopOnlyBlockClassName = "max-md:hidden md:block";
+
 /**
  * Marketing 页面顶部导航栏
  *
@@ -89,7 +93,7 @@ export function Header({ branding, operationFlags }: HeaderProps) {
           </Link>
 
           {/* 导航菜单 (桌面端) */}
-          <div className="hidden md:flex">
+          <div className={desktopOnlyFlexClassName}>
             <NavMenu mainNavItems={visibleMainNav} />
           </div>
         </div>
@@ -104,18 +108,20 @@ export function Header({ branding, operationFlags }: HeaderProps) {
 
           {isPending ? (
             // 加载状态 - 显示骨架
-            <div className="hidden h-9 w-24 animate-pulse rounded-md bg-muted md:block" />
+            <div
+              className={`${desktopOnlyBlockClassName} h-9 w-24 animate-pulse rounded-md bg-muted`}
+            />
           ) : user ? (
             // 已登录 - 显示 Dashboard 按钮和头像
             <>
               <Button
                 asChild
                 variant="ghost"
-                className="hidden text-muted-foreground md:inline-flex"
+                className={`${desktopOnlyInlineFlexClassName} text-muted-foreground`}
               >
                 <Link href="/dashboard">{t("dashboard")}</Link>
               </Button>
-              <Link href="/dashboard" className="hidden md:block">
+              <Link href="/dashboard" className={desktopOnlyBlockClassName}>
                 <Avatar className="h-8 w-8">
                   <AvatarImage src={user.image || undefined} alt={user.name} />
                   <AvatarFallback className="bg-foreground text-xs text-background">
@@ -130,11 +136,11 @@ export function Header({ branding, operationFlags }: HeaderProps) {
               <Button
                 asChild
                 variant="ghost"
-                className="hidden text-muted-foreground hover:text-foreground md:inline-flex"
+                className={`${desktopOnlyInlineFlexClassName} text-muted-foreground hover:text-foreground`}
               >
                 <Link href="/sign-in">{t("login")}</Link>
               </Button>
-              <Button asChild className="hidden md:inline-flex">
+              <Button asChild className={desktopOnlyInlineFlexClassName}>
                 <Link href="/sign-up">{t("getStarted")}</Link>
               </Button>
             </>
