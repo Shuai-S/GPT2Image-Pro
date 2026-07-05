@@ -3,6 +3,7 @@
 import { ModeToggle } from "@repo/shared/components";
 import type { BrandingConfig } from "@repo/shared/config/branding";
 import { mainNav, productsNav } from "@repo/shared/config/nav";
+import type { OperationFeatureFlags } from "@repo/shared/system-settings";
 import {
   Avatar,
   AvatarFallback,
@@ -36,6 +37,7 @@ const productsTitleMap: Record<string, string> = {
 
 interface HeaderProps {
   branding: BrandingConfig;
+  operationFlags: OperationFeatureFlags;
 }
 
 /**
@@ -47,7 +49,7 @@ interface HeaderProps {
  *
  * 布局: [Logo + Nav 靠左] -------- [Actions 靠右]
  */
-export function Header({ branding }: HeaderProps) {
+export function Header({ branding, operationFlags }: HeaderProps) {
   // 获取当前用户会话状态
   const { data: session, isPending } = useCurrentSession();
   const user = session?.user;
@@ -55,6 +57,9 @@ export function Header({ branding }: HeaderProps) {
   const tNav = useTranslations("Navigation");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [productsExpanded, setProductsExpanded] = useState(false);
+  const visibleMainNav = mainNav.filter(
+    (item) => item.href !== "/blog" || operationFlags.blog
+  );
 
   /**
    * 获取用户名首字母作为头像回退
@@ -101,7 +106,7 @@ export function Header({ branding }: HeaderProps) {
 
           {/* 导航菜单 (桌面端) */}
           <div className="hidden md:flex">
-            <NavMenu />
+            <NavMenu mainNavItems={visibleMainNav} />
           </div>
         </div>
 
@@ -210,7 +215,7 @@ export function Header({ branding }: HeaderProps) {
 
               {/* 主导航链接 */}
               <div className="space-y-1">
-                {mainNav.map((item) => (
+                {visibleMainNav.map((item) => (
                   <Link
                     key={item.href}
                     href={item.href}

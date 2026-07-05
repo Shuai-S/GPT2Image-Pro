@@ -1,7 +1,9 @@
-import type { Metadata } from "next";
-import { BreadcrumbJsonLd } from "@/components/seo/json-ld";
-import { Separator } from "@repo/ui/components/separator";
 import { siteConfig } from "@repo/shared/config";
+import { isOperationFeatureEnabled } from "@repo/shared/system-settings";
+import { Separator } from "@repo/ui/components/separator";
+import type { Metadata } from "next";
+import { notFound } from "next/navigation";
+import { BreadcrumbJsonLd } from "@/components/seo/json-ld";
 import { getBlogPosts } from "@/lib/source";
 
 import { BlogPostCard } from "./blog-post-card";
@@ -53,6 +55,10 @@ export default async function BlogPage({
   params: Promise<{ locale: string }>;
 }) {
   const { locale } = await params;
+  if (!(await isOperationFeatureEnabled("blog"))) {
+    notFound();
+  }
+
   const posts = getBlogPosts(locale);
 
   // 按日期排序（最新的在前）

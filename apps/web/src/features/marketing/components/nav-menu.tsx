@@ -1,6 +1,6 @@
 "use client";
 
-import { mainNav, productsNav } from "@repo/shared/config";
+import { type NavItem, productsNav } from "@repo/shared/config";
 import {
   NavigationMenu,
   NavigationMenuItem,
@@ -56,11 +56,22 @@ interface ProductsMenuPosition {
 }
 
 /**
+ * 营销主导航属性。
+ *
+ * @property mainNavItems 已按运营开关过滤的主导航项。
+ */
+type NavMenuProps = {
+  mainNavItems: NavItem[];
+};
+
+/**
  * 导航菜单组件
  *
- * 包含 Products 下拉菜单和普通导航链接
+ * @param mainNavItems 服务端按运营开关过滤后的主导航项。
+ * @returns 桌面端营销导航菜单。
+ * @sideEffects 监听窗口滚动和尺寸变化，用于定位 Products 下拉菜单。
  */
-export function NavMenu() {
+export function NavMenu({ mainNavItems }: NavMenuProps) {
   const pathname = usePathname();
   const t = useTranslations("Navigation");
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
@@ -263,7 +274,7 @@ export function NavMenu() {
         </NavigationMenuItem>
 
         {/* 普通导航链接 */}
-        {mainNav.map((item) => {
+        {mainNavItems.map((item) => {
           const active = isActive(item.href);
           return (
             <NavigationMenuItem key={item.href}>

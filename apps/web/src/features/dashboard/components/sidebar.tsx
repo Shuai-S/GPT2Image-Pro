@@ -4,6 +4,7 @@ import { getMyUnreadAnnouncementCountAction } from "@repo/shared/announcements/a
 import { signOut } from "@repo/shared/auth/client";
 import { isAdminRole, isObserverAdminRole } from "@repo/shared/auth/roles";
 import { ModeToggle } from "@repo/shared/components";
+import type { NavGroup, NavItem } from "@repo/shared/config";
 import { dashboardConfig } from "@repo/shared/config";
 import type { BrandingConfig } from "@repo/shared/config/branding";
 import { CreditBalanceBadge } from "@repo/shared/credits/components";
@@ -13,6 +14,7 @@ import {
   type PlanType,
 } from "@repo/shared/subscription/components/plan-badge";
 import { getMyUnreadTicketCountAction } from "@repo/shared/support/actions/ticket";
+import type { OperationFeatureFlags } from "@repo/shared/system-settings";
 import {
   Avatar,
   AvatarFallback,
@@ -29,6 +31,7 @@ import { cn } from "@repo/ui/utils";
 import {
   Activity,
   ChevronsUpDown,
+  CreditCard,
   Gift,
   LogOut,
   Megaphone,
@@ -68,11 +71,13 @@ import { useSidebar } from "@/features/dashboard/context";
 type DashboardSidebarProps = {
   initialSession?: CurrentSession;
   branding: BrandingConfig;
+  operationFlags: OperationFeatureFlags;
 };
 
 export function DashboardSidebar({
   initialSession,
   branding,
+  operationFlags,
 }: DashboardSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -187,6 +192,7 @@ export function DashboardSidebar({
       "Announcement Management": t("nav.announcementManagement"),
       "Image Backend Pool": t("nav.imageBackendPool"),
       "Referral Management": t("nav.referralManagement"),
+      "Payment Management": t("nav.paymentManagement"),
       Support: t("nav.support"),
       "New Ticket": t("nav.newTicket"),
       "User Management": t("nav.userManagement"),
@@ -237,6 +243,56 @@ export function DashboardSidebar({
 
   const localizedHref = (href: string) =>
     href.startsWith("/") ? `/${locale}${href}` : href;
+
+  /**
+   * 根据运营开关过滤 Dashboard 导航项。
+   *
+   * @param item 原始导航项。
+   * @returns 可见导航项；被关闭的功能返回 null。
+   */
+  const filterOperationalNavItem = useCallback(
+    (item: NavItem): NavItem | null => {
+      const createMode = item.href.startsWith("/dashboard/create?")
+        ? new URLSearchParams(item.href.split("?")[1] ?? "").get("mode")
+        : null;
+      if (createMode === "text" && !operationFlags.textToImage) return null;
+      if (createMode === "image" && !operationFlags.imageToImage) return null;
+      if (createMode === "chat" && !operationFlags.chat) return null;
+      if (createMode === "agent" && !operationFlags.agent) return null;
+      if (createMode === "waterfall" && !operationFlags.waterfall) return null;
+      if (createMode === "video" && !operationFlags.video) return null;
+      if (item.href === "/dashboard/canvas" && !operationFlags.infiniteCanvas) {
+        return null;
+      }
+
+      if (!item.children?.length) return item;
+
+      const children = item.children
+        .map(filterOperationalNavItem)
+        .filter((child): child is NavItem => Boolean(child));
+      if (children.length === 0) return null;
+
+      return {
+        ...item,
+        href: children[0]?.href ?? item.href,
+        children,
+      };
+    },
+    [operationFlags]
+  );
+
+  const sidebarNav = useMemo<NavGroup[]>(
+    () =>
+      dashboardConfig.sidebarNav
+        .map((group) => ({
+          ...group,
+          items: group.items
+            .map(filterOperationalNavItem)
+            .filter((item): item is NavItem => Boolean(item)),
+        }))
+        .filter((group) => group.items.length > 0),
+    [filterOperationalNavItem]
+  );
 
   /**
    * 判断导航项是否匹配当前地址。
@@ -307,7 +363,7 @@ export function DashboardSidebar({
 
         {/* 导航菜单 */}
         <nav className="flex-1 space-y-4 overflow-y-auto p-3">
-          {dashboardConfig.sidebarNav.map((group) => (
+          {sidebarNav.map((group) => (
             <div key={group.title}>
               {/* Group Label - 折叠时隐藏 */}
               {!collapsed && (
@@ -329,6 +385,11 @@ export function DashboardSidebar({
                           title: "User Management",
                           href: "/dashboard/admin/users",
                           icon: Users,
+                        },
+                        {
+                          title: "Payment Management",
+                          href: "/dashboard/admin/payments",
+                          icon: CreditCard,
                         },
                         {
                           title: "Announcement Management",

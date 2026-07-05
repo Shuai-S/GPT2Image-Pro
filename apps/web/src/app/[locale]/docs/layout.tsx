@@ -1,10 +1,10 @@
 import "fumadocs-ui/style.css";
 
+import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
+import { getRuntimeOperationFeatureFlags } from "@repo/shared/system-settings";
 import { DocsLayout } from "fumadocs-ui/layouts/docs";
 import { RootProvider } from "fumadocs-ui/provider/next";
 import type { ReactNode } from "react";
-
-import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
 import { Header } from "@/features/marketing/components";
 import { docsSource } from "@/lib/source";
 
@@ -18,14 +18,17 @@ import { docsSource } from "@/lib/source";
 export default async function Layout({ children }: { children: ReactNode }) {
   // 获取页面树（不需要 locale，因为 i18n 由 Next.js 路由处理）
   const tree = docsSource.pageTree;
-  const branding = await getRuntimeBrandingConfig();
+  const [branding, operationFlags] = await Promise.all([
+    getRuntimeBrandingConfig(),
+    getRuntimeOperationFeatureFlags(),
+  ]);
 
   return (
     // RootProvider 仅在文档区挂载(全局 Providers 已不再挂载它),提供 fumadocs 的
     // 搜索/page-tree 等上下文;fumadocs-ui/style.css 同理只在文档区引入。
     <RootProvider>
       {/* 网站顶部导航栏 - 放在 DocsLayout 外部确保显示 */}
-      <Header branding={branding} />
+      <Header branding={branding} operationFlags={operationFlags} />
 
       {/* Fumadocs 文档布局 */}
       <DocsLayout

@@ -4,6 +4,7 @@
 // 宽度被永久 display:none。fumadocs CSS 只有 blog/[slug]、legal/[slug] 的 .prose 需要,
 // 故下沉到这两个页面各自引入,避免污染首页等无关页面。
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
+import { getRuntimeOperationFeatureFlags } from "@repo/shared/system-settings";
 import { Footer, Header } from "@/features/marketing/components";
 
 export default async function MarketingLayout({
@@ -11,11 +12,14 @@ export default async function MarketingLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const branding = await getRuntimeBrandingConfig();
+  const [branding, operationFlags] = await Promise.all([
+    getRuntimeBrandingConfig(),
+    getRuntimeOperationFeatureFlags(),
+  ]);
 
   return (
     <div className="flex min-h-screen flex-col">
-      <Header branding={branding} />
+      <Header branding={branding} operationFlags={operationFlags} />
       <main className="flex-1">{children}</main>
       <Footer branding={branding} />
     </div>

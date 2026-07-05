@@ -5,25 +5,48 @@ import { systemSetting } from "@repo/database/schema";
 import { eq, inArray, sql } from "drizzle-orm";
 
 import {
+  isSettingKey,
   SETTING_DEFINITION_BY_KEY,
-  SYSTEM_SETTING_DEFINITIONS,
   type SettingDefinition,
   type SettingKey,
-  isSettingKey,
+  SYSTEM_SETTING_DEFINITIONS,
 } from "./definitions";
 
 export {
   SETTING_CATEGORIES,
   SETTING_DEFINITION_BY_KEY,
-  SYSTEM_SETTING_DEFINITIONS,
   type SettingCategory,
   type SettingDefinition,
   type SettingKey,
   type SettingValueType,
+  SYSTEM_SETTING_DEFINITIONS,
 } from "./definitions";
 
 const CACHE_TTL_MS = 10_000;
 const SKIP_RUNTIME_SETTINGS_DB_ENV = "GPT2IMAGE_SKIP_RUNTIME_SETTINGS_DB";
+
+export type OperationFeatureKey =
+  | "blog"
+  | "textToImage"
+  | "imageToImage"
+  | "chat"
+  | "agent"
+  | "waterfall"
+  | "video"
+  | "infiniteCanvas";
+
+export type OperationFeatureFlags = Record<OperationFeatureKey, boolean>;
+
+const OPERATION_FEATURE_SETTING_KEYS = {
+  blog: "OPERATION_BLOG_ENABLED",
+  textToImage: "OPERATION_TEXT_TO_IMAGE_ENABLED",
+  imageToImage: "OPERATION_IMAGE_TO_IMAGE_ENABLED",
+  chat: "OPERATION_CHAT_ENABLED",
+  agent: "OPERATION_AGENT_ENABLED",
+  waterfall: "OPERATION_WATERFALL_ENABLED",
+  video: "OPERATION_VIDEO_ENABLED",
+  infiniteCanvas: "OPERATION_INFINITE_CANVAS_ENABLED",
+} as const satisfies Record<OperationFeatureKey, SettingKey>;
 
 let settingsCache:
   | {
@@ -152,6 +175,39 @@ export async function getRuntimeSettingBoolean(
   const envValue = process.env[key];
   if (!envValue) return fallback;
   return ["1", "true", "yes", "on"].includes(envValue.toLowerCase());
+}
+
+/**
+ * 读取单个运营功能开关。
+ *
+ * @param feature 运营功能标识。
+ * @returns 功能启用时返回 true；未配置时默认启用，避免升级后误关线上功能。
+ * @sideEffects 正常运行时读取 system_setting 表，构建期可按全局规则回退环境变量。
+ */
+export async function isOperationFeatureEnabled(feature: OperationFeatureKey) {
+  return getRuntimeSettingBoolean(
+    OPERATION_FEATURE_SETTING_KEYS[feature],
+    true
+  );
+}
+
+/**
+ * 读取公开内容与创作功能的运营开关快照。
+ *
+ * @returns 所有运营功能开关的布尔快照。
+ * @sideEffects 并发读取运行时系统设置；未配置的开关默认启用。
+ */
+export async function getRuntimeOperationFeatureFlags(): Promise<OperationFeatureFlags> {
+  const entries = await Promise.all(
+    Object.entries(OPERATION_FEATURE_SETTING_KEYS).map(
+      async ([feature, key]) => [
+        feature,
+        await getRuntimeSettingBoolean(key, true),
+      ]
+    )
+  );
+
+  return Object.fromEntries(entries) as OperationFeatureFlags;
 }
 
 export async function getRuntimeSettingNumber(
@@ -390,12 +446,9 @@ export async function initializeMissingSystemSettingsDefaults(options?: {
 
   if (values.length === 0) return [] as SettingKey[];
 
-  await db
-    .insert(systemSetting)
-    .values(values)
-    .onConflictDoNothing({
-      target: systemSetting.key,
-    });
+  await db.insert(systemSetting).values(values).onConflictDoNothing({
+    target: systemSetting.key,
+  });
 
   clearSystemSettingsCache();
   return values.map((value) => value.key);
@@ -469,7 +522,9 @@ async function migrateLegacySub2ApiAutoSyncSettings(
       value: systemSetting.value,
     })
     .from(systemSetting)
-    .where(inArray(systemSetting.key, ["SUB2API_AUTO_SYNC_TASKS", ...legacyKeys]));
+    .where(
+      inArray(systemSetting.key, ["SUB2API_AUTO_SYNC_TASKS", ...legacyKeys])
+    );
 
   const stored = new Map(
     rows
@@ -539,7 +594,9 @@ async function migrateLegacySub2ApiAutoSyncSettings(
         });
     }
 
-    await tx.delete(systemSetting).where(inArray(systemSetting.key, legacyKeys));
+    await tx
+      .delete(systemSetting)
+      .where(inArray(systemSetting.key, legacyKeys));
   });
 
   clearSystemSettingsCache();
@@ -565,9 +622,7 @@ function parsePositiveInteger(value: unknown, fallback: number) {
       : typeof value === "string"
         ? Number(value)
         : Number.NaN;
-  return Number.isFinite(parsed) && parsed > 0
-    ? Math.trunc(parsed)
-    : fallback;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : fallback;
 }
 
 function parseSyncMode(value: unknown) {
@@ -614,9 +669,7 @@ export async function setSystemSettings(
       }
 
       if (entry.clear) {
-        await tx
-          .delete(systemSetting)
-          .where(eq(systemSetting.key, entry.key));
+        await tx.delete(systemSetting).where(eq(systemSetting.key, entry.key));
         changedKeys.push(entry.key);
         processEnvUpdates.push({ key: entry.key, value: undefined });
         continue;
@@ -632,9 +685,7 @@ export async function setSystemSettings(
 
       const value = coerceValue(definition, entry.value);
       if (value === "") {
-        await tx
-          .delete(systemSetting)
-          .where(eq(systemSetting.key, entry.key));
+        await tx.delete(systemSetting).where(eq(systemSetting.key, entry.key));
         processEnvUpdates.push({ key: entry.key, value: undefined });
       } else {
         await tx
@@ -693,7 +744,8 @@ export async function getAdminSystemSettingsSnapshot() {
       row?.value !== undefined &&
       row.value !== null &&
       (typeof row.value !== "string" || row.value.trim().length > 0);
-    const hasEnvValue = typeof envValue === "string" && envValue.trim().length > 0;
+    const hasEnvValue =
+      typeof envValue === "string" && envValue.trim().length > 0;
     const isSecret = "secret" in definition && Boolean(definition.secret);
     const displayValue = isSecret
       ? ""

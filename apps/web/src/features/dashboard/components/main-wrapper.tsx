@@ -30,6 +30,7 @@ function getPageTitleKey(pathname: string): string {
     "/dashboard/referral": "referral",
     "/dashboard/settings": "settings",
     "/dashboard/admin/users": "userManagement",
+    "/dashboard/admin/payments": "paymentManagement",
     "/dashboard/admin/announcements": "announcementManagement",
     "/dashboard/admin/referral": "referralManagement",
     "/dashboard/admin/settings": "systemSettings",

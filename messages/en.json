@@ -581,6 +581,8 @@
       "systemSettings": "System Settings",
       "globalStatus": "Global Status",
       "imageBackendPool": "Image Backend Pool",
+      "referralManagement": "Referral Management",
+      "paymentManagement": "Payment Orders",
       "support": "Support",
       "newTicket": "New Ticket"
     },
@@ -604,6 +606,8 @@
       "systemSettings": "System Settings",
       "globalStatus": "Global Status",
       "imageBackendPool": "Image Backend Pool",
+      "referralManagement": "Referral Management",
+      "paymentManagement": "Payment Orders",
       "creditsBuy": "Buy Credits",
       "profile": "Profile",
       "security": "Security",

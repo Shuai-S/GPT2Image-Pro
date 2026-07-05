@@ -26,7 +26,8 @@ export type OperationDomain =
   | "moderation"
   | "external-api"
   | "support"
-  | "referral";
+  | "referral"
+  | "payment";
 
 /**
  * 访问控制要求 - 声明式描述操作的身份要求。

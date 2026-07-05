@@ -13,6 +13,7 @@ import {
 import { formatCredits } from "@repo/shared/credits/format";
 import { buildStorageThumbnailUrl } from "@repo/shared/storage/signed-url";
 import type { PlanCapabilitySnapshot } from "@repo/shared/subscription/services/plan-capabilities";
+import type { OperationFeatureFlags } from "@repo/shared/system-settings";
 import { Button } from "@repo/ui/components/button";
 import { Checkbox } from "@repo/ui/components/checkbox";
 import { Dialog, DialogContent, DialogTitle } from "@repo/ui/components/dialog";
@@ -1238,6 +1239,7 @@ interface CreatePageClientProps {
   forceWebPixelRange: ForceWebPixelRange;
   timeZone: string;
   videoPricing: VideoPricingInfo;
+  operationFlags: OperationFeatureFlags;
 }
 
 function isImageFile(file: File) {
@@ -1890,6 +1892,7 @@ export function CreatePageClient({
   forceWebPixelRange,
   timeZone,
   videoPricing,
+  operationFlags,
 }: CreatePageClientProps) {
   const locale = useLocale();
   const router = useRouter();
@@ -2060,11 +2063,17 @@ export function CreatePageClient({
     }
     return message;
   };
-  const chatAllowed = capabilities.features["imageGeneration.chat"];
+  const textAllowed = operationFlags.textToImage;
+  const imageAllowed = operationFlags.imageToImage;
+  const chatAllowed =
+    operationFlags.chat && capabilities.features["imageGeneration.chat"];
   const agentAllowed =
-    capabilities.features["imageGeneration.agent"] ?? chatAllowed;
+    operationFlags.agent &&
+    (capabilities.features["imageGeneration.agent"] ?? chatAllowed);
   const waterfallAllowed =
-    capabilities.features["imageGeneration.waterfall"] ?? chatAllowed;
+    operationFlags.waterfall &&
+    (capabilities.features["imageGeneration.waterfall"] ?? chatAllowed);
+  const videoAllowed = operationFlags.video;
   const gpt55ChatAllowed = capabilities.features["models.gpt55"];
   const promptOptimizationAllowed =
     capabilities.features["promptOptimization.control"];
@@ -2902,8 +2911,26 @@ export function CreatePageClient({
           ? waterfallAllowed
           : mode === "chat"
             ? chatAllowed
-            : true,
-    [chatAllowed, effectiveAgentAllowed, waterfallAllowed]
+            : mode === "image"
+              ? imageAllowed
+              : mode === "video"
+                ? videoAllowed
+                : textAllowed,
+    [
+      chatAllowed,
+      effectiveAgentAllowed,
+      imageAllowed,
+      textAllowed,
+      videoAllowed,
+      waterfallAllowed,
+    ]
+  );
+  const fallbackMode = useMemo<ActiveMode | null>(
+    () =>
+      (["text", "image", "chat", "agent", "waterfall", "video"] as const).find(
+        (mode) => isActiveModeAllowed(mode)
+      ) ?? null,
+    [isActiveModeAllowed]
   );
   const currentModeMixWebFirstActive =
     activeMode === "image"
@@ -2930,23 +2957,26 @@ export function CreatePageClient({
 
   useEffect(() => {
     const requestedMode = parseCreateModeParam(searchParams.get("mode"));
-    const fallbackMode: ActiveMode = "text";
 
     if (requestedMode && !isActiveModeAllowed(requestedMode)) {
       toast.error(
         copy(
-          "This mode is not enabled for your plan.",
-          "当前套餐未开启该模式。"
+          "This mode is not enabled for your plan or has been disabled by the operator.",
+          "当前套餐未开启该模式，或运营端已关闭该模式。"
         )
       );
-      switchActiveMode(
-        isActiveModeAllowed(activeMode) ? activeMode : fallbackMode
-      );
+      if (fallbackMode) {
+        switchActiveMode(
+          isActiveModeAllowed(activeMode) ? activeMode : fallbackMode
+        );
+      }
       return;
     }
 
     if (!isActiveModeAllowed(activeMode)) {
-      switchActiveMode(fallbackMode);
+      if (fallbackMode) {
+        switchActiveMode(fallbackMode);
+      }
       return;
     }
 
@@ -2957,7 +2987,14 @@ export function CreatePageClient({
     if (requestedMode === activeMode) return;
 
     switchActiveMode(requestedMode);
-  }, [activeMode, copy, isActiveModeAllowed, searchParams, switchActiveMode]);
+  }, [
+    activeMode,
+    copy,
+    fallbackMode,
+    isActiveModeAllowed,
+    searchParams,
+    switchActiveMode,
+  ]);
   const formattedBalance = formatCredits(balance);
   const formattedTextBatchCreditCost = formatCredits(textBatchCreditCost);
   const formattedLineBatchCreditCost = formatCredits(lineBatchCreditCost);
@@ -7719,8 +7756,21 @@ export function CreatePageClient({
         </p>
       </header>
 
+      {!fallbackMode && (
+        <div className="rounded-lg border bg-background px-4 py-5 text-sm text-muted-foreground">
+          {copy(
+            "All creation modes are currently disabled by the operator.",
+            "运营端已暂时关闭所有创作模式。"
+          )}
+        </div>
+      )}
+
       <div className="mb-10">
-        <div role="tabpanel" hidden={activeMode !== "text"} className="mt-0">
+        <div
+          role="tabpanel"
+          hidden={activeMode !== "text" || !textAllowed}
+          className="mt-0"
+        >
           <Tabs
             value={textMode}
             onValueChange={(value) => setTextMode(value as TextGenerationMode)}
@@ -7849,7 +7899,11 @@ export function CreatePageClient({
           </Tabs>
         </div>
 
-        <div role="tabpanel" hidden={activeMode !== "image"} className="mt-0">
+        <div
+          role="tabpanel"
+          hidden={activeMode !== "image" || !imageAllowed}
+          className="mt-0"
+        >
           <form
             onSubmit={handleEditSubmit}
             onPaste={handleImagePaste}
@@ -8605,7 +8659,11 @@ export function CreatePageClient({
 
         <div
           role="tabpanel"
-          hidden={activeMode !== "chat" && activeMode !== "agent"}
+          hidden={
+            (activeMode !== "chat" && activeMode !== "agent") ||
+            (activeMode === "chat" && !chatAllowed) ||
+            (activeMode === "agent" && !effectiveAgentAllowed)
+          }
           className="mt-0"
         >
           <div className="space-y-4">
@@ -9080,7 +9138,7 @@ export function CreatePageClient({
 
         <div
           role="tabpanel"
-          hidden={activeMode !== "waterfall"}
+          hidden={activeMode !== "waterfall" || !waterfallAllowed}
           className="mt-0"
         >
           <div className="overflow-hidden rounded-lg border border-border bg-background">
@@ -9567,7 +9625,11 @@ export function CreatePageClient({
           </div>
         </div>
 
-        <div role="tabpanel" hidden={activeMode !== "video"} className="mt-0">
+        <div
+          role="tabpanel"
+          hidden={activeMode !== "video" || !videoAllowed}
+          className="mt-0"
+        >
           <VideoCreatePanel recent={recent} pricing={videoPricing} />
         </div>
       </div>

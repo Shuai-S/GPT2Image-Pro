@@ -1,10 +1,11 @@
 // fumadocs CSS 仅文章正文的 .prose 排版需要,就近在本页引入(不要放进营销布局,
 // 否则它会污染首页等所有营销页、压垮 Header 响应式导航)。
 import "fumadocs-ui/style.css";
+import { siteConfig } from "@repo/shared/config";
+import { isOperationFeatureEnabled } from "@repo/shared/system-settings";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ArticleJsonLd, BreadcrumbJsonLd } from "@/components/seo/json-ld";
-import { siteConfig } from "@repo/shared/config";
 import { Link } from "@/i18n/routing";
 import { getAllBlogSlugs, getBlogPost } from "@/lib/source";
 
@@ -24,6 +25,12 @@ export async function generateMetadata({
   params: Promise<{ locale: string; slug: string }>;
 }): Promise<Metadata> {
   const { locale, slug } = await params;
+  if (!(await isOperationFeatureEnabled("blog"))) {
+    return {
+      title: "Post Not Found",
+    };
+  }
+
   const post = getBlogPost(slug, locale);
 
   if (!post) {
@@ -83,6 +90,10 @@ export default async function BlogPostPage({
   params: Promise<{ locale: string; slug: string }>;
 }) {
   const { locale, slug } = await params;
+  if (!(await isOperationFeatureEnabled("blog"))) {
+    notFound();
+  }
+
   const post = getBlogPost(slug, locale);
 
   if (!post) {

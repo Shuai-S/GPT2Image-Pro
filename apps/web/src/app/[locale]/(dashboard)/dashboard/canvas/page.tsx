@@ -1,4 +1,5 @@
 import { getCurrentUser } from "@repo/shared/auth/server";
+import { isOperationFeatureEnabled } from "@repo/shared/system-settings";
 import { redirect } from "next/navigation";
 import { getLocale } from "next-intl/server";
 import { InfiniteCanvasClient } from "@/features/infinite-canvas/components/infinite-canvas-client";
@@ -20,6 +21,9 @@ export default async function InfiniteCanvasPage() {
   const user = await getCurrentUser();
   const locale = await getLocale();
   if (!user) redirect(`/${locale}/sign-in`);
+  if (!(await isOperationFeatureEnabled("infiniteCanvas"))) {
+    redirect(`/${locale}/dashboard`);
+  }
 
   return <InfiniteCanvasClient />;
 }

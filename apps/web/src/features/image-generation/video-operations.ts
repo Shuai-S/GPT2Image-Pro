@@ -27,6 +27,7 @@ import {
   getRuntimeSettingJson,
   getRuntimeSettingNumber,
   getRuntimeSettingString,
+  isOperationFeatureEnabled,
 } from "@repo/shared/system-settings";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -142,7 +143,11 @@ export async function getVideoGenerationById(id: string) {
 async function markVideoFailed(id: string, error: string): Promise<void> {
   await db
     .update(videoGeneration)
-    .set({ status: "failed", error: error.slice(0, 1000), updatedAt: new Date() })
+    .set({
+      status: "failed",
+      error: error.slice(0, 1000),
+      updatedAt: new Date(),
+    })
     .where(eq(videoGeneration.id, id))
     .catch(() => {});
 }
@@ -153,6 +158,10 @@ async function markVideoFailed(id: string, error: string): Promise<void> {
 export async function runAdobeVideoGenerationForUser(
   input: VideoGenerationInput
 ): Promise<VideoGenerationResult> {
+  if (!(await isOperationFeatureEnabled("video"))) {
+    return { error: "Video generation is disabled by the operator." };
+  }
+
   const conf = resolveFireflyVideoModel(input.model);
   if (!conf) {
     return { error: `不支持的视频模型: ${input.model}` };
@@ -281,11 +290,17 @@ export async function runAdobeVideoGenerationForUser(
 
   await db
     .update(videoGeneration)
-    .set({ status: "running", creditsConsumed: billedCost, updatedAt: new Date() })
+    .set({
+      status: "running",
+      creditsConsumed: billedCost,
+      updatedAt: new Date(),
+    })
     .where(eq(videoGeneration.id, videoId));
 
   // 失败统一退款 + 标记。退款幂等（同一 sourceRef 只退一次）。
-  const failAndRefund = async (message: string): Promise<VideoGenerationResult> => {
+  const failAndRefund = async (
+    message: string
+  ): Promise<VideoGenerationResult> => {
     await releaseInflightLease();
     await refundGenerationCredits({
       generationId: videoId,
@@ -352,5 +367,9 @@ export async function runAdobeVideoGenerationForUser(
     .where(eq(videoGeneration.id, videoId));
 
   await releaseInflightLease();
-  return { videoGenerationId: videoId, storageKey, creditsConsumed: billedCost };
+  return {
+    videoGenerationId: videoId,
+    storageKey,
+    creditsConsumed: billedCost,
+  };
 }

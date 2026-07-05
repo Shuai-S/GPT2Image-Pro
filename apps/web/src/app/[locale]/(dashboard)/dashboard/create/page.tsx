@@ -6,20 +6,23 @@ import { buildSignedStorageImageUrl } from "@repo/shared/storage/signed-url";
 import { getPlanCapabilitySnapshot } from "@repo/shared/subscription/services/plan-capabilities";
 import { getPlanUploadLimits } from "@repo/shared/subscription/services/upload-limits";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
-import { getRuntimeSettingNumber } from "@repo/shared/system-settings";
+import {
+  getRuntimeOperationFeatureFlags,
+  getRuntimeSettingNumber,
+} from "@repo/shared/system-settings";
 import { getAppTimeZone } from "@repo/shared/time-zone/server";
-import { getLocale } from "next-intl/server";
 import { redirect } from "next/navigation";
-import { CreatePageClient } from "@/features/image-generation/components/create-page-client";
-import { hasLayeredMeta } from "@/features/psd-export/layered-meta";
-import { getRuntimeImageBaseCreditPricing } from "@/features/image-generation/pricing-settings";
-import { getUserRecentGenerations } from "@/features/image-generation/queries";
-import { getUserApiConfig } from "@/features/image-generation/service";
-import { getVideoPricingForUser } from "@/features/image-generation/video-operations";
+import { getLocale } from "next-intl/server";
 import {
   getUserImageBackendPreference,
   listSelectableImageBackendGroups,
 } from "@/features/image-backend-pool/service";
+import { CreatePageClient } from "@/features/image-generation/components/create-page-client";
+import { getRuntimeImageBaseCreditPricing } from "@/features/image-generation/pricing-settings";
+import { getUserRecentGenerations } from "@/features/image-generation/queries";
+import { getUserApiConfig } from "@/features/image-generation/service";
+import { getVideoPricingForUser } from "@/features/image-generation/video-operations";
+import { hasLayeredMeta } from "@/features/psd-export/layered-meta";
 
 const DEFAULT_FORCE_WEB_MIN_PIXELS = 660_000;
 const DEFAULT_FORCE_WEB_MAX_PIXELS = 2_000_000;
@@ -54,6 +57,7 @@ export default async function CreatePage() {
     forceWebMinPixels,
     forceWebMaxPixels,
     videoPricing,
+    operationFlags,
   ] = await Promise.all([
     getPlanCapabilitySnapshot(plan.plan),
     getRuntimeImageBaseCreditPricing(),
@@ -68,6 +72,7 @@ export default async function CreatePage() {
       { positive: true }
     ),
     getVideoPricingForUser({ userId: user.id }),
+    getRuntimeOperationFeatureFlags(),
   ]);
   const forceWebPixelRange = {
     minPixels: Math.min(forceWebMinPixels, forceWebMaxPixels),
@@ -111,6 +116,7 @@ export default async function CreatePage() {
       forceWebPixelRange={forceWebPixelRange}
       timeZone={timeZone}
       videoPricing={videoPricing}
+      operationFlags={operationFlags}
     />
   );
 }

@@ -32,3 +32,5 @@ import "./external-api";
 import "./support";
 // 邀请返佣域
 import "./referral";
+// 管理端支付订单域
+import "./admin-payments";

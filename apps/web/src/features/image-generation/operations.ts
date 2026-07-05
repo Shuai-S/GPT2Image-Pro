@@ -23,6 +23,7 @@ import {
 } from "@repo/shared/subscription/services/plan-capabilities";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import {
+  getRuntimeOperationFeatureFlags,
   getRuntimeSettingBoolean,
   getRuntimeSettingJson,
   getRuntimeSettingNumber,
@@ -1243,6 +1244,46 @@ export async function runImageGenerationForUser(
   callbacks?: ImageGenerationCallbacks
 ): Promise<ImageGenerationOperationResult> {
   const generationId = input.generationId || nanoid();
+  const operationFlags = await getRuntimeOperationFeatureFlags();
+  if (input.mode === "generate" && !operationFlags.textToImage) {
+    return {
+      error: "Text image generation is disabled by the operator.",
+      generationId,
+    };
+  }
+  if (input.mode === "edit" && !operationFlags.imageToImage) {
+    return {
+      error: "Image editing is disabled by the operator.",
+      generationId,
+    };
+  }
+  if (input.mode === "chat" && input.agentMode && !operationFlags.agent) {
+    return {
+      error: "Agent mode is disabled by the operator.",
+      generationId,
+    };
+  }
+  if (
+    input.mode === "chat" &&
+    input.waterfallMode &&
+    !operationFlags.waterfall
+  ) {
+    return {
+      error: "Waterfall mode is disabled by the operator.",
+      generationId,
+    };
+  }
+  if (
+    input.mode === "chat" &&
+    !input.agentMode &&
+    !input.waterfallMode &&
+    !operationFlags.chat
+  ) {
+    return {
+      error: "Chat mode is disabled by the operator.",
+      generationId,
+    };
+  }
   const size = input.size || DEFAULT_IMAGE_SIZE;
   const requiresResponsesBackend = Boolean(
     input.requiresResponsesBackend || (input.mode === "chat" && input.agentMode)

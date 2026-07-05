@@ -1,6 +1,6 @@
-import type { MetadataRoute } from "next";
-
 import { siteConfig } from "@repo/shared/config";
+import { isOperationFeatureEnabled } from "@repo/shared/system-settings";
+import type { MetadataRoute } from "next";
 import { getAllPseoParams } from "@/features/pseo/lib/pseo-data";
 import { getAllBlogSlugs, getAllLegalSlugs } from "@/lib/source";
 
@@ -23,14 +23,15 @@ const solutionTypes = [
  * 包含所有公开页面的 URL
  * 用于搜索引擎索引
  */
-export default function sitemap(): MetadataRoute.Sitemap {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const baseUrl = siteConfig.url;
   const now = new Date();
+  const blogEnabled = await isOperationFeatureEnabled("blog");
 
   // Static pages that exist for each locale
   const staticPaths = [
     "", // homepage
-    "/blog",
+    ...(blogEnabled ? ["/blog"] : []),
     "/pseo",
   ];
 
@@ -55,13 +56,14 @@ export default function sitemap(): MetadataRoute.Sitemap {
   );
 
   // Blog posts (dynamic)
-  const blogSlugs = getAllBlogSlugs();
-  const blogRoutes = blogSlugs.map(({ locale, slug }) => ({
-    url: `${baseUrl}/${locale}/blog/${slug}`,
-    lastModified: now,
-    changeFrequency: "monthly" as const,
-    priority: 0.7,
-  }));
+  const blogRoutes = blogEnabled
+    ? getAllBlogSlugs().map(({ locale, slug }) => ({
+        url: `${baseUrl}/${locale}/blog/${slug}`,
+        lastModified: now,
+        changeFrequency: "monthly" as const,
+        priority: 0.7,
+      }))
+    : [];
 
   // Legal pages (dynamic)
   const legalSlugs = getAllLegalSlugs();

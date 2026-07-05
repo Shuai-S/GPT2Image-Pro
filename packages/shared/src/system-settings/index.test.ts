@@ -3,11 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearSystemSettingsCache,
   getAdminSystemSettingsSnapshot,
+  getRuntimeOperationFeatureFlags,
   getRuntimeSettingBoolean,
   getRuntimeSettingJson,
   getRuntimeSettingSelect,
   getRuntimeSettingString,
   importSystemSettingsFromEnv,
+  isOperationFeatureEnabled,
   setSystemSettings,
 } from "./index";
 
@@ -599,6 +601,27 @@ describe("runtime setting getters stored/env fallback (C-L29)", () => {
         "creem"
       )
     ).resolves.toBe("alipay");
+  });
+
+  it("reads operation feature flags with enabled defaults", async () => {
+    await expect(isOperationFeatureEnabled("blog")).resolves.toBe(true);
+
+    store.set("OPERATION_BLOG_ENABLED", {
+      key: "OPERATION_BLOG_ENABLED",
+      value: false,
+    });
+    store.set("OPERATION_VIDEO_ENABLED", {
+      key: "OPERATION_VIDEO_ENABLED",
+      value: "0",
+    });
+    clearSystemSettingsCache();
+
+    await expect(getRuntimeOperationFeatureFlags()).resolves.toMatchObject({
+      blog: false,
+      textToImage: true,
+      video: false,
+      infiniteCanvas: true,
+    });
   });
 
   it("getRuntimeSettingJson parses stored string JSON and returns object directly", async () => {

@@ -2,6 +2,7 @@ import { DEFAULT_MODEL_PRICING_RULES } from "../model-pricing";
 
 export type SettingCategory =
   | "general"
+  | "operations"
   | "auth"
   | "payment"
   | "plans"
@@ -28,6 +29,14 @@ export type SettingKey =
   | "NEXT_PUBLIC_APP_OG_IMAGE"
   | "NEXT_PUBLIC_ASSET_PREFIX"
   | "APP_TIME_ZONE"
+  | "OPERATION_BLOG_ENABLED"
+  | "OPERATION_TEXT_TO_IMAGE_ENABLED"
+  | "OPERATION_IMAGE_TO_IMAGE_ENABLED"
+  | "OPERATION_CHAT_ENABLED"
+  | "OPERATION_AGENT_ENABLED"
+  | "OPERATION_WATERFALL_ENABLED"
+  | "OPERATION_VIDEO_ENABLED"
+  | "OPERATION_INFINITE_CANVAS_ENABLED"
   | "MARKETING_SLA_STATUS_ENABLED"
   | "EXTERNAL_API_CORS_ENABLED"
   | "SELF_USE_MODE_ENABLED"
@@ -470,6 +479,70 @@ export const SYSTEM_SETTING_DEFINITIONS = [
       { label: "伦敦时间 (Europe/London)", value: "Europe/London" },
     ],
     defaultValue: "UTC",
+  },
+  {
+    key: "OPERATION_BLOG_ENABLED",
+    label: "博客",
+    description: "控制公开博客入口、博客页面和 sitemap 中的博客链接。",
+    category: "operations",
+    valueType: "boolean",
+    defaultValue: true,
+  },
+  {
+    key: "OPERATION_TEXT_TO_IMAGE_ENABLED",
+    label: "文生图",
+    description: "控制 Dashboard 文生图入口与后端文生图生成能力。",
+    category: "operations",
+    valueType: "boolean",
+    defaultValue: true,
+  },
+  {
+    key: "OPERATION_IMAGE_TO_IMAGE_ENABLED",
+    label: "图生图",
+    description: "控制 Dashboard 图生图/图片编辑入口与后端图片编辑能力。",
+    category: "operations",
+    valueType: "boolean",
+    defaultValue: true,
+  },
+  {
+    key: "OPERATION_CHAT_ENABLED",
+    label: "对话",
+    description: "控制 Dashboard 对话生图入口与后端普通对话生成能力。",
+    category: "operations",
+    valueType: "boolean",
+    defaultValue: true,
+  },
+  {
+    key: "OPERATION_AGENT_ENABLED",
+    label: "Agent",
+    description: "控制 Dashboard Agent 入口与后端 Agent 生图能力。",
+    category: "operations",
+    valueType: "boolean",
+    defaultValue: true,
+  },
+  {
+    key: "OPERATION_WATERFALL_ENABLED",
+    label: "瀑布流",
+    description: "控制 Dashboard 瀑布流入口与后端瀑布流生图能力。",
+    category: "operations",
+    valueType: "boolean",
+    defaultValue: true,
+  },
+  {
+    key: "OPERATION_VIDEO_ENABLED",
+    label: "视频",
+    description: "控制 Dashboard 视频入口与后端视频生成能力。",
+    category: "operations",
+    valueType: "boolean",
+    defaultValue: true,
+  },
+  {
+    key: "OPERATION_INFINITE_CANVAS_ENABLED",
+    label: "无限画布",
+    description: "控制 Dashboard 无限画布入口与页面访问。",
+    category: "operations",
+    valueType: "boolean",
+    defaultValue: true,
   },
   {
     key: "MARKETING_SLA_STATUS_ENABLED",
@@ -1943,6 +2016,11 @@ export const SETTING_CATEGORIES: Array<{
     id: "general",
     label: "基础",
     description: "站点地址、内置任务和限流等全局配置。",
+  },
+  {
+    id: "operations",
+    label: "运营设置",
+    description: "公开内容与创作功能的全局启停开关。",
   },
   {
     id: "auth",
