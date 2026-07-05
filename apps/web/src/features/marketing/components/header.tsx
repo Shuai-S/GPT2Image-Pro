@@ -2,7 +2,7 @@
 
 import { ModeToggle } from "@repo/shared/components";
 import type { BrandingConfig } from "@repo/shared/config/branding";
-import { mainNav, productsNav } from "@repo/shared/config/nav";
+import { mainNav } from "@repo/shared/config/nav";
 import type { OperationFeatureFlags } from "@repo/shared/system-settings";
 import {
   Avatar,
@@ -11,7 +11,7 @@ import {
 } from "@repo/ui/components/avatar";
 import { Button } from "@repo/ui/components/button";
 import { Sheet, SheetContent, SheetTitle } from "@repo/ui/components/sheet";
-import { ChevronDown, Menu } from "lucide-react";
+import { Menu } from "lucide-react";
 import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
@@ -20,20 +20,6 @@ import { useCurrentSession } from "@/features/auth/hooks/use-current-session";
 import { Link } from "@/i18n/routing";
 
 import { NavMenu } from "./nav-menu";
-
-/**
- * Products 下拉菜单翻译映射 key (移动端复用)
- */
-const productsTitleMap: Record<string, string> = {
-  "Core features": "productsMenu.core.title",
-  Platform: "productsMenu.platform.title",
-  "Chat to Image": "productsMenu.core.chatToImage",
-  Gallery: "productsMenu.core.gallery",
-  "Batch Generation": "productsMenu.core.batch",
-  "GPT Image 2": "productsMenu.platform.api",
-  "Multi-model Support": "productsMenu.platform.multiModel",
-  "Credits System": "productsMenu.platform.credits",
-};
 
 interface HeaderProps {
   branding: BrandingConfig;
@@ -56,7 +42,6 @@ export function Header({ branding, operationFlags }: HeaderProps) {
   const t = useTranslations("Header");
   const tNav = useTranslations("Navigation");
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [productsExpanded, setProductsExpanded] = useState(false);
   const visibleMainNav = mainNav.filter(
     (item) => item.href !== "/blog" || operationFlags.blog
   );
@@ -77,7 +62,6 @@ export function Header({ branding, operationFlags }: HeaderProps) {
    * 导航项标题翻译映射
    */
   const navTitleMap: Record<string, string> = {
-    Products: tNav("products"),
     Features: tNav("features"),
     Docs: tNav("docs"),
     Pricing: tNav("pricing"),
@@ -174,47 +158,14 @@ export function Header({ branding, operationFlags }: HeaderProps) {
           <div className="flex h-full flex-col">
             {/* 导航链接 */}
             <nav className="flex-1 overflow-y-auto px-4 pt-12">
-              {/* Products 可折叠区域 */}
               <div className="space-y-1">
-                <button
-                  type="button"
-                  onClick={() => setProductsExpanded(!productsExpanded)}
-                  className="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm font-medium text-foreground/70 hover:bg-accent hover:text-foreground transition-colors"
+                <Link
+                  href="/dashboard/create"
+                  onClick={() => setMobileOpen(false)}
+                  className="flex items-center rounded-md px-3 py-2 text-sm font-medium text-foreground/70 hover:bg-accent hover:text-foreground transition-colors"
                 >
-                  {navTitleMap.Products}
-                  <ChevronDown
-                    className={`h-4 w-4 transition-transform duration-200 ${productsExpanded ? "rotate-180" : ""}`}
-                  />
-                </button>
-                {productsExpanded && (
-                  <div className="ml-3 space-y-1 border-l border-border pl-3">
-                    {productsNav.map((group) => (
-                      <div key={group.title} className="py-1">
-                        <div className="px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                          {tNav(productsTitleMap[group.title] || group.title)}
-                        </div>
-                        {group.items.map((item) => {
-                          const Icon = item.icon;
-                          return (
-                            <Link
-                              key={item.title}
-                              href={item.href}
-                              onClick={() => setMobileOpen(false)}
-                              className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm text-foreground/70 hover:bg-accent hover:text-foreground transition-colors"
-                            >
-                              <Icon className="h-3.5 w-3.5 text-foreground" />
-                              {tNav(productsTitleMap[item.title] || item.title)}
-                            </Link>
-                          );
-                        })}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* 主导航链接 */}
-              <div className="space-y-1">
+                  {tNav("products")}
+                </Link>
                 {visibleMainNav.map((item) => (
                   <Link
                     key={item.href}
