@@ -53,7 +53,8 @@ export interface EpayPurchaseInput {
 export interface EpayPurchaseResult {
   url: string;
   params?: Record<string, string>;
-  method?: "GET" | "POST";
+  method?: "GET" | "POST" | "QR";
+  qrCode?: string;
 }
 
 export interface EpayVerifyResult {

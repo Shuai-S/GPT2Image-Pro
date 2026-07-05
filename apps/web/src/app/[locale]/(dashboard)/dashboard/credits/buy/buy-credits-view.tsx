@@ -32,6 +32,7 @@ import { useLocale } from "next-intl";
 import { useAction } from "next-safe-action/hooks";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { AlipayQrDialog } from "@/features/payment/alipay-qr-dialog";
 
 type CreditPackageCard = {
   id: string;
@@ -109,6 +110,7 @@ export function BuyCreditPackagesView() {
     [isZh]
   );
   const [quantities, setQuantities] = useState<Record<string, number>>({});
+  const [alipayQrCode, setAlipayQrCode] = useState<string | null>(null);
   const {
     execute: fetchPackages,
     result: packagesResult,
@@ -119,7 +121,9 @@ export function BuyCreditPackagesView() {
   const { execute, isPending } = useAction(createCreditsPurchaseCheckout, {
     onSuccess: ({ data }) => {
       if (data?.url) {
-        if (data.method === "POST" && data.params) {
+        if (data.method === "QR" && data.qrCode) {
+          setAlipayQrCode(data.qrCode);
+        } else if (data.method === "POST" && data.params) {
           submitPaymentForm(data.url, data.params);
         } else {
           window.location.href = data.url;
@@ -385,6 +389,15 @@ export function BuyCreditPackagesView() {
           {copy("Back to Billing & Usage", "返回账单与用量")}
         </Button>
       </div>
+
+      <AlipayQrDialog
+        open={Boolean(alipayQrCode)}
+        qrCode={alipayQrCode}
+        onOpenChange={(open) => {
+          if (!open) setAlipayQrCode(null);
+        }}
+        onCompleted={() => router.push(`/${locale}/dashboard/billing`)}
+      />
     </div>
   );
 }

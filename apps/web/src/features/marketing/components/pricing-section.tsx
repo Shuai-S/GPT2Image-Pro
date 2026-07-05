@@ -38,6 +38,7 @@ import {
   createCheckoutSession,
   getUserSubscription,
 } from "@/features/payment/actions";
+import { AlipayQrDialog } from "@/features/payment/alipay-qr-dialog";
 import { PlanInterval } from "@/features/payment/types";
 import { useRouter } from "@/i18n/routing";
 
@@ -106,6 +107,7 @@ export function PricingSection({
   const isZh = locale.startsWith("zh");
   const [isPending, startTransition] = useTransition();
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
+  const [alipayQrCode, setAlipayQrCode] = useState<string | null>(null);
   const router = useRouter();
   const { data: session } = useCurrentSession();
 
@@ -680,7 +682,9 @@ export function PricingSection({
           type: price.type,
         });
         if (result?.data?.url) {
-          if (result.data.method === "POST" && result.data.params) {
+          if (result.data.method === "QR" && result.data.qrCode) {
+            setAlipayQrCode(result.data.qrCode);
+          } else if (result.data.method === "POST" && result.data.params) {
             submitPaymentForm(result.data.url, result.data.params);
           } else {
             window.location.href = result.data.url;
@@ -1070,6 +1074,14 @@ export function PricingSection({
           </ul>
         </div>
       </div>
+      <AlipayQrDialog
+        open={Boolean(alipayQrCode)}
+        qrCode={alipayQrCode}
+        onOpenChange={(open) => {
+          if (!open) setAlipayQrCode(null);
+        }}
+        onCompleted={() => router.push("/dashboard")}
+      />
     </section>
   );
 }

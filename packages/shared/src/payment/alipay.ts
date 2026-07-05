@@ -310,7 +310,7 @@ async function requestAlipayPrecreatePayment(input: {
     throw new Error("Alipay precreate response is missing qr_code");
   }
 
-  return { url: qrCode, method: "GET" };
+  return { url: qrCode, method: "QR", qrCode };
 }
 
 function buildAlipaySubmitUrl(

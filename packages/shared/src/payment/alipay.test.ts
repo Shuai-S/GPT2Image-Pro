@@ -226,7 +226,8 @@ describe("createAlipayPurchase", () => {
 
     expect(result).toEqual({
       url: "https://qr.alipay.com/bax-test",
-      method: "GET",
+      method: "QR",
+      qrCode: "https://qr.alipay.com/bax-test",
     });
     const body = fetchMock.mock.calls[0]?.[1]?.body;
     expect(typeof body).toBe("string");
