@@ -1,6 +1,17 @@
+/**
+ * 注册邮箱验证码服务。
+ *
+ * 职责：发送公开注册验证码、校验验证码状态机并维护 verification 表中的验证码记录。
+ * 使用方：注册验证码 API、UOL user.sendVerificationCode/user.verifyCode、Better Auth 注册钩子。
+ * 关键依赖：system-settings 读取邮箱后缀白名单、registration-identity 查重、mail 发送验证码邮件。
+ */
 import { randomInt, randomUUID } from "node:crypto";
 import { db, verification } from "@repo/database";
 import { eq } from "drizzle-orm";
+import { getRuntimeBrandingConfig } from "../config/branding";
+import { RegistrationVerificationCodeEmail } from "../mail/templates/primary-action-email";
+import { sendEmail } from "../mail/utils";
+import { getRuntimeRegistrationEmailDomains } from "../system-settings";
 import {
   getAllowedRegistrationEmailMessage,
   isAllowedRegistrationEmail,
@@ -13,9 +24,6 @@ import {
   evaluateVerificationAttempt,
   getResendCooldownRemainingSeconds,
 } from "./registration-verification-core";
-import { getRuntimeBrandingConfig } from "../config/branding";
-import { RegistrationVerificationCodeEmail } from "../mail/templates/primary-action-email";
-import { sendEmail } from "../mail/utils";
 import { isSelfUseModeEnabled } from "./self-use-mode";
 
 const PURPOSE = "registration-email-code";
@@ -40,8 +48,10 @@ export async function sendRegistrationVerificationCode(email: string) {
     throw new Error("Invalid email address");
   }
 
-  if (!isAllowedRegistrationEmail(normalizedEmail)) {
-    throw new Error(getAllowedRegistrationEmailMessage());
+  const allowedDomains = await getRuntimeRegistrationEmailDomains();
+
+  if (!isAllowedRegistrationEmail(normalizedEmail, allowedDomains)) {
+    throw new Error(getAllowedRegistrationEmailMessage(allowedDomains));
   }
 
   if (await isRegistrationEmailTaken(normalizedEmail)) {

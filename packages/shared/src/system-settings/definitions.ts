@@ -1,3 +1,15 @@
+/**
+ * 系统设置定义表。
+ *
+ * 职责：声明后台可编辑设置的键、分类、类型、默认值、展示文案和写入约束。
+ * 使用方：系统设置读写服务、后台设置面板、env 同步器和 UOL settings 操作。
+ * 关键依赖：各业务模块导出的默认矩阵与纯格式化工具。
+ */
+import {
+  DEFAULT_REGISTRATION_EMAIL_DOMAIN_LIST,
+  formatRegistrationEmailDomains,
+  REGISTRATION_EMAIL_DOMAINS_SETTING_KEY,
+} from "../auth/email-domain";
 import { DEFAULT_MODEL_PRICING_RULES } from "../model-pricing";
 
 export type SettingCategory =
@@ -40,6 +52,7 @@ export type SettingKey =
   | "MARKETING_SLA_STATUS_ENABLED"
   | "EXTERNAL_API_CORS_ENABLED"
   | "SELF_USE_MODE_ENABLED"
+  | "REGISTRATION_EMAIL_DOMAINS"
   | "BETTER_AUTH_SECRET"
   | "BETTER_AUTH_URL"
   | "GOOGLE_CLIENT_ID"
@@ -570,6 +583,17 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     category: "auth",
     valueType: "boolean",
     defaultValue: true,
+  },
+  {
+    key: REGISTRATION_EMAIL_DOMAINS_SETTING_KEY,
+    label: "注册邮箱后缀",
+    description:
+      "公开注册允许使用的邮箱域名后缀，支持逗号、分号、空格或换行分隔；留空时回退代码默认后缀。",
+    category: "auth",
+    valueType: "string",
+    defaultValue: formatRegistrationEmailDomains(
+      DEFAULT_REGISTRATION_EMAIL_DOMAIN_LIST
+    ),
   },
   {
     key: "BETTER_AUTH_SECRET",

@@ -1,10 +1,18 @@
+/**
+ * Better Auth 注册安全钩子。
+ *
+ * 职责：在公开注册链路统一执行自用模式、邮箱后缀白名单、验证码、重复注册和封禁校验。
+ * 使用方：auth/index.ts 的 Better Auth plugins 配置。
+ * 关键依赖：system-settings 读取邮箱白名单、registration-identity 防重复注册、UOL referral 绑定邀请。
+ */
 import { db, user as userTable } from "@repo/database";
 import type { BetterAuthPlugin } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { eq } from "drizzle-orm";
-import "../uol/operations/referral";
 import { logError } from "../logger";
+import { getRuntimeRegistrationEmailDomains } from "../system-settings";
 import { invokeOperation } from "../uol";
+import "../uol/operations/referral";
 import {
   getAllowedRegistrationEmailMessage,
   isAllowedRegistrationEmail,
@@ -35,10 +43,11 @@ async function assertRegistrationOpen() {
   }
 }
 
-function assertAllowedRegistrationEmail(email: string) {
-  if (!isAllowedRegistrationEmail(email)) {
+async function assertAllowedRegistrationEmail(email: string) {
+  const allowedDomains = await getRuntimeRegistrationEmailDomains();
+  if (!isAllowedRegistrationEmail(email, allowedDomains)) {
     throw new APIError("BAD_REQUEST", {
-      message: getAllowedRegistrationEmailMessage(),
+      message: getAllowedRegistrationEmailMessage(allowedDomains),
       code: "EMAIL_DOMAIN_NOT_ALLOWED",
     });
   }
@@ -101,7 +110,7 @@ export const registrationVerificationPlugin = (): BetterAuthPlugin => ({
               : "";
           const normalizedEmail = normalizeEmail(email);
 
-          assertAllowedRegistrationEmail(normalizedEmail);
+          await assertAllowedRegistrationEmail(normalizedEmail);
           await assertEmailNotRegistered(normalizedEmail);
 
           if (!verificationCode) {
@@ -142,7 +151,7 @@ export const registrationVerificationPlugin = (): BetterAuthPlugin => ({
 
               const normalizedEmail = normalizeEmail(user.email);
 
-              assertAllowedRegistrationEmail(normalizedEmail);
+              await assertAllowedRegistrationEmail(normalizedEmail);
               await assertEmailNotRegistered(normalizedEmail);
 
               if (context?.path === "/sign-up/email") {

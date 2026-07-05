@@ -5,6 +5,12 @@ import { systemSetting } from "@repo/database/schema";
 import { eq, inArray, sql } from "drizzle-orm";
 
 import {
+  formatRegistrationEmailDomains,
+  normalizeRegistrationEmailDomains,
+  parseRegistrationEmailDomains,
+  REGISTRATION_EMAIL_DOMAINS_SETTING_KEY,
+} from "../auth/email-domain";
+import {
   isSettingKey,
   SETTING_DEFINITION_BY_KEY,
   type SettingDefinition,
@@ -161,6 +167,18 @@ export async function getRuntimeSettingString(key: SettingKey) {
   return process.env[key]?.trim() || undefined;
 }
 
+/**
+ * 读取公开注册允许使用的邮箱域名后缀。
+ *
+ * @returns 后台配置、环境变量或代码默认值解析出的域名列表。
+ * @sideEffects 正常运行时读取 system_setting 表；构建期可按全局规则回退环境变量。
+ */
+export async function getRuntimeRegistrationEmailDomains() {
+  return parseRegistrationEmailDomains(
+    await getRuntimeSettingString(REGISTRATION_EMAIL_DOMAINS_SETTING_KEY)
+  );
+}
+
 export async function getRuntimeSettingBoolean(
   key: SettingKey,
   fallback = false
@@ -314,6 +332,15 @@ function coerceValue(definition: SettingDefinition, value: unknown) {
   }
 
   const text = typeof value === "string" ? value.trim() : String(value ?? "");
+  if (definition.key === REGISTRATION_EMAIL_DOMAINS_SETTING_KEY) {
+    const { domains, invalidDomains } = normalizeRegistrationEmailDomains(text);
+    if (invalidDomains.length > 0) {
+      throw new Error(
+        `${definition.label} 包含无效域名: ${invalidDomains.join(", ")}`
+      );
+    }
+    return domains.length > 0 ? formatRegistrationEmailDomains(domains) : "";
+  }
   if (definition.valueType === "select") {
     const allowed = definition.options?.map((option) => option.value) ?? [];
     if (text && !allowed.includes(text)) {

@@ -7,6 +7,7 @@
  *
  * 接线状态：
  * - user.bootstrap: 已接线 -> bootstrapSelfUseSuperAdmin (auth/bootstrap-super-admin)
+ * - user.getRegistrationEmailDomains: 已接线 -> getRuntimeRegistrationEmailDomains (system-settings)
  * - user.sendVerificationCode: 已接线 -> sendRegistrationVerificationCode (auth/registration-verification)
  * - user.verifyCode: 已接线 -> verifyRegistrationCode (auth/registration-verification)
  * - user.getCurrentSession: stub（依赖 next/headers，在 app 层绑定）
@@ -20,6 +21,7 @@ import {
   sendRegistrationVerificationCode as sendRegistrationVerificationCodeService,
   verifyRegistrationCode as verifyRegistrationCodeService,
 } from "../../auth/registration-verification";
+import { getRuntimeRegistrationEmailDomains } from "../../system-settings";
 import { defineOperation } from "../registry";
 
 // ---------------------------------------------------------------------------
@@ -29,8 +31,7 @@ export const listUsers = defineOperation({
   name: "user.list",
   domain: "user-auth",
   title: "List Users",
-  description:
-    "列出系统中的用户列表，支持分页与过滤。仅管理员可调用。",
+  description: "列出系统中的用户列表，支持分页与过滤。仅管理员可调用。",
   input: z.object({
     page: z.number().int().min(1).default(1),
     pageSize: z.number().int().min(1).max(100).default(20),
@@ -85,8 +86,7 @@ export const updateUserRole = defineOperation({
   name: "user.updateRole",
   domain: "user-auth",
   title: "Update User Role",
-  description:
-    "变更指定用户的角色。仅超级管理员可调用。破坏性操作需二次确认。",
+  description: "变更指定用户的角色。仅超级管理员可调用。破坏性操作需二次确认。",
   input: z.object({
     userId: z.string().min(1),
     role: z.enum(["user", "admin", "super_admin"]),
@@ -140,8 +140,7 @@ export const setUserCreditsStatus = defineOperation({
   name: "user.setCreditsStatus",
   domain: "user-auth",
   title: "Set User Credits Status",
-  description:
-    "启用或禁用指定用户的积分功能。仅管理员可调用。",
+  description: "启用或禁用指定用户的积分功能。仅管理员可调用。",
   input: z.object({
     userId: z.string().min(1),
     creditsEnabled: z.boolean(),
@@ -167,8 +166,7 @@ export const setExternalApiKeyStatus = defineOperation({
   name: "user.setExternalApiKeyStatus",
   domain: "user-auth",
   title: "Set External API Key Status",
-  description:
-    "启用或禁用指定用户的外部 API Key 功能。仅管理员可调用。",
+  description: "启用或禁用指定用户的外部 API Key 功能。仅管理员可调用。",
   input: z.object({
     userId: z.string().min(1),
     externalApiKeyEnabled: z.boolean(),
@@ -194,8 +192,7 @@ export const createUser = defineOperation({
   name: "user.create",
   domain: "user-auth",
   title: "Create User",
-  description:
-    "手动创建新用户（含邮箱、密码、角色）。仅超级管理员可调用。",
+  description: "手动创建新用户（含邮箱、密码、角色）。仅超级管理员可调用。",
   input: z.object({
     email: z.string().email(),
     password: z.string().min(6),
@@ -224,8 +221,7 @@ export const updateUserProfile = defineOperation({
   name: "user.updateProfile",
   domain: "user-auth",
   title: "Update User Profile",
-  description:
-    "更新指定用户的资料信息（名称、头像等）。仅超级管理员可调用。",
+  description: "更新指定用户的资料信息（名称、头像等）。仅超级管理员可调用。",
   input: z.object({
     userId: z.string().min(1),
     name: z.string().min(1).optional(),
@@ -252,8 +248,7 @@ export const setUserPassword = defineOperation({
   name: "user.setPassword",
   domain: "user-auth",
   title: "Set User Password",
-  description:
-    "重置指定用户的密码。仅超级管理员可调用。破坏性操作。",
+  description: "重置指定用户的密码。仅超级管理员可调用。破坏性操作。",
   input: z.object({
     userId: z.string().min(1),
     newPassword: z.string().min(6),
@@ -279,8 +274,7 @@ export const setUserPlan = defineOperation({
   name: "user.setUserPlan",
   domain: "user-auth",
   title: "Set User Plan",
-  description:
-    "手动设置指定用户的订阅套餐。仅超级管理员可调用。",
+  description: "手动设置指定用户的订阅套餐。仅超级管理员可调用。",
   input: z.object({
     userId: z.string().min(1),
     plan: z.string().min(1),
@@ -306,8 +300,7 @@ export const getCurrentSession = defineOperation({
   name: "user.getCurrentSession",
   domain: "user-auth",
   title: "Get Current Session",
-  description:
-    "获取当前登录用户的会话信息。公开接口，通过 cookie 识别身份。",
+  description: "获取当前登录用户的会话信息。公开接口，通过 cookie 识别身份。",
   input: z.object({}),
   output: z.object({
     user: z.record(z.string(), z.unknown()).nullable(),
@@ -325,14 +318,36 @@ export const getCurrentSession = defineOperation({
 });
 
 // ---------------------------------------------------------------------------
-// 12. user.sendVerificationCode - 发送注册验证码（公开）
+// 12. user.getRegistrationEmailDomains - 获取注册邮箱后缀（公开）
+// ---------------------------------------------------------------------------
+export const getRegistrationEmailDomains = defineOperation({
+  name: "user.getRegistrationEmailDomains",
+  domain: "user-auth",
+  title: "Get Registration Email Domains",
+  description:
+    "获取公开注册允许使用的邮箱域名后缀，用于注册页展示和客户端预校验。",
+  input: z.object({}),
+  output: z.object({
+    domains: z.array(z.string()),
+  }),
+  access: { kind: "public" },
+  readOnly: true,
+  destructive: false,
+  idempotency: { kind: "natural" },
+  sideEffects: [],
+  execute: async () => ({
+    domains: await getRuntimeRegistrationEmailDomains(),
+  }),
+});
+
+// ---------------------------------------------------------------------------
+// 13. user.sendVerificationCode - 发送注册验证码（公开）
 // ---------------------------------------------------------------------------
 export const sendRegistrationVerificationCode = defineOperation({
   name: "user.sendVerificationCode",
   domain: "user-auth",
   title: "Send Registration Verification Code",
-  description:
-    "向指定邮箱发送注册验证码。公开接口，受频率限制。",
+  description: "向指定邮箱发送注册验证码。公开接口，受频率限制。",
   input: z.object({
     email: z.string().email(),
   }),
@@ -351,14 +366,13 @@ export const sendRegistrationVerificationCode = defineOperation({
 });
 
 // ---------------------------------------------------------------------------
-// 13. user.verifyCode - 验证注册验证码（公开）
+// 14. user.verifyCode - 验证注册验证码（公开）
 // ---------------------------------------------------------------------------
 export const verifyRegistrationCode = defineOperation({
   name: "user.verifyCode",
   domain: "user-auth",
   title: "Verify Registration Code",
-  description:
-    "验证注册验证码是否正确。公开接口。",
+  description: "验证注册验证码是否正确。公开接口。",
   input: z.object({
     email: z.string().email(),
     code: z.string().min(1),
@@ -372,16 +386,13 @@ export const verifyRegistrationCode = defineOperation({
   idempotency: { kind: "natural" },
   sideEffects: [],
   execute: async (input) => {
-    const valid = await verifyRegistrationCodeService(
-      input.email,
-      input.code,
-    );
+    const valid = await verifyRegistrationCodeService(input.email, input.code);
     return { valid };
   },
 });
 
 // ---------------------------------------------------------------------------
-// 14. user.bootstrap - 引导超级管理员（仅系统内部，永远不可外部暴露）
+// 15. user.bootstrap - 引导超级管理员（仅系统内部，永远不可外部暴露）
 // ---------------------------------------------------------------------------
 export const bootstrapSelfUseSuperAdmin = defineOperation({
   name: "user.bootstrap",

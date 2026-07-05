@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { REGISTRATION_EMAIL_DOMAINS_SETTING_KEY } from "../auth/email-domain";
 import {
   clearSystemSettingsCache,
   getAdminSystemSettingsSnapshot,
   getRuntimeOperationFeatureFlags,
+  getRuntimeRegistrationEmailDomains,
   getRuntimeSettingBoolean,
   getRuntimeSettingJson,
   getRuntimeSettingSelect,
@@ -382,6 +384,29 @@ describe("setSystemSettings", () => {
       )
     ).rejects.toThrow(/取值无效/);
   });
+
+  it("normalizes registration email domains and rejects invalid domains", async () => {
+    await setSystemSettings(
+      [
+        {
+          key: "REGISTRATION_EMAIL_DOMAINS",
+          value: " @Outlook.com, gmail.com；outlook.com ",
+        },
+      ],
+      "admin"
+    );
+
+    expect(store.get("REGISTRATION_EMAIL_DOMAINS")?.value).toBe(
+      "outlook.com,gmail.com"
+    );
+
+    await expect(
+      setSystemSettings(
+        [{ key: "REGISTRATION_EMAIL_DOMAINS", value: "gmail.com,bad_domain" }],
+        "admin"
+      )
+    ).rejects.toThrow(/包含无效域名/);
+  });
 });
 
 describe("importSystemSettingsFromEnv", () => {
@@ -509,6 +534,7 @@ describe("runtime setting getters stored/env fallback (C-L29)", () => {
     delete process.env.APP_TIME_ZONE;
     delete process.env.PAYMENT_PROVIDER;
     delete process.env.PLAN_CAPABILITY_MATRIX;
+    delete process.env[REGISTRATION_EMAIL_DOMAINS_SETTING_KEY];
     delete process.env.GPT2IMAGE_SKIP_RUNTIME_SETTINGS_DB;
   });
 
@@ -641,5 +667,36 @@ describe("runtime setting getters stored/env fallback (C-L29)", () => {
     await expect(
       getRuntimeSettingJson("PLAN_CAPABILITY_MATRIX")
     ).resolves.toEqual({ version: 3 });
+  });
+
+  it("getRuntimeRegistrationEmailDomains reads stored, env, then default domains", async () => {
+    store.set("REGISTRATION_EMAIL_DOMAINS", {
+      key: "REGISTRATION_EMAIL_DOMAINS",
+      value: "outlook.com, gmail.com",
+    });
+
+    await expect(getRuntimeRegistrationEmailDomains()).resolves.toEqual([
+      "outlook.com",
+      "gmail.com",
+    ]);
+
+    store.clear();
+    clearSystemSettingsCache();
+    process.env[REGISTRATION_EMAIL_DOMAINS_SETTING_KEY] = "@qq.com; 163.com";
+
+    await expect(getRuntimeRegistrationEmailDomains()).resolves.toEqual([
+      "qq.com",
+      "163.com",
+    ]);
+
+    delete process.env[REGISTRATION_EMAIL_DOMAINS_SETTING_KEY];
+    clearSystemSettingsCache();
+
+    await expect(getRuntimeRegistrationEmailDomains()).resolves.toEqual([
+      "163.com",
+      "126.com",
+      "qq.com",
+      "gmail.com",
+    ]);
   });
 });

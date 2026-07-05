@@ -1,5 +1,13 @@
 "use client";
 
+/**
+ * 注册表单客户端组件。
+ *
+ * 职责：渲染公开注册表单，处理 OAuth 注册、邮箱验证码发送、邮箱密码注册和错误提示。
+ * 使用方：/sign-up 页面服务端入口。
+ * 关键依赖：Better Auth 客户端封装、注册邮箱后缀纯工具、next-intl 文案和 Shadcn UI。
+ */
+
 import {
   resendVerificationEmail,
   sendRegistrationVerificationCode,
@@ -7,7 +15,7 @@ import {
   signUpWithEmail,
 } from "@repo/shared/auth/client";
 import {
-  ALLOWED_REGISTRATION_EMAIL_DOMAIN_LIST,
+  DEFAULT_REGISTRATION_EMAIL_DOMAIN_LIST,
   isAllowedRegistrationEmail,
 } from "@repo/shared/auth/email-domain";
 import { GoogleIcon } from "@repo/shared/components/icons";
@@ -109,17 +117,20 @@ function readCookieValue(name: string) {
  *
  * @param googleAuthEnabled - Google OAuth 是否已配置。
  * @param branding - 管理员配置的应用名称与 Logo。
+ * @param registrationEmailDomains - 允许公开注册的邮箱域名后缀。
  * @returns 注册表单。
  * @sideEffects 调用认证 API、发送邮箱验证码、触发路由跳转。
  */
 interface SignUpFormProps {
   googleAuthEnabled?: boolean;
   branding: BrandingConfig;
+  registrationEmailDomains?: string[];
 }
 
 export function SignUpForm({
   googleAuthEnabled = false,
   branding,
+  registrationEmailDomains = Array.from(DEFAULT_REGISTRATION_EMAIL_DOMAIN_LIST),
 }: SignUpFormProps) {
   const locale = useLocale();
   const searchParams = useSearchParams();
@@ -139,8 +150,13 @@ export function SignUpForm({
   const [emailSent, setEmailSent] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [codeCooldown, setCodeCooldown] = useState(0);
-  const isAllowedEmail = (value: string) => isAllowedRegistrationEmail(value);
-  const allowedEmailDomains = ALLOWED_REGISTRATION_EMAIL_DOMAIN_LIST.join(", ");
+  const allowedDomains =
+    registrationEmailDomains.length > 0
+      ? registrationEmailDomains
+      : Array.from(DEFAULT_REGISTRATION_EMAIL_DOMAIN_LIST);
+  const isAllowedEmail = (value: string) =>
+    isAllowedRegistrationEmail(value, allowedDomains);
+  const allowedEmailDomains = allowedDomains.join(", ");
   const emailDomainError = t("errors.emailDomainNotAllowed", {
     domains: allowedEmailDomains,
   });

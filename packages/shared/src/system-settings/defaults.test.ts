@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { formatRegistrationEmailDomains } from "../auth/email-domain";
 import {
   CREDIT_PACKAGE_MATRIX_SETTING_KEY,
   getRuntimeCreditPackages,
@@ -132,6 +133,7 @@ describe("system setting default initialization", () => {
     expect(initializedKeys).toContain("OPERATION_VIDEO_ENABLED");
     expect(initializedKeys).toContain("OPERATION_INFINITE_CANVAS_ENABLED");
     expect(initializedKeys).toContain("SELF_USE_MODE_ENABLED");
+    expect(initializedKeys).toContain("REGISTRATION_EMAIL_DOMAINS");
     expect(initializedKeys).toContain("GENERATION_IMAGE_RETENTION_HOURS");
     expect(initializedKeys).toContain("GENERATION_IMAGE_RETENTION_MODE");
     expect(initializedKeys).toContain("GENERATION_IMAGE_MAX_COUNT");
@@ -157,6 +159,9 @@ describe("system setting default initialization", () => {
     expect(store.get("OPERATION_VIDEO_ENABLED")?.value).toBe(true);
     expect(store.get("OPERATION_INFINITE_CANVAS_ENABLED")?.value).toBe(true);
     expect(store.get("SELF_USE_MODE_ENABLED")?.value).toBe(true);
+    expect(store.get("REGISTRATION_EMAIL_DOMAINS")?.value).toBe(
+      formatRegistrationEmailDomains()
+    );
     expect(store.get("GENERATION_IMAGE_RETENTION_HOURS")?.value).toBe(0);
     // 默认清理模式 off=永久保存（fail-safe）；最大张数默认 10000。
     expect(store.get("GENERATION_IMAGE_RETENTION_MODE")?.value).toBe("off");
