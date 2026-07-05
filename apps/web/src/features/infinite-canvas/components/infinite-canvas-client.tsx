@@ -123,6 +123,7 @@ export function InfiniteCanvasClient() {
     createEmptyCanvasState(isZh ? "无限画布" : "Infinite Canvas")
   );
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
   const [activeTool, setActiveTool] = useState<ActiveTool>("select");
   const [connectFromId, setConnectFromId] = useState<string | null>(null);
   const [isBooted, setBooted] = useState(false);
@@ -132,12 +133,8 @@ export function InfiniteCanvasClient() {
     [selectedIds, state.nodes]
   );
   const selectedEdges = useMemo(
-    () =>
-      state.edges.filter(
-        (edge) =>
-          selectedIds.includes(edge.from) && selectedIds.includes(edge.to)
-      ),
-    [selectedIds, state.edges]
+    () => state.edges.filter((edge) => selectedEdgeIds.includes(edge.id)),
+    [selectedEdgeIds, state.edges]
   );
 
   /**
@@ -228,6 +225,7 @@ export function InfiniteCanvasClient() {
       const node = createCanvasNode(kind, center, overrides);
       patchState((current) => addCanvasNode(current, node));
       setSelectedIds([node.id]);
+      setSelectedEdgeIds([]);
       return node.id;
     },
     [getBoardCenterWorld, patchState]
@@ -258,6 +256,7 @@ export function InfiniteCanvasClient() {
         );
         patchState((current) => addCanvasNode(current, node));
         setSelectedIds([node.id]);
+        setSelectedEdgeIds([]);
       }
     },
     [getBoardCenterWorld, patchState]
@@ -275,6 +274,7 @@ export function InfiniteCanvasClient() {
       activeTool === "pan" || event.button === 1 || event.altKey;
     if (!shouldPan && activeTool === "select") {
       setSelectedIds([]);
+      setSelectedEdgeIds([]);
       return;
     }
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -368,6 +368,7 @@ export function InfiniteCanvasClient() {
     if (sourceId === targetId) {
       toast.info(copy("Pick another node to connect", "请选择另一个节点连接"));
       setSelectedIds([targetId]);
+      setSelectedEdgeIds([]);
       return;
     }
     if (
@@ -377,12 +378,14 @@ export function InfiniteCanvasClient() {
       setConnectFromId(null);
       setActiveTool("select");
       setSelectedIds([targetId]);
+      setSelectedEdgeIds([]);
       return;
     }
     patchState((current) => addCanvasEdge(current, sourceId, targetId));
     setConnectFromId(null);
     setActiveTool("select");
     setSelectedIds([targetId]);
+    setSelectedEdgeIds([]);
   };
 
   /**
@@ -401,6 +404,7 @@ export function InfiniteCanvasClient() {
       if (!connectFromId) {
         setConnectFromId(nodeId);
         setSelectedIds([nodeId]);
+        setSelectedEdgeIds([]);
         return;
       }
       connectCanvasNodes(connectFromId, nodeId);
@@ -414,6 +418,7 @@ export function InfiniteCanvasClient() {
           : [...current, nodeId]
         : [nodeId]
     );
+    setSelectedEdgeIds([]);
 
     const board = boardRef.current;
     if (!board) return;
@@ -449,12 +454,14 @@ export function InfiniteCanvasClient() {
       setActiveTool("connect");
       setConnectFromId(nodeId);
       setSelectedIds([nodeId]);
+      setSelectedEdgeIds([]);
       return;
     }
     if (!connectFromId) {
       toast.info(copy("Pick a source connector first", "请先选择右侧输出圆点"));
       setActiveTool("connect");
       setSelectedIds([nodeId]);
+      setSelectedEdgeIds([]);
       return;
     }
     connectCanvasNodes(connectFromId, nodeId);
@@ -478,7 +485,29 @@ export function InfiniteCanvasClient() {
       return next;
     });
     setSelectedIds([]);
+    setSelectedEdgeIds([]);
   }, [patchState, selectedEdges, selectedIds]);
+
+  /**
+   * 响应画布级删除快捷键。
+   *
+   * @param event 键盘事件。
+   * @sideEffects 在焦点不处于编辑控件内时删除当前选区。
+   */
+  const handleBoardKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Delete" && event.key !== "Backspace") return;
+    const target = event.target;
+    if (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement ||
+      (target instanceof HTMLElement && target.isContentEditable)
+    ) {
+      return;
+    }
+    event.preventDefault();
+    deleteSelection();
+  };
 
   /**
    * 让视图适配所有节点。
@@ -532,6 +561,7 @@ export function InfiniteCanvasClient() {
       }
       setState(parsed.data);
       setSelectedIds([]);
+      setSelectedEdgeIds([]);
       toast.success(copy("Canvas imported", "画布已导入"));
     } catch {
       toast.error(copy("Import failed", "导入失败"));
@@ -642,6 +672,7 @@ export function InfiniteCanvasClient() {
         updateCanvasNode(current, node.id, { status: "idle", error: undefined })
       );
       setSelectedIds([outputNode.id]);
+      setSelectedEdgeIds([]);
       toast.success(copy("Image generated", "图片已生成"));
     } catch (error) {
       const message =
@@ -667,6 +698,7 @@ export function InfiniteCanvasClient() {
   const resetCanvas = () => {
     setState(createEmptyCanvasState(copy("Infinite Canvas", "无限画布")));
     setSelectedIds([]);
+    setSelectedEdgeIds([]);
     setConnectFromId(null);
   };
 
@@ -685,6 +717,7 @@ export function InfiniteCanvasClient() {
             onClick={() => {
               setActiveTool("select");
               setConnectFromId(null);
+              setSelectedEdgeIds([]);
             }}
           >
             <MousePointer2 className="h-4 w-4" />
@@ -695,6 +728,7 @@ export function InfiniteCanvasClient() {
             onClick={() => {
               setActiveTool("pan");
               setConnectFromId(null);
+              setSelectedEdgeIds([]);
             }}
           >
             <Hand className="h-4 w-4" />
@@ -705,6 +739,7 @@ export function InfiniteCanvasClient() {
             onClick={() => {
               setActiveTool("connect");
               setConnectFromId(selectedIds[0] || null);
+              setSelectedEdgeIds([]);
             }}
           >
             <Link2 className="h-4 w-4" />
@@ -791,6 +826,7 @@ export function InfiniteCanvasClient() {
       <div
         ref={boardRef}
         role="application"
+        tabIndex={0}
         aria-label={copy("Infinite canvas workspace", "无限画布工作区")}
         className={cn(
           "relative flex-1 overflow-hidden bg-[radial-gradient(circle_at_1px_1px,hsl(var(--border))_1px,transparent_0)] bg-[length:24px_24px]",
@@ -805,6 +841,7 @@ export function InfiniteCanvasClient() {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
+        onKeyDown={handleBoardKeyDown}
         onWheel={handleWheel}
       >
         <svg
@@ -833,6 +870,12 @@ export function InfiniteCanvasClient() {
                 edge={edge}
                 nodes={state.nodes}
                 selected={selectedEdges.some((item) => item.id === edge.id)}
+                onSelect={(edgeId) => {
+                  setSelectedIds([]);
+                  setSelectedEdgeIds([edgeId]);
+                  setConnectFromId(null);
+                  setActiveTool("select");
+                }}
               />
             ))}
           </g>
@@ -873,6 +916,11 @@ export function InfiniteCanvasClient() {
               {connectFromId
                 ? copy("Pick target", "选择目标")
                 : copy("Pick source", "选择起点")}
+            </span>
+          )}
+          {selectedEdgeIds.length > 0 && (
+            <span className="text-foreground">
+              {copy("Connection selected", "已选择连接线")}
             </span>
           )}
         </div>
@@ -1206,10 +1254,12 @@ function CanvasEdgePath({
   edge,
   nodes,
   selected,
+  onSelect,
 }: {
   edge: CanvasEdge;
   nodes: CanvasNode[];
   selected: boolean;
+  onSelect: (edgeId: string) => void;
 }) {
   const from = nodes.find((node) => node.id === edge.from);
   const to = nodes.find((node) => node.id === edge.to);
@@ -1222,7 +1272,18 @@ function CanvasEdgePath({
   } ${end.y}, ${end.x} ${end.y}`;
   const stroke = selected ? "rgb(255 255 255)" : "rgb(52 211 153)";
   return (
-    <g>
+    <g className="pointer-events-auto">
+      <path
+        d={path}
+        fill="none"
+        stroke="transparent"
+        strokeWidth={18}
+        strokeLinecap="round"
+        onPointerDown={(event) => {
+          event.stopPropagation();
+          onSelect(edge.id);
+        }}
+      />
       <path
         d={path}
         fill="none"
@@ -1231,13 +1292,30 @@ function CanvasEdgePath({
         strokeWidth={selected ? 4 : 3}
         strokeLinecap="round"
         opacity={selected ? 0.98 : 0.9}
+        onPointerDown={(event) => {
+          event.stopPropagation();
+          onSelect(edge.id);
+        }}
       />
-      <circle cx={start.x} cy={start.y} r={5} fill="rgb(52 211 153)" />
+      <circle
+        cx={start.x}
+        cy={start.y}
+        r={6}
+        fill="rgb(52 211 153)"
+        onPointerDown={(event) => {
+          event.stopPropagation();
+          onSelect(edge.id);
+        }}
+      />
       <circle
         cx={end.x}
         cy={end.y}
-        r={5}
+        r={6}
         fill={selected ? "rgb(255 255 255)" : "rgb(52 211 153)"}
+        onPointerDown={(event) => {
+          event.stopPropagation();
+          onSelect(edge.id);
+        }}
       />
     </g>
   );
