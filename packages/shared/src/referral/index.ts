@@ -1407,9 +1407,13 @@ export async function listReferralProfiles(
   const totals = db
     .select({
       inviterUserId: referralCommissionLedger.inviterUserId,
-      availableCredits: sumCommissionCreditsByStatus("available"),
-      frozenCredits: sumCommissionCreditsByStatus("frozen"),
-      convertedCredits: sumCommissionCreditsByStatus("converted"),
+      availableCredits:
+        sumCommissionCreditsByStatus("available").as("available_credits"),
+      frozenCredits: sumCommissionCreditsByStatus("frozen").as(
+        "frozen_credits"
+      ),
+      convertedCredits:
+        sumCommissionCreditsByStatus("converted").as("converted_credits"),
     })
     .from(referralCommissionLedger)
     .groupBy(referralCommissionLedger.inviterUserId)
