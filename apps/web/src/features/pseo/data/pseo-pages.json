@@ -19,7 +19,7 @@
           },
           "secondaryCta": {
             "label": "See pricing",
-            "href": "/#pricing"
+            "href": "/pricing"
           },
           "summaryTitle": "Workflow snapshot",
           "summaryItems": [
@@ -128,7 +128,7 @@
           },
           "secondaryCta": {
             "label": "See pricing",
-            "href": "/#pricing"
+            "href": "/pricing"
           },
           "note": "No credit card required."
         }
@@ -149,7 +149,7 @@
           },
           "secondaryCta": {
             "label": "查看定价",
-            "href": "/#pricing"
+            "href": "/pricing"
           },
           "summaryTitle": "模板速览",
           "summaryItems": [
@@ -258,7 +258,7 @@
           },
           "secondaryCta": {
             "label": "查看定价",
-            "href": "/#pricing"
+            "href": "/pricing"
           },
           "note": "无需信用卡。"
         }
@@ -285,7 +285,7 @@
           },
           "secondaryCta": {
             "label": "View demo",
-            "href": "/#pricing"
+            "href": "/pricing"
           },
           "summaryTitle": "Playbook snapshot",
           "summaryItems": [
@@ -394,7 +394,7 @@
           },
           "secondaryCta": {
             "label": "See pricing",
-            "href": "/#pricing"
+            "href": "/pricing"
           },
           "note": "No implementation services required."
         }
@@ -415,7 +415,7 @@
           },
           "secondaryCta": {
             "label": "查看演示",
-            "href": "/#pricing"
+            "href": "/pricing"
           },
           "summaryTitle": "手册速览",
           "summaryItems": [
@@ -524,7 +524,7 @@
           },
           "secondaryCta": {
             "label": "查看定价",
-            "href": "/#pricing"
+            "href": "/pricing"
           },
           "note": "无需额外实施服务。"
         }

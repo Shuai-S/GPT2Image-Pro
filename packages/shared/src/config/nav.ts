@@ -109,7 +109,7 @@ export const productsNav: ProductNavGroup[] = [
       },
       {
         title: "Credits System",
-        href: "/#pricing",
+        href: "/pricing",
         description: "Flexible pay-as-you-go credits",
         icon: Coins,
       },
@@ -121,7 +121,7 @@ export const productsNav: ProductNavGroup[] = [
  * 主导航链接 (Header)
  */
 export const mainNav: NavItem[] = [
-  { title: "Pricing", href: "/#pricing" },
+  { title: "Pricing", href: "/pricing" },
   { title: "Docs", href: "/docs" },
   { title: "Blog", href: "/blog" },
 ];
@@ -132,7 +132,7 @@ export const mainNav: NavItem[] = [
 export const footerNav = {
   /** 产品 (Product) */
   product: [
-    { title: "Pricing", href: "/#pricing" },
+    { title: "Pricing", href: "/pricing" },
     { title: "Docs", href: "/docs" },
     { title: "Contact Us", href: "mailto:hello@gpt2image.com" },
   ] as NavItem[],

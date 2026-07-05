@@ -680,7 +680,7 @@ export function PricingSection({
     }
 
     if (!session?.user) {
-      router.push("/sign-in?redirect=/#pricing");
+      router.push("/sign-in?redirect=/pricing");
       return;
     }
 

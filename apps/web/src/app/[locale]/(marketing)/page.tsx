@@ -3,20 +3,9 @@ import { isAdminRole } from "@repo/shared/auth/roles";
 import { getServerSession } from "@repo/shared/auth/server";
 import { siteConfig } from "@repo/shared/config";
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
-import { getRuntimePaymentConfig } from "@repo/shared/config/payment-runtime";
-import { CREDIT_CONFIG_DEFAULTS } from "@repo/shared/credits/config";
-import { getRuntimeCreditPackages } from "@repo/shared/credits/packages";
-import { getPlanCapabilityMatrix } from "@repo/shared/subscription/services/plan-capabilities";
-import {
-  getRuntimeSettingBoolean,
-  getRuntimeSettingNumber,
-} from "@repo/shared/system-settings";
+import { getRuntimeSettingBoolean } from "@repo/shared/system-settings";
 import type { Metadata } from "next";
 import { SiteJsonLd, SoftwareAppJsonLd } from "@/components/seo/json-ld";
-import {
-  getRuntimeImageBaseCreditPricing,
-  getRuntimePublicModelPricingRules,
-} from "@/features/image-generation/pricing-settings";
 import { getRecentGenerationSlaStats } from "@/features/image-generation/sla";
 import {
   CTASection,
@@ -24,7 +13,6 @@ import {
   FeatureGrid,
   HeroSection,
   HowItWorks,
-  PricingSection,
   SlaStatusSection,
   Testimonials,
   UseCasesSection,
@@ -96,28 +84,7 @@ export default async function HomePage({
   params: Promise<{ locale: string }>;
 }) {
   const { locale } = await params;
-  const [
-    runtimePaymentConfig,
-    capabilityMatrix,
-    creditPackages,
-    creditPackageExpiryDays,
-    imageBasePricing,
-    modelPricingRules,
-    slaEnabled,
-    slaStats,
-    session,
-    branding,
-  ] = await Promise.all([
-    getRuntimePaymentConfig(),
-    getPlanCapabilityMatrix(),
-    getRuntimeCreditPackages(),
-    getRuntimeSettingNumber(
-      "CREDITS_EXPIRY_DAYS",
-      CREDIT_CONFIG_DEFAULTS.creditsExpiryDays,
-      { nonNegative: true }
-    ),
-    getRuntimeImageBaseCreditPricing(),
-    getRuntimePublicModelPricingRules(),
+  const [slaEnabled, slaStats, session, branding] = await Promise.all([
     getRuntimeSettingBoolean("MARKETING_SLA_STATUS_ENABLED", true),
     getRecentGenerationSlaStats(1000),
     getServerSession(),
@@ -148,14 +115,6 @@ export default async function HomePage({
           canToggleVisibility={canToggleSlaStatus}
         />
       )}
-      <PricingSection
-        payment={runtimePaymentConfig}
-        capabilityMatrix={capabilityMatrix}
-        creditPackages={creditPackages}
-        creditPackageExpiryDays={creditPackageExpiryDays}
-        imageBasePricing={imageBasePricing}
-        modelPricingRules={modelPricingRules}
-      />
       <FAQSection />
       <CTASection />
     </>

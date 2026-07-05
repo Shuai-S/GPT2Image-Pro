@@ -21,10 +21,7 @@ import { useEffect } from "react";
 import { formatDateInTimeZone } from "../../time-zone";
 import { Button } from "@repo/ui/components/button";
 import { Separator } from "@repo/ui/components/separator";
-import {
-  getMyActiveBatches,
-  getMyCreditsBalance,
-} from "../actions";
+import { getMyActiveBatches, getMyCreditsBalance } from "../actions";
 import { formatCredits } from "../format";
 
 import { TransactionHistory } from "./transaction-history";
@@ -38,11 +35,16 @@ function formatDate(
   timeZone: string
 ): string {
   if (!date) return "Never";
-  return formatDateInTimeZone(date, locale, {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }, timeZone);
+  return formatDateInTimeZone(
+    date,
+    locale,
+    {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    },
+    timeZone
+  );
 }
 
 /**
@@ -125,9 +127,7 @@ export function CreditUsageSection({ timeZone }: { timeZone: string }) {
             </div>
           ) : (
             <>
-              <div className="text-4xl font-bold">
-                {formatCredits(balance)}
-              </div>
+              <div className="text-4xl font-bold">{formatCredits(balance)}</div>
               <div className="text-sm text-muted-foreground">
                 {t("creditsAvailable")}
               </div>
@@ -170,7 +170,7 @@ export function CreditUsageSection({ timeZone }: { timeZone: string }) {
             </Link>
           </Button>
           <Button asChild variant="outline">
-            <Link href={`/${locale}/#pricing`}>
+            <Link href={`/${locale}/pricing`}>
               {t("getMoreCredits.viewPlans")}
             </Link>
           </Button>

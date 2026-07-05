@@ -10,10 +10,7 @@
  * - 账单历史
  */
 
-import {
-  findPlanByPriceId,
-  paymentConfig,
-} from "@repo/shared/config/payment";
+import { findPlanByPriceId, paymentConfig } from "@repo/shared/config/payment";
 import {
   PLAN_PRIVILEGES,
   type SubscriptionPlan,
@@ -70,11 +67,16 @@ function formatCurrency(amount: number | string | undefined) {
 }
 
 function formatDate(date: Date | string, locale: string, timeZone: string) {
-  return formatDateInTimeZone(date, locale, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  }, timeZone);
+  return formatDateInTimeZone(
+    date,
+    locale,
+    {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    },
+    timeZone
+  );
 }
 
 function getBillingAmount(tx: BillingTransaction) {
@@ -182,11 +184,16 @@ export function BillingSection({ timeZone }: { timeZone: string }) {
   }, [planResult.data?.currentPeriodEnd]);
 
   const formattedRenewalDate = renewalDate
-    ? formatDateInTimeZone(renewalDate, locale, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-      }, timeZone)
+    ? formatDateInTimeZone(
+        renewalDate,
+        locale,
+        {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        },
+        timeZone
+      )
     : null;
 
   const [priceDisplay, setPriceDisplay] = useState("-");
@@ -283,7 +290,7 @@ export function BillingSection({ timeZone }: { timeZone: string }) {
             </div>
             {userPlan === "free" && (
               <Button asChild>
-                <Link href="/#pricing">
+                <Link href="/pricing">
                   <Sparkles className="mr-2 h-4 w-4" />
                   {t("currentPlan.upgradePlan")}
                 </Link>
@@ -292,7 +299,7 @@ export function BillingSection({ timeZone }: { timeZone: string }) {
             {userPlan !== "free" && (
               <div className="flex items-center gap-2">
                 <Button asChild size="sm">
-                  <Link href="/#pricing">
+                  <Link href="/pricing">
                     <Sparkles className="mr-2 h-4 w-4" />
                     {t("currentPlan.upgradePlan")}
                   </Link>
