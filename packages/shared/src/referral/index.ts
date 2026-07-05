@@ -38,6 +38,52 @@ import {
   REFERRAL_CODE_LENGTH,
 } from "./rules";
 
+/**
+ * 构造 PostgreSQL enum 状态字面量。
+ *
+ * @param status - 内部受控的返佣账本状态。
+ * @returns 可安全拼入 SQL 的 enum 字面量片段。
+ * @sideEffects 无。
+ */
+function referralCommissionStatusLiteral(status: ReferralCommissionStatus) {
+  switch (status) {
+    case "available":
+      return sql`'available'::referral_commission_status`;
+    case "canceled":
+      return sql`'canceled'::referral_commission_status`;
+    case "converted":
+      return sql`'converted'::referral_commission_status`;
+    case "converting":
+      return sql`'converting'::referral_commission_status`;
+    case "frozen":
+      return sql`'frozen'::referral_commission_status`;
+  }
+}
+
+/**
+ * 按返佣状态聚合积分数量。
+ *
+ * @param status - 要聚合的返佣账本状态。
+ * @returns Drizzle SQL 片段，结果映射为 number。
+ * @sideEffects 无；WHY: 明确 cast enum 字面量，避免 pg 参数化后按 text 比较。
+ */
+function sumCommissionCreditsByStatus(status: ReferralCommissionStatus) {
+  const statusLiteral = referralCommissionStatusLiteral(status);
+
+  return sql<number>`
+    coalesce(
+      sum(
+        case
+          when ${referralCommissionLedger.status} = ${statusLiteral}
+          then ${referralCommissionLedger.commissionCredits}
+          else 0
+        end
+      ),
+      0
+    )
+  `.mapWith(Number);
+}
+
 export interface ReferralPaymentInput {
   inviteeUserId: string;
   provider: "creem" | "epay" | "alipay";
@@ -630,18 +676,9 @@ export async function getReferralOverview(
 
   const [totals] = await db
     .select({
-      available:
-        sql<number>`coalesce(sum(case when ${referralCommissionLedger.status} = 'available' then ${referralCommissionLedger.commissionCredits} else 0 end), 0)`.mapWith(
-          Number
-        ),
-      frozen:
-        sql<number>`coalesce(sum(case when ${referralCommissionLedger.status} = 'frozen' then ${referralCommissionLedger.commissionCredits} else 0 end), 0)`.mapWith(
-          Number
-        ),
-      converted:
-        sql<number>`coalesce(sum(case when ${referralCommissionLedger.status} = 'converted' then ${referralCommissionLedger.commissionCredits} else 0 end), 0)`.mapWith(
-          Number
-        ),
+      available: sumCommissionCreditsByStatus("available"),
+      frozen: sumCommissionCreditsByStatus("frozen"),
+      converted: sumCommissionCreditsByStatus("converted"),
     })
     .from(referralCommissionLedger)
     .where(eq(referralCommissionLedger.inviterUserId, userId));
@@ -1370,18 +1407,9 @@ export async function listReferralProfiles(
   const totals = db
     .select({
       inviterUserId: referralCommissionLedger.inviterUserId,
-      availableCredits:
-        sql<number>`coalesce(sum(case when ${referralCommissionLedger.status} = 'available' then ${referralCommissionLedger.commissionCredits} else 0 end), 0)`.mapWith(
-          Number
-        ),
-      frozenCredits:
-        sql<number>`coalesce(sum(case when ${referralCommissionLedger.status} = 'frozen' then ${referralCommissionLedger.commissionCredits} else 0 end), 0)`.mapWith(
-          Number
-        ),
-      convertedCredits:
-        sql<number>`coalesce(sum(case when ${referralCommissionLedger.status} = 'converted' then ${referralCommissionLedger.commissionCredits} else 0 end), 0)`.mapWith(
-          Number
-        ),
+      availableCredits: sumCommissionCreditsByStatus("available"),
+      frozenCredits: sumCommissionCreditsByStatus("frozen"),
+      convertedCredits: sumCommissionCreditsByStatus("converted"),
     })
     .from(referralCommissionLedger)
     .groupBy(referralCommissionLedger.inviterUserId)

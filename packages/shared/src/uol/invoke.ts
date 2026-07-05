@@ -21,6 +21,7 @@
  * - 未知异常：统一包装为 internal_error，防止内部细节泄露
  */
 import { nanoid } from "nanoid";
+import { logError } from "../logger";
 import { getOperation, isOperationBound } from "./registry";
 import { assertAccess } from "./access";
 import { OperationError } from "./errors";
@@ -67,7 +68,7 @@ export async function invokeOperation<TOutput = unknown>(
   // 1. 访问控制
   assertAccess(def.access, principal);
 
-  // 2. 输入校验���Zod safeParse 不抛异��，手动转 OperationError）
+  // 2. 输入校验（Zod safeParse 不抛异常，手动转 OperationError）
   const parseResult = def.input.safeParse(rawInput);
   if (!parseResult.success) {
     const issues = parseResult.error.issues.map((issue) => ({
@@ -160,6 +161,11 @@ export async function invokeOperation<TOutput = unknown>(
     }
 
     // 未知异常：包装为 internal_error 防止内部细节泄露
+    logError(e, {
+      source: "uol-invoke",
+      operation: name,
+      requestId: ctx.requestId,
+    });
     throw new OperationError(
       "internal_error",
       "An unexpected error occurred",
