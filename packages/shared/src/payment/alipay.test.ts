@@ -57,6 +57,19 @@ function mergeAlipaySubmitParams(result: {
   };
 }
 
+function verifyAlipayRequestParams(params: Record<string, string>) {
+  const sign = params.sign ?? "";
+  const payload = Object.keys(params)
+    .filter((key) => key !== "sign" && params[key] !== "")
+    .sort()
+    .map((key) => `${key}=${params[key]}`)
+    .join("&");
+  return crypto
+    .createVerify("RSA-SHA256")
+    .update(payload, "utf8")
+    .verify(keyPair.publicKey, sign, "base64");
+}
+
 describe("signAlipayParams / verifyAlipayParams", () => {
   it("signs and verifies RSA2 parameters while excluding sign fields", () => {
     configureAlipayEnv();
@@ -115,7 +128,7 @@ describe("createAlipayPurchase", () => {
     expect(submitParams.return_url).toBe(
       "https://app.example.com/api/payments/alipay/return"
     );
-    expect(verifyAlipayParams(submitParams)).toBe(true);
+    expect(verifyAlipayRequestParams(submitParams)).toBe(true);
     const bizContent = submitParams.biz_content;
     expect(bizContent).toBeDefined();
     if (!bizContent) return;
@@ -141,7 +154,7 @@ describe("createAlipayPurchase", () => {
     expect(submitParams.return_url).toBe(
       "https://pay.example.com/payment/result"
     );
-    expect(verifyAlipayParams(submitParams)).toBe(true);
+    expect(verifyAlipayRequestParams(submitParams)).toBe(true);
   });
 
   it("uses configured synchronous return URL from runtime settings", async () => {
@@ -174,7 +187,7 @@ describe("createAlipayPurchase", () => {
     expect(submitParams.return_url).toBe(
       "https://admin.example.com/payment/result"
     );
-    expect(verifyAlipayParams(submitParams)).toBe(true);
+    expect(verifyAlipayRequestParams(submitParams)).toBe(true);
   });
 
   it("creates wap pay params when requested", () => {

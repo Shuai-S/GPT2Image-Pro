@@ -136,10 +136,16 @@ async function getRuntimeAlipayReturnUrl(baseUrl: string): Promise<string> {
   );
 }
 
-function buildAlipaySignPayload(params: Record<string, string>): string {
+function buildAlipaySignPayload(
+  params: Record<string, string>,
+  options?: { includeSignType?: boolean }
+): string {
   return Object.keys(params)
     .filter(
-      (key) => key !== "sign" && key !== "sign_type" && params[key] !== ""
+      (key) =>
+        key !== "sign" &&
+        (options?.includeSignType || key !== "sign_type") &&
+        params[key] !== ""
     )
     .sort()
     .map((key) => `${key}=${params[key]}`)
@@ -148,7 +154,8 @@ function buildAlipaySignPayload(params: Record<string, string>): string {
 
 export function signAlipayParams(
   params: Record<string, string>,
-  appPrivateKey?: string
+  appPrivateKey?: string,
+  options?: { includeSignType?: boolean }
 ): string {
   const privateKey = normalizePemKey(
     appPrivateKey ?? getAlipayConfig().appPrivateKey,
@@ -156,7 +163,7 @@ export function signAlipayParams(
   );
   return crypto
     .createSign("RSA-SHA256")
-    .update(buildAlipaySignPayload(params), "utf8")
+    .update(buildAlipaySignPayload(params, options), "utf8")
     .sign(privateKey, "base64");
 }
 
@@ -227,7 +234,11 @@ function createAlipayRequestParams(input: {
 
   return {
     ...params,
-    sign: signAlipayParams(params, input.config.appPrivateKey),
+    // 支付宝网关对发起支付请求验签时会把 sign_type 放入待签名串；
+    // 回跳/异步通知的验签仍沿用 verify 分支排除 sign_type，避免混淆两种口径。
+    sign: signAlipayParams(params, input.config.appPrivateKey, {
+      includeSignType: true,
+    }),
   };
 }
 
