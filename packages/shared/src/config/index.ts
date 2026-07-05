@@ -2,7 +2,6 @@
 
 export {
   DEFAULT_CONTACT_EMAIL,
-  getRuntimeContactEmail,
   normalizeContactEmail,
   resolveContactEmail,
 } from "./contact";

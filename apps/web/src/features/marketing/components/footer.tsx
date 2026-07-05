@@ -8,7 +8,7 @@
 
 import { footerNav } from "@repo/shared/config";
 import type { BrandingConfig } from "@repo/shared/config/branding";
-import { getRuntimeContactEmail } from "@repo/shared/config/contact";
+import { getRuntimeContactEmail } from "@repo/shared/config/contact-runtime";
 import Link from "next/link";
 import { getLocale } from "next-intl/server";
 

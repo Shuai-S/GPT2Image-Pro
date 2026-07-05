@@ -62,6 +62,7 @@
     "./config": "./src/config/index.ts",
     "./config/branding": "./src/config/branding.ts",
     "./config/contact": "./src/config/contact.ts",
+    "./config/contact-runtime": "./src/config/contact-runtime.ts",
     "./config/nav": "./src/config/nav.ts",
     "./config/payment": "./src/config/payment.ts",
     "./config/payment-runtime": "./src/config/payment-runtime.ts",

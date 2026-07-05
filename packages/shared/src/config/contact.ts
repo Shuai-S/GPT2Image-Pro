@@ -1,9 +1,9 @@
 /**
  * 公开联系邮箱配置。
  *
- * 职责：规范化管理员配置的站点联系邮箱，并在运行时从 system_settings 读取。
- * 使用方：首页页脚、SEO 结构化数据与其他公开联系方式展示。
- * 关键依赖：system-settings 运行时配置读取；为避免 DB 依赖扩散，读取函数内动态导入。
+ * 职责：提供可在浏览器与服务端共享的联系邮箱默认值、规范化与回退规则。
+ * 使用方：系统设置定义、后台设置校验、公开页脚与 SEO 展示逻辑。
+ * 关键依赖：无数据库依赖；运行时读取 CONTACT_EMAIL 的逻辑放在 contact-runtime.ts。
  */
 
 export const DEFAULT_CONTACT_EMAIL = "hello@gpt2image.com";
@@ -33,22 +33,10 @@ export function normalizeContactEmail(value: string | undefined) {
  * 解析可公开展示的联系邮箱。
  *
  * @param value - 未规范化的邮箱文本。
- * @returns 合法邮箱，非法或为空时回退代码默认联系邮箱。
+ * @returns 合法邮箱；非法或为空时回退代码默认联系邮箱。
  * @sideEffects 无。
  * @throws 不抛出异常。
  */
 export function resolveContactEmail(value: string | undefined) {
   return normalizeContactEmail(value) ?? DEFAULT_CONTACT_EMAIL;
-}
-
-/**
- * 读取运行时公开联系邮箱。
- *
- * @returns 后台系统设置、环境变量或代码默认值解析出的公开联系邮箱。
- * @sideEffects 正常运行时读取 system_settings 表；构建期可按系统设置规则回退环境变量。
- * @throws DB 访问异常会向上抛出，由调用方所属页面处理。
- */
-export async function getRuntimeContactEmail() {
-  const { getRuntimeSettingString } = await import("../system-settings");
-  return resolveContactEmail(await getRuntimeSettingString("CONTACT_EMAIL"));
 }
