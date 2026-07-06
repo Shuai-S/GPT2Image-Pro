@@ -19,6 +19,7 @@ import type { Principal } from "../uol/principal";
 import { isOperationBound, listOperations } from "../uol/registry";
 import type { AccessRequirement, OperationDefinition } from "../uol/types";
 import { getMcpDeniedOps, getMcpReadOnlyMode } from "./config";
+import { zodToSimpleJsonSchema } from "./zod-json-schema";
 
 /**
  * MCP 工具定义（JSON-RPC tools/list 响应中的单个工具）
@@ -104,106 +105,6 @@ function isOperationExposable(
   if (readOnlyMode && !op.readOnly) return false;
 
   return true;
-}
-
-/**
- * 从 Zod schema 生成简化的 JSON Schema。
- *
- * 不完整实现（避免引入 zod-to-json-schema 依赖），
- * 优先确保 MCP agent 能理解输入结构。
- * 对于无法解析的复杂 schema 回退为 object 类型。
- */
-function zodToSimpleJsonSchema(zodSchema: unknown): Record<string, unknown> {
-  // Zod v4 内部结构：尝试提取 _zod 元数据
-  // 对于未知结构，回退为通用 object schema
-  try {
-    const schema = zodSchema as Record<string, unknown>;
-
-    // Zod v4: schema._zod.def 包含类型信息
-    const zod = schema._zod as { def?: Record<string, unknown> } | undefined;
-    if (zod?.def) {
-      return buildJsonSchemaFromZodDef(zod.def);
-    }
-
-    // Zod v3 兼容: schema._def
-    const def = schema._def as Record<string, unknown> | undefined;
-    if (def) {
-      return buildJsonSchemaFromZodDef(def);
-    }
-  } catch {
-    // 解析失败回退
-  }
-
-  return { type: "object", properties: {}, additionalProperties: true };
-}
-
-/**
- * 从 Zod 内部 def 构建 JSON Schema（尽力而为）。
- */
-function buildJsonSchemaFromZodDef(
-  def: Record<string, unknown>
-): Record<string, unknown> {
-  const typeName = def.typeName as string | undefined;
-
-  switch (typeName) {
-    case "ZodObject": {
-      const shape = def.shape as Record<string, unknown> | undefined;
-      if (!shape) {
-        return { type: "object", properties: {} };
-      }
-      const properties: Record<string, unknown> = {};
-      const required: string[] = [];
-      for (const [key, fieldSchema] of Object.entries(shape)) {
-        properties[key] = zodToSimpleJsonSchema(fieldSchema);
-        // 检查是否为 optional
-        const fieldZod = (fieldSchema as Record<string, unknown>)._zod as
-          | { def?: Record<string, unknown> }
-          | undefined;
-        const fieldDef =
-          fieldZod?.def ??
-          ((fieldSchema as Record<string, unknown>)._def as
-            | Record<string, unknown>
-            | undefined);
-        if (fieldDef?.typeName !== "ZodOptional") {
-          required.push(key);
-        }
-      }
-      const result: Record<string, unknown> = {
-        type: "object",
-        properties,
-      };
-      if (required.length > 0) result.required = required;
-      return result;
-    }
-    case "ZodString":
-      return { type: "string" };
-    case "ZodNumber":
-      return { type: "number" };
-    case "ZodBoolean":
-      return { type: "boolean" };
-    case "ZodArray": {
-      const itemType = def.type as unknown;
-      return {
-        type: "array",
-        items: itemType ? zodToSimpleJsonSchema(itemType) : {},
-      };
-    }
-    case "ZodEnum": {
-      const values = def.values as string[] | undefined;
-      return values ? { type: "string", enum: values } : { type: "string" };
-    }
-    case "ZodOptional": {
-      const innerType = def.innerType as unknown;
-      return innerType ? zodToSimpleJsonSchema(innerType) : {};
-    }
-    case "ZodNullable": {
-      const inner = def.innerType as unknown;
-      const base = inner ? zodToSimpleJsonSchema(inner) : {};
-      return { ...base, nullable: true };
-    }
-    default:
-      return { type: "object", additionalProperties: true };
-  }
 }
 
 /**

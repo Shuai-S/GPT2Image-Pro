@@ -9,6 +9,7 @@ import {
   toolNameToOperationName,
 } from "./tool-factory";
 import { buildUserMcpTools } from "./user-tool-factory";
+import { zodToSimpleJsonSchema } from "./zod-json-schema";
 
 const apiKeyPrincipal = {
   type: "apiKey",
@@ -95,5 +96,94 @@ describe("MCP tool factories", () => {
 
     expect(toolName).toBe("admin_referral_listProfiles");
     expect(toolNameToOperationName(toolName)).toBe(operationName);
+  });
+
+  it("converts common Zod v4 inputs to JSON Schema", () => {
+    const schema = z.object({
+      prompt: z.string().describe("Prompt text"),
+      count: z.number(),
+      stream: z.boolean(),
+      mode: z.enum(["fast", "safe"]),
+      tags: z.array(z.string()),
+      nested: z.object({
+        enabled: z.boolean(),
+      }),
+      optionalNote: z.string().optional(),
+      defaulted: z.boolean().default(true),
+    });
+
+    expect(zodToSimpleJsonSchema(schema)).toEqual({
+      type: "object",
+      properties: {
+        prompt: { type: "string", description: "Prompt text" },
+        count: { type: "number" },
+        stream: { type: "boolean" },
+        mode: { type: "string", enum: ["fast", "safe"] },
+        tags: { type: "array", items: { type: "string" } },
+        nested: {
+          type: "object",
+          properties: {
+            enabled: { type: "boolean" },
+          },
+          additionalProperties: false,
+          required: ["enabled"],
+        },
+        optionalNote: { type: "string" },
+        defaulted: { type: "boolean", default: true },
+      },
+      additionalProperties: false,
+      required: ["prompt", "count", "stream", "mode", "tags", "nested"],
+    });
+  });
+
+  it("uses the shared JSON Schema converter for user tools", () => {
+    registerOperation({
+      name: "image.generate",
+      access: { kind: "protected" },
+      input: z.object({
+        prompt: z.string(),
+        count: z.number().optional(),
+        stream: z.boolean().default(false),
+      }),
+    });
+    bindExecute("image.generate", async () => ({ ok: true }));
+
+    const [tool] = buildUserMcpTools(apiKeyPrincipal);
+
+    expect(tool?.inputSchema).toMatchObject({
+      type: "object",
+      properties: {
+        prompt: { type: "string" },
+        count: { type: "number" },
+        stream: { type: "boolean", default: false },
+      },
+      required: ["prompt"],
+    });
+  });
+
+  it("uses the shared JSON Schema converter for admin tools", () => {
+    registerOperation({
+      name: "pool.updateWeight",
+      domain: "image-backend-pool",
+      access: { kind: "admin" },
+      input: z.object({
+        backendId: z.string(),
+        weight: z.number(),
+        enabled: z.boolean().optional(),
+      }),
+    });
+    bindExecute("pool.updateWeight", async () => ({ ok: true }));
+
+    const [tool] = buildAdminMcpTools(adminPrincipal);
+
+    expect(tool?.inputSchema).toMatchObject({
+      type: "object",
+      properties: {
+        backendId: { type: "string" },
+        weight: { type: "number" },
+        enabled: { type: "boolean" },
+      },
+      required: ["backendId", "weight"],
+    });
   });
 });

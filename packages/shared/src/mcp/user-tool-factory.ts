@@ -15,6 +15,7 @@
 import { getOperation, isOperationBound } from "../uol/registry";
 import type { OperationDefinition } from "../uol/types";
 import type { Principal } from "../uol/principal";
+import { zodToSimpleJsonSchema } from "./zod-json-schema";
 
 /**
  * MCP Tool 描述 - 对应 MCP 协议 tools/list 响应中的单个工具项
@@ -67,57 +68,6 @@ const USER_MCP_ALLOWED_OPERATIONS: readonly string[] = [
   "subscription.getMyPlan",
   "subscription.canUseCapability",
 ] as const;
-
-/**
- * 从 Zod schema 提取近似 JSON Schema 描述。
- *
- * Zod v4 不内置 .jsonSchema()，此处提取 shape 键作为属性列表，
- * 结合 description 提供基础的 inputSchema。
- * 若后续引入 zod-to-json-schema 可替换此简化实现。
- */
-function zodToSimpleJsonSchema(
-  zodSchema: unknown,
-): Record<string, unknown> {
-  // Zod v4 safeParse 可用于校验；此处尽力提取 shape 信息
-  const schema = zodSchema as Record<string, unknown>;
-
-  // 尝试读取 shape（ZodObject）
-  if (schema && typeof schema === "object" && "_def" in schema) {
-    const def = schema._def as Record<string, unknown>;
-    if (def.shape && typeof def.shape === "function") {
-      const shape = (def.shape as () => Record<string, unknown>)();
-      const properties: Record<string, unknown> = {};
-      const required: string[] = [];
-
-      for (const key of Object.keys(shape)) {
-        const fieldSchema = shape[key] as Record<string, unknown>;
-        const fieldDef = fieldSchema?._def as Record<string, unknown>;
-        const description =
-          (fieldDef?.description as string) || undefined;
-        properties[key] = {
-          type: "string",
-          ...(description ? { description } : {}),
-        };
-        // 非 optional 字段视为 required
-        if (
-          fieldDef?.typeName !== "ZodOptional" &&
-          fieldDef?.typeName !== "ZodDefault"
-        ) {
-          required.push(key);
-        }
-      }
-
-      return {
-        type: "object",
-        properties,
-        ...(required.length > 0 ? { required } : {}),
-      };
-    }
-  }
-
-  // 无法解析时返回空对象 schema
-  return { type: "object", properties: {} };
-}
 
 /**
  * 构建用户 MCP 工具列表。
