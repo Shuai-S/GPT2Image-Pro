@@ -11,7 +11,7 @@ import {
   PopoverTrigger,
 } from "@repo/ui/components/popover";
 import { ChevronDown } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AUTO_IMAGE_SIZE,
   normalizeImageSize,
@@ -323,6 +323,9 @@ export function InlineImageSizeControl({
     auto ? AUTO_IMAGE_SIZE : normalizeImageSize(width, height)
   );
   const [presetOpen, setPresetOpen] = useState(false);
+  const presetCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
   const parsedDraft = parseResolutionInput(draft);
   const draftInvalid = Boolean(draft.trim()) && !parsedDraft;
   const previewSize =
@@ -339,6 +342,34 @@ export function InlineImageSizeControl({
     setTier(auto ? AUTO_RESOLUTION_VALUE : next.base);
     setDraft(auto ? AUTO_IMAGE_SIZE : normalizeImageSize(width, height));
   }, [auto, height, mixWebFirst, width]);
+
+  useEffect(
+    () => () => {
+      if (presetCloseTimerRef.current) {
+        clearTimeout(presetCloseTimerRef.current);
+      }
+    },
+    []
+  );
+
+  const clearPresetCloseTimer = () => {
+    if (!presetCloseTimerRef.current) return;
+    clearTimeout(presetCloseTimerRef.current);
+    presetCloseTimerRef.current = null;
+  };
+
+  const openPresetPanel = () => {
+    clearPresetCloseTimer();
+    setPresetOpen(true);
+  };
+
+  const schedulePresetClose = () => {
+    clearPresetCloseTimer();
+    presetCloseTimerRef.current = setTimeout(() => {
+      setPresetOpen(false);
+      presetCloseTimerRef.current = null;
+    }, 120);
+  };
 
   const applySize = (size: string) => {
     if (size === AUTO_IMAGE_SIZE) {
@@ -413,8 +444,8 @@ export function InlineImageSizeControl({
               variant="outline"
               disabled={disabled}
               className="h-11 gap-2 rounded-xl px-4"
-              onMouseEnter={() => setPresetOpen(true)}
-              onFocus={() => setPresetOpen(true)}
+              onMouseEnter={openPresetPanel}
+              onMouseLeave={schedulePresetClose}
             >
               {copy("Presets", "预设比例")}
               <ChevronDown className="h-4 w-4" />
@@ -422,15 +453,16 @@ export function InlineImageSizeControl({
           </PopoverTrigger>
           <PopoverContent
             align="end"
-            className="w-[min(92vw,30rem)] p-3"
-            onMouseEnter={() => setPresetOpen(true)}
-            onMouseLeave={() => setPresetOpen(false)}
+            sideOffset={8}
+            className="max-h-[70vh] w-[min(86vw,21rem)] overflow-y-auto p-2"
+            onMouseEnter={openPresetPanel}
+            onMouseLeave={schedulePresetClose}
           >
-            <div className="space-y-3">
+            <div className="space-y-2.5">
               <div>
-                <p className="text-sm font-semibold text-foreground">
+                <p className="text-xs font-semibold text-foreground">
                   {copy("Canvas ratio", "画面比例")}
-                  <span className="ml-2 text-xs font-normal text-muted-foreground">
+                  <span className="ml-2 font-normal text-muted-foreground">
                     {copy(
                       "Final resolution depends on provider policy and model.",
                       "最终分辨率受官方政策和模型影响，不做保证。"
@@ -444,7 +476,7 @@ export function InlineImageSizeControl({
                     key={item.value}
                     type="button"
                     onClick={() => selectTier(item.value)}
-                    className={`h-10 rounded-lg text-sm font-semibold transition ${
+                    className={`h-8 rounded-lg text-xs font-semibold transition ${
                       tier === item.value
                         ? "bg-background text-foreground shadow-sm"
                         : "text-muted-foreground hover:text-foreground"
@@ -454,7 +486,7 @@ export function InlineImageSizeControl({
                   </button>
                 ))}
               </div>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <div className="grid grid-cols-2 gap-1.5">
                 {IMAGE_ASPECT_RATIOS.map((item) => {
                   const itemSize =
                     tier === AUTO_RESOLUTION_VALUE
@@ -467,7 +499,7 @@ export function InlineImageSizeControl({
                       key={item.value}
                       type="button"
                       onClick={() => selectPreset(item)}
-                      className={`flex min-h-20 flex-col items-center justify-center gap-2 rounded-xl border px-2 text-center text-sm transition ${
+                      className={`flex min-h-14 flex-col items-center justify-center gap-1.5 rounded-lg border px-2 text-center text-xs transition ${
                         active
                           ? "border-primary bg-primary/10 text-primary"
                           : "border-border bg-background hover:border-primary hover:bg-primary/5 hover:text-primary"
@@ -487,16 +519,16 @@ export function InlineImageSizeControl({
                     </button>
                   );
                 })}
-                <div className="flex min-h-20 flex-col justify-center rounded-xl border border-sky-200 bg-sky-50 px-3 text-center text-sky-700 dark:border-sky-500/40 dark:bg-sky-500/10 dark:text-sky-200">
-                  <span className="text-xs font-medium">
+                <div className="flex min-h-14 flex-col justify-center rounded-lg border border-sky-200 bg-sky-50 px-2 text-center text-sky-700 dark:border-sky-500/40 dark:bg-sky-500/10 dark:text-sky-200">
+                  <span className="text-[11px] font-medium">
                     {copy("Final resolution", "最终分辨率")}
                   </span>
-                  <strong className="mt-1 text-xl">
+                  <strong className="mt-0.5 text-base">
                     {formatImageSizeForDisplay(
                       auto ? previewSize : normalizeImageSize(width, height)
                     )}
                   </strong>
-                  <span className="mt-1 text-xs">
+                  <span className="mt-0.5 text-[11px]">
                     {tier === AUTO_RESOLUTION_VALUE
                       ? copy("Backend decides", "模型自行决定")
                       : copy("Current output", "当前输出")}
