@@ -3216,6 +3216,7 @@ export function CreatePageClient({
       "Overrides the backend group for requests from this page only. Billing follows the selected group's multiplier. Use settings to change the default.",
       "仅覆盖本页请求使用的后端分组,计费按所选分组倍率结算;默认分组请在设置页修改。"
     );
+    const singleGroup = backendGroups.length === 1;
     const select = (
       <Select
         value={requestGroupChoice}
@@ -3236,18 +3237,21 @@ export function CreatePageClient({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="default">
-            {preferenceBackendGroup
-              ? copy(
-                  `Preferred · ${groupItemLabel(preferenceBackendGroup)}`,
-                  `跟随偏好 · ${groupItemLabel(preferenceBackendGroup)}`
-                )
-              : copy("Preferred group", "跟随偏好分组")}
+            {singleGroup && preferenceBackendGroup
+              ? groupItemLabel(preferenceBackendGroup)
+              : preferenceBackendGroup
+                ? copy(
+                    `Preferred · ${groupItemLabel(preferenceBackendGroup)}`,
+                    `跟随偏好 · ${groupItemLabel(preferenceBackendGroup)}`
+                  )
+                : copy("Preferred group", "跟随偏好分组")}
           </SelectItem>
-          {backendGroups.map((group) => (
-            <SelectItem key={group.id} value={group.id}>
-              {groupItemLabel(group)}
-            </SelectItem>
-          ))}
+          {!singleGroup &&
+            backendGroups.map((group) => (
+              <SelectItem key={group.id} value={group.id}>
+                {groupItemLabel(group)}
+              </SelectItem>
+            ))}
         </SelectContent>
       </Select>
     );
