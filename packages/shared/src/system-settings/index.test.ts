@@ -681,6 +681,10 @@ describe("runtime setting getters stored/env fallback (C-L29)", () => {
       key: "OPERATION_VIDEO_ENABLED",
       value: "0",
     });
+    store.set("OPERATION_EXTERNAL_API_ENABLED", {
+      key: "OPERATION_EXTERNAL_API_ENABLED",
+      value: false,
+    });
     clearSystemSettingsCache();
 
     await expect(getRuntimeOperationFeatureFlags()).resolves.toMatchObject({
@@ -688,6 +692,8 @@ describe("runtime setting getters stored/env fallback (C-L29)", () => {
       textToImage: true,
       video: false,
       infiniteCanvas: true,
+      systemDocs: true,
+      externalApi: false,
     });
   });
 

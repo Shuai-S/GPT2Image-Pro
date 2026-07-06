@@ -1,5 +1,6 @@
 import { getServerSession } from "@repo/shared/auth/server";
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
+import { isOperationFeatureEnabled } from "@repo/shared/system-settings";
 import { getAppTimeZone } from "@repo/shared/time-zone/server";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
@@ -27,6 +28,9 @@ export default async function ExternalApiPage() {
   const locale = await getLocale();
   if (!session?.user) {
     redirect(`/${locale}/sign-in`);
+  }
+  if (!(await isOperationFeatureEnabled("externalApi"))) {
+    redirect(`/${locale}/dashboard`);
   }
 
   const [t, timeZone, branding] = await Promise.all([

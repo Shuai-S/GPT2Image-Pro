@@ -44,7 +44,9 @@ export type OperationFeatureKey =
   | "agent"
   | "waterfall"
   | "video"
-  | "infiniteCanvas";
+  | "infiniteCanvas"
+  | "systemDocs"
+  | "externalApi";
 
 export type OperationFeatureFlags = Record<OperationFeatureKey, boolean>;
 
@@ -57,6 +59,8 @@ const OPERATION_FEATURE_SETTING_KEYS = {
   waterfall: "OPERATION_WATERFALL_ENABLED",
   video: "OPERATION_VIDEO_ENABLED",
   infiniteCanvas: "OPERATION_INFINITE_CANVAS_ENABLED",
+  systemDocs: "OPERATION_SYSTEM_DOCS_ENABLED",
+  externalApi: "OPERATION_EXTERNAL_API_ENABLED",
 } as const satisfies Record<OperationFeatureKey, SettingKey>;
 
 let settingsCache:
