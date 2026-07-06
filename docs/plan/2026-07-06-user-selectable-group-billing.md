@@ -226,10 +226,19 @@ priority 回退即等价于"隐式 AutoGroups"；二期补管理 UI 与显式配
 
 ## 落地顺序
 
-1. **Phase 1 选组入口**：`resolveRequestedGroup` 支持 `requestGroupId` +
-   `assertGroupSelectable` 单点校验（fail-closed）；`generateImageAction`
-   schema 增加可选 `groupId`；创作页分组选择器 + 预计扣费展示；
-   UOL 三个 operation。
+1. **Phase 1 选组入口（已完成，2026-07-06）**：
+   - `group-selection.ts` 纯函数校验层（`checkGroupSelectable` +
+     `ImageBackendGroupSelectionError`，DB-free 单测 10 例）；
+   - `resolveRequestedGroup` 支持 `requestGroupId`，优先级
+     请求级 > Key 绑定 > 偏好 > 默认；显式选择 fail-closed，Key 绑定时
+     拒绝覆盖（`group_locked_by_key`）；
+   - `requestGroupId` 贯穿 `getEffectiveConfig` / 换号重试 re-resolve
+     （盖在 `config.backend` 上，重试不漂移分组）；
+   - `generateImageAction` 与内部 generate/edit/chat 路由接收 `groupId`；
+   - UOL：`pool.getSelectableGroups`（含倍率/车道/当前偏好）与
+     `pool.setPreference` 已接线真实实现；
+   - 创作页分组选择器（标准 + compact 形态，覆盖文生图/改图/chat/
+     瀑布流），预估扣费随选组即时反映倍率。
 2. **Phase 2 计费接入**：resolver 进 `runImageGenerationForUser`（未命中
    规则走 legacy）；`pricingSnapshot` 落 `credits_transaction.metadata`
    与 `generation.metadata`；历史/账单展示分组与倍率。
