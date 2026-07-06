@@ -124,7 +124,9 @@ type Group = {
   childGroupIds: string[];
   priority: number;
   apiCount: number;
+  adobeCount: number;
   accountCount: number;
+  availableModels: string[];
 };
 
 type Account = {
@@ -172,6 +174,7 @@ type Api = {
   name: string;
   baseUrl: string;
   model: string | null;
+  enabledModels: string[] | null;
   interfaceMode: ImageBackendApiInterfaceMode;
   chatCompletionsUpstreamMode: ChatCompletionsUpstreamModeFormValue;
   imagesUpstreamMode: ImagesUpstreamModeFormValue;
@@ -323,6 +326,20 @@ const ADOBE_VIDEO_MULTIPLIER_FAMILIES = [
   "kling-o3",
   "kling3",
 ] as const;
+
+const COMMON_IMAGE_API_MODELS = [
+  "gpt-image-1",
+  "gpt-image-1-mini",
+  "gpt-image-2",
+  "gpt-image-2-mini",
+  "nano-banana",
+  "nano-banana2",
+  "nano-banana-pro",
+];
+
+const COMMON_FIREFLY_MODELS = ADOBE_IMAGE_MULTIPLIER_FAMILIES.map(
+  (family) => `firefly-${family}`
+);
 
 /** 把 family→倍率 的 map 转成"输入框字符串"草稿；缺省/非正显示为空（即默认 1）。 */
 function multipliersToDraft(
@@ -542,6 +559,18 @@ function normalizeAccountGroupIds(groupIds?: string[] | null) {
   );
 }
 
+// 后台输入支持逗号、中文逗号和换行，保存前统一成去重数组。
+function parseModelList(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(/[\n,，]/)
+        .map((model) => model.trim())
+        .filter(Boolean)
+    )
+  );
+}
+
 function accountGroupIds(account: Account) {
   const groupIds = normalizeAccountGroupIds(account.groupIds);
   if (groupIds.length) return groupIds;
@@ -558,6 +587,19 @@ function groupNames(groups: Group[], groupIds: string[]) {
   const normalized = normalizeAccountGroupIds(groupIds);
   if (!normalized.length) return "未分组";
   return normalized.map((groupId) => groupName(groups, groupId)).join("、");
+}
+
+// 模型列表用于卡片展示与 title；空列表表示该后端未声明限制。
+function formatModelList(models?: string[] | null) {
+  return models?.length ? models.join(", ") : "不限";
+}
+
+// 分组卡片空间有限，只展示前几个模型，其余用数量概括。
+function compactModelList(models: string[], maxVisible = 6) {
+  if (!models.length) return "不限";
+  const visible = models.slice(0, maxVisible).join(", ");
+  const hidden = models.length - maxVisible;
+  return hidden > 0 ? `${visible} 等 ${models.length} 个` : visible;
 }
 
 function planLabel(plan: SubscriptionPlan) {
@@ -871,6 +913,7 @@ export function ImageBackendPoolAdminPanel({
     baseUrl: "",
     apiKey: "",
     model: "",
+    enabledModels: "",
     interfaceMode: "mixed" as ApiInterfaceModeFormValue,
     chatCompletionsUpstreamMode:
       "responses" as ChatCompletionsUpstreamModeFormValue,
@@ -1188,6 +1231,7 @@ export function ImageBackendPoolAdminPanel({
       baseUrl: "",
       apiKey: "",
       model: "",
+      enabledModels: "",
       interfaceMode: "mixed" as ApiInterfaceModeFormValue,
       chatCompletionsUpstreamMode:
         "responses" as ChatCompletionsUpstreamModeFormValue,
@@ -1341,6 +1385,7 @@ export function ImageBackendPoolAdminPanel({
       baseUrl: api.baseUrl,
       apiKey: "",
       model: api.model || "",
+      enabledModels: (api.enabledModels || []).join(","),
       interfaceMode: api.interfaceMode || "images",
       chatCompletionsUpstreamMode:
         api.chatCompletionsUpstreamMode || "responses",
@@ -2585,6 +2630,7 @@ export function ImageBackendPoolAdminPanel({
                               <span className="text-xs text-muted-foreground">
                                 {groupBackendTypeLabel(group.backendType)} ·
                                 账号 {group.accountCount} · API {group.apiCount}
+                                · Adobe {group.adobeCount}
                               </span>
                             </span>
                             <Checkbox
@@ -2739,6 +2785,11 @@ export function ImageBackendPoolAdminPanel({
                           子分组 {group.childGroupIds.length}
                         </Badge>
                       )}
+                      {group.availableModels.length > 0 && (
+                        <Badge variant="secondary">
+                          模型 {group.availableModels.length}
+                        </Badge>
+                      )}
                       <Badge
                         variant={
                           group.contentSafetyEnabled === false
@@ -2752,7 +2803,14 @@ export function ImageBackendPoolAdminPanel({
                     <p className="mt-1 text-sm text-muted-foreground">
                       {group.description || "无说明"} · 优先级 {group.priority}{" "}
                       · 计费倍率 x{group.billingMultiplier} · 账号{" "}
-                      {group.accountCount} · API {group.apiCount}
+                      {group.accountCount} · API {group.apiCount} · Adobe{" "}
+                      {group.adobeCount}
+                    </p>
+                    <p
+                      className="mt-1 text-xs text-muted-foreground"
+                      title={formatModelList(group.availableModels)}
+                    >
+                      可用模型：{compactModelList(group.availableModels)}
                     </p>
                     {group.childGroupIds.length > 0 && (
                       <p className="mt-1 text-xs text-muted-foreground">
@@ -3810,6 +3868,44 @@ export function ImageBackendPoolAdminPanel({
                   }
                 />
                 <div className="space-y-2">
+                  <Label>可用模型</Label>
+                  <Textarea
+                    placeholder="每行或逗号分隔；留空表示不限制"
+                    value={apiForm.enabledModels}
+                    onChange={(event) =>
+                      setApiForm((current) => ({
+                        ...current,
+                        enabledModels: event.target.value,
+                      }))
+                    }
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    {[...COMMON_IMAGE_API_MODELS, ...COMMON_FIREFLY_MODELS].map(
+                      (model) => (
+                        <Button
+                          key={model}
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            setApiForm((current) => ({
+                              ...current,
+                              enabledModels: parseModelList(
+                                `${current.enabledModels}\n${model}`
+                              ).join(","),
+                            }))
+                          }
+                        >
+                          {model}
+                        </Button>
+                      )
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    参考渠道设计：每个 API 后端声明可服务模型；调度时请求模型不在列表内会跳过该后端。
+                  </p>
+                </div>
+                <div className="space-y-2">
                   <Label>接口类型</Label>
                   <Select
                     value={apiForm.interfaceMode}
@@ -4091,6 +4187,7 @@ export function ImageBackendPoolAdminPanel({
                       ...apiForm,
                       groupId: apiForm.groupIds[0] || "default",
                       groupIds: apiForm.groupIds,
+                      enabledModels: parseModelList(apiForm.enabledModels),
                     })
                   }
                   disabled={
@@ -4162,6 +4259,9 @@ export function ImageBackendPoolAdminPanel({
                         {api.baseUrl} · {groupNames(groups, apiGroupIds(api))} ·{" "}
                         优先级 {api.priority} · 最大并发数 {api.concurrency} ·{" "}
                         {formatDate(api.lastUsedAt, timeZone)}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        可用模型：{formatModelList(api.enabledModels)}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {api.interfaceMode === "mixed"

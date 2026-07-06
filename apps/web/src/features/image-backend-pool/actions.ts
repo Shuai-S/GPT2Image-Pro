@@ -555,6 +555,10 @@ export const saveImageBackendApiAction = withImageBackendPoolAdminAction(
       baseUrl: z.string().trim().url(),
       apiKey: z.string().trim().optional(),
       model: z.string().trim().max(120).optional(),
+      enabledModels: z
+        .array(z.string().trim().min(1).max(120))
+        .max(200)
+        .optional(),
       interfaceMode: apiInterfaceModeSchema.default("mixed"),
       chatCompletionsUpstreamMode:
         chatCompletionsUpstreamModeSchema.default("responses"),
@@ -582,6 +586,7 @@ export const saveImageBackendApiAction = withImageBackendPoolAdminAction(
       baseUrl: parsedInput.baseUrl,
       apiKey: parsedInput.apiKey || undefined,
       model: parsedInput.model || null,
+      enabledModels: parsedInput.enabledModels ?? null,
       interfaceMode: parsedInput.interfaceMode,
       chatCompletionsUpstreamMode: parsedInput.chatCompletionsUpstreamMode,
       imagesUpstreamMode: parsedInput.imagesUpstreamMode,

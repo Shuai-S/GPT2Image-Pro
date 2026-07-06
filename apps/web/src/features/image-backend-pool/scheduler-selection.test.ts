@@ -53,6 +53,7 @@ const schemaMock = vi.hoisted(() => {
       "baseUrl",
       "apiKey",
       "model",
+      "enabledModels",
       "interfaceMode",
       "chatCompletionsUpstreamMode",
       "imageUpstreamMode",
@@ -944,6 +945,7 @@ describe("image backend pool scheduler selection", () => {
       baseUrl: "https://api.example.test/v1",
       apiKey: "key",
       model: "external-chat-model",
+      enabledModels: null,
       interfaceMode: "responses",
       chatCompletionsUpstreamMode: "responses",
       useStream: false,
@@ -975,6 +977,60 @@ describe("image backend pool scheduler selection", () => {
       apiInterfaceMode: "responses",
       imagesUpstreamMode: "responses",
     });
+  });
+
+  it("filters API candidates by enabled model list", async () => {
+    dbMock.state.accounts = [];
+    dbMock.state.apis = [
+      {
+        id: "api-1",
+        groupId: "group-a",
+        name: "GPT Image 1",
+        baseUrl: "https://api-1.example.test/v1",
+        apiKey: "key-1",
+        model: null,
+        enabledModels: ["gpt-image-1"],
+        interfaceMode: "images",
+        chatCompletionsUpstreamMode: "responses",
+        imageUpstreamMode: "images",
+        useStream: false,
+        contentSafetyEnabled: true,
+        alwaysActive: false,
+        priority: 1,
+        concurrency: 1,
+        lastUsedAt: null,
+        createdAt: new Date(2026, 0, 1),
+      },
+      {
+        id: "api-2",
+        groupId: "group-a",
+        name: "GPT Image 2",
+        baseUrl: "https://api-2.example.test/v1",
+        apiKey: "key-2",
+        model: null,
+        enabledModels: ["gpt-image-2"],
+        interfaceMode: "images",
+        chatCompletionsUpstreamMode: "responses",
+        imageUpstreamMode: "images",
+        useStream: false,
+        contentSafetyEnabled: true,
+        alwaysActive: false,
+        priority: 1,
+        concurrency: 1,
+        lastUsedAt: null,
+        createdAt: new Date(2026, 0, 2),
+      },
+    ];
+
+    const result = await resolveImageBackendPoolConfig({
+      userId: "user-a",
+      requestKind: "image_generation",
+      requestedModel: "gpt-image-2",
+    });
+
+    expect(result?.memberType).toBe("api");
+    expect(result?.memberId).toBe("api-2");
+    expect(result?.config.backend?.apiEnabledModels).toEqual(["gpt-image-2"]);
   });
 
   it("can borrow any Responses backend when the requested group is Web-only", async () => {

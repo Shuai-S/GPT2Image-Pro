@@ -32,5 +32,7 @@ export type ImageBackendGroupSummary = {
   childGroupIds: string[];
   priority: number;
   apiCount: number;
+  adobeCount: number;
   accountCount: number;
+  availableModels: string[];
 };

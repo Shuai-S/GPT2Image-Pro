@@ -1085,6 +1085,9 @@ export const imageBackendApi = pgTable("image_backend_api", {
   baseUrl: text("base_url").notNull(),
   apiKey: text("api_key").notNull(),
   model: text("model"),
+  // 该 API 后端可承接的模型列表。为空表示不限制；调度时会按请求模型过滤候选，
+  // 避免把请求派给不支持该模型的上游渠道。
+  enabledModels: json("enabled_models").$type<string[]>(),
   interfaceMode: text("interface_mode").notNull().default("images"),
   useStream: boolean("use_stream").notNull().default(false),
   chatCompletionsUpstreamMode: text("chat_completions_upstream_mode")

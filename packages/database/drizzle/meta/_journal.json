@@ -351,6 +351,13 @@
       "when": 1780401200000,
       "tag": "0049_referral_cny_commission",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1780401260000,
+      "tag": "0050_image_backend_api_enabled_models",
+      "breakpoints": true
     }
   ]
 }

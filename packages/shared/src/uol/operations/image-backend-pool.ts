@@ -302,6 +302,7 @@ export const saveApi = defineOperation({
     baseUrl: z.string().optional(),
     apiKey: z.string().optional(),
     model: z.string().optional(),
+    enabledModels: z.array(z.string()).optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
   }),
   output: z.object({

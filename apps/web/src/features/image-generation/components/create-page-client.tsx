@@ -16,7 +16,6 @@ import type { PlanCapabilitySnapshot } from "@repo/shared/subscription/services/
 import type { OperationFeatureFlags } from "@repo/shared/system-settings";
 import { Button } from "@repo/ui/components/button";
 import { Checkbox } from "@repo/ui/components/checkbox";
-import { Dialog, DialogContent, DialogTitle } from "@repo/ui/components/dialog";
 import { Input } from "@repo/ui/components/input";
 import {
   Select,
@@ -40,7 +39,6 @@ import {
   Eye,
   FileText,
   ImagePlus,
-  Info,
   Loader2,
   Maximize2,
   MessageSquare,
@@ -104,6 +102,10 @@ import {
   validateImageSize,
 } from "../resolution";
 import type { VideoPricingInfo } from "../video-operations";
+import {
+  AspectRatioSizeDialog,
+  type AspectRatioSizeDialogValue,
+} from "./aspect-ratio-size-dialog";
 import { ImageLightbox, type LightboxGeneration } from "./image-lightbox";
 import { VideoCreatePanel } from "./video-create-panel";
 
@@ -360,13 +362,6 @@ type MentionState = {
   query: string;
 };
 
-type ImageSizeDialogValue = {
-  auto: boolean;
-  width: number;
-  height: number;
-  mixWebFirst: boolean;
-};
-
 type ForceWebPixelRange = {
   minPixels: number;
   maxPixels: number;
@@ -404,95 +399,6 @@ function isWithinForceWebPixelRange(
     normalized.minPixels,
     normalized.maxPixels
   );
-}
-
-function formatPixelRange(range?: ForceWebPixelRange | null) {
-  const normalized = normalizeForceWebPixelRange(range);
-  const formatPixels = (pixels: number) =>
-    `${(pixels / 1_000_000).toFixed(2).replace(/\.?0+$/, "")}MP`;
-  return `${formatPixels(normalized.minPixels)}-${formatPixels(
-    normalized.maxPixels
-  )}`;
-}
-
-function getNearestSupportedSizeForRatio(
-  base: ImageSizeBase,
-  ratio: { value?: ImageAspectRatio; width: number; height: number }
-) {
-  const matrixSize = ratio.value
-    ? IMAGE_SIZE_MATRIX[ratio.value]?.[base]
-    : null;
-  if (matrixSize) {
-    return normalizeValidImageSize({
-      width: matrixSize[0],
-      height: matrixSize[1],
-    });
-  }
-
-  const fallbackBaseSpec = IMAGE_SIZE_BASES[0];
-  if (!fallbackBaseSpec) {
-    throw new Error("Image size bases are not configured");
-  }
-  const baseSpec =
-    IMAGE_SIZE_BASES.find((item) => item.value === base) || fallbackBaseSpec;
-  const longEdge = baseSpec.edge;
-  const landscape = ratio.width >= ratio.height;
-  const rawWidth = landscape
-    ? longEdge
-    : (longEdge * ratio.width) / ratio.height;
-  const rawHeight = landscape
-    ? (longEdge * ratio.height) / ratio.width
-    : longEdge;
-  return normalizeValidImageSize({ width: rawWidth, height: rawHeight });
-}
-
-function parseAspectRatioInput(value: string) {
-  const match = value.trim().match(/^(\d{1,3})\s*[:x]\s*(\d{1,3})$/i);
-  if (!match) return null;
-  const width = Number(match[1]);
-  const height = Number(match[2]);
-  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
-  if (width <= 0 || height <= 0) return null;
-  return { width, height };
-}
-
-function inferImageSizeDialogState(value: ImageSizeDialogValue) {
-  if (value.auto) {
-    return {
-      mode: "auto" as ImageSizeMode,
-      base: "1k" as ImageSizeBase,
-      ratio: "1:1" as ImageAspectRatio,
-      customRatio: "1:1",
-      mixWebFirst: value.mixWebFirst,
-    };
-  }
-
-  const normalized = normalizeImageSize(value.width, value.height);
-  for (const base of IMAGE_SIZE_BASES) {
-    for (const ratio of IMAGE_ASPECT_RATIOS) {
-      if (getNearestSupportedSizeForRatio(base.value, ratio) === normalized) {
-        return {
-          mode: "ratio" as ImageSizeMode,
-          base: base.value,
-          ratio: ratio.value,
-          customRatio: ratio.value,
-          mixWebFirst: value.mixWebFirst,
-        };
-      }
-    }
-  }
-
-  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
-  const divisor = gcd(value.width, value.height) || 1;
-  return {
-    mode: "custom" as ImageSizeMode,
-    base: "1k" as ImageSizeBase,
-    ratio: "1:1" as ImageAspectRatio,
-    customRatio: `${Math.round(value.width / divisor)}:${Math.round(
-      value.height / divisor
-    )}`,
-    mixWebFirst: value.mixWebFirst,
-  };
 }
 
 type ChatStreamState = {
@@ -573,19 +479,6 @@ type ImageQuality = "auto" | "low" | "medium" | "high";
 type ImageModeration = "auto" | "low";
 type ImageOutputFormat = "png" | "jpeg" | "webp";
 type ImageBackground = "auto" | "opaque" | "transparent";
-type ImageSizeMode = "auto" | "ratio" | "custom";
-type ImageSizeBase = "1k" | "2k" | "4k";
-type ImageAspectRatio =
-  | "1:1"
-  | "4:3"
-  | "3:4"
-  | "3:2"
-  | "2:3"
-  | "4:5"
-  | "5:4"
-  | "16:9"
-  | "9:16"
-  | "21:9";
 
 type ActiveMode = "text" | "image" | "chat" | "agent" | "waterfall" | "video";
 type ReferenceTargetMode = Extract<ActiveMode, ReferenceHandoffMode>;
@@ -604,438 +497,6 @@ const defaultDimensions = parseImageSize(DEFAULT_IMAGE_SIZE) || {
   width: 1024,
   height: 1024,
 };
-
-function SizeRatioIcon({
-  ratio,
-}: {
-  ratio: { width: number; height: number };
-}) {
-  const landscape = ratio.width >= ratio.height;
-  const width = landscape ? 18 : 12;
-  const height = landscape ? 10 : 18;
-  if (ratio.width === ratio.height) {
-    return (
-      <span className="h-5 w-5 rounded-[3px] border border-current opacity-60" />
-    );
-  }
-  return (
-    <span
-      className="rounded-[3px] border border-current opacity-60"
-      style={{ width, height }}
-    />
-  );
-}
-
-function formatImageSizeForDisplay(size: string) {
-  return size === AUTO_IMAGE_SIZE ? "auto" : size.replace("x", "×");
-}
-
-function ImageSizeDialog({
-  open,
-  onOpenChange,
-  value,
-  onConfirm,
-  title,
-  copy,
-  validationMessage,
-  showMixRouting,
-  mixRoutingPixelRange,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  value: ImageSizeDialogValue;
-  onConfirm: (value: ImageSizeDialogValue) => void;
-  title: string;
-  copy: (en: string, zh: string) => string;
-  validationMessage: (message?: string) => string | undefined;
-  showMixRouting?: boolean;
-  mixRoutingPixelRange?: ForceWebPixelRange;
-}) {
-  const initial = inferImageSizeDialogState(value);
-  const [mode, setMode] = useState<ImageSizeMode>(initial.mode);
-  const [base, setBase] = useState<ImageSizeBase>(initial.base);
-  const [ratio, setRatio] = useState<ImageAspectRatio>(initial.ratio);
-  const [customRatio, setCustomRatio] = useState(initial.customRatio);
-  const [customRatioOpen, setCustomRatioOpen] = useState(false);
-  const [customWidth, setCustomWidth] = useState(value.width);
-  const [customHeight, setCustomHeight] = useState(value.height);
-  const [mixWebFirst, setMixWebFirst] = useState(value.mixWebFirst);
-
-  useEffect(() => {
-    if (!open) return;
-    const next = inferImageSizeDialogState({
-      auto: value.auto,
-      width: value.width,
-      height: value.height,
-      mixWebFirst: value.mixWebFirst,
-    });
-    setMode(next.mode);
-    setBase(next.base);
-    setRatio(next.ratio);
-    setCustomRatio(next.customRatio);
-    setCustomRatioOpen(false);
-    setCustomWidth(value.width);
-    setCustomHeight(value.height);
-    setMixWebFirst(value.mixWebFirst);
-  }, [open, value.auto, value.width, value.height, value.mixWebFirst]);
-
-  const fallbackRatio = IMAGE_ASPECT_RATIOS[0];
-  if (!fallbackRatio) {
-    throw new Error("Image aspect ratios are not configured");
-  }
-  const selectedRatio =
-    IMAGE_ASPECT_RATIOS.find((item) => item.value === ratio) || fallbackRatio;
-  const customRatioValue = parseAspectRatioInput(customRatio);
-  const customRatioSize = customRatioValue
-    ? getNearestSupportedSizeForRatio(base, customRatioValue)
-    : null;
-  const activeRatio =
-    mode === "ratio" && customRatioOpen && customRatioValue
-      ? customRatioValue
-      : selectedRatio;
-  const ratioSize =
-    mode === "ratio"
-      ? getNearestSupportedSizeForRatio(base, activeRatio)
-      : getNearestSupportedSizeForRatio(base, selectedRatio);
-  const normalizedCustomSize = normalizeValidImageSize({
-    width: customWidth,
-    height: customHeight,
-  });
-  const previewSize =
-    mode === "auto"
-      ? AUTO_IMAGE_SIZE
-      : mode === "custom"
-        ? normalizedCustomSize
-        : ratioSize;
-  const previewCheck = validateImageSize(previewSize);
-  const mixRoutingAvailable = Boolean(
-    showMixRouting &&
-      isWithinForceWebPixelRange(previewSize, mixRoutingPixelRange)
-  );
-  const mixRoutingRangeLabel = formatPixelRange(mixRoutingPixelRange);
-  const effectiveMixWebFirst = mixRoutingAvailable && mixWebFirst;
-  const canConfirm =
-    mode === "auto" ||
-    (mode === "custom"
-      ? previewCheck.valid
-      : previewCheck.valid && (!customRatioOpen || Boolean(customRatioValue)));
-
-  const apply = () => {
-    if (!canConfirm) return;
-    if (mode === "auto") {
-      onConfirm({
-        auto: true,
-        width: value.width,
-        height: value.height,
-        mixWebFirst: false,
-      });
-      onOpenChange(false);
-      return;
-    }
-    const size = mode === "custom" ? normalizedCustomSize : ratioSize;
-    const dimensions = parseImageSize(size);
-    if (!dimensions) return;
-    onConfirm({
-      auto: false,
-      width: dimensions.width,
-      height: dimensions.height,
-      mixWebFirst: effectiveMixWebFirst,
-    });
-    onOpenChange(false);
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        aria-describedby={undefined}
-        className="max-h-[92vh] w-[calc(100vw-1.5rem)] max-w-md gap-0 overflow-y-auto rounded-3xl border-border p-0"
-      >
-        <DialogTitle className="sr-only">{title}</DialogTitle>
-        <div className="space-y-6 p-6">
-          <div>
-            <h2 className="text-lg font-semibold text-foreground">{title}</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {copy("Current", "当前")}：{" "}
-              {value.auto
-                ? "auto"
-                : normalizeImageSize(value.width, value.height)}
-            </p>
-          </div>
-
-          <div className="grid grid-cols-3 rounded-xl bg-muted p-1">
-            {[
-              { value: "auto" as ImageSizeMode, label: copy("Auto", "自动") },
-              {
-                value: "ratio" as ImageSizeMode,
-                label: copy("Ratio", "按比例"),
-              },
-              {
-                value: "custom" as ImageSizeMode,
-                label: copy("Custom", "自定义宽高"),
-              },
-            ].map((item) => (
-              <button
-                key={item.value}
-                type="button"
-                onClick={() => setMode(item.value)}
-                className={`h-9 rounded-lg text-sm font-medium transition ${
-                  mode === item.value
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-
-          {mode !== "auto" && (
-            <>
-              <section className="space-y-3">
-                <h3 className="text-sm font-medium text-muted-foreground">
-                  {copy("Base resolution", "基准分辨率")}
-                </h3>
-                <div className="grid grid-cols-3 gap-2">
-                  {IMAGE_SIZE_BASES.map((item) => (
-                    <button
-                      key={item.value}
-                      type="button"
-                      onClick={() => setBase(item.value)}
-                      className={`h-10 rounded-xl border text-sm font-medium transition ${
-                        base === item.value
-                          ? "border-primary bg-primary/5 text-primary"
-                          : "border-border bg-background text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-              </section>
-
-              {mode === "ratio" && (
-                <section className="space-y-3">
-                  <h3 className="text-sm font-medium text-muted-foreground">
-                    {copy("Aspect ratio", "图像比例")}
-                  </h3>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    {IMAGE_ASPECT_RATIOS.map((item) => {
-                      const itemSize = getNearestSupportedSizeForRatio(
-                        base,
-                        item
-                      );
-                      const selected = !customRatioOpen && ratio === item.value;
-                      return (
-                        <button
-                          key={item.value}
-                          type="button"
-                          onClick={() => {
-                            setRatio(item.value);
-                            setCustomRatio(item.value);
-                            setCustomRatioOpen(false);
-                          }}
-                          className={`flex min-h-[4.75rem] items-center gap-3 rounded-xl border px-3 py-2 text-left transition ${
-                            selected
-                              ? "border-primary bg-primary/5 text-primary"
-                              : "border-border bg-background text-muted-foreground hover:text-foreground"
-                          }`}
-                        >
-                          <SizeRatioIcon ratio={item} />
-                          <span className="min-w-0">
-                            <span className="block text-sm font-semibold leading-5">
-                              {item.value} {copy(item.labelEn, item.labelZh)}
-                            </span>
-                            <span className="block break-words text-[11px] leading-4 text-muted-foreground">
-                              {formatImageSizeForDisplay(itemSize)}
-                            </span>
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setCustomRatioOpen(true)}
-                    className={`h-auto min-h-11 w-full justify-between rounded-xl px-3 py-2 ${
-                      customRatioOpen
-                        ? "border-primary text-primary hover:bg-primary/5 hover:text-primary"
-                        : ""
-                    }`}
-                  >
-                    <span>{copy("Custom ratio", "自定义比例")}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {customRatioSize
-                        ? formatImageSizeForDisplay(customRatioSize)
-                        : customRatio}
-                    </span>
-                  </Button>
-                  {customRatioOpen && (
-                    <div className="space-y-2 rounded-xl border border-border bg-background p-3">
-                      <label
-                        htmlFor="create-custom-ratio"
-                        className="text-xs font-medium text-muted-foreground"
-                      >
-                        {copy("Custom ratio", "输入自定义比例")}
-                      </label>
-                      <Input
-                        id="create-custom-ratio"
-                        value={customRatio}
-                        onChange={(event) => setCustomRatio(event.target.value)}
-                        placeholder="16:9"
-                      />
-                      {!customRatioValue && (
-                        <p className="text-xs text-destructive">
-                          {copy(
-                            "Use a ratio like 16:9.",
-                            "请使用类似 16:9 的比例。"
-                          )}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </section>
-              )}
-
-              {mode === "custom" && (
-                <section className="space-y-3">
-                  <h3 className="text-sm font-medium text-muted-foreground">
-                    {copy("Custom size", "输入自定义宽高")}
-                  </h3>
-                  <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
-                    <div className="space-y-1.5">
-                      <label
-                        htmlFor="create-custom-width"
-                        className="text-xs font-medium text-muted-foreground"
-                      >
-                        {copy("Width", "宽度")}
-                      </label>
-                      <Input
-                        id="create-custom-width"
-                        type="number"
-                        min={256}
-                        max={MAX_IMAGE_DIMENSION}
-                        step={IMAGE_DIMENSION_STEP}
-                        value={customWidth}
-                        onChange={(event) =>
-                          setCustomWidth(Number(event.target.value) || 0)
-                        }
-                      />
-                    </div>
-                    <div className="pb-2 text-muted-foreground">x</div>
-                    <div className="space-y-1.5">
-                      <label
-                        htmlFor="create-custom-height"
-                        className="text-xs font-medium text-muted-foreground"
-                      >
-                        {copy("Height", "高度")}
-                      </label>
-                      <Input
-                        id="create-custom-height"
-                        type="number"
-                        min={256}
-                        max={MAX_IMAGE_DIMENSION}
-                        step={IMAGE_DIMENSION_STEP}
-                        value={customHeight}
-                        onChange={(event) =>
-                          setCustomHeight(Number(event.target.value) || 0)
-                        }
-                      />
-                    </div>
-                  </div>
-                </section>
-              )}
-            </>
-          )}
-
-          <div className="rounded-2xl bg-muted/30 p-4">
-            <p className="text-xs font-medium text-muted-foreground">
-              {copy("Will use", "将使用")}
-            </p>
-            <p className="mt-2 text-lg font-semibold text-foreground">
-              {formatImageSizeForDisplay(previewSize)}
-            </p>
-            {!previewCheck.valid && (
-              <p className="mt-2 text-xs text-destructive">
-                {validationMessage(previewCheck.message)}
-              </p>
-            )}
-            {mode === "ratio" && customRatioOpen && !customRatioValue && (
-              <p className="mt-2 text-xs text-destructive">
-                {copy("Use a ratio like 16:9.", "请使用类似 16:9 的比例。")}
-              </p>
-            )}
-          </div>
-
-          <div className="flex gap-3 rounded-2xl border border-border bg-muted/20 p-4 text-xs leading-5 text-muted-foreground">
-            <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-            <p>
-              {copy(
-                "Due to model constraints, the final output is automatically adjusted to a valid size: width and height are multiples of 16, the maximum edge is 3840px, aspect ratio is no more than 3:1, and total pixels are between 655,360 and 8,294,400.",
-                "由于模型限制，最终输出会自动规整到合法尺寸：宽高均为 16 的倍数，最大边长 3840px，宽高比不超过 3:1，总像素限制为 655360-8294400。"
-              )}
-            </p>
-          </div>
-
-          {showMixRouting && (
-            <label
-              htmlFor="create-mix-web-first"
-              className={`flex items-start gap-3 rounded-2xl border border-border bg-muted/20 p-4 text-xs leading-5 text-muted-foreground ${
-                mixRoutingAvailable ? "cursor-pointer" : "cursor-not-allowed"
-              }`}
-            >
-              <Checkbox
-                id="create-mix-web-first"
-                checked={effectiveMixWebFirst}
-                onCheckedChange={(checked) => setMixWebFirst(checked === true)}
-                disabled={!mixRoutingAvailable}
-                className="mt-0.5"
-              />
-              <span>
-                <span className="block text-sm font-medium text-foreground">
-                  {copy("Mixed group Web-first routing", "混合分组优先走 Web")}
-                </span>
-                <span className="mt-1 block">
-                  {copy(
-                    `When the active backend group is mixed and the selected size is within the configured Web-first pixel range (${mixRoutingRangeLabel}), try all available Web accounts first; if they fail or are exhausted, fall back to Codex/Responses accounts. Web does not support exact resolution, image model, quality, output format, or OAI moderation controls, so unrelated controls are disabled while this is enabled.`,
-                    `当前后端分组为混合分组且选择尺寸处于后台配置的 Web-first 像素区间（${mixRoutingRangeLabel}）时，会优先遍历所有可用 Web 账号；失败或耗尽后再回退到 Codex/Responses 账号。Web 不支持精确分辨率、图片模型、质量、输出格式、OAI 审核等控制，因此开启后无关选项会置灰。`
-                  )}
-                </span>
-                {!mixRoutingAvailable && (
-                  <span className="mt-1 block text-[11px] text-muted-foreground">
-                    {copy(
-                      `Available only when the selected size is within ${mixRoutingRangeLabel}.`,
-                      `仅在当前尺寸处于 ${mixRoutingRangeLabel} 区间时可用。`
-                    )}
-                  </span>
-                )}
-              </span>
-            </label>
-          )}
-
-          <div className="grid grid-cols-2 gap-3">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => onOpenChange(false)}
-              className="h-10 rounded-xl"
-            >
-              {copy("Cancel", "取消")}
-            </Button>
-            <Button
-              type="button"
-              onClick={apply}
-              disabled={!canConfirm}
-              className="h-10 rounded-xl"
-            >
-              {copy("Confirm", "确定")}
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 const shouldBypassImageOptimization = (imageUrl: string | undefined) =>
   Boolean(imageUrl);
@@ -1107,87 +568,6 @@ const BACKGROUND_OPTIONS: Array<{
   { value: "auto", label: "Auto" },
   { value: "opaque", label: "Opaque" },
   { value: "transparent", label: "Transparent" },
-];
-const IMAGE_SIZE_BASES: Array<{
-  value: ImageSizeBase;
-  label: string;
-  edge: number;
-}> = [
-  { value: "1k", label: "1K", edge: 1024 },
-  { value: "2k", label: "2K", edge: 2048 },
-  { value: "4k", label: "4K", edge: 3840 },
-];
-
-const IMAGE_SIZE_MATRIX = {
-  "1:1": {
-    "1k": [1024, 1024],
-    "2k": [2048, 2048],
-    "4k": [2880, 2880],
-  },
-  "2:3": {
-    "1k": [688, 1024],
-    "2k": [1360, 2048],
-    "4k": [2336, 3520],
-  },
-  "3:2": {
-    "1k": [1024, 688],
-    "2k": [2048, 1360],
-    "4k": [3520, 2336],
-  },
-  "3:4": {
-    "1k": [768, 1024],
-    "2k": [1536, 2048],
-    "4k": [2480, 3312],
-  },
-  "4:3": {
-    "1k": [1024, 768],
-    "2k": [2048, 1536],
-    "4k": [3312, 2480],
-  },
-  "4:5": {
-    "1k": [816, 1024],
-    "2k": [1632, 2048],
-    "4k": [2560, 3216],
-  },
-  "5:4": {
-    "1k": [1024, 816],
-    "2k": [2048, 1632],
-    "4k": [3216, 2560],
-  },
-  "9:16": {
-    "1k": [576, 1024],
-    "2k": [1152, 2048],
-    "4k": [2160, 3840],
-  },
-  "16:9": {
-    "1k": [1024, 576],
-    "2k": [2048, 1152],
-    "4k": [3840, 2160],
-  },
-  "21:9": {
-    "1k": [1024, 432],
-    "2k": [2048, 864],
-    "4k": [3840, 1632],
-  },
-} satisfies Record<ImageAspectRatio, Record<ImageSizeBase, [number, number]>>;
-
-const IMAGE_ASPECT_RATIOS: Array<{
-  value: ImageAspectRatio;
-  width: number;
-  height: number;
-  labelEn: string;
-  labelZh: string;
-}> = [
-  { value: "1:1", width: 1, height: 1, labelEn: "Square", labelZh: "正方形" },
-  { value: "2:3", width: 2, height: 3, labelEn: "Portrait", labelZh: "竖版" },
-  { value: "3:2", width: 3, height: 2, labelEn: "Landscape", labelZh: "横版" },
-  { value: "3:4", width: 3, height: 4, labelEn: "Portrait", labelZh: "竖版" },
-  { value: "4:3", width: 4, height: 3, labelEn: "Landscape", labelZh: "横版" },
-  { value: "4:5", width: 4, height: 5, labelEn: "Portrait", labelZh: "竖版" },
-  { value: "5:4", width: 5, height: 4, labelEn: "Landscape", labelZh: "横版" },
-  { value: "9:16", width: 9, height: 16, labelEn: "Mobile", labelZh: "竖版" },
-  { value: "16:9", width: 16, height: 9, labelEn: "Wide", labelZh: "横版" },
-  { value: "21:9", width: 21, height: 9, labelEn: "Cinema", labelZh: "影院" },
 ];
 // 瀑布流每批并发预设(对齐原项目 TIER_PRESETS)：tier 决定每批生成张数。
 // 运行时按套餐 imageGenerationConcurrency(单用户并发上限)过滤可选项。
@@ -2860,7 +2240,7 @@ export function CreatePageClient({
     waterfallWarning,
   ]);
   const hasChatImageAttachments = chatImageAttachmentCount > 0;
-  const textSizeDialogValue = useMemo(
+  const textSizeDialogValue = useMemo<AspectRatioSizeDialogValue>(
     () => ({
       auto: useAutoSize,
       width,
@@ -2869,7 +2249,7 @@ export function CreatePageClient({
     }),
     [height, textMixWebFirst, useAutoSize, width]
   );
-  const editSizeDialogValue = useMemo(
+  const editSizeDialogValue = useMemo<AspectRatioSizeDialogValue>(
     () => ({
       auto: useAutoEditSize,
       width: editWidth,
@@ -2878,7 +2258,7 @@ export function CreatePageClient({
     }),
     [editHeight, editMixWebFirst, editWidth, useAutoEditSize]
   );
-  const chatSizeDialogValue = useMemo(
+  const chatSizeDialogValue = useMemo<AspectRatioSizeDialogValue>(
     () =>
       hasChatImageAttachments
         ? {
@@ -7664,7 +7044,7 @@ export function CreatePageClient({
                   disabled={modeBusy}
                   className="shrink-0"
                 >
-                  {copy("Set size", "设置尺寸")}
+                  {copy("Set ratio", "设置比例")}
                 </Button>
               </div>
               {/* 高清修复放分辨率卡内:与后端类型无关(纯服务端超分后处理),须对 web 后端也可见。 */}
@@ -8828,7 +8208,7 @@ export function CreatePageClient({
                           disabled={isEditing}
                           size="sm"
                         >
-                          {copy("Set size", "设置尺寸")}
+                          {copy("Set ratio", "设置比例")}
                         </Button>
                       </div>
                       {!customEditSizeCheck.valid && (
@@ -9452,7 +8832,7 @@ export function CreatePageClient({
                     </SelectContent>
                   </Select>
                 )}
-                {/* 尺寸：复用既有 chat 尺寸弹窗(与 getBatchFallbackSize 同源)，运行中禁用避免批次中途变更 */}
+                {/* 比例：复用统一比例弹窗(与 getBatchFallbackSize 同源)，运行中禁用避免批次中途变更 */}
                 <Button
                   type="button"
                   variant="outline"
@@ -9460,7 +8840,7 @@ export function CreatePageClient({
                   className="h-8"
                   disabled={isBatchActive}
                   onClick={() => setChatSizeDialogOpen(true)}
-                  title={copy("Set image size", "设置图像尺寸")}
+                  title={copy("Set image aspect ratio", "设置图像比例")}
                 >
                   {copy("Size", "尺寸")}：
                   {hasChatImageAttachments
@@ -9992,15 +9372,12 @@ export function CreatePageClient({
         />
       )}
 
-      <ImageSizeDialog
+      <AspectRatioSizeDialog
         open={textSizeDialogOpen}
         onOpenChange={setTextSizeDialogOpen}
-        title={copy("Set image size", "设置图像尺寸")}
+        title={copy("Set image aspect ratio", "设置图像比例")}
         value={textSizeDialogValue}
         copy={copy}
-        validationMessage={validationMessage}
-        showMixRouting={canUseMixWebFirstRouting}
-        mixRoutingPixelRange={forceWebPixelRange}
         onConfirm={(next) => {
           setUseAutoSize(next.auto);
           setTextMixWebFirst(next.mixWebFirst);
@@ -10010,15 +9387,12 @@ export function CreatePageClient({
           }
         }}
       />
-      <ImageSizeDialog
+      <AspectRatioSizeDialog
         open={editSizeDialogOpen}
         onOpenChange={setEditSizeDialogOpen}
-        title={copy("Set image size", "设置图像尺寸")}
+        title={copy("Set image aspect ratio", "设置图像比例")}
         value={editSizeDialogValue}
         copy={copy}
-        validationMessage={validationMessage}
-        showMixRouting={canUseMixWebFirstRouting}
-        mixRoutingPixelRange={forceWebPixelRange}
         onConfirm={(next) => {
           setUseEditFirstImageSize(false);
           setUseAutoEditSize(next.auto);
@@ -10029,15 +9403,12 @@ export function CreatePageClient({
           }
         }}
       />
-      <ImageSizeDialog
+      <AspectRatioSizeDialog
         open={chatSizeDialogOpen}
         onOpenChange={setChatSizeDialogOpen}
-        title={copy("Set image size", "设置图像尺寸")}
+        title={copy("Set image aspect ratio", "设置图像比例")}
         value={chatSizeDialogValue}
         copy={copy}
-        validationMessage={validationMessage}
-        showMixRouting={canUseMixWebFirstRouting}
-        mixRoutingPixelRange={forceWebPixelRange}
         onConfirm={(next) => {
           setChatMixWebFirst(next.mixWebFirst);
           if (hasChatImageAttachments) {

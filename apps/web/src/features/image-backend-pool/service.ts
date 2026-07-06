@@ -174,6 +174,7 @@ type PoolMember =
       baseUrl: string;
       apiKey: string;
       model: string | null;
+      enabledModels: string[] | null;
       interfaceMode: ImageBackendApiInterfaceMode;
       chatCompletionsUpstreamMode: ChatCompletionsUpstreamMode;
       imagesUpstreamMode: ImagesUpstreamMode;
@@ -426,6 +427,57 @@ function normalizeGroupBackendType(
 // （gpt-image 等）只走 codex/web/api。用于调度时的成员过滤，保证二者互不混用。
 function isAdobeFireflyModelId(model?: string | null): boolean {
   return (model || "").trim().toLowerCase().startsWith("firefly-");
+}
+
+// 将后端模型白名单规整成小写去重列表，供调度判定和分组模型汇总复用。
+function normalizeEnabledModelList(value?: readonly string[] | null) {
+  if (!value) return [];
+  return Array.from(
+    new Set(
+      value
+        .map((model) => model.trim())
+        .filter(Boolean)
+        .map((model) => model.toLowerCase())
+    )
+  );
+}
+
+// Firefly 完整模型 id 可带分辨率/比例，匹配时同时允许 family 级与裸 family 写法。
+function fireflyFamilyModelIds(model: string) {
+  const normalized = model.trim().toLowerCase();
+  if (!normalized.startsWith("firefly-")) return [normalized];
+  const rest = normalized.slice("firefly-".length);
+  const families = [
+    "nano-banana-pro",
+    "nano-banana2",
+    "nano-banana",
+    "gpt-image-1.5",
+    "gpt-image-2",
+  ];
+  for (const family of families) {
+    if (rest === family || rest.startsWith(`${family}-`)) {
+      return [`firefly-${family}`, family];
+    }
+  }
+  return [normalized];
+}
+
+// 判断成员是否声明支持本次请求模型；空白名单保持兼容，表示不限制。
+function backendCanServeRequestedModel(input: {
+  enabledModels?: readonly string[] | null;
+  requestedModel?: string | null;
+  configuredModel?: string | null;
+}) {
+  const enabled = normalizeEnabledModelList(input.enabledModels);
+  if (!enabled.length) return true;
+  const requested = input.requestedModel?.trim();
+  const configured = input.configuredModel?.trim();
+  const candidate = requested || configured;
+  if (!candidate) return true;
+  const normalized = candidate.toLowerCase();
+  return fireflyFamilyModelIds(normalized).some((model) =>
+    enabled.includes(model)
+  );
 }
 
 function stripTrailingSlash(value: string) {
@@ -2497,6 +2549,7 @@ async function selectPoolMember(
           baseUrl: imageBackendApi.baseUrl,
           apiKey: imageBackendApi.apiKey,
           model: imageBackendApi.model,
+          enabledModels: imageBackendApi.enabledModels,
           interfaceMode: imageBackendApi.interfaceMode,
           chatCompletionsUpstreamMode:
             imageBackendApi.chatCompletionsUpstreamMode,
@@ -2535,6 +2588,7 @@ async function selectPoolMember(
           baseUrl: imageBackendApi.baseUrl,
           apiKey: imageBackendApi.apiKey,
           model: imageBackendApi.model,
+          enabledModels: imageBackendApi.enabledModels,
           interfaceMode: imageBackendApi.interfaceMode,
           chatCompletionsUpstreamMode:
             imageBackendApi.chatCompletionsUpstreamMode,
@@ -2661,6 +2715,11 @@ async function selectPoolMember(
         // 但「Adobe 来源」api（上游即 Adobe）参与 firefly 候选：force_firefly 直接以 gpt
         // 格式服务，显式 firefly-* 由下游反向转换成 gpt 请求后服务。
         (!fireflyOnly || row.adobeSourced) &&
+        backendCanServeRequestedModel({
+          enabledModels: row.enabledModels,
+          requestedModel,
+          configuredModel: row.model,
+        }) &&
         // 阶段参与纯按车道:web 偏好只取 web/mixed 分组的 API、codex 偏好只取 codex/mixed
         // 分组的 API（mixed 谁都可请求）。是否经 responses 端点出图属于"能否服务该
         // requestKind"的独立维度,交由下方 imageBackendApiInterfaceAllowsRequest 按请求
@@ -2694,6 +2753,7 @@ async function selectPoolMember(
         baseUrl: row.baseUrl,
         apiKey: row.apiKey,
         model: row.model,
+        enabledModels: row.enabledModels ?? null,
         interfaceMode: normalizeImageBackendApiInterfaceMode(row.interfaceMode),
         chatCompletionsUpstreamMode: normalizeChatCompletionsUpstreamMode(
           row.chatCompletionsUpstreamMode
@@ -2782,6 +2842,13 @@ async function selectPoolMember(
       return (
         (effectiveRequestKind === "image_generation" ||
           effectiveRequestKind === "image_edit") &&
+        backendCanServeRequestedModel({
+          enabledModels: row.enabledModels,
+          requestedModel: isAdobeFireflyModelId(requestedModel)
+            ? requestedModel
+            : null,
+          configuredModel: "firefly-gpt-image-2",
+        }) &&
         groupBackendAllowsRequest(metadata, effectiveRequestKind) &&
         // adobe 按所在分组的 backendType 充当该车道兜底:web 偏好请求不再漏到 codex
         // 等非 web 车道的 adobe(挂在混合分组的不限车道,谁都可请求）。
@@ -3106,6 +3173,7 @@ function toResolvedPoolConfig(
           imagesUpstreamMode: member.imagesUpstreamMode,
           apiForceResponsesEndpoint:
             options.accountBackendPreference === "responses",
+          apiEnabledModels: member.enabledModels,
           adobeSourced: member.adobeSourced,
           billingGroupId: fallbackGroupId,
           // Adobe 来源 api：组倍率 × 本后端倍率（复用 Adobe 伪账号同一倍率链）；
@@ -7021,6 +7089,7 @@ type UpsertApiInput = {
   baseUrl: string;
   apiKey?: string;
   model?: string | null;
+  enabledModels?: string[] | null;
   interfaceMode?: ImageBackendApiInterfaceMode;
   chatCompletionsUpstreamMode?: ChatCompletionsUpstreamMode;
   imagesUpstreamMode?: ImagesUpstreamMode;
@@ -7084,6 +7153,7 @@ export async function upsertImageBackendApi(input: UpsertApiInput) {
     name: input.name,
     baseUrl: stripTrailingSlash(input.baseUrl),
     model: input.model || null,
+    enabledModels: input.enabledModels ?? null,
     interfaceMode: normalizeImageBackendApiInterfaceMode(input.interfaceMode),
     chatCompletionsUpstreamMode: normalizeChatCompletionsUpstreamMode(
       input.chatCompletionsUpstreamMode
@@ -7543,11 +7613,18 @@ export async function listAdminImageBackendPool() {
     .select({ groupId: imageBackendApiGroup.groupId, value: count() })
     .from(imageBackendApiGroup)
     .groupBy(imageBackendApiGroup.groupId);
+  const adobeCounts = await db
+    .select({ groupId: imageBackendAdobeGroup.groupId, value: count() })
+    .from(imageBackendAdobeGroup)
+    .groupBy(imageBackendAdobeGroup.groupId);
   const accountCountMap = new Map(
     accountCounts.map((item) => [item.groupId, Number(item.value)])
   );
   const apiCountMap = new Map(
     apiCounts.map((item) => [item.groupId, Number(item.value)])
+  );
+  const adobeCountMap = new Map(
+    adobeCounts.map((item) => [item.groupId, Number(item.value)])
   );
 
   const summaries: ImageBackendGroupSummary[] = groups.map((group) => ({
@@ -7564,7 +7641,9 @@ export async function listAdminImageBackendPool() {
     childGroupIds: getGroupChildGroupIds(group.metadata),
     priority: group.priority,
     apiCount: apiCountMap.get(group.id) ?? 0,
+    adobeCount: adobeCountMap.get(group.id) ?? 0,
     accountCount: accountCountMap.get(group.id) ?? 0,
+    availableModels: [],
   }));
 
   const accounts = await db
@@ -7623,6 +7702,7 @@ export async function listAdminImageBackendPool() {
       name: imageBackendApi.name,
       baseUrl: imageBackendApi.baseUrl,
       model: imageBackendApi.model,
+      enabledModels: imageBackendApi.enabledModels,
       interfaceMode: imageBackendApi.interfaceMode,
       chatCompletionsUpstreamMode: imageBackendApi.chatCompletionsUpstreamMode,
       imagesUpstreamMode: imageBackendApi.imageUpstreamMode,
@@ -7721,8 +7801,57 @@ export async function listAdminImageBackendPool() {
     adobeGroupIdMap.set(row.adobeId, current);
   }
 
+  const availableModelsByGroupId = new Map<string, Set<string>>();
+  const addGroupModel = (groupId: string, model?: string | null) => {
+    const normalized = model?.trim();
+    if (!normalized) return;
+    const current = availableModelsByGroupId.get(groupId) || new Set<string>();
+    current.add(normalized);
+    availableModelsByGroupId.set(groupId, current);
+  };
+  for (const account of accounts) {
+    const groupIds =
+      accountGroupIdMap.get(account.id) ||
+      normalizeAccountGroupIds(account.groupId ? [account.groupId] : []);
+    for (const groupId of groupIds) addGroupModel(groupId, account.model);
+  }
+  for (const api of apis) {
+    const groupIds =
+      apiGroupIdMap.get(api.id) ||
+      normalizeAccountGroupIds(api.groupId ? [api.groupId] : []);
+    const enabledModels = normalizeEnabledModelList(api.enabledModels);
+    for (const groupId of groupIds) {
+      if (enabledModels.length) {
+        for (const model of enabledModels) addGroupModel(groupId, model);
+      } else {
+        addGroupModel(groupId, api.model);
+      }
+    }
+  }
+  for (const adobe of adobes) {
+    const groupIds =
+      adobeGroupIdMap.get(adobe.id) ||
+      normalizeAccountGroupIds(adobe.groupId ? [adobe.groupId] : []);
+    const enabledModels = normalizeEnabledModelList(adobe.enabledModels);
+    for (const groupId of groupIds) {
+      for (const model of enabledModels) {
+        addGroupModel(
+          groupId,
+          model.toLowerCase().startsWith("firefly-")
+            ? model
+            : `firefly-${model}`
+        );
+      }
+    }
+  }
+
   return {
-    groups: summaries,
+    groups: summaries.map((group) => ({
+      ...group,
+      availableModels: Array.from(
+        availableModelsByGroupId.get(group.id) || []
+      ).sort((left, right) => left.localeCompare(right)),
+    })),
     accounts: accounts.map((account) => ({
       ...account,
       groupIds:
