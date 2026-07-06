@@ -1,6 +1,6 @@
 {
   "HomePage": {
-    "title": "GPT2IMAGE",
+    "title": "NexaRelay IMAGE",
     "subtitle": "AI 对话生图平台",
     "description": "通过自然对话将你的想法转化为精美视觉，由最先进的 AI 模型驱动。"
   },
@@ -75,7 +75,7 @@
   "UseCases": {
     "label": "适用场景",
     "title": "为每一位创作者而生",
-    "subtitle": "GPT2IMAGE 契合设计师、营销人员、开发者与内容创作者的日常工作流。",
+    "subtitle": "NexaRelay IMAGE 契合设计师、营销人员、开发者与内容创作者的日常工作流。",
     "items": {
       "designers": {
         "title": "设计师与艺术家",
@@ -122,7 +122,7 @@
   "Testimonials": {
     "label": "用户评价",
     "title": "听听创作者们怎么说",
-    "subtitle": "全球的设计师、营销人员与开发者每天都在使用 GPT2IMAGE。",
+    "subtitle": "全球的设计师、营销人员与开发者每天都在使用 NexaRelay IMAGE。",
     "items": [
       {
         "content": "对话式界面让图像生成变得毫不费力。我可以用日常语言描述脑海中的画面，反复迭代到满意为止。",
@@ -150,7 +150,7 @@
         "role": "插画师"
       },
       {
-        "content": "GPT2IMAGE 替代了我工作流中的三款工具。对话生图、批量生成与精美画廊，都集中在一个平台。",
+        "content": "NexaRelay IMAGE 替代了我工作流中的三款工具。对话生图、批量生成与精美画廊，都集中在一个平台。",
         "author": "赵一鸣",
         "role": "创意总监"
       }
@@ -159,15 +159,15 @@
   "FAQ": {
     "label": "常见问题",
     "title": "你可能想了解的",
-    "subtitle": "关于 GPT2IMAGE 的常见问题与解答。",
+    "subtitle": "关于 NexaRelay IMAGE 的常见问题与解答。",
     "items": [
       {
-        "question": "GPT2IMAGE 是什么？",
-        "answer": "GPT2IMAGE 是一个由 AI 驱动的图像生成平台，通过自然对话即可产出高质量图片。你只需描述想要的画面，AI 便会生成——无需提示词工程。平台内置对话生图、视觉画廊、批量生成与灵活的积分系统等功能。"
+        "question": "NexaRelay IMAGE 是什么？",
+        "answer": "NexaRelay IMAGE 是一个由 AI 驱动的图像生成平台，通过自然对话即可产出高质量图片。你只需描述想要的画面，AI 便会生成——无需提示词工程。平台内置对话生图、视觉画廊、批量生成与灵活的积分系统等功能。"
       },
       {
         "question": "支持哪些 AI 图像模型？",
-        "answer": "GPT2IMAGE 支持市面上主流的图像生成模型，包括 GPT Image 2。只需注册账号、选择套餐即可开始生成——平台自动将请求路由到对应模型，并在统一界面中呈现结果。"
+        "answer": "NexaRelay IMAGE 支持市面上主流的图像生成模型，包括 GPT Image 2。只需注册账号、选择套餐即可开始生成——平台自动将请求路由到对应模型，并在统一界面中呈现结果。"
       },
       {
         "question": "积分系统如何工作？",
@@ -183,7 +183,7 @@
       },
       {
         "question": "生成的图片可以下载并用于商业用途吗？",
-        "answer": "可以。你在 GPT2IMAGE 上生成的图片归你所有，可用于个人、编辑或商业项目。图片可在画廊中下载，所有历史生成记录都会保存。"
+        "answer": "可以。你在 NexaRelay IMAGE 上生成的图片归你所有，可用于个人、编辑或商业项目。图片可在画廊中下载，所有历史生成记录都会保存。"
       }
     ]
   },
@@ -259,7 +259,7 @@
   "CTA": {
     "badge": "免费开始，无需信用卡",
     "title": "今天就开始创作精美图片",
-    "subtitle": "几秒钟即可注册，并获得免费积分体验 GPT2IMAGE。用 AI 图像生成把你的想法变为现实。",
+    "subtitle": "几秒钟即可注册，并获得免费积分体验 NexaRelay IMAGE。用 AI 图像生成把你的想法变为现实。",
     "getStarted": "免费注册",
     "seeDemo": "查看示例"
   },
@@ -367,7 +367,7 @@
     "plans": {
       "free": {
         "name": "免费版",
-        "description": "无负担体验 GPT2IMAGE",
+        "description": "无负担体验 NexaRelay IMAGE",
         "cta": "免费开始",
         "creditsAmount": "200",
         "creditsLabel": "积分",

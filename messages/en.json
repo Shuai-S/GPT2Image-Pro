@@ -1,6 +1,6 @@
 {
   "HomePage": {
-    "title": "GPT2IMAGE",
+    "title": "NexaRelay IMAGE",
     "subtitle": "AI-Powered Chat-to-Image Generation Platform",
     "description": "Transform your ideas into stunning visuals through natural conversation, powered by state-of-the-art AI models."
   },
@@ -75,7 +75,7 @@
   "UseCases": {
     "label": "Use Cases",
     "title": "Made for Every Creator",
-    "subtitle": "GPT2IMAGE fits the workflows of designers, marketers, developers, and storytellers alike.",
+    "subtitle": "NexaRelay IMAGE fits the workflows of designers, marketers, developers, and storytellers alike.",
     "items": {
       "designers": {
         "title": "Designers & Artists",
@@ -122,7 +122,7 @@
   "Testimonials": {
     "label": "Testimonials",
     "title": "What Creators Say",
-    "subtitle": "Designers, marketers, and developers around the world are using GPT2IMAGE every day.",
+    "subtitle": "Designers, marketers, and developers around the world are using NexaRelay IMAGE every day.",
     "items": [
       {
         "content": "The chat interface makes image generation feel effortless. I can describe what I'm imagining in plain language and iterate until it's perfect.",
@@ -150,7 +150,7 @@
         "role": "Illustrator"
       },
       {
-        "content": "GPT2IMAGE replaced three other tools in my workflow. Chat-based prompting, batch runs, and a stunning gallery — it's everything in one place.",
+        "content": "NexaRelay IMAGE replaced three other tools in my workflow. Chat-based prompting, batch runs, and a stunning gallery — it's everything in one place.",
         "author": "Kevin Zhao",
         "role": "Creative Director"
       }
@@ -159,15 +159,15 @@
   "FAQ": {
     "label": "FAQ",
     "title": "Questions You Might Have",
-    "subtitle": "Common questions about GPT2IMAGE and how it works.",
+    "subtitle": "Common questions about NexaRelay IMAGE and how it works.",
     "items": [
       {
-        "question": "What is GPT2IMAGE?",
-        "answer": "GPT2IMAGE is an AI-powered platform that turns natural-language conversations into high-quality images. Describe what you want, and our AI generates it — no prompt engineering required. Features include chat-to-image generation, a visual gallery, batch generation, and a flexible credits system."
+        "question": "What is NexaRelay IMAGE?",
+        "answer": "NexaRelay IMAGE is an AI-powered platform that turns natural-language conversations into high-quality images. Describe what you want, and our AI generates it — no prompt engineering required. Features include chat-to-image generation, a visual gallery, batch generation, and a flexible credits system."
       },
       {
         "question": "Which AI image models are supported?",
-        "answer": "GPT2IMAGE supports the leading image generation models on the market, including GPT Image 2. Just sign up, choose a plan, and start generating — the platform handles model routing and delivers results in a unified interface."
+        "answer": "NexaRelay IMAGE supports the leading image generation models on the market, including GPT Image 2. Just sign up, choose a plan, and start generating — the platform handles model routing and delivers results in a unified interface."
       },
       {
         "question": "How does the credits system work?",
@@ -183,7 +183,7 @@
       },
       {
         "question": "Can I download and use the images commercially?",
-        "answer": "Yes. Images you generate on GPT2IMAGE are yours to use — for personal, editorial, or commercial projects. Downloads are available from your gallery, and your full generation history stays saved."
+        "answer": "Yes. Images you generate on NexaRelay IMAGE are yours to use — for personal, editorial, or commercial projects. Downloads are available from your gallery, and your full generation history stays saved."
       }
     ]
   },
@@ -259,7 +259,7 @@
   "CTA": {
     "badge": "Start free, no credit card required",
     "title": "Start generating stunning images today",
-    "subtitle": "Sign up in seconds and get free credits to try GPT2IMAGE. Bring your ideas to life with AI-powered image generation.",
+    "subtitle": "Sign up in seconds and get free credits to try NexaRelay IMAGE. Bring your ideas to life with AI-powered image generation.",
     "getStarted": "Get Started Free",
     "seeDemo": "See Examples"
   },
@@ -403,7 +403,7 @@
     "plans": {
       "free": {
         "name": "Free",
-        "description": "Try GPT2IMAGE with no commitment",
+        "description": "Try NexaRelay IMAGE with no commitment",
         "cta": "Get Started",
         "creditsAmount": "200",
         "creditsLabel": "credits",
