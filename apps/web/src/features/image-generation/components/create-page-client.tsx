@@ -471,7 +471,6 @@ type MaskPoint = {
 };
 
 type ImageQuality = "auto" | "low" | "medium" | "high";
-type ImageModeration = "auto" | "low";
 type ImageOutputFormat = "png" | "jpeg" | "webp";
 type ImageBackground = "auto" | "opaque" | "transparent";
 
@@ -543,10 +542,6 @@ const QUALITY_OPTIONS: Array<{ value: ImageQuality; label: string }> = [
   { value: "low", label: "Low" },
   { value: "medium", label: "Medium" },
   { value: "high", label: "High" },
-];
-const MODERATION_OPTIONS: Array<{ value: ImageModeration; label: string }> = [
-  { value: "auto", label: "Auto" },
-  { value: "low", label: "Low" },
 ];
 const OUTPUT_FORMAT_OPTIONS: Array<{
   value: ImageOutputFormat;
@@ -1503,15 +1498,6 @@ export function CreatePageClient({
         medium: "中",
       }[qualityValue]
     );
-  const moderationLabel = (moderationValue: ImageModeration) =>
-    copy(
-      MODERATION_OPTIONS.find((option) => option.value === moderationValue)
-        ?.label || moderationValue,
-      {
-        auto: "自动",
-        low: "低",
-      }[moderationValue]
-    );
   const outputFormatLabel = (format: ImageOutputFormat) =>
     OUTPUT_FORMAT_OPTIONS.find((option) => option.value === format)?.label ||
     format.toUpperCase();
@@ -1790,10 +1776,6 @@ export function CreatePageClient({
   );
   const [quality, setQuality] = useCreateRuntimeState<ImageQuality>(
     "quality",
-    "auto"
-  );
-  const [moderation, setModeration] = useCreateRuntimeState<ImageModeration>(
-    "moderation",
     "auto"
   );
   const [outputFormat, setOutputFormat] =
@@ -2870,7 +2852,6 @@ export function CreatePageClient({
    * @param params.qualityDisabled 质量选择是否禁用。
    * @param params.outputDisabled 输出格式和压缩率是否禁用。
    * @param params.backgroundDisabled 背景与透明抠图回退是否禁用。
-   * @param params.moderationDisabled OAI 自身审核强度是否禁用。
    * @returns 可折叠高级参数面板。
    * @sideEffects 用户修改表单控件时更新创作页运行时状态。
    * @failureMode Web-only 后端下隐藏 Responses-only 控件，仅保留提示词优化。
@@ -2884,7 +2865,6 @@ export function CreatePageClient({
     qualityDisabled: boolean;
     outputDisabled: boolean;
     backgroundDisabled: boolean;
-    moderationDisabled: boolean;
   }) => {
     const responseControlsDisabled = Boolean(
       params.responseControlsDisabledReason
@@ -3072,41 +3052,6 @@ export function CreatePageClient({
                   />
                 </div>
               )}
-
-              <div
-                className={`space-y-2 ${
-                  responseControlsDisabled ? "opacity-55" : ""
-                }`}
-                title={params.responseControlsDisabledReason}
-              >
-                <label
-                  htmlFor={`${params.idPrefix}-oai-moderation`}
-                  className="text-sm font-semibold text-foreground"
-                >
-                  {copy("OAI moderation strength", "OAI 自身审核强度")}
-                </label>
-                <Select
-                  value={moderation}
-                  onValueChange={(value) =>
-                    setModeration(value as ImageModeration)
-                  }
-                  disabled={params.moderationDisabled}
-                >
-                  <SelectTrigger
-                    id={`${params.idPrefix}-oai-moderation`}
-                    className="min-h-12 rounded-xl"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MODERATION_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {moderationLabel(option.value)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
             </>
           )}
 
@@ -3685,7 +3630,6 @@ export function CreatePageClient({
         JSON.stringify(toChatHistory(historyMessages))
       );
       formData.append("quality", quality);
-      formData.append("moderation", moderation);
       formData.append("output_format", outputFormat);
       formData.append("background", background);
       // 透明抠图回退仅 chat/瀑布流可用,agent 不传(issue #27)。
@@ -6335,7 +6279,6 @@ export function CreatePageClient({
           ? { generationIds: params.generationIds }
           : {}),
         quality,
-        moderation,
         output_format: outputFormat,
         background,
         ...(background === "transparent" && transparentMatte
@@ -6513,7 +6456,6 @@ export function CreatePageClient({
     formData.append("prompt", currentEditPrompt);
     if (requestGroupId) formData.append("groupId", requestGroupId);
     formData.append("quality", quality);
-    formData.append("moderation", moderation);
     formData.append("output_format", outputFormat);
     formData.append("background", background);
     // 透明抠图回退显式开关(issue #27)。
@@ -7164,8 +7106,6 @@ export function CreatePageClient({
               outputDisabled:
                 modeBusy || disableResponsesOnlyControls || textFireflyActive,
               backgroundDisabled: modeBusy || disableResponsesOnlyControls,
-              moderationDisabled:
-                modeBusy || disableResponsesOnlyControls || textFireflyActive,
             })}
           </div>
 
@@ -7833,8 +7773,6 @@ export function CreatePageClient({
                   outputDisabled:
                     isEditing || editMixWebFirstActive || editFireflyActive,
                   backgroundDisabled: isEditing || editMixWebFirstActive,
-                  moderationDisabled:
-                    isEditing || editMixWebFirstActive || editFireflyActive,
                 })}
 
                 <div className="space-y-2">
