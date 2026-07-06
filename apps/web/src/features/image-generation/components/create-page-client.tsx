@@ -3197,14 +3197,15 @@ export function CreatePageClient({
   };
 
   // 后端分组选择器:默认跟随设置页偏好,切换仅影响本页后续请求(requestGroupId 随请求
-  // 发送,服务端 fail-closed 校验)。展示各分组计费倍率,选中非 1 倍率分组时提示价差。
+  // 发送,服务端 fail-closed 校验)。只要存在可用分组就展示,便于用户确认模型列表来源。
+  // 展示各分组计费倍率,选中非 1 倍率分组时提示价差。
   // compact 形态用于 chat/瀑布流工具条。
   const renderBackendGroupSelect = (params: {
     id: string;
     disabled?: boolean;
     compact?: boolean;
   }) => {
-    if (backendGroups.length < 2) return null;
+    if (backendGroups.length < 1) return null;
     const groupItemLabel = (group: BackendGroupOption) =>
       `${group.name}${group.isDefault ? copy(" (default)", "（默认）") : ""} · x${
         Number(group.billingMultiplier.toFixed(4)) || 1
