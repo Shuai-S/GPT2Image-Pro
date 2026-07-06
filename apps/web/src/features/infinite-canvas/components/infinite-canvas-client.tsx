@@ -33,6 +33,16 @@ import {
 import { toast } from "sonner";
 import { z } from "zod";
 import {
+  InlineImageSizeControl,
+  type AspectRatioSizeDialogValue,
+} from "@/features/image-generation/components/aspect-ratio-size-dialog";
+import {
+  AUTO_IMAGE_SIZE,
+  DEFAULT_IMAGE_SIZE,
+  normalizeImageSize,
+  parseImageSize,
+} from "@/features/image-generation/resolution";
+import {
   addCanvasEdge,
   addCanvasNode,
   type CanvasEdge,
@@ -65,6 +75,7 @@ import { CachedImage as Image } from "@/features/shared/components/cached-image"
 
 const STORAGE_KEY = "gpt2image.infinite-canvas.v1";
 const DEFAULT_NODE_POSITION = { x: 80, y: 80 };
+const DEFAULT_CANVAS_IMAGE_DIMENSIONS = { width: 1024, height: 1024 };
 const GENERATION_STATUS_POLL_INTERVAL_MS = 1500;
 const GENERATION_STATUS_TIMEOUT_MS = 180_000;
 const GENERATION_RESULT_SCHEMA = z.object({
@@ -1038,6 +1049,50 @@ type CanvasNodeViewProps = {
 };
 
 /**
+ * 把画布节点保存的尺寸字符串转换为共享比例控件需要的值对象。
+ *
+ * @param size 节点持久化的 WIDTHxHEIGHT 或 auto。
+ * @returns 比例控件可渲染的尺寸值。
+ * @sideEffects 无。
+ */
+function getCanvasNodeSizeValue(
+  size?: string | null
+): AspectRatioSizeDialogValue {
+  const normalizedSize = size?.trim().toLowerCase();
+  const fallback =
+    parseImageSize(DEFAULT_IMAGE_SIZE) || DEFAULT_CANVAS_IMAGE_DIMENSIONS;
+
+  if (normalizedSize === AUTO_IMAGE_SIZE) {
+    return {
+      auto: true,
+      width: fallback.width,
+      height: fallback.height,
+      mixWebFirst: false,
+    };
+  }
+
+  const dimensions = normalizedSize ? parseImageSize(normalizedSize) : fallback;
+  return {
+    auto: false,
+    width: dimensions?.width || fallback.width,
+    height: dimensions?.height || fallback.height,
+    mixWebFirst: false,
+  };
+}
+
+/**
+ * 把共享比例控件的值转换为画布节点保存的尺寸字符串。
+ *
+ * @param value 比例控件返回的尺寸值。
+ * @returns 节点与生成接口使用的尺寸字符串。
+ * @sideEffects 无。
+ */
+function getCanvasNodeSizeFromValue(value: AspectRatioSizeDialogValue) {
+  if (value.auto) return AUTO_IMAGE_SIZE;
+  return normalizeImageSize(value.width, value.height);
+}
+
+/**
  * 渲染单个画布节点。
  *
  * @param props 节点数据、选区状态与回调。
@@ -1141,12 +1196,14 @@ function CanvasNodeView({
           />
         )}
         {node.kind === "generator" && (
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              value={node.size || "1024x1024"}
-              aria-label={copy("Size", "尺寸")}
-              className="h-9 rounded-md border border-border bg-muted/40 px-2 text-sm outline-none focus:border-foreground"
-              onChange={(event) => onPatch({ size: event.target.value })}
+          <div className="space-y-2">
+            <InlineImageSizeControl
+              id={`canvas-node-size-${node.id}`}
+              value={getCanvasNodeSizeValue(node.size)}
+              copy={copy}
+              onChange={(next) =>
+                onPatch({ size: getCanvasNodeSizeFromValue(next) })
+              }
             />
             <input
               value={node.model || ""}
@@ -1356,7 +1413,7 @@ async function runTextToImage(prompt: string, node: CanvasNode) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       prompt,
-      size: node.size || "1024x1024",
+      size: node.size || DEFAULT_IMAGE_SIZE,
       model: node.model || undefined,
     }),
   });
@@ -1379,7 +1436,7 @@ async function runImageEdit(
 ) {
   const formData = new FormData();
   formData.set("prompt", prompt);
-  formData.set("size", node.size || "1024x1024");
+  formData.set("size", node.size || DEFAULT_IMAGE_SIZE);
   if (node.model) formData.set("model", node.model);
 
   for (const [index, imageNode] of imageNodes.entries()) {
