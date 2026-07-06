@@ -2934,6 +2934,7 @@ export function CreatePageClient({
    *
    * @param params.idPrefix 控件 id 前缀，保证同页多模式下 label 关联唯一。
    * @param params.promptDisabled 提示词优化开关是否禁用。
+   * @param params.repairDisabled 修复类后处理开关是否禁用。
    * @param params.hideResponseControls 是否隐藏 Codex/Responses 专属参数。
    * @param params.responseControlsDisabledReason 专属参数禁用时的说明。
    * @param params.qualityDisabled 质量选择是否禁用。
@@ -2947,6 +2948,7 @@ export function CreatePageClient({
   const renderAdvancedImageSettings = (params: {
     idPrefix: string;
     promptDisabled: boolean;
+    repairDisabled: boolean;
     hideResponseControls: boolean;
     responseControlsDisabledReason?: string;
     qualityDisabled: boolean;
@@ -2959,10 +2961,7 @@ export function CreatePageClient({
     );
 
     return (
-      <details
-        className="group overflow-hidden rounded-lg border border-primary/20 bg-background shadow-sm transition-colors open:border-primary/35"
-        open
-      >
+      <details className="group overflow-hidden rounded-lg border border-primary/20 bg-background shadow-sm transition-colors open:border-primary/35">
         <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-sm font-semibold text-foreground [&::-webkit-details-marker]:hidden">
           <span className="inline-flex items-center gap-2">
             <Settings2 className="h-4 w-4" />
@@ -2976,6 +2975,16 @@ export function CreatePageClient({
               `${params.idPrefix}-prompt-optimization`,
               params.promptDisabled
             )}
+          </div>
+          <div className="space-y-2 md:col-span-2 xl:col-span-1 2xl:col-span-2">
+            {renderHdRepairToggle({
+              id: `${params.idPrefix}-hd-repair`,
+              disabled: params.repairDisabled,
+            })}
+            {renderBlockRepairToggle({
+              id: `${params.idPrefix}-block-repair`,
+              disabled: params.repairDisabled,
+            })}
           </div>
 
           {!params.hideResponseControls && (
@@ -7248,20 +7257,12 @@ export function CreatePageClient({
                   {copy("Set ratio", "设置比例")}
                 </Button>
               </div>
-              {/* 高清修复放分辨率卡内:与后端类型无关(纯服务端超分后处理),须对 web 后端也可见。 */}
-              {renderHdRepairToggle({
-                id: `image-hd-repair-${mode}`,
-                disabled: modeBusy,
-              })}
-              {renderBlockRepairToggle({
-                id: `image-block-repair-${mode}`,
-                disabled: modeBusy,
-              })}
             </div>
 
             {renderAdvancedImageSettings({
               idPrefix: `image-${mode}`,
               promptDisabled: modeBusy,
+              repairDisabled: modeBusy,
               hideResponseControls: isWebOnlyBackend,
               responseControlsDisabledReason: responsesOnlyDisabledReason,
               qualityDisabled: modeBusy || disableResponsesOnlyControls,
@@ -7948,6 +7949,7 @@ export function CreatePageClient({
                 {renderAdvancedImageSettings({
                   idPrefix: "edit",
                   promptDisabled: isEditing,
+                  repairDisabled: isEditing,
                   hideResponseControls: isWebOnlyBackend,
                   responseControlsDisabledReason: editMixWebFirstActive
                     ? responsesOnlyDisabledReason
@@ -8031,15 +8033,6 @@ export function CreatePageClient({
                       )}
                     </div>
                   )}
-                  {/* 高清修复:超分后处理与后端无关,放尺寸卡内确保 web 后端也可见。 */}
-                  {renderHdRepairToggle({
-                    id: "edit-hd-repair",
-                    disabled: isEditing,
-                  })}
-                  {renderBlockRepairToggle({
-                    id: "edit-block-repair",
-                    disabled: isEditing,
-                  })}
                 </div>
 
                 <div className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
