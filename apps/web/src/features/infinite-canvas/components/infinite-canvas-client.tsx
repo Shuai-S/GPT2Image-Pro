@@ -78,9 +78,11 @@ const DEFAULT_NODE_POSITION = { x: 80, y: 80 };
 const DEFAULT_CANVAS_IMAGE_DIMENSIONS = { width: 1024, height: 1024 };
 const GENERATION_STATUS_POLL_INTERVAL_MS = 1500;
 const GENERATION_STATUS_TIMEOUT_MS = 180_000;
+const GENERATION_STATUS_MISSING_GRACE_MS = 15_000;
 const GENERATION_RESULT_SCHEMA = z.object({
   error: z.string().optional(),
   generationId: z.string().optional(),
+  generation_id: z.string().optional(),
   status: z.enum(["pending", "completed", "failed"]).optional(),
   imageUrl: z.string().optional(),
   imageBase64: z.string().optional(),
@@ -100,6 +102,11 @@ const GENERATION_RESULT_SCHEMA = z.object({
 
 type ActiveTool = "select" | "pan" | "connect";
 type ConnectorSide = "input" | "output";
+
+type ImagePreviewState = {
+  imageUrl: string;
+  title: string;
+};
 
 type DragState =
   | {
@@ -139,6 +146,9 @@ export function InfiniteCanvasClient() {
   const [connectFromId, setConnectFromId] = useState<string | null>(null);
   const [isBooted, setBooted] = useState(false);
   const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
+  const [imagePreview, setImagePreview] = useState<ImagePreviewState | null>(
+    null
+  );
   const selectedNode = useMemo(
     () => state.nodes.find((node) => node.id === selectedIds[0]),
     [selectedIds, state.nodes]
@@ -160,6 +170,25 @@ export function InfiniteCanvasClient() {
     (en: string, zh: string) => (isZh ? zh : en),
     [isZh]
   );
+
+  /**
+   * 下载当前预览中的图片。
+   *
+   * @sideEffects 读取图片数据并触发浏览器下载；跨域受限时退回直接下载链接。
+   */
+  const downloadPreviewImage = async () => {
+    if (!imagePreview) return;
+    try {
+      await downloadCanvasImage(imagePreview.imageUrl, imagePreview.title);
+      toast.success(copy("Image download started", "图片下载已开始"));
+    } catch {
+      triggerImageDownload(
+        imagePreview.imageUrl,
+        getCanvasImageDownloadName(imagePreview.title, imagePreview.imageUrl)
+      );
+      toast.info(copy("Download link opened", "已打开下载链接"));
+    }
+  };
 
   useEffect(() => {
     try {
@@ -654,12 +683,24 @@ export function InfiniteCanvasClient() {
         error: undefined,
       })
     );
+    const generationId = createCanvasGenerationId();
     try {
-      const initialResult =
-        imageNodes.length > 0
-          ? await runImageEdit(prompt, node, imageNodes)
-          : await runTextToImage(prompt, node);
-      const result = await resolveGenerationResult(initialResult, copy);
+      let result: GenerationResult;
+      try {
+        const initialResult =
+          imageNodes.length > 0
+            ? await runImageEdit(prompt, node, imageNodes, generationId)
+            : await runTextToImage(prompt, node, generationId);
+        result = await resolveGenerationResult(initialResult, copy);
+      } catch (requestError) {
+        const initialError =
+          requestError instanceof Error
+            ? requestError.message
+            : copy("Generation failed", "生成失败");
+        result = await pollGenerationResult(generationId, initialError, copy, {
+          waitForMissing: true,
+        });
+      }
       if (result.error) throw new Error(result.error);
       const imageUrl = firstImageUrl(result);
       if (!imageUrl) throw new Error(copy("No image returned", "未返回图片"));
@@ -913,6 +954,7 @@ export function InfiniteCanvasClient() {
                   updateCanvasNode(current, node.id, patch)
                 )
               }
+              onPreviewImage={(preview) => setImagePreview(preview)}
               onRun={runSelectedGenerator}
               copy={copy}
             />
@@ -987,6 +1029,14 @@ export function InfiniteCanvasClient() {
           event.currentTarget.value = "";
         }}
       />
+      {imagePreview && (
+        <ImagePreviewDialog
+          preview={imagePreview}
+          copy={copy}
+          onClose={() => setImagePreview(null)}
+          onDownload={() => void downloadPreviewImage()}
+        />
+      )}
     </section>
   );
 }
@@ -997,6 +1047,72 @@ type ToolbarButtonProps = {
   children: React.ReactNode;
   onClick: () => void;
 };
+
+/**
+ * 渲染画布图片的大图预览层。
+ *
+ * @param props 预览图片、文案函数、关闭与下载回调。
+ * @returns 带下载入口的图片预览弹层。
+ * @sideEffects 点击遮罩关闭，点击下载触发父组件下载逻辑。
+ */
+function ImagePreviewDialog({
+  preview,
+  copy,
+  onClose,
+  onDownload,
+}: {
+  preview: ImagePreviewState;
+  copy: (en: string, zh: string) => string;
+  onClose: () => void;
+  onDownload: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-6 backdrop-blur-sm"
+      onMouseDown={onClose}
+    >
+      <div
+        className="flex h-full max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-md border border-border bg-background shadow-xl"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border px-4">
+          <div className="min-w-0 text-sm font-medium">
+            <span className="block truncate">{preview.title}</span>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              className="inline-flex h-8 items-center gap-2 rounded-md border border-border px-3 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+              onClick={onDownload}
+            >
+              <Download className="h-4 w-4" />
+              {copy("Download", "下载")}
+            </button>
+            <button
+              type="button"
+              title={copy("Close", "关闭")}
+              aria-label={copy("Close", "关闭")}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-accent hover:text-foreground"
+              onClick={onClose}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+        <div className="relative min-h-0 flex-1 bg-black/80">
+          <Image
+            src={preview.imageUrl}
+            alt={preview.title}
+            fill
+            sizes="90vw"
+            className="object-contain"
+            unoptimized
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /**
  * 渲染工具栏图标按钮。
@@ -1044,6 +1160,7 @@ type CanvasNodeViewProps = {
     event: ReactPointerEvent<HTMLButtonElement>
   ) => void;
   onPatch: (patch: Partial<Omit<CanvasNode, "id" | "kind">>) => void;
+  onPreviewImage: (preview: ImagePreviewState) => void;
   onRun: (nodeId?: string) => Promise<void>;
   copy: (en: string, zh: string) => string;
 };
@@ -1107,6 +1224,7 @@ function CanvasNodeView({
   onPointerDown,
   onConnectorPointerDown,
   onPatch,
+  onPreviewImage,
   onRun,
   copy,
 }: CanvasNodeViewProps) {
@@ -1215,7 +1333,20 @@ function CanvasNodeView({
           </div>
         )}
         {(node.kind === "image" || node.kind === "output") && node.imageUrl && (
-          <div className="relative h-56 w-full overflow-hidden rounded-md border border-border">
+          <button
+            type="button"
+            title={copy("Preview image", "预览图片")}
+            aria-label={copy("Preview image", "预览图片")}
+            className="relative h-56 w-full overflow-hidden rounded-md border border-border bg-muted/20"
+            onClick={() =>
+              node.imageUrl
+                ? onPreviewImage({
+                    imageUrl: node.imageUrl,
+                    title: node.title,
+                  })
+                : undefined
+            }
+          >
             <Image
               src={node.imageUrl}
               alt={node.title}
@@ -1224,7 +1355,7 @@ function CanvasNodeView({
               className="object-contain"
               unoptimized
             />
-          </div>
+          </button>
         )}
         {node.kind === "output" && !node.imageUrl && (
           <div className="flex h-32 items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
@@ -1380,6 +1511,116 @@ function CanvasEdgePath({
 }
 
 /**
+ * 下载画布中的图片资源。
+ *
+ * @param imageUrl 图片 data URL 或网络 URL。
+ * @param title 用于生成下载文件名的节点标题。
+ * @sideEffects 读取图片并触发浏览器下载。
+ */
+async function downloadCanvasImage(imageUrl: string, title: string) {
+  const fileName = getCanvasImageDownloadName(title, imageUrl);
+  if (imageUrl.startsWith("data:")) {
+    triggerImageDownload(imageUrl, fileName);
+    return;
+  }
+
+  const response = await fetch(imageUrl);
+  if (!response.ok) throw new Error("Image download failed");
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    triggerImageDownload(objectUrl, fileName);
+  } finally {
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  }
+}
+
+/**
+ * 触发浏览器下载链接。
+ *
+ * @param url 下载 URL。
+ * @param fileName 文件名。
+ * @sideEffects 创建并点击临时下载链接。
+ */
+function triggerImageDownload(url: string, fileName: string) {
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.rel = "noopener";
+  link.target = "_blank";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+/**
+ * 根据节点标题和图片地址生成下载文件名。
+ *
+ * @param title 节点标题。
+ * @param imageUrl 图片地址。
+ * @returns 安全的图片文件名。
+ * @sideEffects 无。
+ */
+function getCanvasImageDownloadName(title: string, imageUrl: string) {
+  const baseName =
+    title
+      .trim()
+      .replace(/[\\/:*?"<>|]+/g, "-")
+      .replace(/\s+/g, "-")
+      .slice(0, 80) || "canvas-image";
+  return `${baseName}.${getCanvasImageExtension(imageUrl)}`;
+}
+
+/**
+ * 从图片 URL 中推断扩展名。
+ *
+ * @param imageUrl 图片地址。
+ * @returns 浏览器下载使用的扩展名。
+ * @sideEffects 无。
+ */
+function getCanvasImageExtension(imageUrl: string) {
+  const dataMatch = /^data:image\/([a-z0-9.+-]+);/i.exec(imageUrl);
+  if (dataMatch?.[1]) return normalizeImageExtension(dataMatch[1]);
+  try {
+    const pathname = new URL(imageUrl, window.location.href).pathname;
+    const extension = pathname.split(".").pop()?.toLowerCase();
+    if (extension) return normalizeImageExtension(extension);
+  } catch {
+    return "png";
+  }
+  return "png";
+}
+
+/**
+ * 把 MIME 子类型或路径扩展名归一为常见图片扩展名。
+ *
+ * @param value MIME 子类型或扩展名。
+ * @returns 可用于文件名的扩展名。
+ * @sideEffects 无。
+ */
+function normalizeImageExtension(value: string) {
+  const normalized = value.toLowerCase();
+  if (normalized === "jpeg" || normalized === "jpg") return "jpg";
+  if (normalized === "webp") return "webp";
+  if (normalized === "gif") return "gif";
+  if (normalized === "avif") return "avif";
+  return "png";
+}
+
+/**
+ * 创建可传给图片生成接口并用于状态回查的 ID。
+ *
+ * @returns 图片生成记录 ID。
+ * @sideEffects 读取浏览器随机源。
+ */
+function createCanvasGenerationId() {
+  const randomPart = globalThis.crypto?.randomUUID
+    ? globalThis.crypto.randomUUID().replaceAll("-", "")
+    : `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+  return `gen_${randomPart}`;
+}
+
+/**
  * 把本地文件读取为 data URL。
  *
  * @param file 图片文件。
@@ -1404,14 +1645,20 @@ function readFileAsDataUrl(file: File) {
  *
  * @param prompt 合成后的提示词。
  * @param node 生成节点配置。
+ * @param generationId 本次请求预分配的生成记录 ID，用于失败后状态回查。
  * @returns 生成接口结果。
  * @sideEffects 发起同源网络请求并消耗用户积分。
  */
-async function runTextToImage(prompt: string, node: CanvasNode) {
+async function runTextToImage(
+  prompt: string,
+  node: CanvasNode,
+  generationId: string
+) {
   const response = await fetch("/api/images/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      generationId,
       prompt,
       size: node.size || DEFAULT_IMAGE_SIZE,
       model: node.model || undefined,
@@ -1426,15 +1673,18 @@ async function runTextToImage(prompt: string, node: CanvasNode) {
  * @param prompt 合成后的提示词。
  * @param node 生成节点配置。
  * @param imageNodes 输入图片节点。
+ * @param generationId 本次请求预分配的生成记录 ID，用于失败后状态回查。
  * @returns 生成接口结果。
  * @sideEffects 抓取图片数据、发起同源网络请求并消耗用户积分。
  */
 async function runImageEdit(
   prompt: string,
   node: CanvasNode,
-  imageNodes: CanvasNode[]
+  imageNodes: CanvasNode[],
+  generationId: string
 ) {
   const formData = new FormData();
+  formData.set("generationId", generationId);
   formData.set("prompt", prompt);
   formData.set("size", node.size || DEFAULT_IMAGE_SIZE);
   if (node.model) formData.set("model", node.model);
@@ -1491,7 +1741,10 @@ async function parseGenerationResponse(
   }
   const parsed = GENERATION_RESULT_SCHEMA.safeParse(body);
   if (!parsed.success) throw new Error("Invalid generation response");
-  return parsed.data;
+  return {
+    ...parsed.data,
+    generationId: parsed.data.generationId || parsed.data.generation_id,
+  };
 }
 
 /**
@@ -1503,15 +1756,19 @@ async function parseGenerationResponse(
  * @param generationId 生成任务 ID。
  * @param initialError 首次响应携带的错误，用于状态记录不存在时快速返回真实错误。
  * @param copy 当前语言文本函数。
+ * @param options 轮询行为选项；waitForMissing 会短暂容忍记录尚未创建。
  * @returns 最终生成结果。
  * @sideEffects 轮询同源状态接口。
  */
 async function pollGenerationResult(
   generationId: string,
   initialError: string | undefined,
-  copy: (en: string, zh: string) => string
+  copy: (en: string, zh: string) => string,
+  options: { waitForMissing?: boolean } = {}
 ): Promise<GenerationResult> {
   const deadline = Date.now() + GENERATION_STATUS_TIMEOUT_MS;
+  const missingGraceDeadline =
+    Date.now() + GENERATION_STATUS_MISSING_GRACE_MS;
   let lastError = initialError;
 
   while (Date.now() < deadline) {
@@ -1521,6 +1778,10 @@ async function pollGenerationResult(
     );
 
     if (response.status === 404 && initialError) {
+      if (options.waitForMissing && Date.now() < missingGraceDeadline) {
+        lastError = initialError;
+        continue;
+      }
       throw new Error(initialError);
     }
     if (!response.ok) {
