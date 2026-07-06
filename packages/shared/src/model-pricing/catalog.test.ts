@@ -25,12 +25,24 @@ describe("model pricing catalog", () => {
     );
   });
 
-  it("非法 JSON 或空规则回退默认配置", () => {
+  it("非法 JSON 回退默认配置", () => {
     expect(normalizeModelPricingRulesConfig("not-json")).toEqual(
       DEFAULT_MODEL_PRICING_RULES
     );
+  });
+
+  it("显式空规则保留为空，允许后台删除全部模型定价", () => {
     expect(normalizeModelPricingRulesConfig({ rules: [] })).toEqual(
-      DEFAULT_MODEL_PRICING_RULES
+      {
+        version: 1,
+        rules: [],
+      }
+    );
+    expect(normalizeModelPricingRulesConfig("[]")).toEqual(
+      {
+        version: 1,
+        rules: [],
+      }
     );
   });
 

@@ -23,6 +23,11 @@ export type ModelPricingRulesConfig = {
   rules: PublicModelPricingRule[];
 };
 
+type RawModelPricingRulesInput = {
+  rules: unknown[];
+  explicit: boolean;
+};
+
 const ALLOWED_MODALITIES = [
   "text",
   "image",
@@ -123,15 +128,18 @@ export const DEFAULT_MODEL_PRICING_RULES: ModelPricingRulesConfig = {
 export function normalizeModelPricingRulesConfig(
   value: unknown
 ): ModelPricingRulesConfig {
-  const sourceRules = getRawRules(value);
-  const rules = sourceRules
+  const source = getRawRules(value);
+  const rules = source.rules
     .map(normalizeRule)
     .filter((rule): rule is PublicModelPricingRule => Boolean(rule))
     .sort((a, b) => a.sortOrder - b.sortOrder);
 
   return {
     version: 1,
-    rules: rules.length > 0 ? rules : DEFAULT_MODEL_PRICING_RULES.rules,
+    rules:
+      rules.length > 0 || (source.explicit && source.rules.length === 0)
+        ? rules
+        : DEFAULT_MODEL_PRICING_RULES.rules,
   };
 }
 
@@ -151,21 +159,23 @@ export function getPublicModelPricingRules(
  * 读取数组或 { rules } 包装结构中的原始规则。
  *
  * @param value 未知配置值。
- * @returns 原始规则数组。
+ * @returns 原始规则数组，以及输入是否显式声明了规则列表。
  */
-function getRawRules(value: unknown): unknown[] {
+function getRawRules(value: unknown): RawModelPricingRulesInput {
   if (typeof value === "string") {
     const trimmed = value.trim();
-    if (!trimmed) return [];
+    if (!trimmed) return { rules: [], explicit: false };
     try {
       return getRawRules(JSON.parse(trimmed) as unknown);
     } catch {
-      return [];
+      return { rules: [], explicit: false };
     }
   }
-  if (Array.isArray(value)) return value;
-  if (isRecord(value) && Array.isArray(value.rules)) return value.rules;
-  return [];
+  if (Array.isArray(value)) return { rules: value, explicit: true };
+  if (isRecord(value) && Array.isArray(value.rules)) {
+    return { rules: value.rules, explicit: true };
+  }
+  return { rules: [], explicit: false };
 }
 
 /**
