@@ -7253,12 +7253,15 @@ export function CreatePageClient({
     const modeResult = visualResults[mode] || null;
     const dimensions = getVisualLoadingDimensions(mode);
     const previewUrl = visualPreviewUrls[mode] || null;
+    const resultDimensions = modeResult
+      ? parseImageSize(modeResult.size)
+      : null;
 
     return (
-      <>
+      <section className="flex min-h-[420px] flex-col justify-center overflow-hidden rounded-lg border border-border bg-background p-4 sm:min-h-[560px] xl:min-h-[620px]">
         {loading && (
           <div
-            className="mt-8 mb-10 flex max-w-2xl items-center justify-center overflow-hidden rounded-lg border border-dashed bg-muted/30"
+            className="mx-auto flex w-full max-w-3xl items-center justify-center overflow-hidden rounded-lg border border-dashed bg-muted/30"
             style={{
               aspectRatio: `${dimensions.width} / ${dimensions.height}`,
             }}
@@ -7290,15 +7293,14 @@ export function CreatePageClient({
         )}
 
         {modeResult && !loading && (
-          <section className="mt-8 mb-10 space-y-4">
+          <div className="space-y-4">
             <button
               type="button"
               onClick={() => setSelectedRecentId(modeResult.generationId)}
-              className="group relative mx-auto block w-full max-w-2xl overflow-hidden rounded-lg border bg-muted"
+              className="group relative mx-auto block w-full max-w-3xl overflow-hidden rounded-lg border bg-muted"
               style={{
-                aspectRatio: `${parseImageSize(modeResult.size)?.width || defaultDimensions.width} / ${
-                  parseImageSize(modeResult.size)?.height ||
-                  defaultDimensions.height
+                aspectRatio: `${resultDimensions?.width || defaultDimensions.width} / ${
+                  resultDimensions?.height || defaultDimensions.height
                 }`,
               }}
               title={copy("Open image preview", "打开图片预览")}
@@ -7367,9 +7369,9 @@ export function CreatePageClient({
                 </Button>
               </div>
             </div>
-          </section>
+          </div>
         )}
-      </>
+      </section>
     );
   };
 
@@ -7414,6 +7416,7 @@ export function CreatePageClient({
                 className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]"
               >
                 <div className="min-w-0 space-y-4">
+                  {renderVisualOutput("text-single")}
                   <Textarea
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
@@ -7425,7 +7428,6 @@ export function CreatePageClient({
                     disabled={isTextSingleGenerating}
                     className="min-h-28 resize-none border-input bg-background text-base"
                   />
-                  {renderVisualOutput("text-single")}
                 </div>
                 <aside className="space-y-4">
                   {textSettingsPanel("single")}
@@ -7456,6 +7458,7 @@ export function CreatePageClient({
                 className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]"
               >
                 <div className="min-w-0 space-y-4">
+                  {renderVisualOutput("text-lines")}
                   <Textarea
                     value={linePrompts}
                     onChange={(e) => setLinePrompts(e.target.value)}
@@ -7481,7 +7484,6 @@ export function CreatePageClient({
                       </span>
                     </span>
                   </div>
-                  {renderVisualOutput("text-lines")}
                 </div>
                 <aside className="space-y-4">
                   {textSettingsPanel("lines")}
@@ -7520,6 +7522,7 @@ export function CreatePageClient({
             onPaste={handleImagePaste}
             className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_360px] xl:gap-6"
           >
+            <div className="xl:col-start-1">{renderVisualOutput("image")}</div>
             <div className="relative xl:col-start-1">
               {renderReferenceMentionMenu({
                 open: Boolean(editMention?.open) && canUseEditReferenceMentions,
@@ -8000,7 +8003,6 @@ export function CreatePageClient({
               </Button>
             </div>
           </form>
-          {renderVisualOutput("image")}
         </div>
 
         <div
