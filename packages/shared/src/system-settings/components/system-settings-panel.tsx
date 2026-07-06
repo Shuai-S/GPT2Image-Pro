@@ -2079,7 +2079,7 @@ function getCategoryMap(
 /**
  * 渲染后台系统设置编辑器。
  *
- * @param props.mode 页面模式；system 编辑通用系统设置，pricing 只编辑套餐和积分，model-pricing 只编辑模型定价规则。
+ * @param props.mode 页面模式；system 编辑通用系统设置，pricing 编辑套餐、积分和模型定价，model-pricing 只编辑模型定价规则。
  * @returns 可加载、编辑并保存对应设置范围的 React 面板。
  * @sideEffects 通过 next-safe-action 读取和写入 system_setting，并在保存后同步环境文件。
  */
@@ -2221,7 +2221,11 @@ export function SystemSettingsPanel({
         if (mode === "model-pricing" && setting.key !== "MODEL_PRICING_RULES") {
           continue;
         }
-        if (mode === "pricing" && !PRICING_CATEGORY_IDS.has(setting.category)) {
+        if (
+          mode === "pricing" &&
+          !PRICING_CATEGORY_IDS.has(setting.category) &&
+          setting.key !== "MODEL_PRICING_RULES"
+        ) {
           continue;
         }
         // 见上:模型计费倍率不在本面板编辑,跳过,避免覆盖 Adobe tab 的改动。
@@ -2391,7 +2395,7 @@ export function SystemSettingsPanel({
             {isModelPricingMode
               ? "管理模型定价规则，独立于其他系统设置保存。"
               : isPricingMode
-                ? "管理套餐价格、套餐能力、积分发放和积分包规则。"
+                ? "管理套餐价格、套餐能力、积分发放、积分包和模型定价规则。"
                 : "管理审核、登录、支付、模型、存储和邮件等全局配置。密钥不会在页面回显。"}
           </p>
         </div>
@@ -2444,7 +2448,7 @@ export function SystemSettingsPanel({
         {isModelPricingMode
           ? "模型定价保存后会写入后台配置；未保存时继续使用环境变量或代码默认规则兜底。"
           : isPricingMode
-            ? "套餐和积分配置保存后会写入后台配置；未保存时继续使用环境变量或代码默认值兜底。支付产品 ID 和价格变更请同步确认支付渠道后台配置。"
+            ? "套餐、积分和模型定价配置保存后会写入后台配置；未保存时继续使用环境变量或代码默认值兜底。支付产品 ID 和价格变更请同步确认支付渠道后台配置。"
             : "已保存配置优先于环境变量；未保存时继续使用环境变量兜底。标记为“需重启”或“需重新构建”的配置，保存后要重启服务或重新部署后才完整生效。"}
       </div>
 
@@ -2465,6 +2469,14 @@ export function SystemSettingsPanel({
                 {category.label}
               </TabsTrigger>
             ))}
+            {isPricingMode ? (
+              <TabsTrigger
+                value="model-pricing"
+                className="rounded-md border border-transparent px-3 py-2 data-[state=active]:border-foreground/20 data-[state=active]:bg-foreground/5 data-[state=active]:text-foreground data-[state=active]:shadow-none"
+              >
+                模型定价
+              </TabsTrigger>
+            ) : null}
           </TabsList>
 
           {visibleCategories.map((category) => {
@@ -2634,6 +2646,11 @@ export function SystemSettingsPanel({
               </TabsContent>
             );
           })}
+          {isPricingMode ? (
+            <TabsContent value="model-pricing" className="mt-6 space-y-4">
+              {modelPricingContent}
+            </TabsContent>
+          ) : null}
         </Tabs>
       )}
     </div>
@@ -2641,19 +2658,9 @@ export function SystemSettingsPanel({
 }
 
 /**
- * 渲染独立的模型定价后台菜单内容。
- *
- * @returns 仅编辑 MODEL_PRICING_RULES 的系统设置面板。
- * @sideEffects 复用 SystemSettingsPanel 的读取和保存副作用。
- */
-export function ModelPricingSettingsPanel() {
-  return <SystemSettingsPanel mode="model-pricing" />;
-}
-
-/**
  * 渲染独立的套餐与积分定价后台菜单内容。
  *
- * @returns 仅编辑套餐和积分分类的系统设置面板。
+ * @returns 仅编辑套餐、积分和模型定价分类的系统设置面板。
  * @sideEffects 复用 SystemSettingsPanel 的读取和保存副作用。
  */
 export function PricingSettingsPanel() {
