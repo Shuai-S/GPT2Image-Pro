@@ -7800,18 +7800,6 @@ export function CreatePageClient({
 
   return (
     <div className="mx-auto w-full max-w-[1680px] px-0 py-2 md:py-4">
-      <header className="mb-8 max-w-3xl space-y-2">
-        <h1 className="font-serif text-3xl font-semibold tracking-tight md:text-4xl">
-          {copy("Create", "创作")}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {copy(
-            "Generate a new image from text, or transform uploaded images with a prompt.",
-            "用文字生成新图片，或通过提示词改造上传的图片。"
-          )}
-        </p>
-      </header>
-
       {!fallbackMode && (
         <div className="rounded-lg border bg-background px-4 py-5 text-sm text-muted-foreground">
           {copy(
