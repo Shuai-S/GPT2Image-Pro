@@ -19,17 +19,26 @@ export const getSelectableGroups = defineOperation({
   domain: "image-backend-pool",
   title: "获取可选后端组",
   description:
-    "获取当前用户可选择的图像后端组列表，结合用户套餐能力判定可见组。",
+    "获取当前用户可选择的图像后端组列表（结合套餐能力与 minPlan 判定），" +
+    "含计费倍率与车道类型，供创作页/设置页分组选择器与费用预估使用；" +
+    "同时返回用户当前的偏好分组。",
   input: z.object({}),
   output: z.object({
     groups: z.array(
       z.object({
         id: z.string(),
         name: z.string(),
-        description: z.string().optional(),
+        description: z.string().nullable(),
         isDefault: z.boolean(),
+        // 分组计费倍率(父组口径,嵌套子组调度时结算另行叠乘)。
+        billingMultiplier: z.number(),
+        backendType: z.enum(["mixed", "web", "responses"]),
+        minPlan: z.string(),
+        contentSafetyEnabled: z.boolean().nullable(),
       }),
     ),
+    // 用户当前偏好分组(无偏好或偏好已失效时为 null)。
+    selectedGroupId: z.string().nullable(),
   }),
   access: { kind: "protected" },
   readOnly: true,

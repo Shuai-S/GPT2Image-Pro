@@ -19,8 +19,18 @@
 import "@repo/shared/uol/operations";
 
 import type { OperationContext, Principal } from "@repo/shared/uol";
-import { bindExecute } from "@repo/shared/uol";
-import { listAdminImageBackendPool } from "@/features/image-backend-pool/service";
+import {
+  bindExecute,
+  getPrincipalUserId,
+  OperationError,
+} from "@repo/shared/uol";
+import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
+import {
+  getUserImageBackendPreference,
+  listAdminImageBackendPool,
+  listSelectableImageBackendGroups,
+  setUserImageBackendPreference,
+} from "@/features/image-backend-pool/service";
 import { runImageGenerationForUser } from "@/features/image-generation/operations";
 import type { ImageQuality } from "@/features/image-generation/types";
 
@@ -128,8 +138,72 @@ bindExecute(
   }
 );
 
-// TODO: pool.getSelectableGroups - getSelectableImageBackendGroupsAction 逻辑
-// TODO: pool.setPreference - setUserImageBackendPreferenceAction 逻辑
+/**
+ * pool.getSelectableGroups - 当前用户可选后端组(含倍率/车道/当前偏好)
+ * 源: apps/web/src/features/image-backend-pool/service.ts
+ *   listSelectableImageBackendGroups + getUserImageBackendPreference
+ */
+bindExecute(
+  "pool.getSelectableGroups",
+  async (
+    _input: Record<string, never>,
+    principal: Principal,
+    _ctx: OperationContext
+  ) => {
+    const userId = getPrincipalUserId(principal);
+    if (!userId) {
+      throw new OperationError("unauthenticated", "需要用户身份");
+    }
+    const plan = await getUserPlan(userId);
+    const [groups, selectedGroupId] = await Promise.all([
+      listSelectableImageBackendGroups(plan.plan),
+      getUserImageBackendPreference(userId, plan.plan),
+    ]);
+    return {
+      groups: groups.map((group) => ({
+        id: group.id,
+        name: group.name,
+        description: group.description,
+        isDefault: group.isDefault,
+        billingMultiplier: group.billingMultiplier,
+        backendType: group.backendType,
+        minPlan: group.minPlan,
+        contentSafetyEnabled: group.contentSafetyEnabled,
+      })),
+      selectedGroupId,
+    };
+  }
+);
+
+/**
+ * pool.setPreference - 设置用户默认分组偏好(upsert,同值重写无副作用)
+ * 源: apps/web/src/features/image-backend-pool/service.ts
+ *   setUserImageBackendPreference(内部校验能力位/isUserSelectable/minPlan)
+ */
+bindExecute(
+  "pool.setPreference",
+  async (
+    input: { groupId: string | null },
+    principal: Principal,
+    _ctx: OperationContext
+  ) => {
+    const userId = getPrincipalUserId(principal);
+    if (!userId) {
+      throw new OperationError("unauthenticated", "需要用户身份");
+    }
+    const plan = await getUserPlan(userId);
+    try {
+      await setUserImageBackendPreference(userId, input.groupId, plan.plan);
+    } catch (error) {
+      throw new OperationError(
+        "forbidden",
+        error instanceof Error ? error.message : "设置生图分组偏好失败"
+      );
+    }
+    return { success: true };
+  }
+);
+
 // TODO: pool.getGroupOptions - getImageBackendGroupOptionsAction 逻辑
 // TODO: pool.saveGroup - saveImageBackendGroupAction 逻辑
 // TODO: pool.deleteGroup - deleteImageBackendGroupAction 逻辑
