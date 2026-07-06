@@ -216,13 +216,28 @@ export async function ensureCreditsBalance(userId: string) {
       totalSpent: 0,
       status: "active",
     })
+    .onConflictDoNothing({
+      target: creditsBalance.userId,
+    })
     .returning();
 
-  if (!newBalance) {
+  if (newBalance) {
+    return newBalance;
+  }
+
+  // 并发首次访问同一用户时，唯一索引可能让另一个请求赢得插入。
+  // 冲突不代表失败，重新读取即可得到已创建的账户。
+  const [concurrentBalance] = await db
+    .select()
+    .from(creditsBalance)
+    .where(eq(creditsBalance.userId, userId))
+    .limit(1);
+
+  if (!concurrentBalance) {
     throw new Error("创建积分账户失败");
   }
 
-  return newBalance;
+  return concurrentBalance;
 }
 
 /**
@@ -370,13 +385,28 @@ export async function grantCredits(params: GrantCreditsParams) {
           totalSpent: 0,
           status: "active",
         })
+        .onConflictDoNothing({
+          target: creditsBalance.userId,
+        })
         .returning();
 
-      if (!newBalance) {
-        throw new Error("创建积分账户失败");
-      }
+      if (newBalance) {
+        currentBalance = newBalance;
+      } else {
+        // 同一用户的首次发放可能并发进入事务，依赖 user_id 唯一索引兜底。
+        // 插入冲突后重新读取账户，避免把可恢复的并发竞争暴露为发放失败。
+        const [concurrentBalance] = await tx
+          .select()
+          .from(creditsBalance)
+          .where(eq(creditsBalance.userId, userId))
+          .limit(1);
 
-      currentBalance = newBalance;
+        if (!concurrentBalance) {
+          throw new Error("创建积分账户失败");
+        }
+
+        currentBalance = concurrentBalance;
+      }
     }
 
     if (currentBalance.status === "frozen") {
