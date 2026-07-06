@@ -1,11 +1,7 @@
 "use client";
 
 import {
-  GPT52_CHAT_MODEL,
-  GPT53_CODEX_CHAT_MODEL,
-  GPT53_CODEX_SPARK_CHAT_MODEL,
   GPT54_CHAT_MODEL,
-  GPT54_MINI_CHAT_MODEL,
   GPT55_CHAT_MODEL,
   type RESPONSES_IMAGE_MODELS,
   type SubscriptionPlan,
@@ -697,18 +693,6 @@ function ImageCountSlider({
     </div>
   );
 }
-const CHAT_MODEL_OPTIONS: Array<{
-  value: ChatModel;
-  label: string;
-  ultraOnly?: boolean;
-}> = [
-  { value: GPT54_CHAT_MODEL, label: "GPT-5.4" },
-  { value: GPT54_MINI_CHAT_MODEL, label: "GPT-5.4 Mini" },
-  { value: GPT52_CHAT_MODEL, label: "GPT-5.2" },
-  { value: GPT53_CODEX_CHAT_MODEL, label: "GPT-5.3 Codex" },
-  { value: GPT53_CODEX_SPARK_CHAT_MODEL, label: "GPT-5.3 Codex Spark" },
-  { value: GPT55_CHAT_MODEL, label: "GPT-5.5", ultraOnly: true },
-];
 const CHAT_THINKING_OPTIONS: Array<{
   value: ChatThinkingLevel;
   label: string;
@@ -1597,10 +1581,6 @@ export function CreatePageClient({
       {helpMarker(label, title)}
     </span>
   );
-  const gptModelHelpText = copy(
-    "Web backend: main ChatGPT conversation model. Codex/Responses backend: top-level Responses model. External image API may ignore this field.",
-    "Web 后端：主 ChatGPT 对话模型；Codex/Responses 后端：顶层 Responses 模型；外接 image API 可能忽略此字段。"
-  );
   const imageModelHelpText = copy(
     "Image model for generations/edits. Web backend does not have a separate image model field and ignores this control; Codex/Responses uses it as the image_generation tool model; external image API receives it as the image model.",
     "生图/编辑图片模型。Web 后端没有独立图片模型字段，会忽略该控制；Codex/Responses 会作为 image_generation 工具模型；外接 image API 会作为图片模型传递。"
@@ -1809,9 +1789,6 @@ export function CreatePageClient({
     "layeredGeneration",
     false
   );
-  const [imageGptModel, setImageGptModel] = useCreateRuntimeState<
-    ChatModel | "default"
-  >("imageGptModel", "default");
   const [imageThinking, setImageThinking] =
     useCreateRuntimeState<ChatThinkingLevel>("imageThinking", "low");
   const [chatFirstImageSize, setChatFirstImageSize] = useCreateRuntimeState<{
@@ -2828,54 +2805,6 @@ export function CreatePageClient({
       </span>
     </label>
   );
-
-  const renderGptModelSelect = (params: {
-    id: string;
-    value: ChatModel | "default";
-    onChange: (value: ChatModel | "default") => void;
-    disabled?: boolean;
-    compact?: boolean;
-    allowDefault?: boolean;
-  }) => {
-    const control = (
-      <Select
-        value={params.value}
-        onValueChange={(value) =>
-          params.onChange(value as ChatModel | "default")
-        }
-        disabled={params.disabled}
-      >
-        <SelectTrigger
-          id={params.id}
-          className={params.compact ? "h-8 w-[136px]" : "w-full"}
-          title={gptModelHelpText}
-        >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {params.allowDefault && (
-            <SelectItem value="default">
-              {copy("Backend default", "后端默认")}
-            </SelectItem>
-          )}
-          {CHAT_MODEL_OPTIONS.map((option) => (
-            <SelectItem
-              key={option.value}
-              value={option.value}
-              disabled={option.ultraOnly && !gpt55ChatAllowed}
-            >
-              {option.label}
-              {option.ultraOnly && !gpt55ChatAllowed
-                ? ` · ${copy("Ultra", "Ultra")}`
-                : ""}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    );
-
-    return control;
-  };
 
   const renderImageModelSelect = (params: {
     id: string;
@@ -4133,16 +4062,7 @@ export function CreatePageClient({
     if (!gpt55ChatAllowed && chatModel === GPT55_CHAT_MODEL) {
       setChatModel(GPT54_CHAT_MODEL);
     }
-    if (!gpt55ChatAllowed && imageGptModel === GPT55_CHAT_MODEL) {
-      setImageGptModel("default");
-    }
-  }, [
-    chatModel,
-    gpt55ChatAllowed,
-    imageGptModel,
-    setChatModel,
-    setImageGptModel,
-  ]);
+  }, [chatModel, gpt55ChatAllowed, setChatModel]);
 
   useEffect(() => {
     if (!firstPreviewUrl) {
@@ -5267,15 +5187,6 @@ export function CreatePageClient({
             disabled: isChatGenerating,
             compact: true,
           })}
-          {renderGptModelSelect({
-            id: "chat-gpt-model",
-            value: chatModel,
-            onChange: (value) => {
-              if (value !== "default") setChatModel(value);
-            },
-            disabled: isChatGenerating,
-            compact: true,
-          })}
           {showImageModelControls && (
             <div
               className={chatMixWebFirstActive ? "opacity-55" : ""}
@@ -6254,7 +6165,6 @@ export function CreatePageClient({
         ...(showImageModelControls && textModel !== "default"
           ? { model: textModel }
           : {}),
-        ...(imageGptModel !== "default" ? { gptModel: imageGptModel } : {}),
         ...(showThinkingControls ? { thinking: imageThinking } : {}),
         ...(promptOptimizationAllowed ? { promptOptimization } : {}),
         ...(textMixWebFirstActive ? { mix_web_first: true } : {}),
@@ -6441,9 +6351,6 @@ export function CreatePageClient({
     }
     if (showImageModelControls && editModel !== "default") {
       formData.append("model", editModel);
-    }
-    if (imageGptModel !== "default") {
-      formData.append("gptModel", imageGptModel);
     }
     if (showThinkingControls) {
       formData.append("thinking", imageThinking);
@@ -7021,33 +6928,6 @@ export function CreatePageClient({
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
-              )}
-
-              {!isFireflyModel(textModel) && (
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor={`text-gpt-model-${mode}`}
-                    className="text-xs font-medium text-muted-foreground"
-                  >
-                    {labelWithHelp(
-                      copy("GPT model", "GPT 模型"),
-                      gptModelHelpText
-                    )}
-                  </label>
-                  {renderGptModelSelect({
-                    id: `text-gpt-model-${mode}`,
-                    value: imageGptModel,
-                    onChange: setImageGptModel,
-                    disabled: modeBusy,
-                    allowDefault: true,
-                  })}
-                  <p className="text-[11px] leading-snug text-muted-foreground">
-                    {copy(
-                      "Used by platform Web/Codex backend pools; external image APIs keep using the image model.",
-                      "仅用于平台 Web/Codex 后端池；默认会沿用后端配置，外接 image API 仍按图片模型请求。"
-                    )}
-                  </p>
                 </div>
               )}
 
@@ -7956,33 +7836,6 @@ export function CreatePageClient({
                   </div>
                 )}
 
-                {!isFireflyModel(editModel) && (
-                  <div className="space-y-2">
-                    <label
-                      htmlFor="edit-gpt-model"
-                      className="text-sm font-medium text-foreground"
-                    >
-                      {labelWithHelp(
-                        copy("GPT model", "GPT 模型"),
-                        gptModelHelpText
-                      )}
-                    </label>
-                    {renderGptModelSelect({
-                      id: "edit-gpt-model",
-                      value: imageGptModel,
-                      onChange: setImageGptModel,
-                      disabled: isEditing,
-                      allowDefault: true,
-                    })}
-                    <p className="text-xs leading-snug text-muted-foreground">
-                      {copy(
-                        "Used by platform Web/Codex backend pools; external image APIs keep using the image model.",
-                        "仅用于平台 Web/Codex 后端池；默认会沿用后端配置，外接 image API 仍按图片模型请求。"
-                      )}
-                    </p>
-                  </div>
-                )}
-
                 {showThinkingControls && !isFireflyModel(editModel) && (
                   <div className="space-y-2">
                     <label
@@ -8830,14 +8683,6 @@ export function CreatePageClient({
                 {renderBackendGroupSelect({
                   id: "batch-backend-group",
                   disabled: isBatchActive,
-                  compact: true,
-                })}
-                {renderGptModelSelect({
-                  id: "batch-gpt-model",
-                  value: chatModel,
-                  onChange: (value) => {
-                    if (value !== "default") setChatModel(value);
-                  },
                   compact: true,
                 })}
                 {renderThinkingSelect({
