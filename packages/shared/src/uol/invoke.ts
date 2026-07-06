@@ -22,11 +22,13 @@
  */
 import { nanoid } from "nanoid";
 import { logError } from "../logger";
+import type { PlanCapabilityKey } from "../subscription/services/plan-capabilities";
+import { isSubscriptionPlan } from "../config/subscription-plan";
 import { getOperation, isOperationBound } from "./registry";
 import { assertAccess } from "./access";
 import { OperationError } from "./errors";
 import type { Principal } from "./principal";
-import type { OperationContext } from "./types";
+import type { CapabilityRequirement, OperationContext } from "./types";
 
 /** invokeOperation 的可选配置 */
 export interface InvokeOptions {
@@ -34,6 +36,100 @@ export interface InvokeOptions {
   requestId?: string;
   /** 可选回调集合（未来扩展 SSE / webhook 通知） */
   callbacks?: Record<string, unknown>;
+}
+
+/**
+ * 解析 operation 的静态和动态能力位声明。
+ *
+ * @param requirements - operation.capabilities 声明。
+ * @param input - 已通过 Zod 校验的输入。
+ * @returns 去重后的能力位列表。
+ * @sideEffects 无。
+ */
+function resolveCapabilityRequirements(
+  requirements: CapabilityRequirement[] | undefined,
+  input: unknown,
+) {
+  const capabilities = new Set<string>();
+  for (const requirement of requirements ?? []) {
+    if ("capability" in requirement) {
+      capabilities.add(requirement.capability);
+      continue;
+    }
+    for (const capability of requirement.derive(input)) {
+      capabilities.add(capability);
+    }
+  }
+  return [...capabilities];
+}
+
+/**
+ * 使用运行时能力键列表收窄 capability 类型。
+ *
+ * @param capability - operation 声明或 derive 推导出的能力位。
+ * @param keys - plan-capabilities.ts 导出的能力位列表。
+ * @returns capability 属于能力矩阵时返回 true。
+ * @sideEffects 无。
+ */
+function isKnownPlanCapability(
+  capability: string,
+  keys: readonly string[],
+): capability is PlanCapabilityKey {
+  return keys.includes(capability);
+}
+
+/**
+ * 在 UOL 网关单点校验套餐能力位。
+ *
+ * @param requirements - operation.capabilities 声明。
+ * @param input - 已通过 Zod 校验的输入。
+ * @param principal - 调用者身份。
+ * @throws OperationError 能力位未知、套餐未知或套餐不满足能力要求时。
+ */
+async function assertCapabilities(
+  requirements: CapabilityRequirement[] | undefined,
+  input: unknown,
+  principal: Principal,
+) {
+  const capabilities = resolveCapabilityRequirements(requirements, input);
+  if (capabilities.length === 0) return;
+  if (principal.type === "system") return;
+
+  // 当前 Principal 只有 apiKey 携带 plan。用户会话路径仍由既有 Server Action
+  // 能力校验保护；待 Principal 扩展 plan 后再统一纳入这里。
+  if (principal.type !== "apiKey") return;
+
+  if (!isSubscriptionPlan(principal.plan)) {
+    throw new OperationError(
+      "capability_required",
+      "A valid subscription plan is required for this operation",
+      { plan: principal.plan },
+    );
+  }
+
+  const { canUsePlanCapability, PLAN_CAPABILITY_KEYS } = await import(
+    "../subscription/services/plan-capabilities"
+  );
+  const planCapabilityKeys = PLAN_CAPABILITY_KEYS as readonly string[];
+
+  for (const capability of capabilities) {
+    if (!isKnownPlanCapability(capability, planCapabilityKeys)) {
+      throw new OperationError(
+        "capability_required",
+        `Unknown plan capability: ${capability}`,
+        { capability },
+      );
+    }
+
+    const allowed = await canUsePlanCapability(principal.plan, capability);
+    if (!allowed) {
+      throw new OperationError(
+        "capability_required",
+        `Capability required: ${capability}`,
+        { capability, plan: principal.plan },
+      );
+    }
+  }
 }
 
 /**
@@ -81,7 +177,10 @@ export async function invokeOperation<TOutput = unknown>(
   }
   const input = parseResult.data;
 
-  // 3. 幂等键结构校验（仅校验 keyField 非空，实际去重在 execute/DB 层）
+  // 3. 套餐能力位校验（使用 plan-capabilities.ts 作为唯一能力来源）
+  await assertCapabilities(def.capabilities, input, principal);
+
+  // 4. 幂等键结构校验（仅校验 keyField 非空，实际去重在 execute/DB 层）
   if (def.idempotency.kind === "required") {
     const keyValue = (input as Record<string, unknown>)[
       def.idempotency.keyField
@@ -97,7 +196,7 @@ export async function invokeOperation<TOutput = unknown>(
     }
   }
 
-  // 4. 构建执行上下文
+  // 5. 构建执行上下文
   const ctx: OperationContext = {
     requestId: opts?.requestId ?? nanoid(),
     callbacks: opts?.callbacks,
@@ -120,7 +219,7 @@ export async function invokeOperation<TOutput = unknown>(
     },
   };
 
-  // 5. 检查操作是否已绑定真实实现（非 stub）
+  // 6. 检查操作是否已绑定真实实现（非 stub）
   if (!isOperationBound(name)) {
     throw new OperationError(
       "not_implemented",
@@ -130,7 +229,7 @@ export async function invokeOperation<TOutput = unknown>(
     );
   }
 
-  // 6. 执行业务逻辑
+  // 7. 执行业务逻辑
   try {
     const output = await def.execute(input, principal, ctx);
     return output as TOutput;

@@ -1,5 +1,18 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { z } from "zod";
+
+const capabilityMock = vi.hoisted(() => ({
+  canUsePlanCapability: vi.fn(),
+}));
+
+vi.mock("../../subscription/services/plan-capabilities", () => ({
+  PLAN_CAPABILITY_KEYS: [
+    "imageGeneration.batch",
+    "externalApi.responses",
+    "externalApi.agent",
+  ],
+  canUsePlanCapability: capabilityMock.canUsePlanCapability,
+}));
 
 import { invokeOperation } from "../invoke";
 import { defineOperation, clearRegistry } from "../registry";
@@ -16,6 +29,14 @@ const userPrincipal: Principal = {
 const systemPrincipal: Principal = {
   type: "system",
   reason: "test",
+};
+
+const apiKeyPrincipal: Principal = {
+  type: "apiKey",
+  userId: "u1",
+  apiKeyId: "key-1",
+  plan: "free",
+  relayOnly: false,
 };
 
 /** 注册一个简单的加法操作用于测试 */
@@ -74,6 +95,8 @@ function registerIdempotentOp() {
 describe("UOL Invoke Gateway", () => {
   beforeEach(() => {
     clearRegistry();
+    capabilityMock.canUsePlanCapability.mockReset();
+    capabilityMock.canUsePlanCapability.mockResolvedValue(true);
   });
 
   describe("operation lookup", () => {
@@ -192,6 +215,150 @@ describe("UOL Invoke Gateway", () => {
         expect(e).toBeInstanceOf(OperationError);
         expect((e as OperationError).code).toBe("forbidden");
       }
+    });
+  });
+
+  describe("capability enforcement", () => {
+    it("rejects apiKey principals when plan capability is missing", async () => {
+      const execute = vi.fn(async () => ({ ok: true }));
+      capabilityMock.canUsePlanCapability.mockResolvedValue(false);
+
+      defineOperation({
+        name: "image.batch",
+        domain: "image-generation",
+        title: "Batch Image",
+        description: "Requires batch capability",
+        input: z.object({ count: z.number().int().positive() }),
+        output: z.object({ ok: z.boolean() }),
+        access: { kind: "protected" },
+        capabilities: [{ capability: "imageGeneration.batch" }],
+        readOnly: false,
+        destructive: false,
+        idempotency: { kind: "none" },
+        sideEffects: [],
+        execute,
+      });
+
+      await expect(
+        invokeOperation("image.batch", { count: 2 }, apiKeyPrincipal),
+      ).rejects.toMatchObject({
+        code: "capability_required",
+      });
+      expect(execute).not.toHaveBeenCalled();
+      expect(capabilityMock.canUsePlanCapability).toHaveBeenCalledWith(
+        "free",
+        "imageGeneration.batch",
+      );
+    });
+
+    it("allows apiKey principals when plan capability is present", async () => {
+      defineOperation({
+        name: "external.responses",
+        domain: "external-api",
+        title: "Responses",
+        description: "Requires responses capability",
+        input: z.object({}),
+        output: z.object({ ok: z.boolean() }),
+        access: { kind: "apiKey" },
+        capabilities: [{ capability: "externalApi.responses" }],
+        readOnly: false,
+        destructive: false,
+        idempotency: { kind: "none" },
+        sideEffects: [],
+        execute: async () => ({ ok: true }),
+      });
+
+      await expect(
+        invokeOperation("external.responses", {}, apiKeyPrincipal),
+      ).resolves.toEqual({ ok: true });
+    });
+
+    it("checks derived capabilities after input validation", async () => {
+      defineOperation({
+        name: "image.dynamic",
+        domain: "image-generation",
+        title: "Dynamic Image",
+        description: "Requires batch only for multi-image requests",
+        input: z.object({ count: z.number().int().positive() }),
+        output: z.object({ ok: z.boolean() }),
+        access: { kind: "protected" },
+        capabilities: [
+          {
+            derive: (input: unknown) => {
+              const parsed = input as { count: number };
+              return parsed.count > 1 ? ["imageGeneration.batch"] : [];
+            },
+          },
+        ],
+        readOnly: false,
+        destructive: false,
+        idempotency: { kind: "none" },
+        sideEffects: [],
+        execute: async () => ({ ok: true }),
+      });
+
+      await expect(
+        invokeOperation("image.dynamic", { count: 1 }, apiKeyPrincipal),
+      ).resolves.toEqual({ ok: true });
+      expect(capabilityMock.canUsePlanCapability).not.toHaveBeenCalled();
+
+      await expect(
+        invokeOperation("image.dynamic", { count: 2 }, apiKeyPrincipal),
+      ).resolves.toEqual({ ok: true });
+      expect(capabilityMock.canUsePlanCapability).toHaveBeenCalledWith(
+        "free",
+        "imageGeneration.batch",
+      );
+    });
+
+    it("rejects unknown capability names before execute", async () => {
+      const execute = vi.fn(async () => ({ ok: true }));
+
+      defineOperation({
+        name: "cap.unknown",
+        domain: "external-api",
+        title: "Unknown Capability",
+        description: "Declares an unknown capability",
+        input: z.object({}),
+        output: z.object({ ok: z.boolean() }),
+        access: { kind: "apiKey" },
+        capabilities: [{ capability: "pro" }],
+        readOnly: false,
+        destructive: false,
+        idempotency: { kind: "none" },
+        sideEffects: [],
+        execute,
+      });
+
+      await expect(
+        invokeOperation("cap.unknown", {}, apiKeyPrincipal),
+      ).rejects.toMatchObject({
+        code: "capability_required",
+      });
+      expect(execute).not.toHaveBeenCalled();
+    });
+
+    it("bypasses capability checks for system principals", async () => {
+      defineOperation({
+        name: "system.cap",
+        domain: "system-settings",
+        title: "System Capability",
+        description: "System bypasses user plan capability checks",
+        input: z.object({}),
+        output: z.object({ ok: z.boolean() }),
+        access: { kind: "system" },
+        capabilities: [{ capability: "imageGeneration.batch" }],
+        readOnly: false,
+        destructive: false,
+        idempotency: { kind: "none" },
+        sideEffects: [],
+        execute: async () => ({ ok: true }),
+      });
+
+      await expect(
+        invokeOperation("system.cap", {}, systemPrincipal),
+      ).resolves.toEqual({ ok: true });
+      expect(capabilityMock.canUsePlanCapability).not.toHaveBeenCalled();
     });
   });
 
