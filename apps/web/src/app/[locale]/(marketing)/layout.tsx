@@ -1,8 +1,7 @@
-// 注意:不要在本布局引入 fumadocs-ui/style.css。它自带一套 @layer utilities(含
-// .hidden{display:none}),作为第二个样式表加载时会按层叠顺序压过本 app 的 .md:flex/
-// .md:inline-flex,导致整个营销组(含首页)Header 的 `hidden md:flex` 导航与按钮在所有
-// 宽度被永久 display:none。fumadocs CSS 只有 blog/[slug]、legal/[slug] 的 .prose 需要,
-// 故下沉到这两个页面各自引入,避免污染首页等无关页面。
+// 营销布局:组合全站 Header/Footer 与营销内容区。
+// 不要在本布局或营销子页再次引入 fumadocs-ui/style.css。它会生成第二套
+// Tailwind utilities;作为后加载样式表时会压过 md:flex/md:grid 等响应式类。
+// Fumadocs 样式已在根布局先于应用样式加载一次。
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
 import { getRuntimeOperationFeatureFlags } from "@repo/shared/system-settings";
 import { Footer, Header } from "@/features/marketing/components";

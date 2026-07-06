@@ -1,3 +1,8 @@
+// 全站根布局:负责加载全局样式、品牌 metadata 与 html/body 外壳。
+// Fumadocs 会生成第二套 Tailwind utilities。必须先于应用样式加载,否则从
+// 文档页客户端跳转到控制台/定价页后,后加载的 .hidden 会压过 md:flex 等响应式类。
+import "fumadocs-ui/style.css";
+
 import { siteConfig } from "@repo/shared/config";
 
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";

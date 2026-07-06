@@ -1,6 +1,6 @@
-// fumadocs CSS 仅法律文档正文的 .prose 排版需要,就近在本页引入(不要放进营销布局,
-// 否则它会污染首页等所有营销页、压垮 Header 响应式导航)。
-import "fumadocs-ui/style.css";
+// 法律文档详情页:读取本地 MDX 法律条款并渲染正文与页面 metadata。
+// Fumadocs 样式由根布局先于应用样式加载;本页不要重复引入,避免客户端跳转后
+// 后加载的 Tailwind utilities 覆盖全站响应式类。
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
