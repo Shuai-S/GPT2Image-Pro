@@ -2011,10 +2011,28 @@ export function CreatePageClient({
     (en: string, zh: string) => (isZh ? zh : en),
     [isZh]
   );
-  const selectedBackendGroup =
+  // 请求级生图分组覆盖:"default" 表示跟随设置页偏好。切换仅对本页后续请求生效
+  // (不写偏好表,可另点「设为默认」保存);服务端对显式分组做 fail-closed 校验。
+  const [requestGroupChoice, setRequestGroupChoice] = useCreateRuntimeState(
+    "requestGroupChoice",
+    "default"
+  );
+  const preferenceBackendGroup =
     backendGroups.find((group) => group.id === selectedBackendGroupId) ||
     backendGroups.find((group) => group.isDefault) ||
     null;
+  const selectedBackendGroup =
+    requestGroupChoice === "default"
+      ? preferenceBackendGroup
+      : (backendGroups.find((group) => group.id === requestGroupChoice) ??
+        preferenceBackendGroup);
+  // 仅当覆盖选择指向一个仍可选的分组时才随请求发送 groupId;失效选项静默回落偏好,
+  // 避免把已下线分组发给服务端触发误报错。
+  const requestGroupId =
+    requestGroupChoice !== "default" &&
+    backendGroups.some((group) => group.id === requestGroupChoice)
+      ? requestGroupChoice
+      : undefined;
   const activeBillingMultiplier = Math.max(
     0.01,
     selectedBackendGroup?.billingMultiplier || 1
@@ -3529,6 +3547,80 @@ export function CreatePageClient({
     );
   };
 
+  // 后端分组选择器:默认跟随设置页偏好,切换仅影响本页后续请求(requestGroupId 随请求
+  // 发送,服务端 fail-closed 校验)。展示各分组计费倍率,选中非 1 倍率分组时提示价差。
+  // compact 形态用于 chat/瀑布流工具条。
+  const renderBackendGroupSelect = (params: {
+    id: string;
+    disabled?: boolean;
+    compact?: boolean;
+  }) => {
+    if (backendGroups.length < 2) return null;
+    const groupItemLabel = (group: BackendGroupOption) =>
+      `${group.name}${group.isDefault ? copy(" (default)", "（默认）") : ""} · x${
+        Number(group.billingMultiplier.toFixed(4)) || 1
+      }`;
+    const helpText = copy(
+      "Overrides the backend group for requests from this page only. Billing follows the selected group's multiplier. Use settings to change the default.",
+      "仅覆盖本页请求使用的后端分组,计费按所选分组倍率结算;默认分组请在设置页修改。"
+    );
+    const select = (
+      <Select
+        value={requestGroupChoice}
+        onValueChange={setRequestGroupChoice}
+        disabled={params.disabled}
+      >
+        <SelectTrigger
+          id={params.id}
+          className={params.compact ? "h-8 w-auto gap-1" : "w-full"}
+          title={helpText}
+        >
+          {params.compact && (
+            <span className="text-xs text-muted-foreground">
+              {copy("Group", "分组")}
+            </span>
+          )}
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="default">
+            {preferenceBackendGroup
+              ? copy(
+                  `Preferred · ${groupItemLabel(preferenceBackendGroup)}`,
+                  `跟随偏好 · ${groupItemLabel(preferenceBackendGroup)}`
+                )
+              : copy("Preferred group", "跟随偏好分组")}
+          </SelectItem>
+          {backendGroups.map((group) => (
+            <SelectItem key={group.id} value={group.id}>
+              {groupItemLabel(group)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    );
+    if (params.compact) return select;
+    return (
+      <div className="space-y-1.5">
+        <label
+          htmlFor={params.id}
+          className="text-xs font-medium text-muted-foreground"
+        >
+          {labelWithHelp(copy("Backend group", "后端分组"), helpText)}
+        </label>
+        {select}
+        {activeBillingMultiplier !== 1 && (
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            {copy(
+              `Credits are billed at x${activeBillingMultiplier} in this group.`,
+              `当前分组按 x${activeBillingMultiplier} 倍率扣费。`
+            )}
+          </p>
+        )}
+      </div>
+    );
+  };
+
   // 高清修复开关:总是可见。开启用 SwinIR 复原(文字/结构最佳,较慢),关闭用 general-x4v3(快)。
   // 仅在管理端超分主开关开、且上游图较长边不足目标 2/3 触发超分时才实际生效。
   const renderHdRepairToggle = (params: { id: string; disabled?: boolean }) => (
@@ -4013,6 +4105,7 @@ export function CreatePageClient({
       const formData = new FormData();
       formData.append("prompt", prompt);
       if (generationId) formData.append("generation_id", generationId);
+      if (requestGroupId) formData.append("groupId", requestGroupId);
       formData.append(
         "history",
         JSON.stringify(toChatHistory(historyMessages))
@@ -5717,6 +5810,11 @@ export function CreatePageClient({
         )}
 
         <div className="mb-2 flex flex-wrap items-center gap-2">
+          {renderBackendGroupSelect({
+            id: "chat-backend-group",
+            disabled: isChatGenerating,
+            compact: true,
+          })}
           {renderGptModelSelect({
             id: "chat-gpt-model",
             value: chatModel,
@@ -6684,6 +6782,7 @@ export function CreatePageClient({
         size,
         stream: Boolean(params.stream),
         count: params.count || 1,
+        ...(requestGroupId ? { groupId: requestGroupId } : {}),
         ...(params.generationIds?.length === 1
           ? { generationId: params.generationIds[0] }
           : {}),
@@ -6869,6 +6968,7 @@ export function CreatePageClient({
     );
     const formData = new FormData();
     formData.append("prompt", currentEditPrompt);
+    if (requestGroupId) formData.append("groupId", requestGroupId);
     formData.append("quality", quality);
     formData.append("moderation", moderation);
     formData.append("output_format", outputFormat);
@@ -7537,6 +7637,11 @@ export function CreatePageClient({
                 />
               </div>
             </div>
+
+            {renderBackendGroupSelect({
+              id: `image-backend-group-${mode}`,
+              disabled: modeBusy,
+            })}
 
             <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
               <div className="flex items-center justify-between gap-3">
@@ -8355,6 +8460,10 @@ export function CreatePageClient({
                     )}
                   </p>
                 </div>
+                {renderBackendGroupSelect({
+                  id: "edit-backend-group",
+                  disabled: isEditing,
+                })}
                 {showImageModelControls && (
                   <div
                     className={`space-y-2 ${
@@ -9271,6 +9380,11 @@ export function CreatePageClient({
           <div className="overflow-hidden rounded-lg border border-border bg-background">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-3">
               <div className="flex flex-wrap items-center gap-2">
+                {renderBackendGroupSelect({
+                  id: "batch-backend-group",
+                  disabled: isBatchActive,
+                  compact: true,
+                })}
                 {renderGptModelSelect({
                   id: "batch-gpt-model",
                   value: chatModel,
