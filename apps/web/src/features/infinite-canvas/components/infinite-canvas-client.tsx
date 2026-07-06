@@ -79,25 +79,39 @@ const DEFAULT_CANVAS_IMAGE_DIMENSIONS = { width: 1024, height: 1024 };
 const GENERATION_STATUS_POLL_INTERVAL_MS = 1500;
 const GENERATION_STATUS_TIMEOUT_MS = 180_000;
 const GENERATION_STATUS_MISSING_GRACE_MS = 15_000;
+const nullableStringSchema = z
+  .string()
+  .nullish()
+  .transform((value) => value || undefined);
+const nullableNumberSchema = z
+  .number()
+  .nullish()
+  .transform((value) => value ?? undefined);
+const generationStatusSchema = z
+  .enum(["pending", "completed", "failed"])
+  .nullish()
+  .transform((value) => value || undefined);
 const GENERATION_RESULT_SCHEMA = z.object({
-  error: z.string().optional(),
-  generationId: z.string().optional(),
-  generation_id: z.string().optional(),
-  status: z.enum(["pending", "completed", "failed"]).optional(),
-  imageUrl: z.string().optional(),
-  imageBase64: z.string().optional(),
+  error: nullableStringSchema,
+  generationId: nullableStringSchema,
+  generation_id: nullableStringSchema,
+  status: generationStatusSchema,
+  imageUrl: nullableStringSchema,
+  imageBase64: nullableStringSchema,
   imageOutputs: z
     .array(
       z.object({
-        imageUrl: z.string().optional(),
-        imageBase64: z.string().optional(),
+        imageUrl: nullableStringSchema,
+        imageBase64: nullableStringSchema,
       })
     )
+    .nullish()
+    .transform((value) => value || undefined)
     .optional(),
-  revisedPrompt: z.string().optional(),
-  model: z.string().optional(),
-  size: z.string().optional(),
-  creditsConsumed: z.number().optional(),
+  revisedPrompt: nullableStringSchema,
+  model: nullableStringSchema,
+  size: nullableStringSchema,
+  creditsConsumed: nullableNumberSchema,
 });
 
 type ActiveTool = "select" | "pan" | "connect";
@@ -1738,10 +1752,16 @@ async function parseGenerationResponse(
 ): Promise<GenerationResult> {
   const body: unknown = await response.json().catch(() => ({}));
   if (!response.ok) {
+    const record =
+      body && typeof body === "object" && !Array.isArray(body)
+        ? (body as Record<string, unknown>)
+        : {};
     const message =
-      typeof body === "object" && body && "error" in body
-        ? String(body.error)
-        : "Request failed";
+      typeof record.error === "string"
+        ? record.error
+        : typeof record.message === "string"
+          ? record.message
+          : "Request failed";
     throw new Error(message);
   }
   const parsed = GENERATION_RESULT_SCHEMA.safeParse(body);
