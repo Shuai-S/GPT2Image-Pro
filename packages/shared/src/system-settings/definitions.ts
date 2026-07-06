@@ -51,6 +51,8 @@ export type SettingKey =
   | "OPERATION_WATERFALL_ENABLED"
   | "OPERATION_VIDEO_ENABLED"
   | "OPERATION_INFINITE_CANVAS_ENABLED"
+  | "OPERATION_SYSTEM_DOCS_ENABLED"
+  | "OPERATION_EXTERNAL_API_ENABLED"
   | "MARKETING_SLA_STATUS_ENABLED"
   | "EXTERNAL_API_CORS_ENABLED"
   | "SELF_USE_MODE_ENABLED"
@@ -563,6 +565,22 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     key: "OPERATION_INFINITE_CANVAS_ENABLED",
     label: "无限画布",
     description: "控制 Dashboard 无限画布入口与页面访问。",
+    category: "operations",
+    valueType: "boolean",
+    defaultValue: true,
+  },
+  {
+    key: "OPERATION_SYSTEM_DOCS_ENABLED",
+    label: "系统文档",
+    description: "控制 Dashboard 系统文档菜单入口与页面访问。",
+    category: "operations",
+    valueType: "boolean",
+    defaultValue: true,
+  },
+  {
+    key: "OPERATION_EXTERNAL_API_ENABLED",
+    label: "外接 API",
+    description: "控制 Dashboard 外接 API 菜单入口与 API Key 管理页面访问。",
     category: "operations",
     valueType: "boolean",
     defaultValue: true,

@@ -23,6 +23,12 @@ export type ModelPricingRulesConfig = {
   rules: PublicModelPricingRule[];
 };
 
+export type ModelPricingRulesValidationIssue = {
+  index: number;
+  field: string;
+  message: string;
+};
+
 type RawModelPricingRulesInput = {
   rules: unknown[];
   explicit: boolean;
@@ -144,6 +150,87 @@ export function normalizeModelPricingRulesConfig(
 }
 
 /**
+ * 把前端编辑中的 MODEL_PRICING_RULES 草稿收窄成可渲染规则。
+ *
+ * @param value 来自系统设置表单的未知值。
+ * @returns 草稿配置；显式 rules 会保留空 id 等未完成输入，不回退示例规则。
+ */
+export function normalizeModelPricingRulesDraftConfig(
+  value: unknown
+): ModelPricingRulesConfig {
+  const source = getRawRules(value);
+  if (!source.explicit) {
+    return normalizeModelPricingRulesConfig(value);
+  }
+
+  return {
+    version: 1,
+    rules: source.rules
+      .map(normalizeRuleDraft)
+      .filter((rule): rule is PublicModelPricingRule => Boolean(rule))
+      .sort((a, b) => a.sortOrder - b.sortOrder),
+  };
+}
+
+/**
+ * 校验显式 MODEL_PRICING_RULES 配置是否可保存。
+ *
+ * @param value 来自后台表单、环境变量或导入流程的未知值。
+ * @returns 校验问题列表；空数组表示可保存，非显式配置由调用方按默认值处理。
+ */
+export function getModelPricingRulesValidationIssues(
+  value: unknown
+): ModelPricingRulesValidationIssue[] {
+  const source = getRawRules(value);
+  if (!source.explicit) return [];
+
+  const issues: ModelPricingRulesValidationIssue[] = [];
+  const seenIds = new Map<string, number>();
+
+  source.rules.forEach((rule, index) => {
+    if (!isRecord(rule)) {
+      issues.push({
+        index,
+        field: "rule",
+        message: `第 ${index + 1} 条规则必须是对象`,
+      });
+      return;
+    }
+
+    const id = stringValue(rule.id).trim();
+    if (!id) {
+      issues.push({
+        index,
+        field: "id",
+        message: `第 ${index + 1} 条规则缺少规则 ID`,
+      });
+    } else {
+      const firstIndex = seenIds.get(id);
+      if (firstIndex !== undefined) {
+        issues.push({
+          index,
+          field: "id",
+          message: `第 ${index + 1} 条规则 ID 与第 ${firstIndex + 1} 条重复`,
+        });
+      } else {
+        seenIds.set(id, index);
+      }
+    }
+
+    const scope = normalizeScope(rule.scope);
+    if (!Object.values(scope).some(Boolean)) {
+      issues.push({
+        index,
+        field: "scope",
+        message: `第 ${index + 1} 条规则至少需要一个 scope 条件`,
+      });
+    }
+  });
+
+  return issues;
+}
+
+/**
  * 从配置中取出公开且启用的规则。
  *
  * @param config 已规范化的模型定价配置。
@@ -222,6 +309,46 @@ function normalizeRule(value: unknown): PublicModelPricingRule | null {
   };
 
   return rule;
+}
+
+/**
+ * 规范化编辑草稿中的单条规则，允许暂时缺少必填字段。
+ *
+ * @param value 未知规则对象。
+ * @returns 可渲染的草稿规则；非对象时返回 null。
+ */
+function normalizeRuleDraft(value: unknown): PublicModelPricingRule | null {
+  if (!isRecord(value)) return null;
+  const id = stringValue(value.id).trim();
+  const billingMode = normalizeBillingMode(value.billingMode);
+  const minimumChargeCredits = positiveNumberValue(value.minimumChargeCredits);
+
+  return {
+    id,
+    name: stringValue(value.name).trim(),
+    description: stringValue(value.description).trim(),
+    public: booleanValue(value.public, true),
+    sortOrder: numberValue(value.sortOrder, 1000),
+    scope: normalizeScope(value.scope),
+    billingMode,
+    ...(billingMode !== "per_call"
+      ? { token: normalizeTokenConfig(value.token) }
+      : {}),
+    ...(billingMode !== "token"
+      ? { perCall: normalizePerCallConfig(value.perCall) }
+      : {}),
+    ...(isRecord(value.multipliers)
+      ? { multipliers: normalizeMultipliers(value.multipliers) }
+      : {}),
+    ...(minimumChargeCredits !== undefined ? { minimumChargeCredits } : {}),
+    ...(value.baseRoundingMode === "ceil_integer" ||
+    value.baseRoundingMode === "ceil_2dp"
+      ? { baseRoundingMode: value.baseRoundingMode }
+      : {}),
+    roundingMode:
+      value.roundingMode === "ceil_integer" ? "ceil_integer" : "ceil_2dp",
+    enabled: booleanValue(value.enabled, true),
+  };
 }
 
 /**

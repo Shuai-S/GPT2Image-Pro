@@ -99,9 +99,9 @@ import {
 } from "../resolution";
 import type { VideoPricingInfo } from "../video-operations";
 import {
+  type AspectRatioSizeDialogValue,
   ImageSizePresetButton,
   InlineImageSizeControl,
-  type AspectRatioSizeDialogValue,
 } from "./aspect-ratio-size-dialog";
 import { ImageLightbox, type LightboxGeneration } from "./image-lightbox";
 import { VideoCreatePanel } from "./video-create-panel";
@@ -7280,7 +7280,7 @@ export function CreatePageClient({
       : null;
 
     return (
-      <section className="flex min-h-[420px] flex-col justify-center overflow-hidden rounded-lg border border-border bg-background p-4 sm:min-h-[560px] xl:min-h-[620px]">
+      <section className="flex h-full min-h-[420px] flex-col justify-center overflow-hidden rounded-lg border border-border bg-background p-4 sm:min-h-[560px] xl:min-h-[620px]">
         {loading && (
           <div
             className="mx-auto flex w-full max-w-3xl items-center justify-center overflow-hidden rounded-lg border border-dashed bg-muted/30"
@@ -7426,62 +7426,64 @@ export function CreatePageClient({
             >
               <form
                 onSubmit={handleSubmit}
-                className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]"
+                className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px] xl:grid-rows-[minmax(0,1fr)_auto] xl:items-stretch"
               >
-                <div className="min-w-0 space-y-4">
+                <div className="min-w-0 xl:col-start-1 xl:row-start-1">
                   {renderVisualOutput("text-single")}
-                  <div className="relative">
-                    <Textarea
-                      value={prompt}
-                      onChange={(e) => setPrompt(e.target.value)}
-                      placeholder={copy(
-                        "Describe the image you want to create...",
-                        "描述你想创作的图片..."
-                      )}
-                      rows={5}
-                      disabled={isTextSingleGenerating}
-                      className="min-h-28 resize-none border-input bg-background pr-32 text-base sm:pr-36"
-                    />
-                    <TabsList className="absolute right-3 top-3 z-10 h-auto flex-col border border-border bg-background/95 p-1 shadow-sm backdrop-blur">
-                      <TabsTrigger value="single" className="h-8 w-24">
-                        {copy("Single prompt", "单提示词")}
-                      </TabsTrigger>
-                      <TabsTrigger value="lines" className="h-8 w-24">
-                        {copy("Line batch", "逐行批量")}
-                      </TabsTrigger>
-                    </TabsList>
-                  </div>
                 </div>
-                <aside className="space-y-4">
-                  {textSettingsPanel("single")}
-                  <Button
-                    type="submit"
-                    disabled={isTextSingleGenerating || !prompt.trim()}
-                    className="w-full"
-                  >
-                    {isTextSingleGenerating ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        {copy("Generating", "生成中")}
-                      </>
-                    ) : (
-                      <>
-                        <ImagePlus className="mr-2 h-4 w-4" />
-                        {copy("Generate", "生成")}
-                      </>
+                <div className="relative min-w-0 xl:col-start-1 xl:row-start-2">
+                  <Textarea
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    placeholder={copy(
+                      "Describe the image you want to create...",
+                      "描述你想创作的图片..."
                     )}
-                  </Button>
-                </aside>
+                    rows={5}
+                    disabled={isTextSingleGenerating}
+                    className="min-h-28 resize-none border-input bg-background pr-32 text-base sm:pr-36"
+                  />
+                  <TabsList className="absolute right-3 top-3 z-10 h-auto flex-col border border-border bg-background/95 p-1 shadow-sm backdrop-blur">
+                    <TabsTrigger value="single" className="h-8 w-24">
+                      {copy("Single prompt", "单提示词")}
+                    </TabsTrigger>
+                    <TabsTrigger value="lines" className="h-8 w-24">
+                      {copy("Line batch", "逐行批量")}
+                    </TabsTrigger>
+                  </TabsList>
+                </div>
+                <div className="xl:col-start-2 xl:row-start-1">
+                  {textSettingsPanel("single")}
+                </div>
+                <Button
+                  type="submit"
+                  disabled={isTextSingleGenerating || !prompt.trim()}
+                  className="w-full self-end xl:col-start-2 xl:row-start-2"
+                >
+                  {isTextSingleGenerating ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      {copy("Generating", "生成中")}
+                    </>
+                  ) : (
+                    <>
+                      <ImagePlus className="mr-2 h-4 w-4" />
+                      {copy("Generate", "生成")}
+                    </>
+                  )}
+                </Button>
               </form>
             </div>
 
             <div role="tabpanel" hidden={textMode !== "lines"} className="mt-0">
               <form
                 onSubmit={handleTextLineBatchSubmit}
-                className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]"
+                className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px] xl:grid-rows-[minmax(0,1fr)_auto] xl:items-stretch"
               >
-                <div className="min-w-0 space-y-4">
+                <div className="min-w-0 xl:col-start-1 xl:row-start-1">
                   {renderVisualOutput("text-lines")}
+                </div>
+                <div className="min-w-0 space-y-4 xl:col-start-1 xl:row-start-2">
                   <div className="relative">
                     <Textarea
                       value={linePrompts}
@@ -7518,28 +7520,28 @@ export function CreatePageClient({
                     </span>
                   </div>
                 </div>
-                <aside className="space-y-4">
+                <div className="xl:col-start-2 xl:row-start-1">
                   {textSettingsPanel("lines")}
-                  <Button
-                    type="submit"
-                    disabled={
-                      isTextLinesGenerating || linePromptItems.length === 0
-                    }
-                    className="w-full"
-                  >
-                    {isTextLinesGenerating ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        {copy("Generating", "生成中")}
-                      </>
-                    ) : (
-                      <>
-                        <ImagePlus className="mr-2 h-4 w-4" />
-                        {copy("Generate line batch", "生成逐行批量")}
-                      </>
-                    )}
-                  </Button>
-                </aside>
+                </div>
+                <Button
+                  type="submit"
+                  disabled={
+                    isTextLinesGenerating || linePromptItems.length === 0
+                  }
+                  className="w-full self-end xl:col-start-2 xl:row-start-2"
+                >
+                  {isTextLinesGenerating ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      {copy("Generating", "生成中")}
+                    </>
+                  ) : (
+                    <>
+                      <ImagePlus className="mr-2 h-4 w-4" />
+                      {copy("Generate line batch", "生成逐行批量")}
+                    </>
+                  )}
+                </Button>
               </form>
             </div>
           </Tabs>

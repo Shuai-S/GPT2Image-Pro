@@ -385,6 +385,34 @@ describe("setSystemSettings", () => {
     ).rejects.toThrow(/取值无效/);
   });
 
+  it("rejects model pricing rules with an unfinished empty id", async () => {
+    await expect(
+      setSystemSettings(
+        [
+          {
+            key: "MODEL_PRICING_RULES",
+            value: {
+              version: 1,
+              rules: [
+                {
+                  id: "",
+                  name: "Draft",
+                  scope: { model: "draft", modality: "text" },
+                  billingMode: "token",
+                  token: { inputCreditsPer1M: 1 },
+                  public: true,
+                  enabled: true,
+                  roundingMode: "ceil_2dp",
+                },
+              ],
+            },
+          },
+        ],
+        "admin"
+      )
+    ).rejects.toThrow(/缺少规则 ID/);
+  });
+
   it("normalizes registration email domains and rejects invalid domains", async () => {
     await setSystemSettings(
       [
@@ -653,6 +681,10 @@ describe("runtime setting getters stored/env fallback (C-L29)", () => {
       key: "OPERATION_VIDEO_ENABLED",
       value: "0",
     });
+    store.set("OPERATION_EXTERNAL_API_ENABLED", {
+      key: "OPERATION_EXTERNAL_API_ENABLED",
+      value: false,
+    });
     clearSystemSettingsCache();
 
     await expect(getRuntimeOperationFeatureFlags()).resolves.toMatchObject({
@@ -660,6 +692,8 @@ describe("runtime setting getters stored/env fallback (C-L29)", () => {
       textToImage: true,
       video: false,
       infiniteCanvas: true,
+      systemDocs: true,
+      externalApi: false,
     });
   });
 

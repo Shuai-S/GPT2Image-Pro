@@ -266,6 +266,18 @@ export function DashboardSidebar({
       if (item.href === "/dashboard/canvas" && !operationFlags.infiniteCanvas) {
         return null;
       }
+      if (
+        item.href === "/dashboard/backend-help" &&
+        !operationFlags.systemDocs
+      ) {
+        return null;
+      }
+      if (
+        item.href === "/dashboard/external-api" &&
+        !operationFlags.externalApi
+      ) {
+        return null;
+      }
 
       if (!item.children?.length) return item;
 

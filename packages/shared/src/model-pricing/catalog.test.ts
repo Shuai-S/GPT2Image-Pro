@@ -8,7 +8,9 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MODEL_PRICING_RULES,
+  getModelPricingRulesValidationIssues,
   getPublicModelPricingRules,
+  normalizeModelPricingRulesDraftConfig,
   normalizeModelPricingRulesConfig,
 } from "./catalog";
 
@@ -44,6 +46,50 @@ describe("model pricing catalog", () => {
         rules: [],
       }
     );
+  });
+
+  it("编辑草稿保留正在输入中的空规则 ID，不回退示例规则", () => {
+    const draft = normalizeModelPricingRulesDraftConfig({
+      rules: [
+        {
+          id: "",
+          name: "Custom Model",
+          scope: { model: "custom-model", modality: "text" },
+          billingMode: "token",
+          token: { inputCreditsPer1M: 1 },
+          public: true,
+          enabled: true,
+          roundingMode: "ceil_2dp",
+        },
+      ],
+    });
+
+    expect(draft.rules).toHaveLength(1);
+    expect(draft.rules[0]?.id).toBe("");
+    expect(draft.rules[0]?.name).toBe("Custom Model");
+  });
+
+  it("保存校验拒绝空规则 ID 与重复规则 ID", () => {
+    const issues = getModelPricingRulesValidationIssues({
+      rules: [
+        {
+          id: "",
+          scope: { model: "draft", modality: "text" },
+        },
+        {
+          id: "duplicated",
+          scope: { model: "a", modality: "text" },
+        },
+        {
+          id: "duplicated",
+          scope: { model: "b", modality: "text" },
+        },
+      ],
+    });
+
+    expect(issues.map((issue) => issue.field)).toEqual(["id", "id"]);
+    expect(issues[0]?.message).toContain("缺少规则 ID");
+    expect(issues[1]?.message).toContain("重复");
   });
 
   it("只公开 enabled 且 public 的规则", () => {

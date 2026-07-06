@@ -133,6 +133,8 @@ describe("system setting default initialization", () => {
     expect(initializedKeys).toContain("OPERATION_WATERFALL_ENABLED");
     expect(initializedKeys).toContain("OPERATION_VIDEO_ENABLED");
     expect(initializedKeys).toContain("OPERATION_INFINITE_CANVAS_ENABLED");
+    expect(initializedKeys).toContain("OPERATION_SYSTEM_DOCS_ENABLED");
+    expect(initializedKeys).toContain("OPERATION_EXTERNAL_API_ENABLED");
     expect(initializedKeys).toContain("SELF_USE_MODE_ENABLED");
     expect(initializedKeys).toContain("REGISTRATION_EMAIL_DOMAINS");
     expect(initializedKeys).toContain("GENERATION_IMAGE_RETENTION_HOURS");
@@ -160,6 +162,8 @@ describe("system setting default initialization", () => {
     expect(store.get("OPERATION_WATERFALL_ENABLED")?.value).toBe(true);
     expect(store.get("OPERATION_VIDEO_ENABLED")?.value).toBe(true);
     expect(store.get("OPERATION_INFINITE_CANVAS_ENABLED")?.value).toBe(true);
+    expect(store.get("OPERATION_SYSTEM_DOCS_ENABLED")?.value).toBe(true);
+    expect(store.get("OPERATION_EXTERNAL_API_ENABLED")?.value).toBe(true);
     expect(store.get("SELF_USE_MODE_ENABLED")?.value).toBe(true);
     expect(store.get("REGISTRATION_EMAIL_DOMAINS")?.value).toBe(
       formatRegistrationEmailDomains()
