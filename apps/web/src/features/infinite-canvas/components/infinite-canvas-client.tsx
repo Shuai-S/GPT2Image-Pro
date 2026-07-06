@@ -33,8 +33,8 @@ import {
 import { toast } from "sonner";
 import { z } from "zod";
 import {
-  InlineImageSizeControl,
   type AspectRatioSizeDialogValue,
+  InlineImageSizeControl,
 } from "@/features/image-generation/components/aspect-ratio-size-dialog";
 import {
   AUTO_IMAGE_SIZE,
@@ -1068,13 +1068,18 @@ function ImagePreviewDialog({
 }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-6 backdrop-blur-sm"
-      onMouseDown={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-label={preview.title}
     >
-      <div
-        className="flex h-full max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-md border border-border bg-background shadow-xl"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+      <button
+        type="button"
+        className="absolute inset-0 bg-background/80 backdrop-blur-sm"
+        aria-label={copy("Close preview", "关闭预览")}
+        onClick={onClose}
+      />
+      <div className="relative flex h-full max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-md border border-border bg-background shadow-xl">
         <div className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border px-4">
           <div className="min-w-0 text-sm font-medium">
             <span className="block truncate">{preview.title}</span>
@@ -1767,8 +1772,7 @@ async function pollGenerationResult(
   options: { waitForMissing?: boolean } = {}
 ): Promise<GenerationResult> {
   const deadline = Date.now() + GENERATION_STATUS_TIMEOUT_MS;
-  const missingGraceDeadline =
-    Date.now() + GENERATION_STATUS_MISSING_GRACE_MS;
+  const missingGraceDeadline = Date.now() + GENERATION_STATUS_MISSING_GRACE_MS;
   let lastError = initialError;
 
   while (Date.now() < deadline) {
