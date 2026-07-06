@@ -7426,9 +7426,9 @@ export function CreatePageClient({
             >
               <form
                 onSubmit={handleSubmit}
-                className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px] xl:grid-rows-[minmax(0,1fr)_auto] xl:items-stretch"
+                className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-start"
               >
-                <div className="min-w-0 xl:col-start-1 xl:row-start-1">
+                <div className="min-w-0 self-stretch xl:col-start-1 xl:row-start-1">
                   {renderVisualOutput("text-single")}
                 </div>
                 <div className="relative min-w-0 xl:col-start-1 xl:row-start-2">
@@ -7452,35 +7452,35 @@ export function CreatePageClient({
                     </TabsTrigger>
                   </TabsList>
                 </div>
-                <div className="xl:col-start-2 xl:row-start-1">
+                <aside className="space-y-4 xl:col-start-2 xl:row-start-1">
                   {textSettingsPanel("single")}
-                </div>
-                <Button
-                  type="submit"
-                  disabled={isTextSingleGenerating || !prompt.trim()}
-                  className="w-full self-end xl:col-start-2 xl:row-start-2"
-                >
-                  {isTextSingleGenerating ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      {copy("Generating", "生成中")}
-                    </>
-                  ) : (
-                    <>
-                      <ImagePlus className="mr-2 h-4 w-4" />
-                      {copy("Generate", "生成")}
-                    </>
-                  )}
-                </Button>
+                  <Button
+                    type="submit"
+                    disabled={isTextSingleGenerating || !prompt.trim()}
+                    className="w-full"
+                  >
+                    {isTextSingleGenerating ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        {copy("Generating", "生成中")}
+                      </>
+                    ) : (
+                      <>
+                        <ImagePlus className="mr-2 h-4 w-4" />
+                        {copy("Generate", "生成")}
+                      </>
+                    )}
+                  </Button>
+                </aside>
               </form>
             </div>
 
             <div role="tabpanel" hidden={textMode !== "lines"} className="mt-0">
               <form
                 onSubmit={handleTextLineBatchSubmit}
-                className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px] xl:grid-rows-[minmax(0,1fr)_auto] xl:items-stretch"
+                className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-start"
               >
-                <div className="min-w-0 xl:col-start-1 xl:row-start-1">
+                <div className="min-w-0 self-stretch xl:col-start-1 xl:row-start-1">
                   {renderVisualOutput("text-lines")}
                 </div>
                 <div className="min-w-0 space-y-4 xl:col-start-1 xl:row-start-2">
@@ -7520,28 +7520,28 @@ export function CreatePageClient({
                     </span>
                   </div>
                 </div>
-                <div className="xl:col-start-2 xl:row-start-1">
+                <aside className="space-y-4 xl:col-start-2 xl:row-start-1">
                   {textSettingsPanel("lines")}
-                </div>
-                <Button
-                  type="submit"
-                  disabled={
-                    isTextLinesGenerating || linePromptItems.length === 0
-                  }
-                  className="w-full self-end xl:col-start-2 xl:row-start-2"
-                >
-                  {isTextLinesGenerating ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      {copy("Generating", "生成中")}
-                    </>
-                  ) : (
-                    <>
-                      <ImagePlus className="mr-2 h-4 w-4" />
-                      {copy("Generate line batch", "生成逐行批量")}
-                    </>
-                  )}
-                </Button>
+                  <Button
+                    type="submit"
+                    disabled={
+                      isTextLinesGenerating || linePromptItems.length === 0
+                    }
+                    className="w-full"
+                  >
+                    {isTextLinesGenerating ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        {copy("Generating", "生成中")}
+                      </>
+                    ) : (
+                      <>
+                        <ImagePlus className="mr-2 h-4 w-4" />
+                        {copy("Generate line batch", "生成逐行批量")}
+                      </>
+                    )}
+                  </Button>
+                </aside>
               </form>
             </div>
           </Tabs>
