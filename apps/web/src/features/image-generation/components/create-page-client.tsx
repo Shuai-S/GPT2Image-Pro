@@ -2395,7 +2395,7 @@ export function CreatePageClient({
     editMixWebFirst &&
     Boolean(effectiveEditSize) &&
     isWithinForceWebPixelRange(effectiveEditSize, forceWebPixelRange);
-  // 选 Firefly 模型时,gpt/codex 专属参数(质量/审核/输出格式/思考)对 adobe 无效,统一置灰禁用。
+  // 选 Firefly 模型时,输出格式等 Codex/Responses 专属参数对 Adobe 路径无效。
   const textFireflyActive = isFireflyModel(textModel);
   const editFireflyActive = isFireflyModel(editModel);
   const chatMixWebFirstActive =
@@ -2447,22 +2447,10 @@ export function CreatePageClient({
       ) ?? null,
     [isActiveModeAllowed]
   );
-  const currentModeMixWebFirstActive =
-    activeMode === "image"
-      ? editMixWebFirstActive
-      : activeMode === "agent"
-        ? false
-        : isConversationMode(activeMode)
-          ? chatMixWebFirstActive
-          : textMixWebFirstActive;
-  const disableResponsesOnlyControls =
-    isWebOnlyBackend || currentModeMixWebFirstActive;
-  const responsesOnlyDisabledReason = currentModeMixWebFirstActive
-    ? copy(
-        "Disabled while mixed routing tries Web first. These controls apply after fallback to Codex/Responses.",
-        "混合路由优先走 Web 时置灰；这些控制仅在回退到 Codex/Responses 后生效。"
-      )
-    : undefined;
+  // 高级参数是否可配置只跟当前选中分组的后端类型绑定：
+  // web 分组不展示 Codex/Responses 专属参数；mixed/responses 分组允许用户预先配置，
+  // 即使 mixed 当前可能先尝试 Web，这些参数也会在走 Codex/Responses 车道时生效。
+  const disableResponsesOnlyControls = isWebOnlyBackend;
   const batchSingleCreditCost = applyBillingMultiplier(
     getPricedImageCreditCost(
       batchFallbackSize,
@@ -3075,8 +3063,14 @@ export function CreatePageClient({
     compact?: boolean;
   }) => {
     if (backendGroups.length < 2) return null;
+    const backendTypeLabel = (type: ImageBackendGroupBackendType) =>
+      type === "web"
+        ? "Web"
+        : type === "responses"
+          ? "Codex/Responses"
+          : copy("Mixed", "混合");
     const groupItemLabel = (group: BackendGroupOption) =>
-      `${group.name}${group.isDefault ? copy(" (default)", "（默认）") : ""} · x${
+      `${group.name}${group.isDefault ? copy(" (default)", "（默认）") : ""} · ${backendTypeLabel(group.backendType)} · x${
         Number(group.billingMultiplier.toFixed(4)) || 1
       }`;
     const helpText = copy(
@@ -5322,33 +5316,21 @@ export function CreatePageClient({
             compact: true,
           })}
           {showImageModelControls && (
-            <div
-              className={chatMixWebFirstActive ? "opacity-55" : ""}
-              title={
-                chatMixWebFirstActive ? responsesOnlyDisabledReason : undefined
-              }
-            >
+            <div>
               {renderImageModelSelect({
                 id: "chat-image-model",
                 value: chatImageModel,
                 onChange: setChatImageModel,
-                disabled: isChatGenerating || chatMixWebFirstActive,
+                disabled: isChatGenerating,
                 compact: true,
               })}
             </div>
           )}
           {!isWebOnlyBackend && (
-            <div
-              className={chatMixWebFirstActive ? "opacity-55" : ""}
-              title={
-                chatMixWebFirstActive
-                  ? responsesOnlyDisabledReason
-                  : backgroundHelpText
-              }
-            >
+            <div title={backgroundHelpText}>
               {renderBackgroundSelect({
                 id: "chat-background",
-                disabled: isChatGenerating || chatMixWebFirstActive,
+                disabled: isChatGenerating || disableResponsesOnlyControls,
                 compact: true,
               })}
             </div>
@@ -5357,7 +5339,7 @@ export function CreatePageClient({
             activeMode !== "agent" &&
             renderTransparentMatteToggle({
               id: "chat-transparent-matte",
-              disabled: isChatGenerating || chatMixWebFirstActive,
+              disabled: isChatGenerating || disableResponsesOnlyControls,
             })}
           {renderHdRepairToggle({
             id: "chat-hd-repair",
@@ -7008,17 +6990,14 @@ export function CreatePageClient({
           </div>
           <div className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+              <div className="sm:col-span-2 lg:col-span-1">
+                {renderBackendGroupSelect({
+                  id: `image-backend-group-${mode}`,
+                  disabled: modeBusy,
+                })}
+              </div>
               {showImageModelControls && (
-                <div
-                  className={`space-y-1.5 ${
-                    textMixWebFirstActive ? "opacity-55" : ""
-                  }`}
-                  title={
-                    textMixWebFirstActive
-                      ? responsesOnlyDisabledReason
-                      : undefined
-                  }
-                >
+                <div className="space-y-1.5">
                   <label
                     htmlFor={`text-model-${mode}`}
                     className="text-xs font-medium text-muted-foreground"
@@ -7031,7 +7010,7 @@ export function CreatePageClient({
                   <Select
                     value={textModel}
                     onValueChange={setTextModel}
-                    disabled={modeBusy || textMixWebFirstActive}
+                    disabled={modeBusy}
                   >
                     <SelectTrigger
                       id={`text-model-${mode}`}
@@ -7065,11 +7044,6 @@ export function CreatePageClient({
               />
             </div>
 
-            {renderBackendGroupSelect({
-              id: `image-backend-group-${mode}`,
-              disabled: modeBusy,
-            })}
-
             <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -7101,7 +7075,6 @@ export function CreatePageClient({
               promptDisabled: modeBusy,
               repairDisabled: modeBusy,
               hideResponseControls: isWebOnlyBackend,
-              responseControlsDisabledReason: responsesOnlyDisabledReason,
               qualityDisabled: modeBusy || disableResponsesOnlyControls,
               outputDisabled:
                 modeBusy || disableResponsesOnlyControls || textFireflyActive,
@@ -7717,16 +7690,7 @@ export function CreatePageClient({
                   disabled: isEditing,
                 })}
                 {showImageModelControls && (
-                  <div
-                    className={`space-y-2 ${
-                      editMixWebFirstActive ? "opacity-55" : ""
-                    }`}
-                    title={
-                      editMixWebFirstActive
-                        ? responsesOnlyDisabledReason
-                        : undefined
-                    }
-                  >
+                  <div className="space-y-2">
                     <label
                       htmlFor="edit-model"
                       className="text-sm font-medium text-foreground"
@@ -7739,9 +7703,7 @@ export function CreatePageClient({
                     <Select
                       value={editModel}
                       onValueChange={setEditModel}
-                      disabled={
-                        isEditing || editMixWebFirstActive || editFireflyActive
-                      }
+                      disabled={isEditing}
                     >
                       <SelectTrigger
                         id="edit-model"
@@ -7766,13 +7728,12 @@ export function CreatePageClient({
                   promptDisabled: isEditing,
                   repairDisabled: isEditing,
                   hideResponseControls: isWebOnlyBackend,
-                  responseControlsDisabledReason: editMixWebFirstActive
-                    ? responsesOnlyDisabledReason
-                    : undefined,
-                  qualityDisabled: isEditing || editMixWebFirstActive,
+                  qualityDisabled: isEditing || disableResponsesOnlyControls,
                   outputDisabled:
-                    isEditing || editMixWebFirstActive || editFireflyActive,
-                  backgroundDisabled: isEditing || editMixWebFirstActive,
+                    isEditing ||
+                    disableResponsesOnlyControls ||
+                    editFireflyActive,
+                  backgroundDisabled: isEditing || disableResponsesOnlyControls,
                 })}
 
                 <div className="space-y-2">
@@ -8457,17 +8418,10 @@ export function CreatePageClient({
                       : size}
                 </Button>
                 {!isWebOnlyBackend && (
-                  <div
-                    className={chatMixWebFirstActive ? "opacity-55" : ""}
-                    title={
-                      chatMixWebFirstActive
-                        ? responsesOnlyDisabledReason
-                        : backgroundHelpText
-                    }
-                  >
+                  <div title={backgroundHelpText}>
                     {renderBackgroundSelect({
                       id: "batch-background",
-                      disabled: isBatchActive || chatMixWebFirstActive,
+                      disabled: isBatchActive || disableResponsesOnlyControls,
                       compact: true,
                     })}
                   </div>
@@ -8475,7 +8429,7 @@ export function CreatePageClient({
                 {!isWebOnlyBackend &&
                   renderTransparentMatteToggle({
                     id: "batch-transparent-matte",
-                    disabled: isBatchActive || chatMixWebFirstActive,
+                    disabled: isBatchActive || disableResponsesOnlyControls,
                   })}
                 {renderHdRepairToggle({
                   id: "batch-hd-repair",
