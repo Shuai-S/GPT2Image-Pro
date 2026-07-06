@@ -5,8 +5,8 @@ import { formatDateInTimeZone } from "@repo/shared/time-zone";
 import { Badge } from "@repo/ui/components/badge";
 import { Card } from "@repo/ui/components/card";
 import { Check, Clock, ImageIcon } from "lucide-react";
-import Image from "next/image";
 import { useLocale } from "next-intl";
+import { CachedImage as Image } from "@/features/shared/components/cached-image";
 
 export interface ImageCardProps {
   id: string;

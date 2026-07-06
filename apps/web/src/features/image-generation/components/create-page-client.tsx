@@ -55,7 +55,6 @@ import {
   X,
 } from "lucide-react";
 import { nanoid } from "nanoid";
-import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useLocale } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -77,6 +76,7 @@ import {
   normalizeReferenceFetchUrl,
   type ReferenceHandoffMode,
 } from "@/features/image-generation/reference-handoff";
+import { CachedImage as Image } from "@/features/shared/components/cached-image";
 import {
   type AgentTaskCard,
   agentEventToImageUrl,
@@ -90,7 +90,6 @@ import {
   DEFAULT_IMAGE_MODEL,
   DEFAULT_IMAGE_SIZE,
   getImageCreditCost,
-  IMAGE_1K_BASE_EDGE,
   IMAGE_DIMENSION_STEP,
   type ImageBaseCreditPricing,
   type ImageQualityLevel,
@@ -418,8 +417,18 @@ function formatPixelRange(range?: ForceWebPixelRange | null) {
 
 function getNearestSupportedSizeForRatio(
   base: ImageSizeBase,
-  ratio: { width: number; height: number }
+  ratio: { value?: ImageAspectRatio; width: number; height: number }
 ) {
+  const matrixSize = ratio.value
+    ? IMAGE_SIZE_MATRIX[ratio.value]?.[base]
+    : null;
+  if (matrixSize) {
+    return normalizeValidImageSize({
+      width: matrixSize[0],
+      height: matrixSize[1],
+    });
+  }
+
   const fallbackBaseSpec = IMAGE_SIZE_BASES[0];
   if (!fallbackBaseSpec) {
     throw new Error("Image size bases are not configured");
@@ -568,12 +577,14 @@ type ImageSizeMode = "auto" | "ratio" | "custom";
 type ImageSizeBase = "1k" | "2k" | "4k";
 type ImageAspectRatio =
   | "1:1"
-  | "3:2"
-  | "2:3"
-  | "16:9"
-  | "9:16"
   | "4:3"
   | "3:4"
+  | "3:2"
+  | "2:3"
+  | "4:5"
+  | "5:4"
+  | "16:9"
+  | "9:16"
   | "21:9";
 
 type ActiveMode = "text" | "image" | "chat" | "agent" | "waterfall" | "video";
@@ -613,6 +624,10 @@ function SizeRatioIcon({
       style={{ width, height }}
     />
   );
+}
+
+function formatImageSizeForDisplay(size: string) {
+  return size === AUTO_IMAGE_SIZE ? "auto" : size.replace("x", "×");
 }
 
 function ImageSizeDialog({
@@ -671,6 +686,9 @@ function ImageSizeDialog({
   const selectedRatio =
     IMAGE_ASPECT_RATIOS.find((item) => item.value === ratio) || fallbackRatio;
   const customRatioValue = parseAspectRatioInput(customRatio);
+  const customRatioSize = customRatioValue
+    ? getNearestSupportedSizeForRatio(base, customRatioValue)
+    : null;
   const activeRatio =
     mode === "ratio" && customRatioOpen && customRatioValue
       ? customRatioValue
@@ -800,34 +818,57 @@ function ImageSizeDialog({
                   <h3 className="text-sm font-medium text-muted-foreground">
                     {copy("Aspect ratio", "图像比例")}
                   </h3>
-                  <div className="grid grid-cols-4 gap-2">
-                    {IMAGE_ASPECT_RATIOS.map((item) => (
-                      <button
-                        key={item.value}
-                        type="button"
-                        onClick={() => {
-                          setRatio(item.value);
-                          setCustomRatio(item.value);
-                          setCustomRatioOpen(false);
-                        }}
-                        className={`flex h-16 flex-col items-center justify-center gap-1 rounded-xl border text-xs transition ${
-                          ratio === item.value
-                            ? "border-primary bg-primary/5 text-primary"
-                            : "border-border bg-background text-muted-foreground hover:text-foreground"
-                        }`}
-                      >
-                        <SizeRatioIcon ratio={item} />
-                        <span>{item.value}</span>
-                      </button>
-                    ))}
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {IMAGE_ASPECT_RATIOS.map((item) => {
+                      const itemSize = getNearestSupportedSizeForRatio(
+                        base,
+                        item
+                      );
+                      const selected = !customRatioOpen && ratio === item.value;
+                      return (
+                        <button
+                          key={item.value}
+                          type="button"
+                          onClick={() => {
+                            setRatio(item.value);
+                            setCustomRatio(item.value);
+                            setCustomRatioOpen(false);
+                          }}
+                          className={`flex min-h-[4.75rem] items-center gap-3 rounded-xl border px-3 py-2 text-left transition ${
+                            selected
+                              ? "border-primary bg-primary/5 text-primary"
+                              : "border-border bg-background text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          <SizeRatioIcon ratio={item} />
+                          <span className="min-w-0">
+                            <span className="block text-sm font-semibold leading-5">
+                              {item.value} {copy(item.labelEn, item.labelZh)}
+                            </span>
+                            <span className="block break-words text-[11px] leading-4 text-muted-foreground">
+                              {formatImageSizeForDisplay(itemSize)}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                   <Button
                     type="button"
                     variant="outline"
                     onClick={() => setCustomRatioOpen(true)}
-                    className="w-full border-primary text-primary hover:bg-primary/5 hover:text-primary"
+                    className={`h-auto min-h-11 w-full justify-between rounded-xl px-3 py-2 ${
+                      customRatioOpen
+                        ? "border-primary text-primary hover:bg-primary/5 hover:text-primary"
+                        : ""
+                    }`}
                   >
-                    {copy("Custom ratio", "自定义比例")}
+                    <span>{copy("Custom ratio", "自定义比例")}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {customRatioSize
+                        ? formatImageSizeForDisplay(customRatioSize)
+                        : customRatio}
+                    </span>
                   </Button>
                   {customRatioOpen && (
                     <div className="space-y-2 rounded-xl border border-border bg-background p-3">
@@ -912,9 +953,7 @@ function ImageSizeDialog({
               {copy("Will use", "将使用")}
             </p>
             <p className="mt-2 text-lg font-semibold text-foreground">
-              {previewSize === AUTO_IMAGE_SIZE
-                ? "auto"
-                : previewSize.replace("x", "×")}
+              {formatImageSizeForDisplay(previewSize)}
             </p>
             {!previewCheck.valid && (
               <p className="mt-2 text-xs text-destructive">
@@ -1074,23 +1113,81 @@ const IMAGE_SIZE_BASES: Array<{
   label: string;
   edge: number;
 }> = [
-  { value: "1k", label: "1K", edge: IMAGE_1K_BASE_EDGE },
+  { value: "1k", label: "1K", edge: 1024 },
   { value: "2k", label: "2K", edge: 2048 },
   { value: "4k", label: "4K", edge: 3840 },
 ];
+
+const IMAGE_SIZE_MATRIX = {
+  "1:1": {
+    "1k": [1024, 1024],
+    "2k": [2048, 2048],
+    "4k": [2880, 2880],
+  },
+  "2:3": {
+    "1k": [688, 1024],
+    "2k": [1360, 2048],
+    "4k": [2336, 3520],
+  },
+  "3:2": {
+    "1k": [1024, 688],
+    "2k": [2048, 1360],
+    "4k": [3520, 2336],
+  },
+  "3:4": {
+    "1k": [768, 1024],
+    "2k": [1536, 2048],
+    "4k": [2480, 3312],
+  },
+  "4:3": {
+    "1k": [1024, 768],
+    "2k": [2048, 1536],
+    "4k": [3312, 2480],
+  },
+  "4:5": {
+    "1k": [816, 1024],
+    "2k": [1632, 2048],
+    "4k": [2560, 3216],
+  },
+  "5:4": {
+    "1k": [1024, 816],
+    "2k": [2048, 1632],
+    "4k": [3216, 2560],
+  },
+  "9:16": {
+    "1k": [576, 1024],
+    "2k": [1152, 2048],
+    "4k": [2160, 3840],
+  },
+  "16:9": {
+    "1k": [1024, 576],
+    "2k": [2048, 1152],
+    "4k": [3840, 2160],
+  },
+  "21:9": {
+    "1k": [1024, 432],
+    "2k": [2048, 864],
+    "4k": [3840, 1632],
+  },
+} satisfies Record<ImageAspectRatio, Record<ImageSizeBase, [number, number]>>;
+
 const IMAGE_ASPECT_RATIOS: Array<{
   value: ImageAspectRatio;
   width: number;
   height: number;
+  labelEn: string;
+  labelZh: string;
 }> = [
-  { value: "1:1", width: 1, height: 1 },
-  { value: "3:2", width: 3, height: 2 },
-  { value: "2:3", width: 2, height: 3 },
-  { value: "16:9", width: 16, height: 9 },
-  { value: "9:16", width: 9, height: 16 },
-  { value: "4:3", width: 4, height: 3 },
-  { value: "3:4", width: 3, height: 4 },
-  { value: "21:9", width: 21, height: 9 },
+  { value: "1:1", width: 1, height: 1, labelEn: "Square", labelZh: "正方形" },
+  { value: "2:3", width: 2, height: 3, labelEn: "Portrait", labelZh: "竖版" },
+  { value: "3:2", width: 3, height: 2, labelEn: "Landscape", labelZh: "横版" },
+  { value: "3:4", width: 3, height: 4, labelEn: "Portrait", labelZh: "竖版" },
+  { value: "4:3", width: 4, height: 3, labelEn: "Landscape", labelZh: "横版" },
+  { value: "4:5", width: 4, height: 5, labelEn: "Portrait", labelZh: "竖版" },
+  { value: "5:4", width: 5, height: 4, labelEn: "Landscape", labelZh: "横版" },
+  { value: "9:16", width: 9, height: 16, labelEn: "Mobile", labelZh: "竖版" },
+  { value: "16:9", width: 16, height: 9, labelEn: "Wide", labelZh: "横版" },
+  { value: "21:9", width: 21, height: 9, labelEn: "Cinema", labelZh: "影院" },
 ];
 // 瀑布流每批并发预设(对齐原项目 TIER_PRESETS)：tier 决定每批生成张数。
 // 运行时按套餐 imageGenerationConcurrency(单用户并发上限)过滤可选项。

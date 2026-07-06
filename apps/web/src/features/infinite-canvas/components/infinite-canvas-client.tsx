@@ -20,7 +20,6 @@ import {
   Wand2,
   X,
 } from "lucide-react";
-import Image from "next/image";
 import { useLocale } from "next-intl";
 import {
   type PointerEvent as ReactPointerEvent,
@@ -55,6 +54,7 @@ import {
   serializeCanvasState,
   updateCanvasNode,
 } from "@/features/infinite-canvas/canvas-state";
+import { CachedImage as Image } from "@/features/shared/components/cached-image";
 
 /**
  * 无限画布主交互组件。

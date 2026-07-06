@@ -13,7 +13,6 @@ import {
   ImagePlus,
 } from "lucide-react";
 import dynamic from "next/dynamic";
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale } from "next-intl";
@@ -22,6 +21,7 @@ import type {
   LightboxGeneration,
   LightboxReferenceImage,
 } from "@/features/image-generation/components/image-lightbox";
+import { CachedImage as Image } from "@/features/shared/components/cached-image";
 
 // 懒加载:lightbox(大图查看模态)仅在点开某张图时才需要,改 next/dynamic 后从列表页
 // 首屏 bundle 移出,点开时再异步加载。

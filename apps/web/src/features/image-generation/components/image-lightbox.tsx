@@ -15,7 +15,6 @@ import {
   Send,
   Trash2,
 } from "lucide-react";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useLocale } from "next-intl";
 import { useAction } from "next-safe-action/hooks";
@@ -25,6 +24,7 @@ import { deleteGenerationAction } from "@/features/image-generation/actions";
 import type { GenerationCreditDetails } from "@/features/image-generation/credit-calculation-details";
 import { writePendingReferenceHandoff } from "@/features/image-generation/reference-handoff";
 import { ExportPsdDialog } from "@/features/psd-export/components/export-psd-dialog";
+import { CachedImage as Image } from "@/features/shared/components/cached-image";
 import { generateDownloadFilename } from "@/lib/download-filename";
 
 export interface LightboxReferenceImage {
