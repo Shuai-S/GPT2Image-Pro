@@ -575,6 +575,8 @@ const WATERFALL_TIER_PRESETS = [1, 5, 10, 20] as const;
 const DEFAULT_WATERFALL_TIER = 5;
 // 单批最大并发 = tier * 该倍数(再与套餐并发上限取 min 兜底)，对齐原项目 maxConcurrent = tier * 3。
 const WATERFALL_CONCURRENCY_MULTIPLIER = 3;
+// 普通创作页“张数”只暴露轻量 1-5 张滑块；更大连续抽卡走瀑布流模式。
+const TEXT_IMAGE_COUNT_SLIDER_MAX = 5;
 
 // 数字输入 + 鼠标滚轮增减的"数量/并发"控件(issue #16)。
 // max = 套餐生图并发 imageGenerationConcurrency(可达 1000+)，下拉框无法承载，故改数字输入。
@@ -626,6 +628,71 @@ function ConcurrencyNumberInput({
           )
         }
         className="w-full"
+      />
+    </div>
+  );
+}
+
+/**
+ * 渲染普通创作张数滑块。
+ *
+ * @param props.id 表单控件 id，用于 label 关联与可访问性。
+ * @param props.label 当前语言下的控件名称。
+ * @param props.value 当前张数，调用方负责持久化到运行时状态。
+ * @param props.max 当前套餐与页面规则共同允许的最大张数。
+ * @param props.disabled 生成中禁用，避免请求参数被中途改写。
+ * @param props.onChange 张数变化回调，输出已钳制到 1..max 的整数。
+ * @returns 可键盘操作的范围输入控件。
+ * @sideEffects 仅在用户拖动时触发 onChange。
+ * @failureMode max 异常时兜底为 1，避免产生服务端不接受的 count。
+ */
+function ImageCountSlider({
+  id,
+  label,
+  value,
+  max,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: number;
+  max: number;
+  disabled?: boolean;
+  onChange: (next: number) => void;
+}) {
+  const safeMax = Number.isFinite(max) ? Math.max(1, Math.floor(max)) : 1;
+  const safeValue = Math.min(safeMax, Math.max(1, Math.floor(value)));
+  const fillPercent =
+    safeMax <= 1 ? 100 : ((safeValue - 1) / (safeMax - 1)) * 100;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <label htmlFor={id} className="text-sm font-semibold text-foreground">
+          {label}
+        </label>
+        <span className="text-sm font-semibold tabular-nums text-muted-foreground">
+          {safeValue}
+        </span>
+      </div>
+      <input
+        id={id}
+        type="range"
+        min={1}
+        max={safeMax}
+        step={1}
+        value={safeValue}
+        disabled={disabled}
+        aria-valuetext={`${safeValue}`}
+        onChange={(event) => {
+          const next = Math.floor(Number(event.target.value) || 1);
+          onChange(Math.min(safeMax, Math.max(1, next)));
+        }}
+        className="h-4 w-full cursor-pointer appearance-none rounded-full bg-transparent disabled:cursor-not-allowed disabled:opacity-50 [&::-moz-range-progress]:h-1.5 [&::-moz-range-progress]:rounded-full [&::-moz-range-progress]:bg-primary [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-primary [&::-moz-range-track]:h-1.5 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-border [&::-webkit-slider-runnable-track]:h-1.5 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-transparent [&::-webkit-slider-thumb]:mt-[-5px] [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:shadow-sm"
+        style={{
+          background: `linear-gradient(to right, var(--primary) 0%, var(--primary) ${fillPercent}%, var(--border) ${fillPercent}%, var(--border) 100%)`,
+        }}
       />
     </div>
   );
@@ -1587,6 +1654,10 @@ export function CreatePageClient({
   const maxChatImages = capabilities.limits.maxChatImages;
   // 单次生成张数与服务端统一挂 imageGenerationConcurrency；maxBatchCount 是历史字段，不再拦截批量。
   const batchCountMax = getImageBatchCountLimit(capabilities.limits);
+  const textImageCountMax = Math.min(
+    batchCountMax,
+    TEXT_IMAGE_COUNT_SLIDER_MAX
+  );
   const maxImageBytes =
     uploadLimits.maxFileSizeBytes || DEFAULT_MAX_IMAGE_BYTES;
   const maxEditRequestBytes =
@@ -1843,8 +1914,8 @@ export function CreatePageClient({
   }, [resetKeys]);
 
   useEffect(() => {
-    setBatchCount((value) => Math.min(value, batchCountMax));
-    setLineBatchRepeatCount((value) => Math.min(value, batchCountMax));
+    setBatchCount((value) => Math.min(value, textImageCountMax));
+    setLineBatchRepeatCount((value) => Math.min(value, textImageCountMax));
     setEditBatchCount((value) => Math.min(value, batchCountMax));
     // 瀑布流 tier 也钳制到当前套餐允许上限(套餐切换/管理员调整并发时收紧)
     setWaterfallTier((value) =>
@@ -1856,6 +1927,7 @@ export function CreatePageClient({
     setEditBatchCount,
     setLineBatchRepeatCount,
     setWaterfallTier,
+    textImageCountMax,
     waterfallTierLimit,
   ]);
 
@@ -6876,7 +6948,7 @@ export function CreatePageClient({
       : isTextSingleGenerating;
     const countValue = isLineMode ? lineBatchRepeatCount : batchCount;
     const setCountValue = (value: number) => {
-      const normalized = Math.min(Math.max(1, value), batchCountMax);
+      const normalized = Math.min(Math.max(1, value), textImageCountMax);
       if (isLineMode) {
         setLineBatchRepeatCount(normalized);
       } else {
@@ -6999,23 +7071,18 @@ export function CreatePageClient({
                 </div>
               )}
 
-              <div className="space-y-1.5">
-                <label
-                  htmlFor={isLineMode ? "line-repeat-count" : "batch-count"}
-                  className="text-xs font-medium text-muted-foreground"
-                >
-                  {isLineMode
-                    ? copy("Repeat each line", "每行重复")
-                    : copy("Repeat prompt", "重复生成")}
-                </label>
-                <ConcurrencyNumberInput
-                  id={isLineMode ? "line-repeat-count" : "batch-count"}
-                  value={countValue}
-                  max={batchCountMax}
-                  disabled={modeBusy}
-                  onChange={setCountValue}
-                />
-              </div>
+              <ImageCountSlider
+                id={isLineMode ? "line-repeat-count" : "batch-count"}
+                label={
+                  isLineMode
+                    ? copy("Images per line", "每行张数")
+                    : copy("Images", "张数")
+                }
+                value={countValue}
+                max={textImageCountMax}
+                disabled={modeBusy}
+                onChange={setCountValue}
+              />
             </div>
 
             {renderBackendGroupSelect({
