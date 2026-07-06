@@ -7398,15 +7398,6 @@ export function CreatePageClient({
             onValueChange={(value) => setTextMode(value as TextGenerationMode)}
             className="space-y-5"
           >
-            <TabsList className="border border-border bg-muted/40">
-              <TabsTrigger value="single">
-                {copy("Single prompt", "单提示词")}
-              </TabsTrigger>
-              <TabsTrigger value="lines">
-                {copy("Line batch", "逐行批量")}
-              </TabsTrigger>
-            </TabsList>
-
             <div
               role="tabpanel"
               hidden={textMode !== "single"}
@@ -7418,17 +7409,27 @@ export function CreatePageClient({
               >
                 <div className="min-w-0 space-y-4">
                   {renderVisualOutput("text-single")}
-                  <Textarea
-                    value={prompt}
-                    onChange={(e) => setPrompt(e.target.value)}
-                    placeholder={copy(
-                      "Describe the image you want to create...",
-                      "描述你想创作的图片..."
-                    )}
-                    rows={5}
-                    disabled={isTextSingleGenerating}
-                    className="min-h-28 resize-none border-input bg-background text-base"
-                  />
+                  <div className="relative">
+                    <Textarea
+                      value={prompt}
+                      onChange={(e) => setPrompt(e.target.value)}
+                      placeholder={copy(
+                        "Describe the image you want to create...",
+                        "描述你想创作的图片..."
+                      )}
+                      rows={5}
+                      disabled={isTextSingleGenerating}
+                      className="min-h-28 resize-none border-input bg-background pr-32 text-base sm:pr-36"
+                    />
+                    <TabsList className="absolute right-3 top-3 z-10 h-auto flex-col border border-border bg-background/95 p-1 shadow-sm backdrop-blur">
+                      <TabsTrigger value="single" className="h-8 w-24">
+                        {copy("Single prompt", "单提示词")}
+                      </TabsTrigger>
+                      <TabsTrigger value="lines" className="h-8 w-24">
+                        {copy("Line batch", "逐行批量")}
+                      </TabsTrigger>
+                    </TabsList>
+                  </div>
                 </div>
                 <aside className="space-y-4">
                   {textSettingsPanel("single")}
@@ -7460,17 +7461,27 @@ export function CreatePageClient({
               >
                 <div className="min-w-0 space-y-4">
                   {renderVisualOutput("text-lines")}
-                  <Textarea
-                    value={linePrompts}
-                    onChange={(e) => setLinePrompts(e.target.value)}
-                    placeholder={copy(
-                      "One prompt per line. Each line generates one image.",
-                      "每行一个提示词，每行生成一张图片。"
-                    )}
-                    rows={8}
-                    disabled={isTextLinesGenerating}
-                    className="min-h-48 resize-none border-input bg-background text-base"
-                  />
+                  <div className="relative">
+                    <Textarea
+                      value={linePrompts}
+                      onChange={(e) => setLinePrompts(e.target.value)}
+                      placeholder={copy(
+                        "One prompt per line. Each line generates one image.",
+                        "每行一个提示词，每行生成一张图片。"
+                      )}
+                      rows={8}
+                      disabled={isTextLinesGenerating}
+                      className="min-h-48 resize-none border-input bg-background pr-32 text-base sm:pr-36"
+                    />
+                    <TabsList className="absolute right-3 top-3 z-10 h-auto flex-col border border-border bg-background/95 p-1 shadow-sm backdrop-blur">
+                      <TabsTrigger value="single" className="h-8 w-24">
+                        {copy("Single prompt", "单提示词")}
+                      </TabsTrigger>
+                      <TabsTrigger value="lines" className="h-8 w-24">
+                        {copy("Line batch", "逐行批量")}
+                      </TabsTrigger>
+                    </TabsList>
+                  </div>
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
                     <span>
                       {copy("Prompt lines", "提示词行数")}:{" "}
