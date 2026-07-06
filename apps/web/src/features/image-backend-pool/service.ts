@@ -442,6 +442,157 @@ function normalizeEnabledModelList(value?: readonly string[] | null) {
   );
 }
 
+/**
+ * 汇总指定分组当前启用后端声明的可用图像模型。
+ *
+ * @param groupIds 需要汇总模型的分组 id 列表。
+ * @returns 分组 id 到模型列表的映射；空列表表示该分组未声明限制或暂无可见模型。
+ * @sideEffects 读取数据库。
+ * @failureMode 后端未配置模型或模型列表为空时不写入模型，由前端回退到默认模型目录。
+ */
+async function collectAvailableModelsByGroupIds(groupIds: string[]) {
+  const targetGroupIds = Array.from(new Set(groupIds.filter(Boolean)));
+  const availableModelsByGroupId = new Map<string, Set<string>>();
+  if (!targetGroupIds.length) return availableModelsByGroupId;
+
+  const targetGroupIdSet = new Set(targetGroupIds);
+  const addGroupModel = (
+    groupId: string | null | undefined,
+    model?: string | null
+  ) => {
+    if (!groupId || !targetGroupIdSet.has(groupId)) return;
+    const normalized = model?.trim();
+    if (!normalized) return;
+    const current = availableModelsByGroupId.get(groupId) || new Set<string>();
+    current.add(normalized);
+    availableModelsByGroupId.set(groupId, current);
+  };
+
+  const accountRows = await db
+    .select({
+      id: imageBackendAccount.id,
+      groupId: imageBackendAccount.groupId,
+      model: imageBackendAccount.model,
+    })
+    .from(imageBackendAccount)
+    .where(eq(imageBackendAccount.isEnabled, true));
+  const accountGroupRows = accountRows.length
+    ? await db
+        .select({
+          accountId: imageBackendAccountGroup.accountId,
+          groupId: imageBackendAccountGroup.groupId,
+        })
+        .from(imageBackendAccountGroup)
+        .where(
+          inArray(
+            imageBackendAccountGroup.accountId,
+            accountRows.map((account) => account.id)
+          )
+        )
+    : [];
+  const accountGroupIdMap = new Map<string, string[]>();
+  for (const row of accountGroupRows) {
+    const current = accountGroupIdMap.get(row.accountId) || [];
+    current.push(row.groupId);
+    accountGroupIdMap.set(row.accountId, current);
+  }
+  for (const account of accountRows) {
+    const accountGroupIds =
+      accountGroupIdMap.get(account.id) ||
+      normalizeAccountGroupIds(account.groupId ? [account.groupId] : []);
+    for (const groupId of accountGroupIds) {
+      addGroupModel(groupId, account.model);
+    }
+  }
+
+  const apiRows = await db
+    .select({
+      id: imageBackendApi.id,
+      groupId: imageBackendApi.groupId,
+      model: imageBackendApi.model,
+      enabledModels: imageBackendApi.enabledModels,
+    })
+    .from(imageBackendApi)
+    .where(eq(imageBackendApi.isEnabled, true));
+  const apiGroupRows = apiRows.length
+    ? await db
+        .select({
+          apiId: imageBackendApiGroup.apiId,
+          groupId: imageBackendApiGroup.groupId,
+        })
+        .from(imageBackendApiGroup)
+        .where(
+          inArray(
+            imageBackendApiGroup.apiId,
+            apiRows.map((api) => api.id)
+          )
+        )
+    : [];
+  const apiGroupIdMap = new Map<string, string[]>();
+  for (const row of apiGroupRows) {
+    const current = apiGroupIdMap.get(row.apiId) || [];
+    current.push(row.groupId);
+    apiGroupIdMap.set(row.apiId, current);
+  }
+  for (const api of apiRows) {
+    const apiGroupIds =
+      apiGroupIdMap.get(api.id) ||
+      normalizeAccountGroupIds(api.groupId ? [api.groupId] : []);
+    const enabledModels = normalizeEnabledModelList(api.enabledModels);
+    for (const groupId of apiGroupIds) {
+      if (enabledModels.length) {
+        for (const model of enabledModels) addGroupModel(groupId, model);
+      } else {
+        addGroupModel(groupId, api.model);
+      }
+    }
+  }
+
+  const adobeRows = await db
+    .select({
+      id: imageBackendAdobe.id,
+      groupId: imageBackendAdobe.groupId,
+      enabledModels: imageBackendAdobe.enabledModels,
+    })
+    .from(imageBackendAdobe)
+    .where(eq(imageBackendAdobe.isEnabled, true));
+  const adobeGroupRows = adobeRows.length
+    ? await db
+        .select({
+          adobeId: imageBackendAdobeGroup.adobeId,
+          groupId: imageBackendAdobeGroup.groupId,
+        })
+        .from(imageBackendAdobeGroup)
+        .where(
+          inArray(
+            imageBackendAdobeGroup.adobeId,
+            adobeRows.map((adobe) => adobe.id)
+          )
+        )
+    : [];
+  const adobeGroupIdMap = new Map<string, string[]>();
+  for (const row of adobeGroupRows) {
+    const current = adobeGroupIdMap.get(row.adobeId) || [];
+    current.push(row.groupId);
+    adobeGroupIdMap.set(row.adobeId, current);
+  }
+  for (const adobe of adobeRows) {
+    const adobeGroupIds =
+      adobeGroupIdMap.get(adobe.id) ||
+      normalizeAccountGroupIds(adobe.groupId ? [adobe.groupId] : []);
+    for (const model of normalizeEnabledModelList(adobe.enabledModels)) {
+      const normalizedModel = model.toLowerCase().startsWith("firefly-")
+        ? model
+        : `firefly-${model}`;
+      for (const groupId of adobeGroupIds) {
+        addGroupModel(groupId, normalizedModel);
+      }
+    }
+  }
+
+  return availableModelsByGroupId;
+}
+
 // Firefly 完整模型 id 可带分辨率/比例，匹配时同时允许 family 级与裸 family 写法。
 function fireflyFamilyModelIds(model: string) {
   const normalized = model.trim().toLowerCase();
@@ -3891,7 +4042,7 @@ export async function listImageBackendGroupOptions(options?: {
         : eq(imageBackendGroup.isEnabled, true)
     )
     .orderBy(asc(imageBackendGroup.priority), asc(imageBackendGroup.createdAt));
-  return rows
+  const groups = rows
     .filter((group) =>
       plan ? canUseBackendGroupForPlan(group.metadata, plan) : true
     )
@@ -3902,6 +4053,15 @@ export async function listImageBackendGroupOptions(options?: {
       billingMultiplier: getGroupBillingMultiplier(metadata),
       childGroupIds: getGroupChildGroupIds(metadata),
     }));
+  const availableModelsByGroupId = await collectAvailableModelsByGroupIds(
+    groups.map((group) => group.id)
+  );
+  return groups.map((group) => ({
+    ...group,
+    availableModels: Array.from(
+      availableModelsByGroupId.get(group.id) || []
+    ).sort((left, right) => left.localeCompare(right)),
+  }));
 }
 
 export async function listSelectableImageBackendGroups(

@@ -485,6 +485,7 @@ type BackendGroupOption = {
   backendType: ImageBackendGroupBackendType;
   contentSafetyEnabled: boolean | null;
   billingMultiplier: number;
+  availableModels: string[];
 };
 
 const defaultDimensions = parseImageSize(DEFAULT_IMAGE_SIZE) || {
@@ -536,6 +537,93 @@ const EDIT_MODEL_OPTIONS = [
   { value: "gpt-image-1-mini", label: "GPT Image 1 Mini" },
   ...FIREFLY_MODEL_OPTIONS,
 ] as const;
+
+type ImageModelOption = {
+  value: string;
+  label: string;
+};
+
+const IMAGE_MODEL_LABELS: Map<string, string> = new Map(
+  [...TEXT_MODEL_OPTIONS, ...EDIT_MODEL_OPTIONS]
+    .filter((option) => option.value !== "default")
+    .map((option) => [option.value, option.label])
+);
+
+/**
+ * 规范化后端模型 id,用于分组可用模型与前端下拉项匹配。
+ *
+ * @param value 后端或前端声明的模型 id。
+ * @returns 可比较的模型 id。
+ * @sideEffects 无。
+ * @failureMode 空白输入会返回空字符串,调用方负责过滤。
+ */
+const normalizeModelId = (value: string) => value.trim().toLowerCase();
+
+/**
+ * 将后端自定义模型 id 转为可读标签。
+ *
+ * @param value 规范化后的模型 id。
+ * @returns 下拉列表展示文案。
+ * @sideEffects 无。
+ * @failureMode 未识别缩写仅做首字母大写,不影响提交值。
+ */
+const formatImageModelLabel = (value: string) =>
+  IMAGE_MODEL_LABELS.get(value) ||
+  value
+    .split("-")
+    .filter(Boolean)
+    .map((part) => {
+      if (part === "gpt") return "GPT";
+      if (part === "api") return "API";
+      return `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`;
+    })
+    .join(" ");
+
+/**
+ * 根据当前后端分组收敛图片模型下拉项。
+ *
+ * @param options 当前模式支持的基础模型目录。
+ * @param group 当前选中的后端分组。
+ * @param allowFirefly 当前模式是否允许 Firefly 模型。
+ * @returns 可选择的图片模型列表,顺序决定默认模型。
+ * @sideEffects 无。
+ * @failureMode 分组未声明模型时回退到基础模型目录;声明值没有匹配项时保留自定义模型。
+ */
+const filterImageModelOptionsForGroup = (
+  options: readonly ImageModelOption[],
+  group: BackendGroupOption | null,
+  allowFirefly = true
+): ImageModelOption[] => {
+  const baseOptions = options.filter(
+    (option) =>
+      option.value !== "default" &&
+      (allowFirefly || !isFireflyModel(option.value))
+  );
+  const availableModels = Array.from(
+    new Set(
+      (group?.availableModels || [])
+        .map((model) => normalizeModelId(model))
+        .filter(Boolean)
+    )
+  ).filter((model) => allowFirefly || !isFireflyModel(model));
+  if (!availableModels.length) return baseOptions;
+
+  const availableModelSet = new Set(availableModels);
+  const matchedOptions = baseOptions.filter((option) =>
+    availableModelSet.has(normalizeModelId(option.value))
+  );
+  const baseModelSet = new Set(
+    baseOptions.map((option) => normalizeModelId(option.value))
+  );
+  const customOptions = availableModels
+    .filter((model) => !baseModelSet.has(model))
+    .map((model) => ({
+      value: model,
+      label: formatImageModelLabel(model),
+    }));
+  const filteredOptions = [...matchedOptions, ...customOptions];
+  return filteredOptions.length ? filteredOptions : baseOptions;
+};
 
 const QUALITY_OPTIONS: Array<{ value: ImageQuality; label: string }> = [
   { value: "auto", label: "Auto" },
@@ -2052,6 +2140,60 @@ export function CreatePageClient({
     "chatImageModel",
     "default"
   );
+  const textModelOptions = useMemo(
+    () =>
+      filterImageModelOptionsForGroup(TEXT_MODEL_OPTIONS, selectedBackendGroup),
+    [selectedBackendGroup]
+  );
+  const editModelOptions = useMemo(
+    () =>
+      filterImageModelOptionsForGroup(EDIT_MODEL_OPTIONS, selectedBackendGroup),
+    [selectedBackendGroup]
+  );
+  const chatImageModelOptions = useMemo(
+    () =>
+      filterImageModelOptionsForGroup(
+        CHAT_IMAGE_MODEL_OPTIONS,
+        selectedBackendGroup,
+        false
+      ),
+    [selectedBackendGroup]
+  );
+  useEffect(() => {
+    const fallbackModel = textModelOptions[0]?.value;
+    if (
+      showImageModelControls &&
+      fallbackModel &&
+      !textModelOptions.some((option) => option.value === textModel)
+    ) {
+      setTextModel(fallbackModel);
+    }
+  }, [setTextModel, showImageModelControls, textModel, textModelOptions]);
+  useEffect(() => {
+    const fallbackModel = editModelOptions[0]?.value;
+    if (
+      showImageModelControls &&
+      fallbackModel &&
+      !editModelOptions.some((option) => option.value === editModel)
+    ) {
+      setEditModel(fallbackModel);
+    }
+  }, [editModel, editModelOptions, setEditModel, showImageModelControls]);
+  useEffect(() => {
+    const fallbackModel = chatImageModelOptions[0]?.value;
+    if (
+      showImageModelControls &&
+      fallbackModel &&
+      !chatImageModelOptions.some((option) => option.value === chatImageModel)
+    ) {
+      setChatImageModel(fallbackModel);
+    }
+  }, [
+    chatImageModel,
+    chatImageModelOptions,
+    setChatImageModel,
+    showImageModelControls,
+  ]);
   const [useEditFirstImageSize, setUseEditFirstImageSize] =
     useCreateRuntimeState("useEditFirstImageSize", true);
   const [useAutoEditSize, setUseAutoEditSize] = useCreateRuntimeState(
@@ -2760,7 +2902,7 @@ export function CreatePageClient({
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {CHAT_IMAGE_MODEL_OPTIONS.map((option) => (
+        {chatImageModelOptions.map((option) => (
           <SelectItem key={option.value} value={option.value}>
             {chatImageModelLabel(option.label)}
           </SelectItem>
@@ -3063,14 +3205,8 @@ export function CreatePageClient({
     compact?: boolean;
   }) => {
     if (backendGroups.length < 2) return null;
-    const backendTypeLabel = (type: ImageBackendGroupBackendType) =>
-      type === "web"
-        ? "Web"
-        : type === "responses"
-          ? "Codex/Responses"
-          : copy("Mixed", "混合");
     const groupItemLabel = (group: BackendGroupOption) =>
-      `${group.name}${group.isDefault ? copy(" (default)", "（默认）") : ""} · ${backendTypeLabel(group.backendType)} · x${
+      `${group.name}${group.isDefault ? copy(" (default)", "（默认）") : ""} · x${
         Number(group.billingMultiplier.toFixed(4)) || 1
       }`;
     const helpText = copy(
@@ -7020,7 +7156,7 @@ export function CreatePageClient({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {TEXT_MODEL_OPTIONS.map((option) => (
+                      {textModelOptions.map((option) => (
                         <SelectItem key={option.value} value={option.value}>
                           {textModelLabel(option.label)}
                         </SelectItem>
@@ -7713,7 +7849,7 @@ export function CreatePageClient({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {EDIT_MODEL_OPTIONS.map((option) => (
+                        {editModelOptions.map((option) => (
                           <SelectItem key={option.value} value={option.value}>
                             {editModelLabel(option.label)}
                           </SelectItem>
