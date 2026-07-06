@@ -1,9 +1,8 @@
 "use client";
 
-// 可复用的图像比例设置弹窗。使用方包括文生图、图生图、瀑布流/对话生图等需要把画面比例
+// 可复用的图像尺寸控件。使用方包括文生图、图生图、瀑布流/对话生图等需要把画面比例
 // 映射为合法输出尺寸的入口；依赖 resolution 工具保证最终尺寸可被服务端接受。
 import { Button } from "@repo/ui/components/button";
-import { Dialog, DialogContent, DialogTitle } from "@repo/ui/components/dialog";
 import { Input } from "@repo/ui/components/input";
 import {
   Popover,
@@ -17,7 +16,6 @@ import {
   normalizeImageSize,
   normalizeValidImageSize,
   parseImageSize,
-  validateImageSize,
 } from "../resolution";
 
 export type AspectRatioSizeDialogValue = {
@@ -165,34 +163,173 @@ function getNearestSupportedSizeForRatio(
 }
 
 /**
- * 解析用户输入的比例，支持 16:9 与 16x9。
+ * 管理悬浮预设面板的延迟关闭,避免鼠标从按钮移动到面板时闪退。
  *
- * @param value 输入框内容。
- * @returns 可用比例；无法解析时返回 null。
+ * @returns 面板开关状态与鼠标事件处理器。
  */
-function parseAspectRatioInput(value: string) {
-  const match = value.trim().match(/^(\d{1,3})\s*[:x]\s*(\d{1,3})$/i);
-  if (!match) return null;
-  const width = Number(match[1]);
-  const height = Number(match[2]);
-  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
-  if (width <= 0 || height <= 0) return null;
-  return { width, height };
+function useHoverPresetPanel() {
+  const [open, setOpen] = useState(false);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (closeTimerRef.current) {
+        clearTimeout(closeTimerRef.current);
+      }
+    },
+    []
+  );
+
+  const clearCloseTimer = () => {
+    if (!closeTimerRef.current) return;
+    clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = null;
+  };
+
+  const openPanel = () => {
+    clearCloseTimer();
+    setOpen(true);
+  };
+
+  const scheduleClose = () => {
+    clearCloseTimer();
+    closeTimerRef.current = setTimeout(() => {
+      setOpen(false);
+      closeTimerRef.current = null;
+    }, 120);
+  };
+
+  return { open, setOpen, openPanel, scheduleClose };
 }
 
+type ImageSizePresetPanelProps = {
+  value: AspectRatioSizeDialogValue;
+  tier: ImageSizeBase;
+  setTier: (tier: ImageSizeBase) => void;
+  applySize: (size: string) => void;
+  closePanel: () => void;
+  copy: CopyFn;
+};
+
 /**
- * 判断输入框是否表示自动比例。
+ * 悬浮预设面板内容。文生图/图生图行内控件与工具条尺寸按钮共享同一套比例 UI。
  *
- * @param value 输入框内容。
- * @returns 为 true 时提交 auto 尺寸。
+ * @param props.value 当前尺寸值。
+ * @param props.tier 当前 1K/2K/4K 档位。
+ * @param props.setTier 设置档位。
+ * @param props.applySize 应用最终尺寸。
+ * @param props.closePanel 选择后关闭面板。
+ * @param props.copy 中英文文案选择函数。
  */
-function isAutoRatioInput(value: string) {
-  const normalized = value.trim().toLowerCase();
+function ImageSizePresetPanel({
+  value,
+  tier,
+  setTier,
+  applySize,
+  closePanel,
+  copy,
+}: ImageSizePresetPanelProps) {
+  const { auto, height, width } = value;
+  const previewSize = auto
+    ? AUTO_IMAGE_SIZE
+    : getNearestSupportedSizeForRatio(tier, {
+        width: 1,
+        height: 1,
+        value: "1:1",
+      });
+  const selectPreset = (ratio: (typeof IMAGE_ASPECT_RATIOS)[number]) => {
+    applySize(getNearestSupportedSizeForRatio(tier, ratio));
+    closePanel();
+  };
+
   return (
-    normalized === "" ||
-    normalized === "auto" ||
-    normalized === "自动" ||
-    normalized === AUTO_RATIO_LABEL.toLowerCase()
+    <div className="space-y-2.5">
+      <div>
+        <p className="text-xs font-semibold text-foreground">
+          {copy("Canvas ratio", "画面比例")}
+          <span className="ml-2 font-normal text-muted-foreground">
+            {copy(
+              "Final resolution depends on provider policy and model.",
+              "最终分辨率受官方政策和模型影响，不做保证。"
+            )}
+          </span>
+        </p>
+      </div>
+      <div className="grid grid-cols-3 rounded-xl border border-border bg-muted/30 p-1">
+        {IMAGE_SIZE_BASES.map((item) => (
+          <button
+            key={item.value}
+            type="button"
+            onClick={() => setTier(item.value)}
+            className={`h-8 rounded-lg text-xs font-semibold transition ${
+              tier === item.value
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        {IMAGE_ASPECT_RATIOS.map((item) => {
+          const itemSize = getNearestSupportedSizeForRatio(tier, item);
+          const active =
+            !auto && itemSize === normalizeImageSize(width, height);
+          return (
+            <button
+              key={item.value}
+              type="button"
+              onClick={() => selectPreset(item)}
+              className={`flex min-h-14 flex-col items-center justify-center gap-1.5 rounded-lg border px-2 text-center text-xs transition ${
+                active
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border bg-background hover:border-primary hover:bg-primary/5 hover:text-primary"
+              }`}
+            >
+              <span
+                className={`rounded-[3px] border-2 ${
+                  active ? "border-current" : "border-muted-foreground/35"
+                }`}
+                style={getRatioShapeStyle(item)}
+              />
+              <span>
+                {item.value} {copy(item.labelEn, item.labelZh)}
+              </span>
+            </button>
+          );
+        })}
+        <div className="flex min-h-14 flex-col justify-center rounded-lg border border-sky-200 bg-sky-50 px-2 text-center text-sky-700 dark:border-sky-500/40 dark:bg-sky-500/10 dark:text-sky-200">
+          <span className="text-[11px] font-medium">
+            {copy("Final resolution", "最终分辨率")}
+          </span>
+          <strong className="mt-0.5 text-base">
+            {formatImageSizeForDisplay(
+              auto ? previewSize : normalizeImageSize(width, height)
+            )}
+          </strong>
+          <span className="mt-0.5 text-[11px]">
+            {auto
+              ? copy("Backend decides", "模型自行决定")
+              : copy("Current output", "当前输出")}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            applySize(AUTO_IMAGE_SIZE);
+            closePanel();
+          }}
+          className={`flex min-h-14 flex-col items-center justify-center rounded-lg border px-2 text-center text-xs font-semibold transition ${
+            auto
+              ? "border-primary bg-primary/10 text-primary"
+              : "border-border bg-background hover:border-primary hover:bg-primary/5 hover:text-primary"
+          }`}
+        >
+          {copy("Auto", "自动")}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -309,53 +446,15 @@ export function InlineImageSizeControl({
   const [draft, setDraft] = useState(
     auto ? AUTO_IMAGE_SIZE : normalizeImageSize(width, height)
   );
-  const [presetOpen, setPresetOpen] = useState(false);
-  const presetCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  );
+  const presetPanel = useHoverPresetPanel();
   const parsedDraft = parseResolutionInput(draft);
   const draftInvalid = Boolean(draft.trim()) && !parsedDraft;
-  const previewSize = auto
-    ? AUTO_IMAGE_SIZE
-    : getNearestSupportedSizeForRatio(tier, {
-        width: 1,
-        height: 1,
-        value: "1:1",
-      });
 
   useEffect(() => {
     const next = inferAspectRatioState({ auto, height, mixWebFirst, width });
     setTier(next.base);
     setDraft(auto ? AUTO_IMAGE_SIZE : normalizeImageSize(width, height));
   }, [auto, height, mixWebFirst, width]);
-
-  useEffect(
-    () => () => {
-      if (presetCloseTimerRef.current) {
-        clearTimeout(presetCloseTimerRef.current);
-      }
-    },
-    []
-  );
-
-  const clearPresetCloseTimer = () => {
-    if (!presetCloseTimerRef.current) return;
-    clearTimeout(presetCloseTimerRef.current);
-    presetCloseTimerRef.current = null;
-  };
-
-  const openPresetPanel = () => {
-    clearPresetCloseTimer();
-    setPresetOpen(true);
-  };
-
-  const schedulePresetClose = () => {
-    clearPresetCloseTimer();
-    presetCloseTimerRef.current = setTimeout(() => {
-      setPresetOpen(false);
-      presetCloseTimerRef.current = null;
-    }, 120);
-  };
 
   const applySize = (size: string) => {
     if (size === AUTO_IMAGE_SIZE) {
@@ -386,15 +485,6 @@ export function InlineImageSizeControl({
     applySize(parsed.size);
   };
 
-  const selectTier = (nextTier: ImageSizeBase) => {
-    setTier(nextTier);
-  };
-
-  const selectPreset = (ratio: (typeof IMAGE_ASPECT_RATIOS)[number]) => {
-    applySize(getNearestSupportedSizeForRatio(tier, ratio));
-    setPresetOpen(false);
-  };
-
   return (
     <div className="space-y-2">
       <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
@@ -413,15 +503,15 @@ export function InlineImageSizeControl({
           placeholder="1024x1024"
           className="h-11 rounded-xl"
         />
-        <Popover open={presetOpen} onOpenChange={setPresetOpen}>
+        <Popover open={presetPanel.open} onOpenChange={presetPanel.setOpen}>
           <PopoverTrigger asChild>
             <Button
               type="button"
               variant="outline"
               disabled={disabled}
               className="h-11 gap-2 rounded-xl px-4"
-              onMouseEnter={openPresetPanel}
-              onMouseLeave={schedulePresetClose}
+              onMouseEnter={presetPanel.openPanel}
+              onMouseLeave={presetPanel.scheduleClose}
             >
               {copy("Presets", "预设比例")}
               <ChevronDown className="h-4 w-4" />
@@ -431,98 +521,17 @@ export function InlineImageSizeControl({
             align="end"
             sideOffset={8}
             className="max-h-[70vh] w-[min(86vw,21rem)] overflow-y-auto p-2"
-            onMouseEnter={openPresetPanel}
-            onMouseLeave={schedulePresetClose}
+            onMouseEnter={presetPanel.openPanel}
+            onMouseLeave={presetPanel.scheduleClose}
           >
-            <div className="space-y-2.5">
-              <div>
-                <p className="text-xs font-semibold text-foreground">
-                  {copy("Canvas ratio", "画面比例")}
-                  <span className="ml-2 font-normal text-muted-foreground">
-                    {copy(
-                      "Final resolution depends on provider policy and model.",
-                      "最终分辨率受官方政策和模型影响，不做保证。"
-                    )}
-                  </span>
-                </p>
-              </div>
-              <div className="grid grid-cols-3 rounded-xl border border-border bg-muted/30 p-1">
-                {IMAGE_SIZE_BASES.map((item) => (
-                  <button
-                    key={item.value}
-                    type="button"
-                    onClick={() => selectTier(item.value)}
-                    className={`h-8 rounded-lg text-xs font-semibold transition ${
-                      tier === item.value
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-              <div className="grid grid-cols-2 gap-1.5">
-                {IMAGE_ASPECT_RATIOS.map((item) => {
-                  const itemSize = getNearestSupportedSizeForRatio(tier, item);
-                  const active =
-                    !auto && itemSize === normalizeImageSize(width, height);
-                  return (
-                    <button
-                      key={item.value}
-                      type="button"
-                      onClick={() => selectPreset(item)}
-                      className={`flex min-h-14 flex-col items-center justify-center gap-1.5 rounded-lg border px-2 text-center text-xs transition ${
-                        active
-                          ? "border-primary bg-primary/10 text-primary"
-                          : "border-border bg-background hover:border-primary hover:bg-primary/5 hover:text-primary"
-                      }`}
-                    >
-                      <span
-                        className={`rounded-[3px] border-2 ${
-                          active
-                            ? "border-current"
-                            : "border-muted-foreground/35"
-                        }`}
-                        style={getRatioShapeStyle(item)}
-                      />
-                      <span>
-                        {item.value} {copy(item.labelEn, item.labelZh)}
-                      </span>
-                    </button>
-                  );
-                })}
-                <div className="flex min-h-14 flex-col justify-center rounded-lg border border-sky-200 bg-sky-50 px-2 text-center text-sky-700 dark:border-sky-500/40 dark:bg-sky-500/10 dark:text-sky-200">
-                  <span className="text-[11px] font-medium">
-                    {copy("Final resolution", "最终分辨率")}
-                  </span>
-                  <strong className="mt-0.5 text-base">
-                    {formatImageSizeForDisplay(
-                      auto ? previewSize : normalizeImageSize(width, height)
-                    )}
-                  </strong>
-                  <span className="mt-0.5 text-[11px]">
-                    {auto
-                      ? copy("Backend decides", "模型自行决定")
-                      : copy("Current output", "当前输出")}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    applySize(AUTO_IMAGE_SIZE);
-                    setPresetOpen(false);
-                  }}
-                  className={`flex min-h-14 flex-col items-center justify-center rounded-lg border px-2 text-center text-xs font-semibold transition ${
-                    auto
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border bg-background hover:border-primary hover:bg-primary/5 hover:text-primary"
-                  }`}
-                >
-                  {copy("Auto", "自动")}
-                </button>
-              </div>
-            </div>
+            <ImageSizePresetPanel
+              value={value}
+              tier={tier}
+              setTier={setTier}
+              applySize={applySize}
+              closePanel={() => presetPanel.setOpen(false)}
+              copy={copy}
+            />
           </PopoverContent>
         </Popover>
       </div>
@@ -539,38 +548,39 @@ export function InlineImageSizeControl({
 }
 
 /**
- * 可复用比例设置弹窗。
+ * 工具条尺寸按钮。复用行内分辨率控件的悬浮预设面板,用于对话与瀑布流入口。
  *
- * @param props.open 弹窗是否打开。
- * @param props.onOpenChange 弹窗开关回调。
+ * @param props.label 按钮文本。
  * @param props.value 当前尺寸值。
- * @param props.onConfirm 确认后返回 auto 或由比例映射出的合法尺寸。
- * @param props.title 弹窗标题。
+ * @param props.onChange 尺寸变化回调。
+ * @param props.disabled 禁用状态。
+ * @param props.className 按钮样式。
+ * @param props.title 按钮提示。
  * @param props.copy 中英文文案选择函数。
  */
-export function AspectRatioSizeDialog({
-  open,
-  onOpenChange,
+export function ImageSizePresetButton({
+  label,
   value,
-  onConfirm,
+  onChange,
+  disabled,
+  className,
   title,
   copy,
 }: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  label: string;
   value: AspectRatioSizeDialogValue;
-  onConfirm: (value: AspectRatioSizeDialogValue) => void;
-  title: string;
+  onChange: (value: AspectRatioSizeDialogValue) => void;
+  disabled?: boolean;
+  className?: string;
+  title?: string;
   copy: CopyFn;
 }) {
+  const { auto, height, mixWebFirst, width } = value;
   const initial = inferAspectRatioState(value);
   const [base, setBase] = useState<ImageSizeBase>(initial.base);
-  const [ratioInput, setRatioInput] = useState(initial.input);
-  const [presetOpen, setPresetOpen] = useState(false);
-  const { auto, height, mixWebFirst, width } = value;
+  const presetPanel = useHoverPresetPanel();
 
   useEffect(() => {
-    if (!open) return;
     const next = inferAspectRatioState({
       auto,
       height,
@@ -578,189 +588,61 @@ export function AspectRatioSizeDialog({
       width,
     });
     setBase(next.base);
-    setRatioInput(next.input);
-    setPresetOpen(false);
-  }, [auto, height, mixWebFirst, open, width]);
+  }, [auto, height, mixWebFirst, width]);
 
-  const autoSelected = isAutoRatioInput(ratioInput);
-  const parsedRatio = autoSelected ? null : parseAspectRatioInput(ratioInput);
-  const previewSize = parsedRatio
-    ? getNearestSupportedSizeForRatio(base, parsedRatio)
-    : AUTO_IMAGE_SIZE;
-  const previewCheck = validateImageSize(previewSize);
-  const canConfirm =
-    autoSelected || (Boolean(parsedRatio) && previewCheck.valid);
-
-  const selectPreset = (next: string) => {
-    setRatioInput(next);
-    setPresetOpen(false);
-  };
-
-  const selectBase = (next: ImageSizeBase) => {
-    setBase(next);
-    if (isAutoRatioInput(ratioInput)) {
-      setRatioInput("1:1");
-    }
-  };
-
-  const apply = () => {
-    if (!canConfirm) return;
-
-    if (autoSelected) {
-      onConfirm({
+  const applySize = (size: string) => {
+    if (size === AUTO_IMAGE_SIZE) {
+      onChange({
         auto: true,
         width,
         height,
         mixWebFirst: false,
       });
-      onOpenChange(false);
       return;
     }
 
-    if (!parsedRatio) return;
-    const size = getNearestSupportedSizeForRatio(base, parsedRatio);
     const dimensions = parseImageSize(size);
     if (!dimensions) return;
-    onConfirm({
+    onChange({
       auto: false,
       width: dimensions.width,
       height: dimensions.height,
       mixWebFirst: false,
     });
-    onOpenChange(false);
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        aria-describedby={undefined}
-        className="w-[calc(100vw-1.5rem)] max-w-xl gap-0 rounded-2xl border-border p-0"
+    <Popover open={presetPanel.open} onOpenChange={presetPanel.setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={disabled}
+          className={className}
+          title={title}
+          onMouseEnter={presetPanel.openPanel}
+          onMouseLeave={presetPanel.scheduleClose}
+        >
+          {label}
+          <ChevronDown className="h-3.5 w-3.5" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        sideOffset={8}
+        className="max-h-[70vh] w-[min(86vw,21rem)] overflow-y-auto p-2"
+        onMouseEnter={presetPanel.openPanel}
+        onMouseLeave={presetPanel.scheduleClose}
       >
-        <div className="space-y-5 p-6">
-          <DialogTitle className="text-xl font-semibold">
-            {title || copy("Aspect ratio", "画面比例")}
-          </DialogTitle>
-
-          <div className="space-y-2">
-            <label
-              htmlFor="aspect-ratio-input"
-              className="text-sm font-medium text-muted-foreground"
-            >
-              {copy("Aspect ratio", "画面比例")}
-            </label>
-            <div className="grid grid-cols-[1fr_auto] gap-2">
-              <Input
-                id="aspect-ratio-input"
-                value={ratioInput}
-                onChange={(event) => setRatioInput(event.target.value)}
-                placeholder="16:9"
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    apply();
-                  }
-                }}
-              />
-              <Popover open={presetOpen} onOpenChange={setPresetOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-10 gap-2 whitespace-nowrap"
-                    onMouseEnter={() => setPresetOpen(true)}
-                    onFocus={() => setPresetOpen(true)}
-                  >
-                    {copy("Presets", "预设比例")}
-                    <ChevronDown className="h-4 w-4" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent
-                  align="end"
-                  className="w-80 p-2"
-                  onMouseEnter={() => setPresetOpen(true)}
-                  onMouseLeave={() => setPresetOpen(false)}
-                >
-                  <div className="grid grid-cols-2 gap-2">
-                    {IMAGE_ASPECT_RATIOS.map((item) => (
-                      <button
-                        key={item.value}
-                        type="button"
-                        onClick={() => selectPreset(item.value)}
-                        className="flex min-h-16 items-center gap-3 rounded-lg border border-border px-3 text-left text-sm hover:border-primary hover:bg-primary/5 hover:text-primary"
-                      >
-                        <span
-                          className="rounded-[3px] border-2 border-current opacity-40"
-                          style={getRatioShapeStyle(item)}
-                        />
-                        <span>
-                          {item.value} {copy(item.labelEn, item.labelZh)}
-                        </span>
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => selectPreset(AUTO_RATIO_LABEL)}
-                      className="flex min-h-16 items-center justify-center rounded-lg border border-border px-3 text-center text-sm hover:border-primary hover:bg-primary/5 hover:text-primary"
-                    >
-                      {copy("Auto", "自动")}
-                    </button>
-                  </div>
-                </PopoverContent>
-              </Popover>
-            </div>
-            {!autoSelected && !parsedRatio && (
-              <p className="text-xs text-destructive">
-                {copy("Use a ratio like 16:9.", "请使用类似 16:9 的比例。")}
-              </p>
-            )}
-          </div>
-
-          <div className="grid grid-cols-3 gap-2 rounded-xl border border-border bg-muted/30 p-2">
-            {IMAGE_SIZE_BASES.map((item) => (
-              <button
-                key={item.value}
-                type="button"
-                onClick={() => selectBase(item.value)}
-                className={`h-10 rounded-lg text-sm font-semibold transition ${
-                  base === item.value
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="rounded-xl bg-muted/30 p-4">
-            <p className="text-xs font-medium text-muted-foreground">
-              {copy("Will use", "将使用")}
-            </p>
-            <p className="mt-2 text-lg font-semibold text-foreground">
-              {formatImageSizeForDisplay(previewSize)}
-            </p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => onOpenChange(false)}
-              className="h-10 rounded-xl"
-            >
-              {copy("Cancel", "取消")}
-            </Button>
-            <Button
-              type="button"
-              onClick={apply}
-              disabled={!canConfirm}
-              className="h-10 rounded-xl"
-            >
-              {copy("Confirm", "确定")}
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+        <ImageSizePresetPanel
+          value={value}
+          tier={base}
+          setTier={setBase}
+          applySize={applySize}
+          closePanel={() => presetPanel.setOpen(false)}
+          copy={copy}
+        />
+      </PopoverContent>
+    </Popover>
   );
 }

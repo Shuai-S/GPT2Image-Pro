@@ -52,7 +52,7 @@ import {
 import { nanoid } from "nanoid";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useLocale } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import type { ImageBackendGroupBackendType } from "@/features/image-backend-pool/types";
 import { getImageBatchCountLimit } from "@/features/image-generation/batch-limits";
@@ -99,7 +99,7 @@ import {
 } from "../resolution";
 import type { VideoPricingInfo } from "../video-operations";
 import {
-  AspectRatioSizeDialog,
+  ImageSizePresetButton,
   InlineImageSizeControl,
   type AspectRatioSizeDialogValue,
 } from "./aspect-ratio-size-dialog";
@@ -2205,7 +2205,6 @@ export function CreatePageClient({
     "useAutoChatEditSize",
     false
   );
-  const [chatSizeDialogOpen, setChatSizeDialogOpen] = useState(false);
   const [editWidth, setEditWidth] = useCreateRuntimeState(
     "editWidth",
     defaultDimensions.width
@@ -2412,6 +2411,22 @@ export function CreatePageClient({
       width,
     ]
   );
+  const handleConversationSizeChange = (next: AspectRatioSizeDialogValue) => {
+    setChatMixWebFirst(next.mixWebFirst);
+    if (hasChatImageAttachments) {
+      setUseAutoChatEditSize(next.auto);
+      if (!next.auto) {
+        setChatEditWidth(next.width);
+        setChatEditHeight(next.height);
+      }
+      return;
+    }
+    setUseAutoSize(next.auto);
+    if (!next.auto) {
+      setWidth(next.width);
+      setHeight(next.height);
+    }
+  };
 
   const effectiveContentSafetyEnabled =
     moderationEnabled &&
@@ -5492,19 +5507,19 @@ export function CreatePageClient({
             id: "chat-block-repair",
             disabled: isChatGenerating,
           })}
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setChatSizeDialogOpen(true)}
+          <ImageSizePresetButton
+            label={`${copy("Size", "尺寸")} · ${
+              activeChatSize === AUTO_IMAGE_SIZE
+                ? autoSizeLabel
+                : activeChatSize
+            }`}
+            value={chatSizeDialogValue}
+            onChange={handleConversationSizeChange}
             disabled={isChatGenerating}
             className="h-8 rounded-full px-3 text-xs"
             title={resolutionHelpText}
-          >
-            {copy("Size", "尺寸")} ·{" "}
-            {activeChatSize === AUTO_IMAGE_SIZE
-              ? autoSizeLabel
-              : activeChatSize}
-          </Button>
+            copy={copy}
+          />
           {activeMode === "agent" && (
             <div className="flex items-center gap-2 rounded-full border border-border bg-background px-2 py-1">
               <label
@@ -8567,25 +8582,23 @@ export function CreatePageClient({
                     </SelectContent>
                   </Select>
                 )}
-                {/* 比例：复用统一比例弹窗(与 getBatchFallbackSize 同源)，运行中禁用避免批次中途变更 */}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8"
+                <ImageSizePresetButton
+                  label={`${copy("Size", "尺寸")}：${
+                    hasChatImageAttachments
+                      ? useAutoChatEditSize
+                        ? autoSizeLabel
+                        : chatCustomEditSize
+                      : useAutoSize
+                        ? autoSizeLabel
+                        : size
+                  }`}
+                  value={chatSizeDialogValue}
+                  onChange={handleConversationSizeChange}
                   disabled={isBatchActive}
-                  onClick={() => setChatSizeDialogOpen(true)}
+                  className="h-8 rounded-md px-3 text-xs"
                   title={copy("Set image aspect ratio", "设置图像比例")}
-                >
-                  {copy("Size", "尺寸")}：
-                  {hasChatImageAttachments
-                    ? useAutoChatEditSize
-                      ? autoSizeLabel
-                      : chatCustomEditSize
-                    : useAutoSize
-                      ? autoSizeLabel
-                      : size}
-                </Button>
+                  copy={copy}
+                />
                 {!isWebOnlyBackend && (
                   <div title={backgroundHelpText}>
                     {renderBackgroundSelect({
@@ -9100,29 +9113,6 @@ export function CreatePageClient({
         />
       )}
 
-      <AspectRatioSizeDialog
-        open={chatSizeDialogOpen}
-        onOpenChange={setChatSizeDialogOpen}
-        title={copy("Set image aspect ratio", "设置图像比例")}
-        value={chatSizeDialogValue}
-        copy={copy}
-        onConfirm={(next) => {
-          setChatMixWebFirst(next.mixWebFirst);
-          if (hasChatImageAttachments) {
-            setUseAutoChatEditSize(next.auto);
-            if (!next.auto) {
-              setChatEditWidth(next.width);
-              setChatEditHeight(next.height);
-            }
-            return;
-          }
-          setUseAutoSize(next.auto);
-          if (!next.auto) {
-            setWidth(next.width);
-            setHeight(next.height);
-          }
-        }}
-      />
       {waterfallWarning && (
         <WaterfallWarningPopup
           type={waterfallWarning.type}
