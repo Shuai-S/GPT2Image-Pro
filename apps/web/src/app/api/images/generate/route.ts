@@ -43,6 +43,9 @@ const generateImageSchema = z.object({
       message: "Invalid image size",
     }),
   model: z.string().optional(),
+  // 请求级生图分组(创作页选择器)。服务端 fail-closed 校验,不信任客户端值。
+  groupId: z.string().trim().min(1).max(64).optional(),
+  group_id: z.string().trim().min(1).max(64).optional(),
   gptModel: z.string().optional(),
   gpt_model: z.string().optional(),
   thinking: z.enum(["none", "low", "medium", "high", "xhigh"]).optional(),
@@ -136,6 +139,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
     promptOptimization: parsed.data.promptOptimization,
     size: parsed.data.size || DEFAULT_IMAGE_SIZE,
     model: parsed.data.model,
+    requestGroupId: parsed.data.groupId ?? parsed.data.group_id,
     gptModel: parsed.data.gptModel || parsed.data.gpt_model,
     thinking: parsed.data.thinking,
     quality: parsed.data.quality || "auto",

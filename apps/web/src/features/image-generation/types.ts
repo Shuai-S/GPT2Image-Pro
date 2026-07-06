@@ -306,6 +306,9 @@ export interface ApiConfig {
     groupBackendType?: "web" | "responses" | "mixed";
     userId?: string;
     apiKeyId?: string;
+    // 请求级显式分组(用户本次请求手动所选)。解析时盖在 config 上,使失败换号重试
+    // 的 re-resolve 保持在同一分组内(选组即选价,重试不得漂移到其他分组的计费口径)。
+    requestGroupId?: string;
     requestKind?: "image_generation" | "image_edit" | "chat" | "responses";
     accountBackend?: "web" | "responses";
     apiInterfaceMode?: "images" | "responses" | "mixed" | "task";

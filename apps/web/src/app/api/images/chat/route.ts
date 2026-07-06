@@ -901,6 +901,9 @@ export const POST = withApiLogging(async (request: NextRequest) => {
     getText(formData, "imageModel") ||
     getText(formData, "image_model") ||
     undefined;
+  // 请求级生图分组(创作页选择器)。服务端 fail-closed 校验,不信任客户端值。
+  const requestGroupId =
+    getText(formData, "groupId") || getText(formData, "group_id") || undefined;
   // 对话生图/Agent 走 Codex/Responses 语义,与 Adobe 直连不兼容;firefly 图像模型在此
   // 不被支持(否则 firefly 意图不进 fireflyOnly,会落到非 Adobe 后端)。UI 已不暴露,此处
   // 服务端兜底拒收,作为防御边界。
@@ -963,6 +966,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
           size,
           model,
           imageModel,
+          requestGroupId,
           quality,
           n: 1,
           moderation,

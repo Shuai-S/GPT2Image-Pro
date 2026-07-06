@@ -115,6 +115,9 @@ type RunImageGenerationInput =
       userId: string;
       generationId?: string;
       apiKeyId?: string;
+      // 请求级显式分组(创作页选择器 / 外部 API generation_group)。fail-closed:
+      // 不可选/无权时整个请求报错,不降级(见 image-backend-pool/group-selection.ts)。
+      requestGroupId?: string;
       relayOnly?: boolean;
       backendRequestKind?: ImageBackendRequestKind;
       preferredBackendMemberId?: string;
@@ -131,6 +134,7 @@ type RunImageGenerationInput =
       userId: string;
       generationId?: string;
       apiKeyId?: string;
+      requestGroupId?: string;
       relayOnly?: boolean;
       backendRequestKind?: ImageBackendRequestKind;
       preferredBackendMemberId?: string;
@@ -147,6 +151,7 @@ type RunImageGenerationInput =
       userId: string;
       generationId?: string;
       apiKeyId?: string;
+      requestGroupId?: string;
       relayOnly?: boolean;
       backendRequestKind?: ImageBackendRequestKind;
       preferredBackendMemberId?: string;
@@ -1464,6 +1469,7 @@ export async function runImageGenerationForUser(
               effectiveConfig = await getEffectiveConfig(userConfig, {
                 userId: input.userId,
                 apiKeyId: input.apiKeyId,
+                requestGroupId: input.requestGroupId,
                 requestKind: backendRequestKind,
                 requestedModel: input.model,
                 preferredMemberId: input.preferredBackendMemberId,
@@ -1491,6 +1497,7 @@ export async function runImageGenerationForUser(
               effectiveConfig = await getEffectiveConfig(userConfig, {
                 userId: input.userId,
                 apiKeyId: input.apiKeyId,
+                requestGroupId: input.requestGroupId,
                 requestKind: backendRequestKind,
                 requestedModel: input.model,
                 preferredMemberId: input.preferredBackendMemberId,

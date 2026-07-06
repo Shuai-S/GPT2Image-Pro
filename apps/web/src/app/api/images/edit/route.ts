@@ -289,6 +289,9 @@ export const POST = withApiLogging(async (request: NextRequest) => {
   }
 
   const model = getText(formData, "model") || undefined;
+  // 请求级生图分组(创作页选择器)。服务端 fail-closed 校验,不信任客户端值。
+  const requestGroupId =
+    getText(formData, "groupId") || getText(formData, "group_id") || undefined;
   const gptModel =
     getText(formData, "gptModel") ||
     getText(formData, "gpt_model") ||
@@ -371,6 +374,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
           promptOptimization,
           size: displaySize || size,
           model,
+          requestGroupId,
           gptModel,
           thinking,
           quality,

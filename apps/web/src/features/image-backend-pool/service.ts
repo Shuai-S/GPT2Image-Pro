@@ -68,6 +68,10 @@ import {
   getGroupBillingMultiplier,
 } from "./group-billing";
 import {
+  checkGroupSelectable,
+  ImageBackendGroupSelectionError,
+} from "./group-selection";
+import {
   checkImageBackendApiHealth,
   type ImageApiHealthResult,
 } from "./health-check";
@@ -124,6 +128,10 @@ type BackendLeaseAcquireResult = "acquired" | "full" | "stale";
 type ResolveBackendOptions = {
   userId: string;
   apiKeyId?: string;
+  // 请求级显式分组(创作页选择器 / 外部 API generation_group)。优先级最高;
+  // 校验 fail-closed:分组不可选/无权时抛 ImageBackendGroupSelectionError,
+  // 绝不静默降级(防止"选了半价组、按全价组扣费")。Key 已绑定分组时禁止覆盖。
+  requestGroupId?: string;
   requestKind: ImageBackendRequestKind;
   // 请求的模型 id。adobe（Firefly）按模型前缀自动路由：firefly-* 只调度 adobe 后端，
   // 其余模型（gpt-image 等）只调度 codex/web/api，二者互不混用。
@@ -2146,18 +2154,44 @@ async function getDefaultGroupId() {
   return firstGroup?.id ?? null;
 }
 
+// 分组解析统一入口。优先级:请求级显式分组 > API Key 绑定 > 用户偏好 > 默认分组。
+// 请求级显式选择 fail-closed:校验失败抛 ImageBackendGroupSelectionError,不降级
+// (选组即选价,静默降级会导致按非用户所选的倍率扣费)。偏好来源保持既有语义:
+// 失效(禁用/降套餐)时静默回退默认分组。
 async function resolveRequestedGroup(
   options: ResolveBackendOptions,
   plan: SubscriptionPlan
 ): Promise<{ groupId: string | null; explicit: boolean }> {
+  const requestGroupId = options.requestGroupId?.trim();
+
   if (options.apiKeyId) {
     const [key] = await db
       .select({ groupId: externalApiKey.generationGroupId })
       .from(externalApiKey)
       .where(eq(externalApiKey.id, options.apiKeyId))
       .limit(1);
-    if (key?.groupId) return { groupId: key.groupId, explicit: true };
+    if (key?.groupId) {
+      // Key 绑定是发 Key 者的管理约束(如限定第三方只能用低价组),请求方不得
+      // 用 generation_group 覆盖(升组越权/降组混淆计费口径都不允许)。
+      if (requestGroupId && requestGroupId !== key.groupId) {
+        throw new ImageBackendGroupSelectionError("group_locked_by_key");
+      }
+      return { groupId: key.groupId, explicit: true };
+    }
+    if (requestGroupId) {
+      return {
+        groupId: await assertRequestGroupSelectable(requestGroupId, plan),
+        explicit: true,
+      };
+    }
     return { groupId: await getDefaultGroupId(), explicit: false };
+  }
+
+  if (requestGroupId) {
+    return {
+      groupId: await assertRequestGroupSelectable(requestGroupId, plan),
+      explicit: true,
+    };
   }
 
   const preferenceGroupId = await getUserImageBackendPreference(
@@ -2169,6 +2203,35 @@ async function resolveRequestedGroup(
   }
 
   return { groupId: await getDefaultGroupId(), explicit: false };
+}
+
+// 请求级显式分组的 fail-closed 校验:isEnabled + isUserSelectable + minPlan +
+// backendGroups.select 能力位,任一不满足抛 ImageBackendGroupSelectionError。
+// 判定逻辑在 group-selection.ts 纯函数,此处只负责取数与能力位查询。
+async function assertRequestGroupSelectable(
+  groupId: string,
+  plan: SubscriptionPlan
+): Promise<string> {
+  const [group] = await db
+    .select({
+      id: imageBackendGroup.id,
+      isEnabled: imageBackendGroup.isEnabled,
+      isUserSelectable: imageBackendGroup.isUserSelectable,
+      metadata: imageBackendGroup.metadata,
+    })
+    .from(imageBackendGroup)
+    .where(eq(imageBackendGroup.id, groupId))
+    .limit(1);
+  const verdict = checkGroupSelectable({
+    group: group ?? null,
+    plan,
+    canSelectGroups: await canUsePlanCapability(plan, "backendGroups.select"),
+    source: "request",
+  });
+  if (!verdict.ok) {
+    throw new ImageBackendGroupSelectionError(verdict.reason);
+  }
+  return groupId;
 }
 
 async function ensureGroupUsable(
@@ -3036,6 +3099,7 @@ function toResolvedPoolConfig(
           groupBackendType,
           userId: options.userId,
           apiKeyId: options.apiKeyId,
+          requestGroupId: options.requestGroupId,
           requestKind: options.requestKind,
           apiInterfaceMode: member.interfaceMode,
           chatCompletionsUpstreamMode: member.chatCompletionsUpstreamMode,
@@ -3076,6 +3140,7 @@ function toResolvedPoolConfig(
           groupBackendType,
           userId: options.userId,
           apiKeyId: options.apiKeyId,
+          requestGroupId: options.requestGroupId,
           requestKind: options.requestKind,
           adobeMode: member.mode === "direct" ? "direct" : "gateway",
           adobeEnabledModels: member.enabledModels,
@@ -3132,6 +3197,7 @@ function toResolvedPoolConfig(
         groupBackendType,
         userId: options.userId,
         apiKeyId: options.apiKeyId,
+        requestGroupId: options.requestGroupId,
         requestKind: options.requestKind,
         accountBackend: implementationMode,
         billingGroupId: fallbackGroupId,

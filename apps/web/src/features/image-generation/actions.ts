@@ -30,6 +30,9 @@ const generateImageSchema = z.object({
       message: "Invalid image size",
     }),
   model: z.string().optional(),
+  // 请求级生图分组(创作页选择器)。服务端 fail-closed 校验
+  // (isEnabled/isUserSelectable/minPlan/能力位),不信任客户端值。
+  groupId: z.string().trim().min(1).max(64).optional(),
 });
 
 function referenceKey(ref: GenerationImageStorageReference) {
@@ -46,6 +49,7 @@ export const generateImageAction = protectedAction
       prompt: parsedInput.prompt,
       size: parsedInput.size || DEFAULT_IMAGE_SIZE,
       model: parsedInput.model,
+      requestGroupId: parsedInput.groupId,
     });
   });
 

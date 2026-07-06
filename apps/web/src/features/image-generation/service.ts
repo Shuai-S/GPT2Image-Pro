@@ -1156,6 +1156,7 @@ async function retryPoolBackendResult(
       return await resolveImageBackendPoolConfig({
         userId: config.backend?.userId || "",
         apiKeyId: config.backend?.apiKeyId,
+        requestGroupId: config.backend?.requestGroupId,
         requestKind: requestKind as ImageBackendRequestKind,
         excludedMemberKeys: Array.from(excluded),
         accountBackendPreference,
@@ -1259,6 +1260,7 @@ async function retryPoolBackendResult(
       next = await resolveImageBackendPoolConfig({
         userId: config.backend.userId,
         apiKeyId: config.backend.apiKeyId,
+        requestGroupId: config.backend.requestGroupId,
         requestKind,
         excludedMemberKeys: Array.from(excluded),
         accountBackendPreference,
@@ -4075,6 +4077,8 @@ export async function getEffectiveConfig(
   options?: {
     userId?: string;
     apiKeyId?: string;
+    // 请求级显式分组(fail-closed,见 image-backend-pool/group-selection.ts)。
+    requestGroupId?: string;
     requestKind?: ImageBackendRequestKind;
     requestedModel?: string;
     preferredMemberId?: string;
@@ -4101,6 +4105,7 @@ export async function getEffectiveConfig(
       poolConfig = await resolveImageBackendPoolConfig({
         userId: options.userId,
         apiKeyId: options.apiKeyId,
+        requestGroupId: options.requestGroupId,
         requestKind: options.requestKind,
         requestedModel: options.requestedModel,
         preferredMemberId: options.preferredMemberId,
