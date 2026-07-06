@@ -1,6 +1,5 @@
-import { MessageCircle } from "lucide-react";
-
 import { Button } from "@repo/ui/components/button";
+import { MessageCircle } from "lucide-react";
 import { Link } from "@/i18n/routing";
 
 import type { PseoPage } from "../lib/pseo-data";

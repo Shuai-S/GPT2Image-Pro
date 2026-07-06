@@ -15,8 +15,8 @@ import { Download, Layers, Loader2 } from "lucide-react";
 import { useLocale } from "next-intl";
 import { useAction } from "next-safe-action/hooks";
 import { useEffect, useState } from "react";
-import { exportPsdAction } from "../actions";
 import { generateDownloadFilename } from "@/lib/download-filename";
+import { exportPsdAction } from "../actions";
 
 type Phase = "idle" | "generating" | "ready" | "failed";
 
@@ -114,7 +114,9 @@ export function ExportPsdDialog({
         }}
       >
         <DialogContent className="max-w-md">
-          <DialogTitle>{copy("Export layered PSD", "导出分层 PSD")}</DialogTitle>
+          <DialogTitle>
+            {copy("Export layered PSD", "导出分层 PSD")}
+          </DialogTitle>
 
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">

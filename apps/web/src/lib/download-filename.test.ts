@@ -13,10 +13,7 @@ describe("generateDownloadFilename", () => {
   });
 
   it("时间戳精确到毫秒", () => {
-    const result = generateDownloadFilename(
-      "test",
-      "2026-06-19T08:00:00.456Z"
-    );
+    const result = generateDownloadFilename("test", "2026-06-19T08:00:00.456Z");
     expect(result).toContain("2026-06-19T08-00-00d456Z");
   });
 

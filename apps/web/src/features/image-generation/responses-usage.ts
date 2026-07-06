@@ -6,7 +6,9 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 
 function getUsageNumber(source: Record<string, unknown>, key: string) {
   const value = source[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 export function extractResponsesTokenUsage(

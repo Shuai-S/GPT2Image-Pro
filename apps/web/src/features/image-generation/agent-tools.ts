@@ -12,8 +12,7 @@ const AGENT_IMAGE_FLOW_INSTRUCTIONS = [
 export const DEFAULT_RESPONSES_IMAGE_INSTRUCTIONS =
   AGENT_IMAGE_FLOW_INSTRUCTIONS;
 
-export const ORIGINAL_PROMPT_RESPONSES_IMAGE_INSTRUCTIONS =
-  `${AGENT_IMAGE_FLOW_INSTRUCTIONS}\nWhen calling image_generation, use the user's original image prompt exactly as written. Do not rewrite, expand, translate, polish, or optimize the latest user prompt before image generation.`;
+export const ORIGINAL_PROMPT_RESPONSES_IMAGE_INSTRUCTIONS = `${AGENT_IMAGE_FLOW_INSTRUCTIONS}\nWhen calling image_generation, use the user's original image prompt exactly as written. Do not rewrite, expand, translate, polish, or optimize the latest user prompt before image generation.`;
 
 export const AGENT_CONTINUE_INSTRUCTIONS =
   "Continue the same Agent run. Review the previous assistant notes, tool outputs, and generated draft images in this conversation. If the task is not complete, continue autonomously: write a brief progress note, then call image_generation for the next concrete version or use web_search if more current information is still needed. Stop only when no further useful iteration is needed.";

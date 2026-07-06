@@ -10,7 +10,7 @@
     "lint": "turbo lint",
     "dev:web": "turbo dev --filter=@repo/web",
     "build:web": "turbo build --filter=@repo/web",
-    "db:generate": "turbo db:generate --filter=@repo/database",
+    "db:generate": "pnpm --filter @repo/database db:generate",
     "db:migrate": "pnpm --filter @repo/database db:migrate",
     "db:push": "turbo db:push --filter=@repo/database",
     "db:studio": "turbo db:studio --filter=@repo/database"

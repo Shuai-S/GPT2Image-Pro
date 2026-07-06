@@ -1,20 +1,13 @@
 "use server";
 
-import { getUserRoleById } from "@repo/shared/auth/role-server";
-import { isAdminRole } from "@repo/shared/auth/roles";
-import { protectedAction } from "@repo/shared/safe-action";
+import { adminAction } from "@repo/shared/safe-action";
 import { setSystemSettings } from "@repo/shared/system-settings";
 import { z } from "zod";
 
-export const updateMarketingSlaStatusVisibilityAction = protectedAction
+export const updateMarketingSlaStatusVisibilityAction = adminAction
   .metadata({ action: "marketing.slaStatus.visibility" })
   .schema(z.object({ enabled: z.boolean() }))
   .action(async ({ parsedInput, ctx }) => {
-    const role = await getUserRoleById(ctx.userId);
-    if (!isAdminRole(role)) {
-      throw new Error("此操作需要管理员权限");
-    }
-
     await setSystemSettings(
       [
         {

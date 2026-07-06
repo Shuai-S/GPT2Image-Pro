@@ -1,6 +1,6 @@
-import { toNextJsHandler } from "better-auth/next-js";
 import { withApiLogging } from "@repo/shared/api-logger";
 import { auth } from "@repo/shared/auth";
+import { toNextJsHandler } from "better-auth/next-js";
 
 /**
  * Better Auth API 路由处理器

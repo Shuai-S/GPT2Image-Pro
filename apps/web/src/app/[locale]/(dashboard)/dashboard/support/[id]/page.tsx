@@ -1,14 +1,8 @@
-import { and, eq } from "drizzle-orm";
-import { ArrowLeft } from "lucide-react";
-import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
-import { getLocale } from "next-intl/server";
-import { Avatar, AvatarFallback, AvatarImage } from "@repo/ui/components/avatar";
-import { Badge } from "@repo/ui/components/badge";
-import { Button } from "@repo/ui/components/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@repo/ui/components/card";
 import { db } from "@repo/database";
 import { ticket, ticketMessage, user } from "@repo/database/schema";
+import { getUserRoleById } from "@repo/shared/auth/role-server";
+import { isAdminRole } from "@repo/shared/auth/roles";
+import { getServerSession } from "@repo/shared/auth/server";
 import { AdminTicketReplyForm } from "@repo/shared/support/components/admin-ticket-reply-form";
 import { AdminTicketStatusSelect } from "@repo/shared/support/components/admin-ticket-status-select";
 import { TicketMessageForm } from "@repo/shared/support/components/ticket-message-form";
@@ -17,11 +11,26 @@ import {
   ticketPriorities,
   ticketStatuses,
 } from "@repo/shared/support/schemas";
-import { getServerSession } from "@repo/shared/auth/server";
-import { getUserRoleById } from "@repo/shared/auth/role-server";
-import { isAdminRole } from "@repo/shared/auth/roles";
 import { formatDateInTimeZone } from "@repo/shared/time-zone";
 import { getAppTimeZone } from "@repo/shared/time-zone/server";
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+} from "@repo/ui/components/avatar";
+import { Badge } from "@repo/ui/components/badge";
+import { Button } from "@repo/ui/components/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@repo/ui/components/card";
+import { and, eq } from "drizzle-orm";
+import { ArrowLeft } from "lucide-react";
+import Link from "next/link";
+import { notFound, redirect } from "next/navigation";
+import { getLocale } from "next-intl/server";
 
 interface TicketDetailPageProps {
   params: Promise<{
@@ -240,7 +249,9 @@ export default async function TicketDetailPage({
                   </AvatarFallback>
                 </Avatar>
                 <div>
-                  <p className="font-medium">{ticketUser?.name || "未知用户"}</p>
+                  <p className="font-medium">
+                    {ticketUser?.name || "未知用户"}
+                  </p>
                   <p className="text-sm text-muted-foreground">
                     {ticketUser?.email}
                   </p>

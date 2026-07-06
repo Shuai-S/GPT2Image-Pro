@@ -1,8 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-
 import type { AppUserRole } from "@repo/shared/auth/roles";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type CurrentSession = {
   user?: {

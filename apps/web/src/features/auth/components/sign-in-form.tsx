@@ -37,6 +37,23 @@ interface SignInFormProps {
   branding: BrandingConfig;
 }
 
+function getSafeCallbackUrl(locale: string) {
+  const fallback = `/${locale}/dashboard`;
+  const callbackUrl = new URLSearchParams(window.location.search).get(
+    "callbackUrl"
+  );
+  if (!callbackUrl) return fallback;
+
+  try {
+    const parsedUrl = new URL(callbackUrl, window.location.origin);
+    if (parsedUrl.origin !== window.location.origin) return fallback;
+    if (!parsedUrl.pathname.startsWith(`/${locale}/dashboard`)) return fallback;
+    return `${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}`;
+  } catch {
+    return fallback;
+  }
+}
+
 export function SignInForm({
   googleAuthEnabled = false,
   branding,
@@ -122,7 +139,7 @@ export function SignInForm({
 
       // 登录成功，提示并跳转
       toast.success(t("success"));
-      window.location.href = `/${locale}/dashboard`;
+      window.location.href = getSafeCallbackUrl(locale);
     } catch {
       setError(t("errors.invalidCredentials"));
       setIsLoading(false);

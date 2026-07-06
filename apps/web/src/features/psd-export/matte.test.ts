@@ -10,36 +10,32 @@ function testImage(size: number) {
 }
 
 describe("removeBackground (ISNet 抠图)", () => {
-  it(
-    "输出带 alpha 的 PNG:背景四角透明、前景中心保留",
-    async () => {
-      const input = await testImage(512);
-      const out = await removeBackground(input);
+  it("输出带 alpha 的 PNG:背景四角透明、前景中心保留", async () => {
+    const input = await testImage(512);
+    const out = await removeBackground(input);
 
-      const meta = await sharp(out).metadata();
-      expect(meta.hasAlpha).toBe(true);
-      expect(meta.width).toBe(512);
-      expect(meta.height).toBe(512);
+    const meta = await sharp(out).metadata();
+    expect(meta.hasAlpha).toBe(true);
+    expect(meta.width).toBe(512);
+    expect(meta.height).toBe(512);
 
-      const { data, info } = await sharp(out)
-        .ensureAlpha()
-        .raw()
-        .toBuffer({ resolveWithObject: true });
-      const alphaAt = (x: number, y: number) =>
-        data[(y * info.width + x) * 4 + 3] ?? 0;
-      const corner = Math.max(
-        alphaAt(2, 2),
-        alphaAt(info.width - 3, 2),
-        alphaAt(2, info.height - 3),
-        alphaAt(info.width - 3, info.height - 3)
-      );
-      const center = alphaAt(
-        Math.floor(info.width / 2),
-        Math.floor(info.height / 2)
-      );
-      expect(center).toBeGreaterThan(200);
-      expect(corner).toBeLessThan(80);
-    },
-    30000
-  );
+    const { data, info } = await sharp(out)
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const alphaAt = (x: number, y: number) =>
+      data[(y * info.width + x) * 4 + 3] ?? 0;
+    const corner = Math.max(
+      alphaAt(2, 2),
+      alphaAt(info.width - 3, 2),
+      alphaAt(2, info.height - 3),
+      alphaAt(info.width - 3, info.height - 3)
+    );
+    const center = alphaAt(
+      Math.floor(info.width / 2),
+      Math.floor(info.height / 2)
+    );
+    expect(center).toBeGreaterThan(200);
+    expect(corner).toBeLessThan(80);
+  }, 30000);
 });

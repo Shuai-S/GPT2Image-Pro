@@ -109,7 +109,7 @@ export function getLatestWebHistoryImageReference(
 ): WebHistoryImageReference | null {
   for (let index = (history || []).length - 1; index >= 0; index--) {
     const message = history?.[index];
-    if (!message || message.role !== "assistant" || message.error) continue;
+    if (message?.role !== "assistant" || message.error) continue;
 
     const imageUrl = getActiveHistoryVariantImageUrl(message);
     if (!imageUrl || !isUsableHistoryImageUrl(imageUrl)) continue;
@@ -140,7 +140,10 @@ export async function downloadWebHistoryImageReference(
             "@repo/shared/storage/providers"
           );
           const storage = await getStorageProvider();
-          return storage.getObject(storageReference.key, storageReference.bucket);
+          return storage.getObject(
+            storageReference.key,
+            storageReference.bucket
+          );
         })();
     const type = mimeTypeFromExtension(storageReference.extension);
     const extension = type === "image/jpeg" ? "jpg" : type.slice(6);

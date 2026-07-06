@@ -123,7 +123,7 @@ export const protectedAction = actionClient.use(async ({ next }) => {
   });
 
   // 如果没有会话或用户信息，重定向到登录页
-  if (!session || !session.user) {
+  if (!session?.user) {
     throw new ActionAuthError();
   }
 

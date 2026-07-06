@@ -4,8 +4,8 @@ import {
   isModerationBlockRiskLevel,
   type ModerationBlockRiskLevel,
 } from "@repo/shared/config/subscription-plan";
-import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { canUsePlanCapability } from "@repo/shared/subscription/services/plan-capabilities";
+import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { and, eq } from "drizzle-orm";
 
 import { getBearerToken, hashApiKey, safeEqual } from "./auth-token";
@@ -31,7 +31,10 @@ export async function authenticateExternalApiRequest(request: Request) {
     .from(externalApiKey)
     .innerJoin(user, eq(user.id, externalApiKey.userId))
     .where(
-      and(eq(externalApiKey.keyHash, keyHash), eq(externalApiKey.isActive, true))
+      and(
+        eq(externalApiKey.keyHash, keyHash),
+        eq(externalApiKey.isActive, true)
+      )
     )
     .limit(1);
 
@@ -57,11 +60,11 @@ export async function authenticateExternalApiRequest(request: Request) {
     apiKeyId: apiKey.id,
     userId: apiKey.userId,
     plan: plan.plan,
-    moderationBlockRiskLevel: (
-      isModerationBlockRiskLevel(apiKey.moderationBlockRiskLevel)
-        ? apiKey.moderationBlockRiskLevel
-        : "low"
-    ) satisfies ModerationBlockRiskLevel,
+    moderationBlockRiskLevel: (isModerationBlockRiskLevel(
+      apiKey.moderationBlockRiskLevel
+    )
+      ? apiKey.moderationBlockRiskLevel
+      : "low") satisfies ModerationBlockRiskLevel,
     creditLimit: apiKey.creditLimit ?? null,
     creditsUsed: Number(apiKey.creditsUsed || 0),
     relayOnly,

@@ -16,10 +16,9 @@
  *   时刻只跑一个修复推理,其余排队;并对超大图设上限跳过。整图推理（不分块）以避免复原接缝。
  */
 import path from "node:path";
+import { logWarn } from "@repo/shared/logger";
 import * as ort from "onnxruntime-node";
 import sharp from "sharp";
-
-import { logWarn } from "@repo/shared/logger";
 
 // 超过此较长边则跳过修复（SCUNet 整图推理成本随像素平方增长，且修复目标是上游原分辨率图，
 // 本就有界）。上游图通常 ≤1254；超大图跳过而非拖垮 CPU。

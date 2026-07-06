@@ -36,7 +36,12 @@ describe("planOutpaintTiles", () => {
     const p = planOutpaintTiles(OUTPAINT_MAX_WORKING, OUTPAINT_MAX_WORKING);
     const xs = [...new Set(p.tiles.map((t) => t.x))].sort((a, b) => a - b);
     for (let i = 1; i < xs.length; i++) {
-      const overlap = OUTPAINT_TILE - (xs[i]! - xs[i - 1]!);
+      const current = xs[i];
+      const previous = xs[i - 1];
+      if (current === undefined || previous === undefined) {
+        throw new Error("expected adjacent x coordinates");
+      }
+      const overlap = OUTPAINT_TILE - (current - previous);
       expect(overlap).toBeGreaterThan(0);
     }
   });
@@ -45,13 +50,15 @@ describe("planOutpaintTiles", () => {
 describe("tileKeepInset", () => {
   it("首块(0,0)无保留区（全部重绘）", () => {
     const p = planOutpaintTiles(2880, 2880);
-    const t0 = p.tiles.find((t) => t.col === 0 && t.row === 0)!;
+    const t0 = p.tiles.find((t) => t.col === 0 && t.row === 0);
+    if (!t0) throw new Error("expected top-left tile");
     expect(tileKeepInset(p, t0)).toEqual({ left: 0, top: 0 });
   });
 
   it("非首列块左侧有保留区(=与左邻重叠)", () => {
     const p = planOutpaintTiles(2880, 2880);
-    const t = p.tiles.find((x) => x.col === 1 && x.row === 0)!;
+    const t = p.tiles.find((x) => x.col === 1 && x.row === 0);
+    if (!t) throw new Error("expected second column tile");
     const inset = tileKeepInset(p, t);
     expect(inset.left).toBeGreaterThan(0);
     expect(inset.top).toBe(0);
@@ -61,7 +68,8 @@ describe("tileKeepInset", () => {
 
   it("内部块左、上都有保留区", () => {
     const p = planOutpaintTiles(2880, 2880);
-    const t = p.tiles.find((x) => x.col === 2 && x.row === 2)!;
+    const t = p.tiles.find((x) => x.col === 2 && x.row === 2);
+    if (!t) throw new Error("expected inner tile");
     const inset = tileKeepInset(p, t);
     expect(inset.left).toBeGreaterThan(0);
     expect(inset.top).toBeGreaterThan(0);

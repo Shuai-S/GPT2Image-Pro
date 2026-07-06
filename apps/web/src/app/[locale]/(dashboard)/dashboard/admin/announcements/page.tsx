@@ -1,15 +1,17 @@
-import { redirect } from "next/navigation";
-import { getLocale } from "next-intl/server";
-
 import { listAnnouncementsForAdmin } from "@repo/shared/announcements";
 import { getUserRoleById } from "@repo/shared/auth/role-server";
 import { canAccessAdminArea } from "@repo/shared/auth/roles";
 import { getServerSession } from "@repo/shared/auth/server";
 import { getAppTimeZone } from "@repo/shared/time-zone/server";
+import { redirect } from "next/navigation";
+import { getLocale } from "next-intl/server";
 import { AdminAnnouncementsManagement } from "@/features/announcements/admin-announcements-management";
 
 export default async function DashboardAdminAnnouncementsPage() {
-  const [session, locale] = await Promise.all([getServerSession(), getLocale()]);
+  const [session, locale] = await Promise.all([
+    getServerSession(),
+    getLocale(),
+  ]);
   if (!session?.user) {
     redirect(`/${locale}/sign-in`);
   }

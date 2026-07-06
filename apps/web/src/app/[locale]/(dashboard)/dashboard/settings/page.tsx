@@ -1,11 +1,11 @@
+import { db, user } from "@repo/database";
+import { getServerSession } from "@repo/shared/auth/server";
+import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
+import { eq } from "drizzle-orm";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getLocale } from "next-intl/server";
 import { SettingsProfileView } from "@/features/settings/components";
-import { getServerSession } from "@repo/shared/auth/server";
-import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
-import { db, user } from "@repo/database";
-import { eq } from "drizzle-orm";
 
 /**
  * 生成设置页面 metadata。

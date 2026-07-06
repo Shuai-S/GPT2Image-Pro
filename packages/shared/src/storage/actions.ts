@@ -62,7 +62,7 @@ export const getSignedUploadUrlAction = withStorageAction("getSignedUploadUrl")
         .string()
         .min(1, "文件键名不能为空")
         .max(255, "文件键名过长")
-        .regex(/^[a-zA-Z0-9\-_\/\.]+$/, "文件键名包含非法字符"),
+        .regex(/^[a-zA-Z0-9\-_/.]+$/, "文件键名包含非法字符"),
       /** 文件 MIME 类型 */
       contentType: z.enum(["image/jpeg", "image/png", "image/gif", "image/webp"], {
         message: `只支持以下文件类型: ${ALLOWED_IMAGE_TYPES.join(", ")}`,

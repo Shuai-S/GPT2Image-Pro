@@ -381,8 +381,7 @@ function toBlobPart(buffer: Buffer): BlobPart {
 function getOutputFileCacheBackend(config: ApiConfig) {
   const backend = config.backend;
   if (
-    !backend ||
-    backend.type !== "pool-account" ||
+    backend?.type !== "pool-account" ||
     backend.accountBackend !== "responses"
   ) {
     return null;
@@ -2854,14 +2853,16 @@ async function runQueuedImageGenerationForUser({
         )
       : -1;
   // 分层生成的主图应为整图合成(第 0 张),而非最后一张元素;否则画廊缩略图/下载会变成单个元素。
-  const primaryOutput =
-    storedOutputs[
-      selectedOutputIndex >= 0
-        ? selectedOutputIndex
-        : isLayeredRun
-          ? 0
-          : storedOutputs.length - 1
-    ]!;
+  const primaryOutputIndex =
+    selectedOutputIndex >= 0
+      ? selectedOutputIndex
+      : isLayeredRun
+        ? 0
+        : storedOutputs.length - 1;
+  const primaryOutput = storedOutputs[primaryOutputIndex];
+  if (!primaryOutput) {
+    throw new Error("Stored image outputs are unexpectedly empty");
+  }
   const upstreamImageOutputCount = Math.max(
     Math.floor(result.imageOutputCount || 0),
     storedOutputs.length

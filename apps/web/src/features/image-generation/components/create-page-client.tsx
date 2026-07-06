@@ -420,9 +420,12 @@ function getNearestSupportedSizeForRatio(
   base: ImageSizeBase,
   ratio: { width: number; height: number }
 ) {
+  const fallbackBaseSpec = IMAGE_SIZE_BASES[0];
+  if (!fallbackBaseSpec) {
+    throw new Error("Image size bases are not configured");
+  }
   const baseSpec =
-    IMAGE_SIZE_BASES.find((item) => item.value === base) ||
-    IMAGE_SIZE_BASES[0]!;
+    IMAGE_SIZE_BASES.find((item) => item.value === base) || fallbackBaseSpec;
   const longEdge = baseSpec.edge;
   const landscape = ratio.width >= ratio.height;
   const rawWidth = landscape
@@ -656,9 +659,12 @@ function ImageSizeDialog({
     setMixWebFirst(value.mixWebFirst);
   }, [open, value.auto, value.width, value.height, value.mixWebFirst]);
 
+  const fallbackRatio = IMAGE_ASPECT_RATIOS[0];
+  if (!fallbackRatio) {
+    throw new Error("Image aspect ratios are not configured");
+  }
   const selectedRatio =
-    IMAGE_ASPECT_RATIOS.find((item) => item.value === ratio) ||
-    IMAGE_ASPECT_RATIOS[0]!;
+    IMAGE_ASPECT_RATIOS.find((item) => item.value === ratio) || fallbackRatio;
   const customRatioValue = parseAspectRatioInput(customRatio);
   const activeRatio =
     mode === "ratio" && customRatioOpen && customRatioValue
@@ -4715,24 +4721,29 @@ export function CreatePageClient({
       );
       if (activeChoiceIndex >= 0 && activeChoiceIndex < variants.length - 1) {
         const [selected] = variants.splice(activeChoiceIndex, 1);
-        variants.push(selected!);
+        if (selected) variants.push(selected);
       }
       const nextRecent = variants
         .filter((variant) => variant.imageUrl && variant.generationId)
         .toReversed()
-        .map((variant, index) => ({
-          id: variant.generationId!,
-          prompt: resultPrompt,
-          revisedPrompt: variant.revisedPrompt || null,
-          model: variant.model,
-          size: variant.size,
-          creditsConsumed: index === 0 ? data.creditsConsumed || 0 : 0,
-          status: "completed" as const,
-          imageUrl: variant.imageUrl || null,
-          createdAt: new Date().toISOString(),
-          canDelete: index === 0,
-          isLayered: data.layered,
-        }));
+        .flatMap((variant, index) => {
+          if (!variant.generationId) return [];
+          return [
+            {
+              id: variant.generationId,
+              prompt: resultPrompt,
+              revisedPrompt: variant.revisedPrompt || null,
+              model: variant.model,
+              size: variant.size,
+              creditsConsumed: index === 0 ? data.creditsConsumed || 0 : 0,
+              status: "completed" as const,
+              imageUrl: variant.imageUrl || null,
+              createdAt: new Date().toISOString(),
+              canDelete: index === 0,
+              isLayered: data.layered,
+            },
+          ];
+        });
       if (nextRecent.length > 0) {
         setRecent((prev) => {
           const known = new Set(prev.map((item) => item.id));
@@ -6758,7 +6769,11 @@ export function CreatePageClient({
     if (maskFile) formData.append("mask", maskFile.file);
     formData.append("count", String(editBatchCount));
     if (generationIds.length === 1) {
-      formData.append("generationId", generationIds[0]!);
+      const generationId = generationIds[0];
+      if (!generationId) {
+        throw new Error("Expected one generation id for edit request");
+      }
+      formData.append("generationId", generationId);
     } else {
       formData.append("generationIds", JSON.stringify(generationIds));
     }
@@ -8790,8 +8805,7 @@ export function CreatePageClient({
                     </p>
                   </div>
                 ) : (
-                  <>
-                    {visibleChatMessages.map((message) => {
+                  visibleChatMessages.map((message) => {
                       const variants = getChatVariants(message);
                       const activeVariant = getActiveChatVariant(message);
                       const activeIndex = message.activeVariant || 0;
@@ -9112,22 +9126,18 @@ export function CreatePageClient({
                           </div>
                         </div>
                       );
-                    })}
-                  </>
+                    })
                 )}
 
                 {chatStream &&
                   !retryingChatMessageId &&
-                  !chatStream.messageId && (
-                    <>
-                      {chatStream.mode === activeConversationMode && (
-                        <div className="flex justify-start">
-                          <div className="max-w-[88%]">
-                            {renderChatStreamBubble(undefined)}
-                          </div>
-                        </div>
-                      )}
-                    </>
+                  !chatStream.messageId &&
+                  chatStream.mode === activeConversationMode && (
+                    <div className="flex justify-start">
+                      <div className="max-w-[88%]">
+                        {renderChatStreamBubble(undefined)}
+                      </div>
+                    </div>
                   )}
               </div>
 

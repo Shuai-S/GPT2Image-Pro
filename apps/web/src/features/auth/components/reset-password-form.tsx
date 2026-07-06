@@ -1,15 +1,14 @@
 "use client";
 
-import { Eye, EyeOff, KeyRound, Loader2 } from "lucide-react";
-import Link from "next/link";
-import { useLocale } from "next-intl";
-import { useSearchParams } from "next/navigation";
-import { useState } from "react";
-
 import { resetPassword } from "@repo/shared/auth/client";
 import { Button } from "@repo/ui/components/button";
 import { Input } from "@repo/ui/components/input";
 import { Label } from "@repo/ui/components/label";
+import { Eye, EyeOff, KeyRound, Loader2 } from "lucide-react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { useLocale } from "next-intl";
+import { useState } from "react";
 
 import { AuthErrorAlert } from "./auth-error-alert";
 
@@ -25,18 +24,25 @@ export function ResetPasswordForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState<string | null>(
-    token ? null : copy("Reset link is invalid or expired.", "重置链接无效或已过期。")
+    token
+      ? null
+      : copy("Reset link is invalid or expired.", "重置链接无效或已过期。")
   );
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!token) {
-      setError(copy("Reset link is invalid or expired.", "重置链接无效或已过期。"));
+      setError(
+        copy("Reset link is invalid or expired.", "重置链接无效或已过期。")
+      );
       return;
     }
     if (password.length < 8) {
       setError(
-        copy("Password must be at least 8 characters.", "密码至少需要 8 个字符。")
+        copy(
+          "Password must be at least 8 characters.",
+          "密码至少需要 8 个字符。"
+        )
       );
       return;
     }

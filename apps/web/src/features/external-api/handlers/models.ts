@@ -1,7 +1,6 @@
 import { withApiLogging } from "@repo/shared/api-logger";
-import { type NextRequest, NextResponse } from "next/server";
-
 import { canUsePlanCapability } from "@repo/shared/subscription/services/plan-capabilities";
+import { type NextRequest, NextResponse } from "next/server";
 import { authenticateExternalApiRequest } from "@/features/external-api/auth";
 import { getExternalModelsForUser } from "@/features/external-api/models";
 

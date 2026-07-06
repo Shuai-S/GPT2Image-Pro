@@ -102,8 +102,9 @@ export function ChatgptRegisterTab({ groups }: Props) {
   const logEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    void logs.length;
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [logs]);
+  }, [logs.length]);
 
   // 加载当前配置
   const { execute: loadConfig, isExecuting: isLoadingConfig } = useAction(
@@ -128,7 +129,8 @@ export function ChatgptRegisterTab({ groups }: Props) {
         setMaintainEnabled(Boolean(data.maintainEnabled));
         if (data.maintainGroupId) setMaintainGroupId(data.maintainGroupId);
         setMaintainTarget(data.maintainTarget ?? 0);
-        if (data.maintainMaxPerRun) setMaintainMaxPerRun(data.maintainMaxPerRun);
+        if (data.maintainMaxPerRun)
+          setMaintainMaxPerRun(data.maintainMaxPerRun);
         if (data.maintainConcurrency)
           setMaintainConcurrency(data.maintainConcurrency);
       },
@@ -138,7 +140,7 @@ export function ChatgptRegisterTab({ groups }: Props) {
 
   useEffect(() => {
     loadConfig();
-  }, []);
+  }, [loadConfig]);
 
   // 查询维持目标分组当前可用数
   const { execute: fetchAvailable, isExecuting: isFetchingAvailable } =
@@ -166,8 +168,9 @@ export function ChatgptRegisterTab({ groups }: Props) {
         if (!data) return;
         setAvailableDomains(data.domains);
         setSavedDomainCount(data.domains.length);
-        if (data.domains.length > 0 && !domain) {
-          setDomain(data.domains[0]!);
+        const firstDomain = data.domains[0];
+        if (firstDomain && !domain) {
+          setDomain(firstDomain);
         }
         // 查询即自动落库（供轮换域名使用），无需再点保存。
         toast.success(`获取并保存 ${data.domains.length} 个可用域名`);
@@ -253,7 +256,10 @@ export function ChatgptRegisterTab({ groups }: Props) {
               } else if (event.type === "error") {
                 toast.error(`注册机错误：${event.message}`);
                 const id = ++logIdRef.current;
-                setLogs((prev) => [...prev, { id, line: `[错误] ${event.message}` }]);
+                setLogs((prev) => [
+                  ...prev,
+                  { id, line: `[错误] ${event.message}` },
+                ]);
               }
             } catch {
               // 忽略解析失败的行
@@ -369,7 +375,9 @@ export function ChatgptRegisterTab({ groups }: Props) {
             <div className="flex items-center justify-between">
               <Label>代理地址</Label>
               <span className="flex items-center gap-2 text-sm font-normal">
-                <span className="text-muted-foreground">禁用代理（直连本机 IP）</span>
+                <span className="text-muted-foreground">
+                  禁用代理（直连本机 IP）
+                </span>
                 <Switch
                   checked={proxyDisabled}
                   onCheckedChange={(v) => {
@@ -416,7 +424,9 @@ export function ChatgptRegisterTab({ groups }: Props) {
                 min={1}
                 value={refreshMinIntervalSeconds}
                 onChange={(e) =>
-                  setRefreshMinIntervalSeconds(Math.max(1, Number(e.target.value)))
+                  setRefreshMinIntervalSeconds(
+                    Math.max(1, Number(e.target.value))
+                  )
                 }
                 disabled={running || proxyDisabled}
               />
@@ -476,7 +486,8 @@ export function ChatgptRegisterTab({ groups }: Props) {
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
             开启后，定时任务会在目标分组可用 web 账号数低于目标值时自动注册补号
-            （单轮最多注册「每轮上限」个，受 OpenAI 机房 IP 检测影响，靠多轮逼近）。
+            （单轮最多注册「每轮上限」个，受 OpenAI 机房 IP
+            检测影响，靠多轮逼近）。
           </p>
 
           <div className="space-y-1.5">
@@ -503,7 +514,8 @@ export function ChatgptRegisterTab({ groups }: Props) {
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  if (maintainGroupId) fetchAvailable({ groupId: maintainGroupId });
+                  if (maintainGroupId)
+                    fetchAvailable({ groupId: maintainGroupId });
                 }}
                 disabled={!maintainGroupId || isFetchingAvailable || running}
               >
@@ -582,7 +594,9 @@ export function ChatgptRegisterTab({ groups }: Props) {
                 min={1}
                 max={500}
                 value={count}
-                onChange={(e) => setCount(Math.max(1, Math.min(500, Number(e.target.value))))}
+                onChange={(e) =>
+                  setCount(Math.max(1, Math.min(500, Number(e.target.value))))
+                }
                 disabled={running}
               />
             </div>
@@ -594,7 +608,9 @@ export function ChatgptRegisterTab({ groups }: Props) {
                 max={50}
                 value={concurrency}
                 onChange={(e) =>
-                  setConcurrency(Math.max(1, Math.min(50, Number(e.target.value))))
+                  setConcurrency(
+                    Math.max(1, Math.min(50, Number(e.target.value)))
+                  )
                 }
                 disabled={running}
               />
@@ -634,11 +650,7 @@ export function ChatgptRegisterTab({ groups }: Props) {
           </div>
 
           <div className="flex justify-end">
-            <Button
-              type="button"
-              onClick={startRegister}
-              disabled={running}
-            >
+            <Button type="button" onClick={startRegister} disabled={running}>
               {running ? "注册中..." : "开始注册"}
             </Button>
           </div>
@@ -653,8 +665,8 @@ export function ChatgptRegisterTab({ groups }: Props) {
               注册日志
               {importResult && (
                 <span className="ml-3 text-sm font-normal text-muted-foreground">
-                  导入：成功 {importResult.imported}，失败 {importResult.failed}，跳过{" "}
-                  {importResult.skipped}
+                  导入：成功 {importResult.imported}，失败 {importResult.failed}
+                  ，跳过 {importResult.skipped}
                 </span>
               )}
             </CardTitle>

@@ -1,9 +1,8 @@
-import { redirect } from "next/navigation";
-import { getLocale } from "next-intl/server";
-
 import { getUserRoleById } from "@repo/shared/auth/role-server";
 import { canViewImageBackendPool } from "@repo/shared/auth/roles";
 import { getServerSession } from "@repo/shared/auth/server";
+import { redirect } from "next/navigation";
+import { getLocale } from "next-intl/server";
 
 /**
  * Admin 段集中式守卫布局（审计 M-H5）。

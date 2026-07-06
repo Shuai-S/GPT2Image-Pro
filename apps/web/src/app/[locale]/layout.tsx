@@ -1,15 +1,15 @@
+import { Providers } from "@repo/shared/components";
+import { siteConfig } from "@repo/shared/config";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages } from "next-intl/server";
 import { Toaster } from "sonner";
-import { siteConfig } from "@repo/shared/config";
 import { Analytics } from "@/features/analytics";
 // 深路径直引(不经 marketing barrel):barrel 同时 re-export Header/PricingSection,
 // 它们 import framer-motion(~62KB gzip)。经 barrel 引入会把 framer 引擎拖进每个
 // 非营销路由(dashboard/auth 共 21 个)的首屏。直引 cookie-consent 即可避免。
 import { CookieConsent } from "@/features/marketing/components/cookie-consent";
-import { Providers } from "@repo/shared/components";
 import { routing } from "@/i18n/routing";
 
 /**

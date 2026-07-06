@@ -1,13 +1,12 @@
 "use server";
 
+import { db, user } from "@repo/database";
+import { protectedAction } from "@repo/shared/safe-action";
+import { normalizePlanModerationBlockRiskLevel } from "@repo/shared/subscription/services/plan-capabilities";
+import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-
-import { db, user } from "@repo/database";
 import { updateProfileSchema } from "@/features/settings/schemas";
-import { normalizePlanModerationBlockRiskLevel } from "@repo/shared/subscription/services/plan-capabilities";
-import { protectedAction } from "@repo/shared/safe-action";
-import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 
 /**
  * 更新用户资料 Server Action

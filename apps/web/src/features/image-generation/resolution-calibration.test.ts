@@ -5,7 +5,10 @@ import { shouldSuperResolve } from "./resolution-calibration";
 describe("shouldSuperResolve（超分触发阈值：实际较长边 < 目标 2/3）", () => {
   it("实际明显偏小（1024 目标，512 实际）→ 触发", () => {
     expect(
-      shouldSuperResolve({ width: 512, height: 512 }, { width: 1024, height: 1024 })
+      shouldSuperResolve(
+        { width: 512, height: 512 },
+        { width: 1024, height: 1024 }
+      )
     ).toBe(true);
   });
 
@@ -39,7 +42,10 @@ describe("shouldSuperResolve（超分触发阈值：实际较长边 < 目标 2/3
 
   it("按较长边判定：1024 目标、长边 768 的非方图 → 不触发（768 > 683）", () => {
     expect(
-      shouldSuperResolve({ width: 768, height: 512 }, { width: 1024, height: 1024 })
+      shouldSuperResolve(
+        { width: 768, height: 512 },
+        { width: 1024, height: 1024 }
+      )
     ).toBe(false);
   });
 

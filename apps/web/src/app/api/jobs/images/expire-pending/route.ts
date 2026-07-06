@@ -1,10 +1,9 @@
 import crypto from "node:crypto";
-import { headers } from "next/headers";
-import { NextResponse } from "next/server";
-
 import { withApiLogging } from "@repo/shared/api-logger";
 import { IMAGE_GENERATION_PENDING_TIMEOUT_MS } from "@repo/shared/generation-maintenance";
 import { logWarn } from "@repo/shared/logger";
+import { headers } from "next/headers";
+import { NextResponse } from "next/server";
 
 import { runImageMaintenanceJob } from "@/server/scheduled-jobs";
 

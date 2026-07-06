@@ -132,9 +132,7 @@ export function toGenerationImageTaskResponse(
     status,
     created: Math.floor(row.createdAt.getTime() / 1000),
     created_at: row.createdAt.toISOString(),
-    ...(row.completedAt
-      ? { completed_at: row.completedAt.toISOString() }
-      : {}),
+    ...(row.completedAt ? { completed_at: row.completedAt.toISOString() } : {}),
     generation_id: row.id,
     generationId: row.id,
     ...(status === "completed" && imageUrl

@@ -1,3 +1,4 @@
+import type { BrandingConfig } from "@repo/shared/config/branding";
 import {
   type ArticleSchemaInput,
   type BreadcrumbItem,
@@ -9,7 +10,6 @@ import {
   generateSoftwareApplicationSchema,
   generateWebSiteSchema,
 } from "@/lib/seo/json-ld";
-import type { BrandingConfig } from "@repo/shared/config/branding";
 
 type LocaleType = "en" | "zh";
 

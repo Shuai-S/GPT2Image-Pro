@@ -1,8 +1,7 @@
 import crypto from "node:crypto";
+import { withApiLogging } from "@repo/shared/api-logger";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-
-import { withApiLogging } from "@repo/shared/api-logger";
 
 import { runSub2ApiSyncJob } from "@/server/scheduled-jobs";
 
@@ -14,7 +13,10 @@ async function validateCronSecret(authHeader: string | null) {
     ? authHeader.slice(7)
     : authHeader;
   if (!token) return false;
-  const tokenHash = crypto.createHash("sha256").update(Buffer.from(token)).digest();
+  const tokenHash = crypto
+    .createHash("sha256")
+    .update(Buffer.from(token))
+    .digest();
   const secretHash = crypto
     .createHash("sha256")
     .update(Buffer.from(cronSecret))
@@ -46,7 +48,8 @@ export const GET = withApiLogging(async () =>
     status: "ok",
     endpoint: "/api/jobs/image-backend/sub2api/sync",
     method: "POST",
-    description: "Sync Sub2API current access tokens into the image backend pool",
+    description:
+      "Sync Sub2API current access tokens into the image backend pool",
     schedule:
       "Call periodically; configured Sub2API auto-sync tasks decide their own run intervals.",
     authentication: "Bearer token required (process env CRON_SECRET)",

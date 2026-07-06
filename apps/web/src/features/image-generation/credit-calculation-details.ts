@@ -80,7 +80,9 @@ export function extractGenerationCreditDetails(
   if (!isRecord(metadata)) return null;
 
   const backend = isRecord(metadata.backend) ? metadata.backend : {};
-  const outputImage = isRecord(metadata.outputImage) ? metadata.outputImage : {};
+  const outputImage = isRecord(metadata.outputImage)
+    ? metadata.outputImage
+    : {};
   const creditCost = readCreditCost(metadata.creditCost);
   const requestedCreditCost = readCreditCost(outputImage.requestedCreditCost);
   const actualCreditCost = readCreditCost(outputImage.actualCreditCost);
@@ -101,9 +103,8 @@ export function extractGenerationCreditDetails(
   const chatCredits =
     readNumber(chatTextOnlyCharge?.credits) ??
     (chatRoundCredits !== null && chatRoundCount !== null
-      ? Math.round(
-          (chatRoundCredits * chatRoundCount + Number.EPSILON) * 100
-        ) / 100
+      ? Math.round((chatRoundCredits * chatRoundCount + Number.EPSILON) * 100) /
+        100
       : null);
 
   const actualImageCredits =

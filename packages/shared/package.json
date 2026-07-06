@@ -93,6 +93,7 @@
     "./mcp/user-key-actions": "./src/mcp/user-key-actions.ts"
   },
   "scripts": {
+    "lint": "pnpm --filter @repo/web exec biome lint ../../packages/shared",
     "test": "vitest run --config vitest.config.ts",
     "test:matrix": "vitest run --config vitest.config.ts src/subscription/services/plan-capabilities.test.ts",
     "typecheck": "tsc --noEmit"

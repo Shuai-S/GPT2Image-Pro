@@ -156,7 +156,10 @@ describe("external final image selection", () => {
     });
     expect("data" in payload).toBe(true);
     if (!("data" in payload)) throw new Error("expected image response data");
-    const url = new URL(payload.data[0]!.url!);
+    const firstImage = payload.data[0];
+    expect(firstImage?.url).toBeDefined();
+    if (!firstImage?.url) throw new Error("expected first image URL");
+    const url = new URL(firstImage.url);
     expect(url.origin).toBe("https://example.com");
     expect(url.pathname).toBe("/api/storage/generations/final.png");
     expect(url.searchParams.get("sig")).toMatch(/^[a-f0-9]{64}$/);
@@ -172,7 +175,9 @@ describe("external final image selection", () => {
       "https://example.com/api/storage/generations/user/out.png"
     );
 
-    const url = new URL(publicUrl!);
+    expect(publicUrl).toBeDefined();
+    if (!publicUrl) throw new Error("expected public image URL");
+    const url = new URL(publicUrl);
     expect(url.origin).toBe("https://example.com");
     expect(url.pathname).toBe("/api/storage/generations/user/out.png");
     expect(url.searchParams.get("sig")).toMatch(/^[a-f0-9]{64}$/);

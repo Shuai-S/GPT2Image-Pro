@@ -1,5 +1,3 @@
-import { and, eq, gte, gt, isNull, lt, or, sql } from "drizzle-orm";
-
 import { db } from "@repo/database";
 import { creditsBatch } from "@repo/database/schema";
 import {
@@ -12,6 +10,7 @@ import {
   PLAN_RANK,
   type SubscriptionPlan,
 } from "@repo/shared/config/subscription-plan";
+import { and, eq, gt, gte, isNull, lt, or, sql } from "drizzle-orm";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MIN_UPGRADE_PAYMENT_CENTS = 1;
@@ -111,9 +110,10 @@ async function getRemainingSubscriptionCredits(
 
   const [result] = await db
     .select({
-      remaining: sql<number>`coalesce(sum(${creditsBatch.remaining}), 0)`.mapWith(
-        Number
-      ),
+      remaining:
+        sql<number>`coalesce(sum(${creditsBatch.remaining}), 0)`.mapWith(
+          Number
+        ),
     })
     .from(creditsBatch)
     .where(and(...filters));

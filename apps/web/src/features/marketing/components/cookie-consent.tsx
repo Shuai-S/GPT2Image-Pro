@@ -1,10 +1,10 @@
 "use client";
 
-import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
-
 import { Button } from "@repo/ui/components/button";
 import { Switch } from "@repo/ui/components/switch";
+import { cn } from "@repo/ui/utils";
+import { useTranslations } from "next-intl";
+import { useCallback, useEffect, useState } from "react";
 import {
   COOKIE_CONSENT_CHANGE_EVENT,
   COOKIE_CONSENT_KEY,
@@ -13,7 +13,6 @@ import {
   type CookiePreferences,
 } from "@/features/marketing/constants";
 import { Link } from "@/i18n/routing";
-import { cn } from "@repo/ui/utils";
 
 /**
  * 默认 Cookie 偏好

@@ -1,14 +1,14 @@
 import {
-  moderateContent,
-  type ModerationImageInput,
-} from "@repo/shared/moderation";
-import {
   isModerationBlockRiskLevel,
   type ModerationBlockRiskLevel,
   type SubscriptionPlan,
 } from "@repo/shared/config/subscription-plan";
+import {
+  type ModerationImageInput,
+  moderateContent,
+} from "@repo/shared/moderation";
 import { getRuntimeSettingString } from "@repo/shared/system-settings";
-import { NextResponse, type NextRequest } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import { secretMatchesAny } from "./proxy-secret";
 
 type ModerationRequestImage = {
@@ -47,7 +47,9 @@ async function verifyProxySecret(request: NextRequest) {
   );
 }
 
-function parseImage(image: ModerationRequestImage): ModerationImageInput | null {
+function parseImage(
+  image: ModerationRequestImage
+): ModerationImageInput | null {
   if (!image.url && !image.data) return null;
   return {
     data: image.data ? Buffer.from(image.data, "base64") : Buffer.alloc(0),

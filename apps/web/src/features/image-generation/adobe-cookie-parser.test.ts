@@ -19,17 +19,16 @@ describe("parseAdobeCookieEntries", () => {
 
   it("skips blank lines and `#` comments", () => {
     const a = "aux_sid=AAA; x=1";
-    expect(parseAdobeCookieEntries(`# 第一个账号\n${a}\n\n  # 注释\n`)).toEqual([
-      { cookie: a },
-    ]);
+    expect(parseAdobeCookieEntries(`# 第一个账号\n${a}\n\n  # 注释\n`)).toEqual(
+      [{ cookie: a }]
+    );
   });
 
   it("strips surrounding quotes and trailing commas", () => {
     const a = "aux_sid=AAA; x=1";
-    expect(parseAdobeCookieEntries(`"${a}",\n'${a.replace("AAA", "BBB")}'`)).toEqual([
-      { cookie: a },
-      { cookie: "aux_sid=BBB; x=1" },
-    ]);
+    expect(
+      parseAdobeCookieEntries(`"${a}",\n'${a.replace("AAA", "BBB")}'`)
+    ).toEqual([{ cookie: a }, { cookie: "aux_sid=BBB; x=1" }]);
   });
 
   it("dedupes identical cookie strings, preserving order", () => {
@@ -68,7 +67,10 @@ describe("parseAdobeCookieEntries", () => {
     const result = parseAdobeCookieEntries(
       JSON.stringify({ cookies: ["aux_sid=AAA", { cookie: "aux_sid=BBB" }] })
     );
-    expect(result).toEqual([{ cookie: "aux_sid=AAA" }, { cookie: "aux_sid=BBB" }]);
+    expect(result).toEqual([
+      { cookie: "aux_sid=AAA" },
+      { cookie: "aux_sid=BBB" },
+    ]);
   });
 
   it("keeps a raw cookie containing braces (does not mistake it for JSON)", () => {

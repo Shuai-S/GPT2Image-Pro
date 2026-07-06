@@ -66,6 +66,7 @@ import { toast } from "sonner";
 import {
   bulkDeleteImageBackendAccountsAction,
   bulkUpdateImageBackendAccountsAction,
+  deleteAdobeAccountAction,
   deleteImageBackendGroupAction,
   deleteImageBackendMemberAction,
   deleteSub2ApiAutoSyncTaskAction,
@@ -75,11 +76,10 @@ import {
   getSub2ApiSourceGroupsAction,
   getSub2ApiSyncProgressAction,
   getSub2ApiSyncStatusAction,
-  importImageBackendAccountsFromRefreshTokensAction,
-  importImageBackendWebAccountsFromAccessTokensAction,
-  deleteAdobeAccountAction,
   importAdobeAccountAction,
   importAdobeAccountsAction,
+  importImageBackendAccountsFromRefreshTokensAction,
+  importImageBackendWebAccountsFromAccessTokensAction,
   listAdobeAccountsAction,
   refreshImageBackendAccountInfoAction,
   refreshImageBackendAccountsInfoAction,
@@ -88,9 +88,9 @@ import {
   saveImageBackendAccountAction,
   saveImageBackendAdobeAction,
   saveImageBackendApiAction,
-  setAdobeModelMultipliersAction,
   saveImageBackendGroupAction,
   setAdobeAccountEnabledAction,
+  setAdobeModelMultipliersAction,
   setImageBackendAccountAlwaysActiveAction,
   setImageBackendAdobeAlwaysActiveAction,
   setImageBackendAdobeEnabledAction,
@@ -1664,16 +1664,10 @@ export function ImageBackendPoolAdminPanel({
     {
       onSuccess: ({ data }) => {
         setImageMultiplierDraft(
-          multipliersToDraft(
-            ADOBE_IMAGE_MULTIPLIER_FAMILIES,
-            data?.image ?? {}
-          )
+          multipliersToDraft(ADOBE_IMAGE_MULTIPLIER_FAMILIES, data?.image ?? {})
         );
         setVideoMultiplierDraft(
-          multipliersToDraft(
-            ADOBE_VIDEO_MULTIPLIER_FAMILIES,
-            data?.video ?? {}
-          )
+          multipliersToDraft(ADOBE_VIDEO_MULTIPLIER_FAMILIES, data?.video ?? {})
         );
       },
       onError: ({ error }) =>
@@ -1699,17 +1693,19 @@ export function ImageBackendPoolAdminPanel({
       toast.error(error.serverError || "加载 Adobe 账号失败"),
   });
 
-  const { execute: importAdobeAccountExec, isPending: isImportingAdobeAccount } =
-    useAction(importAdobeAccountAction, {
-      onSuccess: () => {
-        toast.success("Adobe 账号已导入并验证");
-        setAdobeCookieInput("");
-        setAdobeAccountName("");
-        if (adobeForm.id) loadAdobeAccounts({ adobeId: adobeForm.id });
-      },
-      onError: ({ error }) =>
-        toast.error(error.serverError || "导入 Adobe 账号失败"),
-    });
+  const {
+    execute: importAdobeAccountExec,
+    isPending: isImportingAdobeAccount,
+  } = useAction(importAdobeAccountAction, {
+    onSuccess: () => {
+      toast.success("Adobe 账号已导入并验证");
+      setAdobeCookieInput("");
+      setAdobeAccountName("");
+      if (adobeForm.id) loadAdobeAccounts({ adobeId: adobeForm.id });
+    },
+    onError: ({ error }) =>
+      toast.error(error.serverError || "导入 Adobe 账号失败"),
+  });
 
   const [adobeBatchSummary, setAdobeBatchSummary] = useState("");
   const {
@@ -2372,6 +2368,7 @@ export function ImageBackendPoolAdminPanel({
   }, [loadSub2ApiSourceGroups, sub2ApiConfigured]);
 
   useEffect(() => {
+    void accountFilterKey;
     setAccountPage(1);
   }, [accountFilterKey]);
 
@@ -2416,7 +2413,8 @@ export function ImageBackendPoolAdminPanel({
               : readOnly
                 ? "accounts"
                 : "groups";
-          if (readOnly && (nextTab === "import" || nextTab === "register")) return;
+          if (readOnly && (nextTab === "import" || nextTab === "register"))
+            return;
           setActiveTab(nextTab);
         }}
         className="w-full"
@@ -4010,8 +4008,9 @@ export function ImageBackendPoolAdminPanel({
                     <Label>Adobe 来源（按 Adobe 计费 + 进 firefly 调度）</Label>
                     <p className="text-xs text-muted-foreground">
                       上游实为 Adobe 的 gpt 格式 api。开启后：计费吃下方成员倍率
-                      （命中组倍率 × 成员倍率，与 Adobe 伪账号同口径）；调度上参与
-                      firefly 候选，firefly-* 请求自动反向转换成 gpt 请求后由本后端处理。
+                      （命中组倍率 × 成员倍率，与 Adobe
+                      伪账号同口径）；调度上参与 firefly 候选，firefly-*
+                      请求自动反向转换成 gpt 请求后由本后端处理。
                     </p>
                   </div>
                   <Switch
@@ -4041,8 +4040,9 @@ export function ImageBackendPoolAdminPanel({
                       }
                     />
                     <p className="text-xs text-muted-foreground">
-                      仅「Adobe 来源」开启时生效。最终扣费 = 向上保留两位(向上保留两位
-                      (基础价 + 审核附加) × 模型倍率 × 命中组倍率 × 本成员倍率)。
+                      仅「Adobe 来源」开启时生效。最终扣费 =
+                      向上保留两位(向上保留两位 (基础价 + 审核附加) × 模型倍率 ×
+                      命中组倍率 × 本成员倍率)。
                     </p>
                     {(() => {
                       // 实时算例：以 nano-banana-pro · 1024×1024 为例，套上方输入的成员
@@ -4063,19 +4063,21 @@ export function ImageBackendPoolAdminPanel({
                             算例：nano-banana-pro · 1024×1024
                           </div>
                           <div className="text-muted-foreground">
-                            模型 x{modelMultiplier} · 组 x{sampleGroup}（示例） ·
-                            成员 x{member}
+                            模型 x{modelMultiplier} · 组 x{sampleGroup}（示例）
+                            · 成员 x{member}
                           </div>
                           <div className="text-muted-foreground">
-                            向上保留两位(向上保留两位(6 基础价 + 0.04 审核附加) x{" "}
-                            {modelMultiplier} x {sampleGroup} x {member})
+                            向上保留两位(向上保留两位(6 基础价 + 0.04 审核附加)
+                            x {modelMultiplier} x {sampleGroup} x {member})
                           </div>
                           <div className="font-medium text-foreground">
                             = {final} 积分/张
                           </div>
                           <p className="text-muted-foreground">
-                            模型倍率（如 nano-banana-pro x1.5）按 IMAGE_MODEL_MULTIPLIERS
-                            配置、与本成员倍率叠乘；关闭「Adobe 来源」则成员 x1（同普通 api）。
+                            模型倍率（如 nano-banana-pro x1.5）按
+                            IMAGE_MODEL_MULTIPLIERS
+                            配置、与本成员倍率叠乘；关闭「Adobe 来源」则成员
+                            x1（同普通 api）。
                           </p>
                         </div>
                       );
@@ -4491,7 +4493,8 @@ export function ImageBackendPoolAdminPanel({
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    用户选 auto 时映射到此质量；显式选 low/medium/high 则按用户的来。
+                    用户选 auto 时映射到此质量；显式选 low/medium/high
+                    则按用户的来。
                   </p>
                 </div>
                 <div className="space-y-1">
@@ -4517,7 +4520,9 @@ export function ImageBackendPoolAdminPanel({
                 <div className="space-y-2 rounded-md border p-3">
                   <div className="flex items-center justify-between gap-2">
                     <Label>所属分组</Label>
-                    <span className="text-xs text-muted-foreground">可多选</span>
+                    <span className="text-xs text-muted-foreground">
+                      可多选
+                    </span>
                   </div>
                   <div className="grid max-h-40 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
                     {groups.map((group) => (
@@ -4558,7 +4563,9 @@ export function ImageBackendPoolAdminPanel({
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">并发</Label>
+                    <Label className="text-xs text-muted-foreground">
+                      并发
+                    </Label>
                     <Input
                       type="number"
                       value={adobeForm.concurrency}
@@ -4717,15 +4724,13 @@ export function ImageBackendPoolAdminPanel({
                           variant="secondary"
                           className="w-full"
                           disabled={
-                            isImportingAdobeAccounts ||
-                            !adobeCookieInput.trim()
+                            isImportingAdobeAccounts || !adobeCookieInput.trim()
                           }
                           onClick={() =>
                             importAdobeAccountsExec({
                               adobeId: adobeForm.id,
                               cookiesText: adobeCookieInput,
-                              namePrefix:
-                                adobeAccountName.trim() || undefined,
+                              namePrefix: adobeAccountName.trim() || undefined,
                             })
                           }
                         >

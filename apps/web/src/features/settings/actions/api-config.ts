@@ -1,14 +1,13 @@
 "use server";
 
-import { eq } from "drizzle-orm";
-import { nanoid } from "nanoid";
-import { z } from "zod";
-
 import { db } from "@repo/database";
 import { userApiConfig } from "@repo/database/schema";
 import { protectedAction } from "@repo/shared/safe-action";
 import { canUsePlanCapability } from "@repo/shared/subscription/services/plan-capabilities";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
+import { eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import { z } from "zod";
 
 import { checkImageBackendApiHealth } from "@/features/image-backend-pool/health-check";
 
@@ -38,9 +37,9 @@ function isPrivateUrl(urlString: string): boolean {
 
     // Reject IPv6 shorthand hex-encoded private/loopback ranges
     // e.g., ::ffff:7f00:1 (127.0.0.1), ::ffff:a00:0 (10.0.0.0), ::ffff:c0a8:0 (192.168.0.0)
-    const ipv6HexMatch = hostname.replace(/^\[|\]$/g, "").match(
-      /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/
-    );
+    const ipv6HexMatch = hostname
+      .replace(/^\[|\]$/g, "")
+      .match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
     if (ipv6HexMatch?.[1] && ipv6HexMatch[2]) {
       const high = Number.parseInt(ipv6HexMatch[1], 16);
       const a = (high >> 8) & 0xff;
@@ -54,7 +53,9 @@ function isPrivateUrl(urlString: string): boolean {
     }
 
     // Check IPv6-mapped IPv4 addresses (e.g., ::ffff:127.0.0.1)
-    const ipv6MappedMatch = hostname.match(/^::ffff:(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+    const ipv6MappedMatch = hostname.match(
+      /^::ffff:(\d+)\.(\d+)\.(\d+)\.(\d+)$/
+    );
     if (ipv6MappedMatch) {
       const a = Number(ipv6MappedMatch[1]);
       const b = Number(ipv6MappedMatch[2]);
@@ -117,7 +118,9 @@ const withApiConfigAction = (name: string) =>
 async function ensureCustomApiAllowed(userId: string) {
   const plan = await getUserPlan(userId);
   if (!(await canUsePlanCapability(plan.plan, "customApi.configure"))) {
-    throw new Error("Custom API configuration requires Starter plan or higher.");
+    throw new Error(
+      "Custom API configuration requires Starter plan or higher."
+    );
   }
 }
 

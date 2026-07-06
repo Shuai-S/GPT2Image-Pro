@@ -135,7 +135,7 @@ export function buildStorageThumbnailUrl(
   signedUrl: string | null | undefined,
   width: number
 ): string | null | undefined {
-  if (!signedUrl || !signedUrl.startsWith("/api/storage/")) {
+  if (!signedUrl?.startsWith("/api/storage/")) {
     return signedUrl;
   }
   if (!Number.isInteger(width) || width <= 0) {

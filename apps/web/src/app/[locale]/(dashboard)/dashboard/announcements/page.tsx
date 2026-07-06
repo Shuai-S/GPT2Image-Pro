@@ -1,7 +1,3 @@
-import { redirect } from "next/navigation";
-import { getLocale } from "next-intl/server";
-import { CheckCircle2, Megaphone, Pin } from "lucide-react";
-
 import {
   listActiveAnnouncementsForUser,
   markAnnouncementIdsReadForUser,
@@ -17,6 +13,9 @@ import {
   CardTitle,
 } from "@repo/ui/components/card";
 import { cn } from "@repo/ui/utils";
+import { CheckCircle2, Megaphone, Pin } from "lucide-react";
+import { redirect } from "next/navigation";
+import { getLocale } from "next-intl/server";
 
 function getSeverityMeta(severity: string) {
   switch (severity) {
@@ -37,16 +36,13 @@ function getSeverityMeta(severity: string) {
     case "critical":
       return {
         label: "紧急",
-        className:
-          "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
+        className: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
         borderClassName: "border-l-red-500",
       };
-    case "info":
     default:
       return {
         label: "公告",
-        className:
-          "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300",
+        className: "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300",
         borderClassName: "border-l-sky-500",
       };
   }

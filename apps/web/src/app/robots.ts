@@ -1,6 +1,5 @@
-import type { MetadataRoute } from "next";
-
 import { siteConfig } from "@repo/shared/config";
+import type { MetadataRoute } from "next";
 
 /**
  * 动态生成 robots.txt

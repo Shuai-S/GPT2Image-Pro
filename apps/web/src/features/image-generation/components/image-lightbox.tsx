@@ -16,15 +16,15 @@ import {
   Trash2,
 } from "lucide-react";
 import Image from "next/image";
-import { useLocale } from "next-intl";
 import { useRouter } from "next/navigation";
+import { useLocale } from "next-intl";
 import { useAction } from "next-safe-action/hooks";
 import { type PointerEvent, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { deleteGenerationAction } from "@/features/image-generation/actions";
 import type { GenerationCreditDetails } from "@/features/image-generation/credit-calculation-details";
-import { ExportPsdDialog } from "@/features/psd-export/components/export-psd-dialog";
 import { writePendingReferenceHandoff } from "@/features/image-generation/reference-handoff";
+import { ExportPsdDialog } from "@/features/psd-export/components/export-psd-dialog";
 import { generateDownloadFilename } from "@/lib/download-filename";
 
 export interface LightboxReferenceImage {
@@ -475,7 +475,7 @@ export function ImageLightbox({
                       )}
                       {visibleReferenceImages.map((item, index) => (
                         <button
-                          key={`${item.id}-${index}`}
+                          key={item.id}
                           type="button"
                           onClick={() => setActivePreviewId(item.id)}
                           className={[
@@ -612,7 +612,10 @@ export function ImageLightbox({
                   >
                     <a
                       href={previewImageUrl}
-                      download={generateDownloadFilename(generation.prompt, generation.createdAt)}
+                      download={generateDownloadFilename(
+                        generation.prompt,
+                        generation.createdAt
+                      )}
                       target="_blank"
                       rel="noopener noreferrer"
                     >

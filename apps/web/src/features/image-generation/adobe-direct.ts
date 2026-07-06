@@ -27,9 +27,9 @@ import {
   type FireflyTransport,
   fetchAccountInfo,
   fetchCreditsBalance,
+  fireflyVideoSize,
   isAdobeRotatableError,
   isTokenExpired,
-  fireflyVideoSize,
   ProxyFireflyTransport,
   QuotaExhaustedError,
   refreshAccessTokenFromCookie,
@@ -39,9 +39,8 @@ import {
 import { logError, logWarn } from "@repo/shared/logger";
 import { getRuntimeSettingString } from "@repo/shared/system-settings";
 import { and, asc, eq, sql } from "drizzle-orm";
-
-import { parseAdobeCookieEntries } from "./adobe-cookie-parser";
 import { nanoid } from "nanoid";
+import { parseAdobeCookieEntries } from "./adobe-cookie-parser";
 import type { ApiConfig, GenerateImageResult } from "./types";
 
 // IMS access_token 距过期多久内视为需要刷新（秒）。
@@ -330,7 +329,11 @@ async function acquireToken(
         .update(adobeToken)
         .set({ lastUsedAt: new Date() })
         .where(eq(adobeToken.id, refreshed.id));
-      return { id: refreshed.id, value: refreshed.value, accountId: account.id };
+      return {
+        id: refreshed.id,
+        value: refreshed.value,
+        accountId: account.id,
+      };
     }
   }
   return null;
@@ -656,7 +659,12 @@ async function validateAdobeCookie(
 // 持久化一个已验证的 Adobe 账号：写 adobeAccount + 初始 auto_refresh adobeToken。
 // 额外回传 accountUserId（IMS 稳定身份），供批量导入去重使用。
 async function persistAdobeAccount(
-  input: { adobeId: string; name?: string; cookie: string; scope?: string | null },
+  input: {
+    adobeId: string;
+    name?: string;
+    cookie: string;
+    scope?: string | null;
+  },
   validated: AdobeCookieValidation
 ): Promise<{
   id: string;
@@ -712,7 +720,10 @@ export async function importAdobeAccount(input: {
     input.cookie,
     input.scope
   );
-  const { id, displayName, email } = await persistAdobeAccount(input, validated);
+  const { id, displayName, email } = await persistAdobeAccount(
+    input,
+    validated
+  );
   return { id, displayName, email };
 }
 

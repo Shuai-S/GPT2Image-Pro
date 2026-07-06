@@ -1,8 +1,8 @@
-import { siteConfig } from "@repo/shared/config";
 import {
   createOgImageResponse,
   OG_IMAGE_SIZE,
 } from "@repo/shared/components/og-image-template";
+import { siteConfig } from "@repo/shared/config";
 
 /**
  * Twitter 图片配置

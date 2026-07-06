@@ -1,6 +1,6 @@
 import { getCurrentUser } from "@repo/shared/auth/server";
-import { getLocale } from "next-intl/server";
 import { redirect } from "next/navigation";
+import { getLocale } from "next-intl/server";
 
 import { SystemDocsContent } from "@/features/docs/system-docs";
 

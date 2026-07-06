@@ -1,8 +1,7 @@
 import { db, user } from "@repo/database";
 import { auth } from "@repo/shared/auth";
 import { eq } from "drizzle-orm";
-import { headers } from "next/headers";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { isAuthCookieName, toCurrentSessionUser } from "./session-current-core";
 

@@ -266,7 +266,9 @@ describe("fitImageDimensionsToValidSize", () => {
       expect(fitted.height).toBeGreaterThanOrEqual(MIN_IMAGE_DIMENSION);
       expect(fitted.width).toBeLessThanOrEqual(MAX_IMAGE_DIMENSION);
       expect(fitted.height).toBeLessThanOrEqual(MAX_IMAGE_DIMENSION);
-      expect(fitted.width * fitted.height).toBeLessThanOrEqual(MAX_IMAGE_PIXELS);
+      expect(fitted.width * fitted.height).toBeLessThanOrEqual(
+        MAX_IMAGE_PIXELS
+      );
       expect(isValidImageDimension(fitted.width)).toBe(true);
       expect(isValidImageDimension(fitted.height)).toBe(true);
     }

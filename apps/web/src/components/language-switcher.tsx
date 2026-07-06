@@ -1,10 +1,5 @@
 "use client";
 
-import { Globe } from "lucide-react";
-import { useParams } from "next/navigation";
-import { useLocale, useTranslations } from "next-intl";
-import { useTransition } from "react";
-
 import { Button } from "@repo/ui/components/button";
 import {
   DropdownMenu,
@@ -12,6 +7,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@repo/ui/components/dropdown-menu";
+import { Globe } from "lucide-react";
+import { useParams } from "next/navigation";
+import { useLocale, useTranslations } from "next-intl";
+import { useTransition } from "react";
 import { usePathname, useRouter } from "@/i18n/routing";
 
 /**

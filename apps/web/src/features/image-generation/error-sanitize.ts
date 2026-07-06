@@ -26,7 +26,10 @@ export function isInternalDatabaseError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   if (/^Failed query:/i.test(error.message)) return true;
   const candidate = error as { code?: unknown; severity?: unknown };
-  if (typeof candidate.code === "string" && /^[0-9A-Z]{5}$/.test(candidate.code)) {
+  if (
+    typeof candidate.code === "string" &&
+    /^[0-9A-Z]{5}$/.test(candidate.code)
+  ) {
     return true;
   }
   if (typeof candidate.severity === "string") return true;

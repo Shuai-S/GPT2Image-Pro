@@ -251,9 +251,9 @@ export async function getRuntimeCreditPackages(options?: {
   }
 
   if (options?.plan) {
+    const plan = options.plan;
     packages = packages.filter(
-      (pkg) =>
-        !pkg.requiresPlan || isPlanAtLeast(options.plan!, pkg.requiresPlan)
+      (pkg) => !pkg.requiresPlan || isPlanAtLeast(plan, pkg.requiresPlan)
     );
   }
 
@@ -278,8 +278,9 @@ export function getCreditPackagePriceForPlan(
 ) {
   for (let i = PLAN_RANK[plan]; i >= 0; i -= 1) {
     const candidate = SUBSCRIPTION_PLANS.find((item) => PLAN_RANK[item] === i);
-    if (candidate && pkg.pricesByPlan?.[candidate]) {
-      return pkg.pricesByPlan[candidate]!;
+    const price = candidate ? pkg.pricesByPlan?.[candidate] : undefined;
+    if (price) {
+      return price;
     }
   }
   return pkg.price;
@@ -291,8 +292,11 @@ export function getCreditPackageCreemProductIdForPlan(
 ) {
   for (let i = PLAN_RANK[plan]; i >= 0; i -= 1) {
     const candidate = SUBSCRIPTION_PLANS.find((item) => PLAN_RANK[item] === i);
-    if (candidate && pkg.creemProductIdsByPlan?.[candidate]) {
-      return pkg.creemProductIdsByPlan[candidate]!;
+    const productId = candidate
+      ? pkg.creemProductIdsByPlan?.[candidate]
+      : undefined;
+    if (productId) {
+      return productId;
     }
   }
   return pkg.creemProductId || `credits_${pkg.id}`;

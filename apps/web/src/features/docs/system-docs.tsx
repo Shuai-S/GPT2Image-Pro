@@ -1461,12 +1461,12 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
           responses: [
             {
               name: "id",
-              description: "任务 ID（task_...），与请求路径中的 {task_id} 一致。",
+              description:
+                "任务 ID（task_...），与请求路径中的 {task_id} 一致。",
             },
             {
               name: "object",
-              description:
-                "执行中为 image.generation，完成后为 image。",
+              description: "执行中为 image.generation，完成后为 image。",
             },
             {
               name: "status",
@@ -1490,8 +1490,7 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
             },
             {
               name: "credits_consumed",
-              description:
-                "完成后结算的本站积分；命中用户自接 API 时为 0。",
+              description: "完成后结算的本站积分；命中用户自接 API 时为 0。",
             },
           ],
           notes: [
@@ -1694,7 +1693,8 @@ curl https://gpt2image.superapi.buzz/v1/videos/task_... \\
             },
             {
               name: "generation_id / generationId",
-              description: "关联的视频生成记录 ID，可作本端点路径参数持久查询。",
+              description:
+                "关联的视频生成记录 ID，可作本端点路径参数持久查询。",
             },
             {
               name: "credits_consumed",
@@ -3734,7 +3734,8 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
           responses: [
             {
               name: "id",
-              description: "Task ID (task_...), matching {task_id} in the path.",
+              description:
+                "Task ID (task_...), matching {task_id} in the path.",
             },
             {
               name: "object",
@@ -3938,7 +3939,8 @@ curl https://gpt2image.superapi.buzz/v1/videos/task_... \\
           responses: [
             {
               name: "id",
-              description: "Task ID (task_...), matching {id} in the request path.",
+              description:
+                "Task ID (task_...), matching {id} in the request path.",
             },
             {
               name: "object",
@@ -3952,7 +3954,8 @@ curl https://gpt2image.superapi.buzz/v1/videos/task_... \\
             },
             {
               name: "duration_seconds",
-              description: "Video duration in seconds, taken from <dur> in the model id.",
+              description:
+                "Video duration in seconds, taken from <dur> in the model id.",
               custom: true,
             },
             {
@@ -3967,7 +3970,8 @@ curl https://gpt2image.superapi.buzz/v1/videos/task_... \\
             },
             {
               name: "generation_id / generationId",
-              description: "The associated video generation record ID, usable as this endpoint's path parameter for persistent lookups.",
+              description:
+                "The associated video generation record ID, usable as this endpoint's path parameter for persistent lookups.",
             },
             {
               name: "credits_consumed",
@@ -3977,7 +3981,7 @@ curl https://gpt2image.superapi.buzz/v1/videos/task_... \\
           ],
           notes: [
             "This endpoint is a GPT2IMAGE extension, not an official OpenAI endpoint; /api/v1/videos/{id} is an alias.",
-            "In-memory tasks expire after 30 minutes; a restart or multi-instance switch makes an unfinished task return 404 \"Video task not found or expired.\", but an already-sent callback_url callback is unaffected. Use the generation_id for persistent lookups.",
+            'In-memory tasks expire after 30 minutes; a restart or multi-instance switch makes an unfinished task return 404 "Video task not found or expired.", but an already-sent callback_url callback is unaffected. Use the generation_id for persistent lookups.',
             "Only tasks created by the user that owns the current API key are queryable; the response is Cache-Control: no-store.",
             "The shape is identical to the task object POSTed to callback_url.",
           ],

@@ -4,6 +4,15 @@
  * Next.js App Router 会在页面数据获取时自动显示此组件
  * 提供即时视觉反馈，避免页面切换时的"卡顿"感
  */
+const dashboardSkeletonIds = [
+  "usage",
+  "gallery",
+  "billing",
+  "settings",
+  "support",
+  "activity",
+];
+
 export default function DashboardLoading() {
   return (
     <div className="container mx-auto py-6 px-4 md:px-6 animate-pulse">
@@ -18,8 +27,8 @@ export default function DashboardLoading() {
 
       {/* 内容区域骨架 */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="rounded-lg border p-6 space-y-4">
+        {dashboardSkeletonIds.map((id) => (
+          <div key={id} className="rounded-lg border p-6 space-y-4">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-full bg-muted" />
               <div className="space-y-2 flex-1">

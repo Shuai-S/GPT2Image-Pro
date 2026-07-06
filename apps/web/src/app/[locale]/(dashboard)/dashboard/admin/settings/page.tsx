@@ -1,6 +1,3 @@
-import { redirect } from "next/navigation";
-import { getLocale } from "next-intl/server";
-
 import { getUserRoleById } from "@repo/shared/auth/role-server";
 import {
   canAccessAdminArea,
@@ -9,6 +6,8 @@ import {
 } from "@repo/shared/auth/roles";
 import { getServerSession } from "@repo/shared/auth/server";
 import { getAppTimeZone } from "@repo/shared/time-zone/server";
+import { redirect } from "next/navigation";
+import { getLocale } from "next-intl/server";
 import { ImageBackendPoolAdminPanel } from "@/features/image-backend-pool";
 import { AdminSettingsTabs } from "./admin-settings-tabs";
 

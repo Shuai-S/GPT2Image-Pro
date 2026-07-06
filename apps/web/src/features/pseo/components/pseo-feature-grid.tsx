@@ -1,3 +1,5 @@
+import { Badge } from "@repo/ui/components/badge";
+import { Card, CardContent } from "@repo/ui/components/card";
 import {
   Layers,
   LineChart,
@@ -8,9 +10,6 @@ import {
   Users,
   Zap,
 } from "lucide-react";
-
-import { Badge } from "@repo/ui/components/badge";
-import { Card, CardContent } from "@repo/ui/components/card";
 
 import type { PseoPage } from "../lib/pseo-data";
 

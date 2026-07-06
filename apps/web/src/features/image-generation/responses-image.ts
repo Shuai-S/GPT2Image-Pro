@@ -1,12 +1,13 @@
+import { getInputImageUrl } from "./input-image-url";
+import {
+  buildOpenAIPromptCacheKey,
+  buildPromptCacheSalt,
+} from "./openai-prompt-cache";
 import {
   normalizeImageBackground,
   normalizeOutputCompression,
   normalizeOutputFormat,
 } from "./output-format";
-import {
-  buildOpenAIPromptCacheKey,
-  buildPromptCacheSalt,
-} from "./openai-prompt-cache";
 import {
   AUTO_IMAGE_SIZE,
   DEFAULT_IMAGE_MODEL,
@@ -17,7 +18,6 @@ import {
   resolvePromptImageReferences,
   withResponsesImageReferenceInstructions,
 } from "./responses-native-state";
-import { getInputImageUrl } from "./input-image-url";
 import type {
   ApiConfig,
   EditImageParams,

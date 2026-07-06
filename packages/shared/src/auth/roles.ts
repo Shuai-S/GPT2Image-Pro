@@ -72,7 +72,6 @@ export function getUserRoleLabel(role?: string | null) {
       return "管理员";
     case "observer_admin":
       return "观察管理员";
-    case "user":
     default:
       return "普通用户";
   }

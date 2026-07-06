@@ -77,7 +77,9 @@ export function appendAgentRunEvent(
     if (nextEvent.id && event.id === nextEvent.id) return true;
     if (isAgentRoundStartEvent(nextEvent) && isAgentRoundStartEvent(event)) {
       const nextRound = getAgentRoundStartNumber(nextEvent);
-      return Boolean(nextRound && nextRound === getAgentRoundStartNumber(event));
+      return Boolean(
+        nextRound && nextRound === getAgentRoundStartNumber(event)
+      );
     }
     return false;
   });
@@ -171,7 +173,8 @@ function mergeWebSearchTask(
 ): AgentTaskCard {
   const events = appendAgentRunEvent(task.events, event);
   const status = getDominantStatus(events) || event.status || task.status;
-  const detail = summarizeWebSearchDetail(events) || event.detail || task.detail;
+  const detail =
+    summarizeWebSearchDetail(events) || event.detail || task.detail;
   return {
     ...task,
     title: status === "completed" ? "联网搜索完成" : "联网搜索",
@@ -277,8 +280,7 @@ export function buildAgentRoundCards(events: AgentRunEvent[] | undefined) {
     ) {
       const waitingTaskIndex = round.tasks.findIndex(
         (task) =>
-          task.toolType === "agent_round_request" &&
-          task.status === "running"
+          task.toolType === "agent_round_request" && task.status === "running"
       );
       if (waitingTaskIndex >= 0) {
         const waitingTask = round.tasks[waitingTaskIndex];
@@ -339,9 +341,7 @@ export function createAgentRoundStartEvent(round = 1): AgentRunEvent {
     status: "started",
     title: `Agent 第 ${round} 轮开始`,
     detail:
-      round === 1
-        ? "分析请求并按需调用工具"
-        : "根据上一版结果继续判断是否迭代",
+      round === 1 ? "分析请求并按需调用工具" : "根据上一版结果继续判断是否迭代",
     timestamp: new Date().toISOString(),
   };
 }
@@ -359,5 +359,8 @@ export function createAgentRoundWaitingEvent(round = 1): AgentRunEvent {
 }
 
 export function createOptimisticAgentRoundEvents(round = 1): AgentRunEvent[] {
-  return [createAgentRoundStartEvent(round), createAgentRoundWaitingEvent(round)];
+  return [
+    createAgentRoundStartEvent(round),
+    createAgentRoundWaitingEvent(round),
+  ];
 }

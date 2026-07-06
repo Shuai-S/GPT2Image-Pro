@@ -38,9 +38,10 @@ describe("Agent round task cards", () => {
   });
 
   it("merges optimistic waiting events with backend waiting updates", () => {
-    const events = createOptimisticAgentRoundEvents(1).reduce<
-      AgentRunEvent[]
-    >((items, event) => appendAgentRunEvent(items, event), []);
+    const events = createOptimisticAgentRoundEvents(1).reduce<AgentRunEvent[]>(
+      (items, event) => appendAgentRunEvent(items, event),
+      []
+    );
     const merged = appendAgentRunEvent(events, {
       id: "agent-round-1-upstream",
       kind: "tool",
@@ -61,9 +62,10 @@ describe("Agent round task cards", () => {
   });
 
   it("merges optimistic round starts with backend round starts by round number", () => {
-    const events = createOptimisticAgentRoundEvents(1).reduce<
-      AgentRunEvent[]
-    >((items, event) => appendAgentRunEvent(items, event), []);
+    const events = createOptimisticAgentRoundEvents(1).reduce<AgentRunEvent[]>(
+      (items, event) => appendAgentRunEvent(items, event),
+      []
+    );
     const merged = appendAgentRunEvent(events, {
       kind: "message",
       status: "started",

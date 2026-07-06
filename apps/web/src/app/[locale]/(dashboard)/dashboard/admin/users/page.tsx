@@ -1,6 +1,3 @@
-import { redirect } from "next/navigation";
-import { getLocale } from "next-intl/server";
-
 import { getUserRoleById } from "@repo/shared/auth/role-server";
 import {
   canAccessAdminArea,
@@ -9,6 +6,8 @@ import {
 import { getServerSession } from "@repo/shared/auth/server";
 import { AdminUsersManagement } from "@repo/shared/support/components";
 import { getAppTimeZone } from "@repo/shared/time-zone/server";
+import { redirect } from "next/navigation";
+import { getLocale } from "next-intl/server";
 
 export default async function DashboardAdminUsersPage() {
   const session = await getServerSession();

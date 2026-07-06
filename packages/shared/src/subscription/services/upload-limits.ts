@@ -1,6 +1,4 @@
-import {
-  type SubscriptionPlan,
-} from "../../config/subscription-plan";
+import type { SubscriptionPlan } from "../../config/subscription-plan";
 import { getPlanLimits, megabytesToBytes } from "./plan-capabilities";
 
 export type PlanUploadLimits = {

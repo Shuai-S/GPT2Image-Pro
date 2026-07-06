@@ -76,12 +76,15 @@ export function createOgImageResponse(): ImageResponse {
             width="48"
             height="48"
             viewBox="0 0 24 24"
+            role="img"
+            aria-labelledby="og-image-logo-title"
             fill="none"
             stroke="white"
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
           >
+            <title id="og-image-logo-title">{siteConfig.name}</title>
             <path d="M12 2L2 7l10 5 10-5-10-5z" />
             <path d="M2 17l10 5 10-5" />
             <path d="M2 12l10 5 10-5" />

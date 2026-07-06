@@ -7,6 +7,7 @@ import {
   type PaymentConfig,
   PaymentType,
   type Plan,
+  type PlanConfig,
   PlanInterval,
   type PriceConfig,
 } from "../payment/types";
@@ -59,6 +60,14 @@ const PLAN_DEFAULT_AMOUNTS = {
 } as const;
 
 type RuntimePaymentProvider = "creem" | "epay" | "alipay";
+
+function getRequiredPlanConfig(plan: PaidPlanId): PlanConfig {
+  const config = paymentConfig.plans[plan];
+  if (!config) {
+    throw new Error(`Missing payment plan config: ${plan}`);
+  }
+  return config;
+}
 
 function getDefaultPaymentProvider(): RuntimePaymentProvider {
   if (
@@ -146,19 +155,19 @@ export async function getRuntimePaymentConfig(): Promise<RuntimePaymentConfig> {
 
   const plans: RuntimePaymentConfig["plans"] = {
     starter: {
-      ...paymentConfig.plans.starter!,
+      ...getRequiredPlanConfig("starter"),
       prices: starterPrices,
     },
     pro: {
-      ...paymentConfig.plans.pro!,
+      ...getRequiredPlanConfig("pro"),
       prices: proPrices,
     },
     ultra: {
-      ...paymentConfig.plans.ultra!,
+      ...getRequiredPlanConfig("ultra"),
       prices: ultraPrices,
     },
     enterprise: {
-      ...paymentConfig.plans.enterprise!,
+      ...getRequiredPlanConfig("enterprise"),
       prices: enterprisePrices,
     },
   };

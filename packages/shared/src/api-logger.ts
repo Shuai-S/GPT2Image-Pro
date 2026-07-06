@@ -1,13 +1,13 @@
 import { logApiResponse, logError } from "./logger/index";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type ApiHandler = (request: any, context?: any) => Promise<Response>;
-
-export function withApiLogging<T extends ApiHandler>(handler: T): T {
-  const wrapped = async (request: Request, context?: unknown) => {
+export function withApiLogging<T extends (...args: never[]) => Promise<Response>>(
+  handler: T
+): T {
+  const wrapped = async (...args: Parameters<T>) => {
+    const request = args[0] as unknown as Request;
     const startTime = Date.now();
     try {
-      const response = await handler(request, context);
+      const response = await handler(...args);
       logApiResponse(request, response, Date.now() - startTime);
       return response;
     } catch (error) {

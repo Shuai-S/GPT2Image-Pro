@@ -8,6 +8,9 @@
  *   v1 API 消费者通过签名 URL 参数获取授权（无 cookie）。
  */
 
+import { createHash } from "node:crypto";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { db } from "@repo/database";
 import { generation } from "@repo/database/schema";
 import { getCurrentUser } from "@repo/shared/auth/server";
@@ -19,9 +22,6 @@ import {
 } from "@repo/shared/storage/signed-url";
 import { eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
-import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import path from "node:path";
 import sharp from "sharp";
 
 const GENERATIONS_BUCKET =
@@ -136,7 +136,9 @@ function releaseThumbSlot(): void {
   }
 }
 
-async function readThumbFromDisk(diskPath: string): Promise<Buffer | undefined> {
+async function readThumbFromDisk(
+  diskPath: string
+): Promise<Buffer | undefined> {
   try {
     return await readFile(diskPath);
   } catch {
@@ -196,9 +198,8 @@ function isObjectNotFoundError(error: unknown): boolean {
     return true;
   }
   // AWS SDK 错误携带 HTTP 元数据，404 同样视为对象不存在。
-  const statusCode = (
-    error as { $metadata?: { httpStatusCode?: unknown } }
-  ).$metadata?.httpStatusCode;
+  const statusCode = (error as { $metadata?: { httpStatusCode?: unknown } })
+    .$metadata?.httpStatusCode;
   if (statusCode === 404) {
     return true;
   }

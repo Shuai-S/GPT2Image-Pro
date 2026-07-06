@@ -826,6 +826,7 @@ export function InfiniteCanvasClient() {
       <div
         ref={boardRef}
         role="application"
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: 无限画布工作区需要接收键盘快捷键焦点。
         tabIndex={0}
         aria-label={copy("Infinite canvas workspace", "无限画布工作区")}
         className={cn(

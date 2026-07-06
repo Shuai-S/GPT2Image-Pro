@@ -3,9 +3,15 @@ type TokenParseMode = "refresh" | "access" | "none";
 function normalizeImportedToken(value: string | null | undefined) {
   let token = value?.trim() || "";
   token = token.replace(/^Bearer\s+/i, "").trim();
-  token = token.replace(/^["'`]+/, "").replace(/["'`,;]+$/, "").trim();
+  token = token
+    .replace(/^["'`]+/, "")
+    .replace(/["'`,;]+$/, "")
+    .trim();
   token = token.replace(/^Bearer\s+/i, "").trim();
-  return token.replace(/^["'`]+/, "").replace(/["'`,;]+$/, "").trim();
+  return token
+    .replace(/^["'`]+/, "")
+    .replace(/["'`,;]+$/, "")
+    .trim();
 }
 
 function addToken(tokens: Set<string>, value: string | null | undefined) {

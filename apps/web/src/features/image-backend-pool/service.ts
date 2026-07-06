@@ -5413,6 +5413,7 @@ async function resolveSyncedAccountHealth(
     (preserveNewerLocalInvalidCredential ||
       (!overwriteLocalUnavailableState &&
         (await shouldPreserveLocalUnavailableState(existing))));
+  const preservedLocalState = preserveLocalUnavailable ? existing : null;
   const rawUpdate = sourceHealth.status
     ? {
         // 同步不回写启停:始终保留本地 isEnabled(管理员控制),仅新账号默认启用。
@@ -5422,13 +5423,13 @@ async function resolveSyncedAccountHealth(
         lastError: sourceHealth.lastError ?? null,
         lastErrorAt: sourceHealth.lastError ? now : null,
       }
-    : preserveLocalUnavailable
+    : preservedLocalState
       ? {
-          status: existing!.status,
-          isEnabled: existing!.isEnabled,
-          cooldownUntil: existing!.cooldownUntil,
-          lastError: existing!.lastError,
-          lastErrorAt: existing!.lastErrorAt,
+          status: preservedLocalState.status,
+          isEnabled: preservedLocalState.isEnabled,
+          cooldownUntil: preservedLocalState.cooldownUntil,
+          lastError: preservedLocalState.lastError,
+          lastErrorAt: preservedLocalState.lastErrorAt,
         }
       : {
           // 上游健康:恢复为 active,但同样保留本地 isEnabled——不因上游正常就把

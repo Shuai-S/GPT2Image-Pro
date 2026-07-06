@@ -1,5 +1,5 @@
-import { createFromSource } from "fumadocs-core/search/server";
 import { withApiLogging } from "@repo/shared/api-logger";
+import { createFromSource } from "fumadocs-core/search/server";
 import { docsSource } from "@/lib/source";
 
 /**

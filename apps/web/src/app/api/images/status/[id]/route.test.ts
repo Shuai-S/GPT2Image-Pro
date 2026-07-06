@@ -37,7 +37,10 @@ describe("image status output URLs", () => {
     );
 
     expect(outputs).toHaveLength(1);
-    const url = new URL(outputs[0]!.imageUrl!, "https://example.com");
+    const output = outputs[0];
+    expect(output?.imageUrl).toBeDefined();
+    if (!output?.imageUrl) throw new Error("expected signed output image URL");
+    const url = new URL(output.imageUrl, "https://example.com");
     expect(url.pathname).toBe("/api/storage/generations/user/out.png");
     expect(url.searchParams.get("sig")).toMatch(/^[a-f0-9]{64}$/);
     expect(Number(url.searchParams.get("exp"))).toBeGreaterThan(

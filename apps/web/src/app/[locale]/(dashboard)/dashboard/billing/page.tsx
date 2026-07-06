@@ -1,16 +1,16 @@
-import type { Metadata } from "next";
 import { getServerSession } from "@repo/shared/auth/server";
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
 import { CreditUsageSection } from "@repo/shared/credits/components";
+import { getAppTimeZone } from "@repo/shared/time-zone/server";
 import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
 } from "@repo/ui/components/tabs";
-import { getLocale, getTranslations } from "next-intl/server";
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { getAppTimeZone } from "@repo/shared/time-zone/server";
+import { getLocale, getTranslations } from "next-intl/server";
 
 import { BillingSection } from "@/features/settings/components/billing-section";
 

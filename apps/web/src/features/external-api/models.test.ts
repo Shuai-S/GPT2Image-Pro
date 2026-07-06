@@ -1,6 +1,5 @@
-import { describe, expect, it } from "vitest";
-
 import type { SubscriptionPlan } from "@repo/shared/config/subscription-plan";
+import { describe, expect, it } from "vitest";
 
 // models.ts 经 plan-capabilities → system-settings 间接 import @repo/database，
 // 后者在模块加载时要求 DATABASE_URL；先注入占位再动态 import（不会真正连库）。

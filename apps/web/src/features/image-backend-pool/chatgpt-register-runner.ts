@@ -75,10 +75,7 @@ export async function callRegisterSidecar(
     getRuntimeSettingString("CHATGPT_REGISTER_REFRESH_URL"),
     getRuntimeSettingBoolean("CHATGPT_REGISTER_PROXY_DISABLED", false),
     getRuntimeSettingString("CHATGPT_REGISTER_DOMAINS"),
-    getRuntimeSettingBoolean(
-      "CHATGPT_REGISTER_DOMAIN_ROTATION_ENABLED",
-      false
-    ),
+    getRuntimeSettingBoolean("CHATGPT_REGISTER_DOMAIN_ROTATION_ENABLED", false),
   ]);
   // 禁用代理开关：直连本机 IP。代理值保留不动（避免 secret 空值无法清空的问题），
   // 仅由开关决定是否启用；禁用时刷新也跳过（本机 IP 刷新无意义）。

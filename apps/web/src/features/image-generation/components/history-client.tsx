@@ -12,15 +12,15 @@ import {
   ImageIcon,
   ImagePlus,
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale } from "next-intl";
 import { useEffect, useState } from "react";
-import dynamic from "next/dynamic";
 import type {
-  LightboxReferenceImage,
   LightboxGeneration,
+  LightboxReferenceImage,
 } from "@/features/image-generation/components/image-lightbox";
 
 // 懒加载:lightbox(大图查看模态)仅在点开某张图时才需要,改 next/dynamic 后从列表页
@@ -32,6 +32,7 @@ const ImageLightbox = dynamic(
     ),
   { ssr: false }
 );
+
 import type { GenerationCreditDetails } from "@/features/image-generation/credit-calculation-details";
 
 export interface HistoryGeneration {
@@ -353,10 +354,7 @@ export function HistoryClient({
                 }
               }}
               onBlur={commitPageInput}
-              aria-label={copy(
-                "Page number",
-                "页码"
-              )}
+              aria-label={copy("Page number", "页码")}
               className="h-8 w-16 rounded border border-border bg-background text-center text-sm text-foreground"
             />
             <span className="text-xs text-muted-foreground">

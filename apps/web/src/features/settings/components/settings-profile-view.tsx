@@ -1,15 +1,21 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Camera, Loader2 } from "lucide-react";
-import { useParams, useSearchParams } from "next/navigation";
-import { useLocale, useTranslations } from "next-intl";
-import { useAction } from "next-safe-action/hooks";
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
-import { useForm } from "react-hook-form";
-import { toast } from "sonner";
-import type { z } from "zod";
-
+import { signOut } from "@repo/shared/auth/client";
+import {
+  getAllowedModerationBlockRiskLevels,
+  type ModerationBlockRiskLevel,
+  type SubscriptionPlan,
+} from "@repo/shared/config/subscription-plan";
+import {
+  ALLOWED_IMAGE_TYPES,
+  generateAvatarKey,
+  getAvatarUrl,
+  getSignedUploadUrlAction,
+  MAX_FILE_SIZE,
+} from "@repo/shared/storage";
+import { getMyPlanAction } from "@repo/shared/subscription/actions/get-user-plan";
+import type { PlanCapabilitySnapshot } from "@repo/shared/subscription/services/plan-capabilities";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -19,7 +25,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@repo/ui/components/alert-dialog";
-import { Avatar, AvatarFallback, AvatarImage } from "@repo/ui/components/avatar";
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+} from "@repo/ui/components/avatar";
 import { Button } from "@repo/ui/components/button";
 import {
   Form,
@@ -41,29 +51,27 @@ import {
   SelectValue,
 } from "@repo/ui/components/select";
 import { Separator } from "@repo/ui/components/separator";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui/components/tabs";
 import {
-  getAllowedModerationBlockRiskLevels,
-  type ModerationBlockRiskLevel,
-  type SubscriptionPlan,
-} from "@repo/shared/config/subscription-plan";
-import type { PlanCapabilitySnapshot } from "@repo/shared/subscription/services/plan-capabilities";
-import { getMyPlanAction } from "@repo/shared/subscription/actions/get-user-plan";
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@repo/ui/components/tabs";
+import { Camera, Loader2 } from "lucide-react";
+import { useParams, useSearchParams } from "next/navigation";
+import { useLocale, useTranslations } from "next-intl";
+import { useAction } from "next-safe-action/hooks";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useForm } from "react-hook-form";
+import { toast } from "sonner";
+import type { z } from "zod";
+import { ImageBackendPreferenceSection } from "@/features/image-backend-pool";
 import {
   deleteAccountAction,
   updateProfileAction,
 } from "@/features/settings/actions";
 import { updateProfileSchema } from "@/features/settings/schemas";
-import {
-  ALLOWED_IMAGE_TYPES,
-  generateAvatarKey,
-  getAvatarUrl,
-  getSignedUploadUrlAction,
-  MAX_FILE_SIZE,
-} from "@repo/shared/storage";
 import { usePathname, useRouter } from "@/i18n/routing";
-import { signOut } from "@repo/shared/auth/client";
-import { ImageBackendPreferenceSection } from "@/features/image-backend-pool";
 
 import { ApiConfigForm } from "./api-config-form";
 import { SecuritySection } from "./security-section";
@@ -478,9 +486,7 @@ export function SettingsProfileView({ user }: SettingsProfileViewProps) {
                                   </span>
                                 </div>
                                 <p className="mt-2 text-xs font-normal text-muted-foreground">
-                                  {t(
-                                    `moderation.options.${level}.description`
-                                  )}
+                                  {t(`moderation.options.${level}.description`)}
                                 </p>
                               </Label>
                             );

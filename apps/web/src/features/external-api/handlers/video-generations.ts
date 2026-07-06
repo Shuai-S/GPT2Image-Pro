@@ -7,11 +7,11 @@
  * 状态的 OpenAI 错误响应。
  */
 
-import { withApiLogging } from "@repo/shared/api-logger";
 import { isFireflyVideoModelId } from "@repo/shared/adobe/firefly-direct/video-catalog";
+import { withApiLogging } from "@repo/shared/api-logger";
 import { logError } from "@repo/shared/logger";
-import { canUsePlanCapability } from "@repo/shared/subscription/services/plan-capabilities";
 import { buildSignedStorageImageUrl } from "@repo/shared/storage/signed-url";
+import { canUsePlanCapability } from "@repo/shared/subscription/services/plan-capabilities";
 import { getRuntimeSettingString } from "@repo/shared/system-settings";
 import { nanoid } from "nanoid";
 import type { NextRequest } from "next/server";
@@ -165,8 +165,10 @@ export const postExternalVideoGenerations = withApiLogging(
             });
           } else {
             const videoUrl =
-              buildSignedStorageImageUrl(result.storageKey, await bucketName()) ??
-              "";
+              buildSignedStorageImageUrl(
+                result.storageKey,
+                await bucketName()
+              ) ?? "";
             completed = completeAsyncImageTask(task.id, {
               result: {
                 object: "video",
@@ -218,8 +220,7 @@ export const postExternalVideoGenerations = withApiLogging(
           model: parsed.data.model,
           data: [
             {
-              url:
-                buildSignedStorageImageUrl(result.storageKey, bucket) ?? "",
+              url: buildSignedStorageImageUrl(result.storageKey, bucket) ?? "",
             },
           ],
           generation_id: result.videoGenerationId,

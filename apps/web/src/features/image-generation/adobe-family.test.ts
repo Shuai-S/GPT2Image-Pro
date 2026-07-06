@@ -33,8 +33,8 @@ describe("resolveAdobeFamilyFromModel", () => {
     expect(resolveAdobeFamilyFromModel("firefly-nano-banana2")).toBe(
       "nano-banana2"
     );
-    expect(
-      resolveAdobeFamilyFromModel("firefly-gpt-image-1.5-2k-1x1")
-    ).toBe("gpt-image-1.5");
+    expect(resolveAdobeFamilyFromModel("firefly-gpt-image-1.5-2k-1x1")).toBe(
+      "gpt-image-1.5"
+    );
   });
 });

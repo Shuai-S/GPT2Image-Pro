@@ -692,7 +692,7 @@ function getPreferredBackendMember(
 ): StickyBackendMemberState | undefined {
   for (let index = history.length - 1; index >= 0; index--) {
     const message = history[index];
-    if (!message || message.role !== "assistant" || message.error) continue;
+    if (message?.role !== "assistant" || message.error) continue;
     const variants = message.variants || [];
     const variant = variants[message.activeVariant || 0] || variants[0];
     const responsesBackendMember =
@@ -709,7 +709,7 @@ function getLatestResponsesPreviousResponseId(
 ): string | undefined {
   for (let index = history.length - 1; index >= 0; index--) {
     const message = history[index];
-    if (!message || message.role !== "assistant" || message.error) continue;
+    if (message?.role !== "assistant" || message.error) continue;
     const variants = message.variants || [];
     const variant = variants[message.activeVariant || 0] || variants[0];
     return variant?.responsesPreviousResponse?.responseId;
@@ -1061,7 +1061,8 @@ export const postExternalAgentImages = withApiLogging(
       return openAIImageError("history must be valid JSON.");
     }
     const preferredBackendMember = getPreferredBackendMember(history);
-    const stickyPreviousResponseId = getLatestResponsesPreviousResponseId(history);
+    const stickyPreviousResponseId =
+      getLatestResponsesPreviousResponseId(history);
 
     const attachmentFiles = getAttachmentFiles(formData);
     if (

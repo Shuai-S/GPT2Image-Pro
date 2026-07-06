@@ -48,7 +48,7 @@ describe("ChatGPT Web image choices", () => {
       content: {
         content_type: "system_error",
         name: "ChatGPTAgentToolRateLimitException",
-        text: "Before doing anything else, explicitly explain to the user that you were unable to invoke the image_gen.text2im tool right now. Make sure to begin your response with \"You've hit the Free plan limit for image generation.\"",
+        text: 'Before doing anything else, explicitly explain to the user that you were unable to invoke the image_gen.text2im tool right now. Make sure to begin your response with "You\'ve hit the Free plan limit for image generation."',
       },
     };
     const sse = `data: ${JSON.stringify({ o: "add", v: { message } })}\n\n`;

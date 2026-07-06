@@ -184,8 +184,9 @@ describe("UOL Registry", () => {
 
       // 绑定前：execute 是 stub
       const before = getOperation("bind.test");
+      if (!before) throw new Error("expected bind.test operation before bind");
       await expect(
-        before!.execute({}, {} as never, {} as never),
+        before.execute({}, {} as never, {} as never),
       ).rejects.toThrow("Not yet wired");
 
       // 绑定真实实现
@@ -193,7 +194,8 @@ describe("UOL Registry", () => {
 
       // 绑定后：execute 返回真实结果
       const after = getOperation("bind.test");
-      const result = await after!.execute({}, {} as never, {} as never);
+      if (!after) throw new Error("expected bind.test operation after bind");
+      const result = await after.execute({}, {} as never, {} as never);
       expect(result).toEqual({ ok: true });
     });
 
@@ -223,7 +225,9 @@ describe("UOL Registry", () => {
       const fakePrincipal = { type: "system" as const, reason: "test" };
       const fakeCtx = { requestId: "r1" };
 
-      await getOperation("bind.args")!.execute(
+      const operation = getOperation("bind.args");
+      if (!operation) throw new Error("expected bind.args operation");
+      await operation.execute(
         fakeInput,
         fakePrincipal as never,
         fakeCtx as never,

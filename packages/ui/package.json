@@ -32,6 +32,7 @@
     "./components/textarea": "./src/components/textarea.tsx"
   },
   "scripts": {
+    "lint": "pnpm --filter @repo/web exec biome lint ../../packages/ui",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

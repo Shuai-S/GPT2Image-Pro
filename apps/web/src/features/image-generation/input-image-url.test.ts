@@ -100,9 +100,7 @@ describe("getInputImageUrl", () => {
 
     // forceBase64：跳过 URL 选择，直接内联 base64。
     const forcedUrl = getInputImageUrl(image, { forceBase64: true });
-    expect(forcedUrl).toBe(
-      `data:image/png;base64,${bytes.toString("base64")}`
-    );
+    expect(forcedUrl).toBe(`data:image/png;base64,${bytes.toString("base64")}`);
   });
 
   it("ignores forceBase64 when there are no bytes (keeps url passthrough)", async () => {

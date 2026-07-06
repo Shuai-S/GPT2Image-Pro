@@ -1,6 +1,5 @@
-import type { MetadataRoute } from "next";
-
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
+import type { MetadataRoute } from "next";
 
 /**
  * Web App Manifest 动态配置。

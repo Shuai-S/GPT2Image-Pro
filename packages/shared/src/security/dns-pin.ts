@@ -95,7 +95,11 @@ async function resolveAndValidate(hostname: string): Promise<string> {
   }
 
   // 返回第一个合法 IPv4（优先）用于 pin
-  return addresses[0]!;
+  const firstAddress = addresses[0];
+  if (!firstAddress) {
+    throw new SsrfBlockedError("Image URL did not resolve to an IP address.");
+  }
+  return firstAddress;
 }
 
 /**

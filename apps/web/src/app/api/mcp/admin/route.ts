@@ -18,6 +18,8 @@
  * - 不暴露 system/protected/apiKey/cron/webhook/proxySecret 操作
  * - 不暴露 image-generation 和 external-api 域
  */
+
+import { logger } from "@repo/shared/logger";
 import {
   authenticateMcpAdmin,
   buildAdminMcpTools,
@@ -26,7 +28,6 @@ import {
   redactSensitiveFields,
   toolNameToOperationName,
 } from "@repo/shared/mcp";
-import { logger } from "@repo/shared/logger";
 import {
   invokeOperation,
   OperationError,
@@ -91,7 +92,7 @@ const JSONRPC_OPERATION_ERROR = -32003;
 
 function jsonRpcSuccess(
   id: string | number | null,
-  result: unknown,
+  result: unknown
 ): JsonRpcSuccessResponse {
   return { jsonrpc: "2.0", id, result };
 }
@@ -100,7 +101,7 @@ function jsonRpcError(
   id: string | number | null,
   code: number,
   message: string,
-  data?: unknown,
+  data?: unknown
 ): JsonRpcErrorResponse {
   return { jsonrpc: "2.0", id, error: { code, message, data } };
 }
@@ -158,7 +159,7 @@ export async function POST(request: Request) {
   if (!isMcpAdminEnabled()) {
     return NextResponse.json(
       { error: "MCP Admin is not enabled" },
-      { status: 404 },
+      { status: 404 }
     );
   }
 
@@ -167,7 +168,7 @@ export async function POST(request: Request) {
   if (!checkMcpRateLimit(rateLimit)) {
     return NextResponse.json(
       jsonRpcError(null, JSONRPC_RATE_LIMITED, "Rate limit exceeded"),
-      { status: 429 },
+      { status: 429 }
     );
   }
 
@@ -177,7 +178,7 @@ export async function POST(request: Request) {
   if (!authResult.ok) {
     return NextResponse.json(
       jsonRpcError(null, JSONRPC_AUTH_ERROR, authResult.error),
-      { status: 401 },
+      { status: 401 }
     );
   }
 
@@ -188,7 +189,7 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json(
       jsonRpcError(null, JSONRPC_INTERNAL_ERROR, "MCP tools are not ready"),
-      { status: 500 },
+      { status: 500 }
     );
   }
 
@@ -199,24 +200,23 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json(
       jsonRpcError(null, JSONRPC_PARSE_ERROR, "Parse error"),
-      { status: 400 },
+      { status: 400 }
     );
   }
 
   // 5. 校验 JSON-RPC 格式
   const rpcRequest = body as Partial<JsonRpcRequest>;
   if (
-    !rpcRequest ||
-    rpcRequest.jsonrpc !== "2.0" ||
+    rpcRequest?.jsonrpc !== "2.0" ||
     typeof rpcRequest.method !== "string"
   ) {
     return NextResponse.json(
       jsonRpcError(
         rpcRequest?.id ?? null,
         JSONRPC_INVALID_REQUEST,
-        "Invalid JSON-RPC request",
+        "Invalid JSON-RPC request"
       ),
-      { status: 400 },
+      { status: 400 }
     );
   }
 
@@ -237,7 +237,7 @@ export async function POST(request: Request) {
           capabilities: {
             tools: {},
           },
-        }),
+        })
       );
 
     case "tools/list":
@@ -249,7 +249,7 @@ export async function POST(request: Request) {
     default:
       return NextResponse.json(
         jsonRpcError(id, JSONRPC_METHOD_NOT_FOUND, `Unknown method: ${method}`),
-        { status: 400 },
+        { status: 400 }
       );
   }
 }
@@ -258,10 +258,7 @@ export async function POST(request: Request) {
 // Method Handlers
 // ============================================
 
-function handleToolsList(
-  id: string | number | null,
-  principal: Principal,
-) {
+function handleToolsList(id: string | number | null, principal: Principal) {
   const tools = buildAdminMcpTools(principal);
   return NextResponse.json(jsonRpcSuccess(id, { tools }));
 }
@@ -269,7 +266,7 @@ function handleToolsList(
 async function handleToolsCall(
   id: string | number | null,
   params: Record<string, unknown>,
-  principal: Principal,
+  principal: Principal
 ) {
   const toolName = params.name;
   const args = params.arguments ?? {};
@@ -279,25 +276,25 @@ async function handleToolsCall(
       jsonRpcError(
         id,
         JSONRPC_INVALID_PARAMS,
-        "Missing or invalid 'name' in tools/call params",
+        "Missing or invalid 'name' in tools/call params"
       ),
-      { status: 400 },
+      { status: 400 }
     );
   }
 
   // 工具名 → 操作名
   const operationName = toolNameToOperationName(toolName);
   const allowed = buildAdminMcpTools(principal).some(
-    (tool) => tool.name === toolName,
+    (tool) => tool.name === toolName
   );
   if (!allowed) {
     return NextResponse.json(
       jsonRpcError(
         id,
         JSONRPC_METHOD_NOT_FOUND,
-        `Tool not available: ${toolName}`,
+        `Tool not available: ${toolName}`
       ),
-      { status: 400 },
+      { status: 400 }
     );
   }
 
@@ -310,7 +307,7 @@ async function handleToolsCall(
       operation: operationName,
       params: redactSensitiveFields(args),
     },
-    `[MCP Admin] tools/call: ${operationName}`,
+    `[MCP Admin] tools/call: ${operationName}`
   );
 
   try {
@@ -318,7 +315,7 @@ async function handleToolsCall(
     return NextResponse.json(
       jsonRpcSuccess(id, {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-      }),
+      })
     );
   } catch (err: unknown) {
     if (err instanceof OperationError) {
@@ -330,19 +327,18 @@ async function handleToolsCall(
           errorCode: err.code,
           errorMessage: err.message,
         },
-        `[MCP Admin] Operation error: ${err.code} - ${err.message}`,
+        `[MCP Admin] Operation error: ${err.code} - ${err.message}`
       );
       return NextResponse.json(
         jsonRpcError(id, JSONRPC_OPERATION_ERROR, err.message, {
           code: err.code,
           details: err.details,
-        }),
+        })
       );
     }
 
     // 未知错误脱敏
-    const errMsg =
-      err instanceof Error ? err.message : "Unknown error";
+    const errMsg = err instanceof Error ? err.message : "Unknown error";
     logger.error(
       {
         mcp: true,
@@ -350,11 +346,11 @@ async function handleToolsCall(
         tool: toolName,
         err: errMsg,
       },
-      `[MCP Admin] Unexpected error in tools/call`,
+      `[MCP Admin] Unexpected error in tools/call`
     );
     return NextResponse.json(
       jsonRpcError(id, JSONRPC_INTERNAL_ERROR, "Internal server error"),
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

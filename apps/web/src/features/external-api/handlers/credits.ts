@@ -1,10 +1,10 @@
-import { getCreditsBalance } from "@repo/shared/credits/core";
 import { withApiLogging } from "@repo/shared/api-logger";
+import { getCreditsBalance } from "@repo/shared/credits/core";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { authenticateExternalApiRequest } from "@/features/external-api/auth";
-import { getExternalApiKeyQuota } from "@/features/external-api/quota";
 import { openAIImageError } from "@/features/external-api/images";
+import { getExternalApiKeyQuota } from "@/features/external-api/quota";
 
 export const getExternalCredits = withApiLogging(
   async (request: NextRequest) => {

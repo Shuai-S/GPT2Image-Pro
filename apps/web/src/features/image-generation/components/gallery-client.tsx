@@ -10,18 +10,18 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useLocale } from "next-intl";
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ImageCard } from "@/features/image-generation/components/image-card";
 import { batchDeleteGenerationAction } from "@/features/image-generation/actions";
-import { generateDownloadFilename } from "@/lib/download-filename";
-import dynamic from "next/dynamic";
+import { ImageCard } from "@/features/image-generation/components/image-card";
 import type {
-  LightboxReferenceImage,
   LightboxGeneration,
+  LightboxReferenceImage,
 } from "@/features/image-generation/components/image-lightbox";
+import { generateDownloadFilename } from "@/lib/download-filename";
 
 // 懒加载:lightbox 仅在点开某张图时才需要,改 next/dynamic 后从图库首屏 bundle 移出。
 const ImageLightbox = dynamic(
@@ -78,20 +78,20 @@ export function GalleryClient({
 }: GalleryClientProps) {
   const locale = useLocale();
   const isZh = locale === "zh";
-  const copy = (en: string, zh: string) => (isZh ? zh : en);
+  const copy = useCallback(
+    (en: string, zh: string) => (isZh ? zh : en),
+    [isZh]
+  );
   const [items, setItems] = useState<GenerationWithUrl[]>(initialGenerations);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // -- 多选模式状态 --
   const [selectMode, setSelectMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    new Set()
-  );
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   /** 记录上一次点选的索引,用于 Shift 范围选择 */
   const lastSelectedIndexRef = useRef<number>(-1);
   /** 批量删除二次确认:第一次点击设为 true,第二次才真正执行 */
-  const [confirmBatchDelete, setConfirmBatchDelete] =
-    useState(false);
+  const [confirmBatchDelete, setConfirmBatchDelete] = useState(false);
   const [batchDeleting, setBatchDeleting] = useState(false);
 
   const selected = items.find((i) => i.id === selectedId) ?? null;
@@ -119,14 +119,8 @@ export function GalleryClient({
           lastSelectedIndexRef.current >= 0 &&
           lastSelectedIndexRef.current !== currentIndex
         ) {
-          const start = Math.min(
-            lastSelectedIndexRef.current,
-            currentIndex
-          );
-          const end = Math.max(
-            lastSelectedIndexRef.current,
-            currentIndex
-          );
+          const start = Math.min(lastSelectedIndexRef.current, currentIndex);
+          const end = Math.max(lastSelectedIndexRef.current, currentIndex);
           for (let i = start; i <= end; i++) {
             const item = items[i];
             if (item) next.add(item.id);
@@ -152,9 +146,7 @@ export function GalleryClient({
 
   // -- 批量下载:依次创建临时 <a> 触发下载,间隔 100ms 避免浏览器拦截 --
   const handleBatchDownload = useCallback(() => {
-    const toDownload = items.filter(
-      (i) => selectedIds.has(i.id) && i.imageUrl
-    );
+    const toDownload = items.filter((i) => selectedIds.has(i.id) && i.imageUrl);
     if (toDownload.length === 0) return;
     for (let idx = 0; idx < toDownload.length; idx++) {
       const item = toDownload[idx];
@@ -191,31 +183,20 @@ export function GalleryClient({
       });
       if (result?.data?.success) {
         const count = result.data.deletedCount ?? ids.length;
-        setItems((prev) =>
-          prev.filter((i) => !selectedIds.has(i.id))
-        );
+        setItems((prev) => prev.filter((i) => !selectedIds.has(i.id)));
         setSelectedIds(new Set());
         setConfirmBatchDelete(false);
         toast.success(
-          copy(
-            `Deleted ${count} images`,
-            `已删除 ${count} 张图片`
-          )
+          copy(`Deleted ${count} images`, `已删除 ${count} 张图片`)
         );
       } else {
-        const msg =
-          result?.serverError ||
-          copy("Failed to delete", "删除失败");
+        const msg = result?.serverError || copy("Failed to delete", "删除失败");
         toast.error(
-          typeof msg === "string"
-            ? msg
-            : copy("Failed to delete", "删除失败")
+          typeof msg === "string" ? msg : copy("Failed to delete", "删除失败")
         );
       }
     } catch {
-      toast.error(
-        copy("Failed to delete", "删除失败")
-      );
+      toast.error(copy("Failed to delete", "删除失败"));
     } finally {
       setBatchDeleting(false);
     }
@@ -256,41 +237,29 @@ export function GalleryClient({
               {copy("Final images", "成品")}
               <Badge
                 variant="outline"
-                className={countBadgeClass(
-                  activeTab === "final"
-                )}
+                className={countBadgeClass(activeTab === "final")}
               >
                 {finalCount}
               </Badge>
             </Link>
           </TabsTrigger>
           <TabsTrigger value="agent-drafts" asChild>
-            <Link
-              href={galleryHref("agent-drafts")}
-              scroll={false}
-            >
+            <Link href={galleryHref("agent-drafts")} scroll={false}>
               {copy("Agent drafts", "Agent 中间图")}
               <Badge
                 variant="outline"
-                className={countBadgeClass(
-                  activeTab === "agent-drafts"
-                )}
+                className={countBadgeClass(activeTab === "agent-drafts")}
               >
                 {draftCount}
               </Badge>
             </Link>
           </TabsTrigger>
           <TabsTrigger value="uploads" asChild>
-            <Link
-              href={galleryHref("uploads")}
-              scroll={false}
-            >
+            <Link href={galleryHref("uploads")} scroll={false}>
               {copy("User uploads", "用户上传图")}
               <Badge
                 variant="outline"
-                className={countBadgeClass(
-                  activeTab === "uploads"
-                )}
+                className={countBadgeClass(activeTab === "uploads")}
               >
                 {uploadCount}
               </Badge>
@@ -314,9 +283,7 @@ export function GalleryClient({
         <Button
           variant={selectMode ? "secondary" : "outline"}
           size="sm"
-          onClick={
-            selectMode ? exitSelectMode : () => setSelectMode(true)
-          }
+          onClick={selectMode ? exitSelectMode : () => setSelectMode(true)}
           className="shrink-0"
         >
           {selectMode ? (
@@ -432,9 +399,7 @@ export function GalleryClient({
                 selectable={selectMode}
                 selected={selectedIds.has(item.id)}
                 onSelect={selectMode ? handleSelect : undefined}
-                onClick={
-                  selectMode ? undefined : () => setSelectedId(item.id)
-                }
+                onClick={selectMode ? undefined : () => setSelectedId(item.id)}
                 badge={
                   item.outputRole === "agent_draft"
                     ? copy("Draft", "中间图")
@@ -469,27 +434,17 @@ export function GalleryClient({
               )}
             </span>
             <div className="h-4 w-px bg-border" />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleSelectAll}
-            >
+            <Button variant="outline" size="sm" onClick={handleSelectAll}>
               {selectedIds.size === items.length
                 ? copy("Deselect all", "取消全选")
                 : copy("Select all", "全选")}
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleBatchDownload}
-            >
+            <Button variant="outline" size="sm" onClick={handleBatchDownload}>
               <Download className="mr-1.5 h-3.5 w-3.5" />
               {copy("Download", "下载")}
             </Button>
             <Button
-              variant={
-                confirmBatchDelete ? "destructive" : "outline"
-              }
+              variant={confirmBatchDelete ? "destructive" : "outline"}
               size="sm"
               disabled={batchDeleting}
               onClick={handleBatchDelete}

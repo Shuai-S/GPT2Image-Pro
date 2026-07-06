@@ -1,9 +1,9 @@
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { nanoid } from "nanoid";
-import { type NextRequest, NextResponse } from "next/server";
 import { withApiLogging } from "@repo/shared/api-logger";
 import { auth } from "@repo/shared/auth";
+import { nanoid } from "nanoid";
+import { type NextRequest, NextResponse } from "next/server";
 import { validateUploadRequest } from "./validation";
 
 /**
@@ -39,8 +39,10 @@ export const POST = withApiLogging(async (request: NextRequest) => {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { filename } = body as { filename: string };
+    const body: unknown = await request.json();
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+    }
 
     // 校验文件名、文件类型与大小（纯逻辑在 validation.ts，便于单测）。
     // 失败时返回 400；成功时拿到服务端派生的安全 Content-Type。
@@ -49,6 +51,14 @@ export const POST = withApiLogging(async (request: NextRequest) => {
       return NextResponse.json({ error: validation.error }, { status: 400 });
     }
     const { safeContentType } = validation;
+    const { filename } = body as { filename: string };
+    const storageEndpoint = process.env.STORAGE_ENDPOINT;
+    if (!storageEndpoint) {
+      return NextResponse.json(
+        { error: "Upload storage is not configured" },
+        { status: 503 }
+      );
+    }
 
     // 生成唯一的文件 key
     const fileExtension = filename.match(/\.[^.]+$/)?.[0] || "";
@@ -66,7 +76,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
     });
 
     // 构建文件访问 URL
-    const fileUrl = `${process.env.STORAGE_ENDPOINT}/${BUCKET_NAME}/${fileKey}`;
+    const fileUrl = `${storageEndpoint}/${BUCKET_NAME}/${fileKey}`;
 
     return NextResponse.json({
       presignedUrl,

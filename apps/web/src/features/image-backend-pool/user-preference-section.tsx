@@ -64,7 +64,7 @@ export function ImageBackendPreferenceSection() {
   const selectedGroup =
     selectedGroupId === "default"
       ? defaultGroup
-      : groups.find((group) => group.id === selectedGroupId) ?? null;
+      : (groups.find((group) => group.id === selectedGroupId) ?? null);
 
   const { execute: loadGroups, isPending: isLoading } = useAction(
     getSelectableImageBackendGroupsAction,
@@ -73,7 +73,8 @@ export function ImageBackendPreferenceSection() {
         setGroups((data?.groups || []) as GroupOption[]);
         setSelectedGroupId(data?.selectedGroupId || "default");
       },
-      onError: ({ error }) => toast.error(error.serverError || "加载生图分组失败"),
+      onError: ({ error }) =>
+        toast.error(error.serverError || "加载生图分组失败"),
     }
   );
 
@@ -81,7 +82,8 @@ export function ImageBackendPreferenceSection() {
     setUserImageBackendPreferenceAction,
     {
       onSuccess: () => toast.success("生图后端分组已保存"),
-      onError: ({ error }) => toast.error(error.serverError || "保存生图分组失败"),
+      onError: ({ error }) =>
+        toast.error(error.serverError || "保存生图分组失败"),
     }
   );
 
@@ -95,7 +97,8 @@ export function ImageBackendPreferenceSection() {
         <div>
           <h4 className="text-sm font-medium">生图后端分组</h4>
           <p className="text-xs text-muted-foreground">
-            只影响网页端创作；外接 API Key 在 API Key 列表中单独选择分组，Key 未绑定时使用平台默认分组。
+            只影响网页端创作；外接 API Key 在 API Key 列表中单独选择分组，Key
+            未绑定时使用平台默认分组。
           </p>
         </div>
         <Button

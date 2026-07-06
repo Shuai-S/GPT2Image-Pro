@@ -1,7 +1,7 @@
 "use client";
 
-import { getMyPlanAction } from "@repo/shared/subscription/actions/get-user-plan";
 import { canUseCustomApi } from "@repo/shared/config/subscription-plan";
+import { getMyPlanAction } from "@repo/shared/subscription/actions/get-user-plan";
 import { Button } from "@repo/ui/components/button";
 import { Input } from "@repo/ui/components/input";
 import { Label } from "@repo/ui/components/label";
@@ -46,12 +46,17 @@ function flattenValidationErrors(value: unknown): string[] {
     return value.flatMap((item) => flattenValidationErrors(item));
   }
   if (typeof value === "object") {
-    return Object.values(value).flatMap((item) => flattenValidationErrors(item));
+    return Object.values(value).flatMap((item) =>
+      flattenValidationErrors(item)
+    );
   }
   return [];
 }
 
-function getActionErrorMessage(error: ActionError | undefined, fallback: string) {
+function getActionErrorMessage(
+  error: ActionError | undefined,
+  fallback: string
+) {
   const validationMessages = flattenValidationErrors(error?.validationErrors);
   if (validationMessages.length > 0) {
     return validationMessages.join(", ");
@@ -82,7 +87,9 @@ export function ApiConfigForm() {
         setIsActive(true);
       },
       onError: (err) => {
-        toast.error(getActionErrorMessage(err.error, t("apiConfig.saveFailed")));
+        toast.error(
+          getActionErrorMessage(err.error, t("apiConfig.saveFailed"))
+        );
       },
     }
   );
@@ -161,8 +168,7 @@ export function ApiConfigForm() {
           setModel(configResult.data.model || "");
           setUseStream(Boolean(configResult.data.useStream));
           setChatCompletionsUpstreamMode(
-            configResult.data.chatCompletionsUpstreamMode ===
-              "chat_completions"
+            configResult.data.chatCompletionsUpstreamMode === "chat_completions"
               ? "chat_completions"
               : "responses"
           );
@@ -249,9 +255,7 @@ export function ApiConfigForm() {
           {hasConfig && (
             <div className="flex items-center justify-between">
               <div>
-                <Label className="text-sm">
-                  {t("apiConfig.enabled")}
-                </Label>
+                <Label className="text-sm">{t("apiConfig.enabled")}</Label>
                 <p className="text-xs text-muted-foreground">
                   {t("apiConfig.enabledDescription")}
                 </p>
@@ -338,7 +342,9 @@ export function ApiConfigForm() {
               value={chatCompletionsUpstreamMode}
               onValueChange={(value) =>
                 setChatCompletionsUpstreamMode(
-                  value === "chat_completions" ? "chat_completions" : "responses"
+                  value === "chat_completions"
+                    ? "chat_completions"
+                    : "responses"
                 )
               }
               disabled={!customApiAllowed}
@@ -354,7 +360,9 @@ export function ApiConfigForm() {
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
-              Responses 模式会把 Chat 请求接到上游 /responses，保留生图能力；原生模式会请求上游 /chat/completions，适合纯聊天兼容。
+              Responses 模式会把 Chat 请求接到上游
+              /responses，保留生图能力；原生模式会请求上游
+              /chat/completions，适合纯聊天兼容。
             </p>
           </div>
 
@@ -372,9 +380,7 @@ export function ApiConfigForm() {
               variant="outline"
               size="sm"
               onClick={handleTest}
-              disabled={
-                !customApiAllowed || !baseUrl || !apiKey || isTesting
-              }
+              disabled={!customApiAllowed || !baseUrl || !apiKey || isTesting}
             >
               {isTesting ? (
                 <Loader2 className="mr-2 h-3 w-3 animate-spin" />

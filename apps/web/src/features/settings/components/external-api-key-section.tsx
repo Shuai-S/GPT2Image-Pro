@@ -7,14 +7,13 @@ import {
   type SubscriptionPlan,
 } from "@repo/shared/config/subscription-plan";
 import { formatCredits } from "@repo/shared/credits/format";
-import type { PlanCapabilitySnapshot } from "@repo/shared/subscription/services/plan-capabilities";
 import { getMyPlanAction } from "@repo/shared/subscription/actions/get-user-plan";
+import type { PlanCapabilitySnapshot } from "@repo/shared/subscription/services/plan-capabilities";
 import { formatDateInTimeZone } from "@repo/shared/time-zone";
-import { Button } from "@repo/ui/components/button";
 import { Badge } from "@repo/ui/components/badge";
+import { Button } from "@repo/ui/components/button";
 import { Input } from "@repo/ui/components/input";
 import { Label } from "@repo/ui/components/label";
-import { Switch } from "@repo/ui/components/switch";
 import {
   Select,
   SelectContent,
@@ -22,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@repo/ui/components/select";
+import { Switch } from "@repo/ui/components/switch";
 import {
   Copy,
   ExternalLink,
@@ -36,7 +36,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { useAction } from "next-safe-action/hooks";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-
+import type { ImageBackendGroupBackendType } from "@/features/image-backend-pool/types";
 import {
   createExternalApiKey,
   deleteExternalApiKey,
@@ -47,7 +47,6 @@ import {
   updateExternalApiKeyQuota,
   updateExternalApiKeyRelay,
 } from "../actions";
-import type { ImageBackendGroupBackendType } from "@/features/image-backend-pool/types";
 
 type ImageBackendGroupOption = {
   id: string;
@@ -83,10 +82,15 @@ function formatDate(
   timeZone?: string
 ) {
   if (!value) return emptyLabel;
-  return formatDateInTimeZone(value, locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }, timeZone);
+  return formatDateInTimeZone(
+    value,
+    locale,
+    {
+      dateStyle: "medium",
+      timeStyle: "short",
+    },
+    timeZone
+  );
 }
 
 function formatBillingMultiplier(value: number | null | undefined) {
@@ -158,10 +162,10 @@ export function ExternalApiKeySection({
   const newKeyGroup =
     newKeyGroupId === "default"
       ? defaultGroup
-      : groups.find((group) => group.id === newKeyGroupId) ?? null;
+      : (groups.find((group) => group.id === newKeyGroupId) ?? null);
   const resolveKeyGroup = (groupId: string | null) =>
     groupId
-      ? groups.find((group) => group.id === groupId) ?? null
+      ? (groups.find((group) => group.id === groupId) ?? null)
       : defaultGroup;
 
   const { execute: loadKeys, isPending: isRefreshing } = useAction(
@@ -169,17 +173,17 @@ export function ExternalApiKeySection({
     {
       onSuccess: ({ data }) => {
         const nextKeys = (data?.keys || []).map((key) => ({
-            ...key,
-            creditLimit:
-              typeof key.creditLimit === "number" ? key.creditLimit : null,
-            creditsUsed: Number(key.creditsUsed || 0),
-            relayOnly: key.relayOnly === true,
-            moderationBlockRiskLevel:
-              key.moderationBlockRiskLevel === "medium" ||
-              key.moderationBlockRiskLevel === "high"
-                ? key.moderationBlockRiskLevel
-                : ("low" as ModerationBlockRiskLevel),
-          }));
+          ...key,
+          creditLimit:
+            typeof key.creditLimit === "number" ? key.creditLimit : null,
+          creditsUsed: Number(key.creditsUsed || 0),
+          relayOnly: key.relayOnly === true,
+          moderationBlockRiskLevel:
+            key.moderationBlockRiskLevel === "medium" ||
+            key.moderationBlockRiskLevel === "high"
+              ? key.moderationBlockRiskLevel
+              : ("low" as ModerationBlockRiskLevel),
+        }));
         setKeys(nextKeys);
         setQuotaDrafts(
           Object.fromEntries(
@@ -242,18 +246,16 @@ export function ExternalApiKeySection({
     }
   );
 
-  const {
-    execute: updateKeyModeration,
-    isPending: isUpdatingModeration,
-  } = useAction(updateExternalApiKeyModeration, {
-    onSuccess: () => {
-      toast.success(t("success.updated"));
-      loadKeys();
-    },
-    onError: ({ error }) => {
-      toast.error(error.serverError || t("errors.update"));
-    },
-  });
+  const { execute: updateKeyModeration, isPending: isUpdatingModeration } =
+    useAction(updateExternalApiKeyModeration, {
+      onSuccess: () => {
+        toast.success(t("success.updated"));
+        loadKeys();
+      },
+      onError: ({ error }) => {
+        toast.error(error.serverError || t("errors.update"));
+      },
+    });
 
   const { execute: updateKeyGroup, isPending: isUpdatingGroup } = useAction(
     updateExternalApiKeyGroup,
@@ -534,9 +536,7 @@ export function ExternalApiKeySection({
             {t("loading")}
           </div>
         ) : keys.length === 0 ? (
-          <p className="py-3 text-sm text-muted-foreground">
-            {t("empty")}
-          </p>
+          <p className="py-3 text-sm text-muted-foreground">{t("empty")}</p>
         ) : (
           keys.map((key) => {
             const selectedKeyGroup = resolveKeyGroup(key.generationGroupId);
@@ -545,207 +545,207 @@ export function ExternalApiKeySection({
                 key={key.id}
                 className="flex flex-col gap-3 rounded-md border border-border px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
               >
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-sm font-medium">
-                    {key.name}
-                  </span>
-                  <span className="rounded-sm bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-                    {key.isActive ? t("active") : t("revoked")}
-                  </span>
-                  {key.relayOnly && (
-                    <Badge variant="secondary" className="gap-1">
-                      <ShieldCheck className="h-3 w-3" />
-                      纯中转
-                    </Badge>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium">
+                      {key.name}
+                    </span>
+                    <span className="rounded-sm bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                      {key.isActive ? t("active") : t("revoked")}
+                    </span>
+                    {key.relayOnly && (
+                      <Badge variant="secondary" className="gap-1">
+                        <ShieldCheck className="h-3 w-3" />
+                        纯中转
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="mt-1 font-mono text-xs text-muted-foreground">
+                    {key.keyPrefix}...{key.lastFour} · {t("lastUsed")}{" "}
+                    {formatDate(key.lastUsedAt, t("never"), locale, timeZone)}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t("quota.used")}: {formatCredits(key.creditsUsed)} ·{" "}
+                    {key.creditLimit === null
+                      ? t("quota.unlimited")
+                      : `${t("quota.remaining")}: ${formatCredits(
+                          Math.max(0, key.creditLimit - key.creditsUsed)
+                        )} / ${formatCredits(key.creditLimit)}`}
+                  </p>
+                  {selectedKeyGroup && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {t("backendGroup.label")}:{" "}
+                      {groupOptionLabel(selectedKeyGroup)}
+                    </p>
+                  )}
+                  <div className="mt-3 max-w-xs">
+                    <Label htmlFor={`external-key-moderation-${key.id}`}>
+                      {t("moderation.label")}
+                    </Label>
+                    <Select
+                      value={
+                        moderationOptionSet.has(key.moderationBlockRiskLevel)
+                          ? key.moderationBlockRiskLevel
+                          : moderationOptions.at(-1) || "low"
+                      }
+                      onValueChange={(value) =>
+                        updateKeyModeration({
+                          id: key.id,
+                          moderationBlockRiskLevel:
+                            value as ModerationBlockRiskLevel,
+                        })
+                      }
+                      disabled={
+                        !externalApiAllowed ||
+                        !moderationControlAllowed ||
+                        isUpdatingModeration
+                      }
+                    >
+                      <SelectTrigger
+                        id={`external-key-moderation-${key.id}`}
+                        className="mt-1"
+                      >
+                        <SelectValue placeholder={t("moderation.label")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {moderationOptions.map((level) => (
+                          <SelectItem key={level} value={level}>
+                            {t(`moderation.options.${level}`)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {t("moderation.hint")}
+                    </p>
+                  </div>
+                  <div className="mt-3 max-w-xs">
+                    <Label htmlFor={`external-key-group-${key.id}`}>
+                      {t("backendGroup.label")}
+                    </Label>
+                    <Select
+                      value={key.generationGroupId || "default"}
+                      onValueChange={(value) =>
+                        updateKeyGroup({
+                          id: key.id,
+                          generationGroupId: value,
+                        })
+                      }
+                      disabled={!externalApiAllowed || isUpdatingGroup}
+                    >
+                      <SelectTrigger
+                        id={`external-key-group-${key.id}`}
+                        className="mt-1"
+                      >
+                        <SelectValue placeholder={t("backendGroup.label")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="default">
+                          {defaultGroup
+                            ? `${t("backendGroup.default")} · ${groupOptionLabel(
+                                defaultGroup
+                              )}`
+                            : t("backendGroup.default")}
+                        </SelectItem>
+                        {groups.map((group) => (
+                          <SelectItem key={group.id} value={group.id}>
+                            {groupOptionLabel(group)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="mt-3 flex max-w-xs items-end gap-2">
+                    <div className="flex-1">
+                      <Label htmlFor={`external-key-quota-${key.id}`}>
+                        {t("quota.label")}
+                      </Label>
+                      <Input
+                        id={`external-key-quota-${key.id}`}
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={quotaDrafts[key.id] ?? ""}
+                        onChange={(event) =>
+                          setQuotaDrafts((current) => ({
+                            ...current,
+                            [key.id]: event.target.value,
+                          }))
+                        }
+                        placeholder={t("quota.placeholder")}
+                        className="mt-1"
+                        disabled={!externalApiAllowed || isUpdatingQuota}
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => saveKeyQuota(key.id)}
+                      disabled={!externalApiAllowed || isUpdatingQuota}
+                    >
+                      {t("quota.save")}
+                    </Button>
+                  </div>
+                  {(relayAllowed || key.relayOnly) && (
+                    <div className="mt-3 flex max-w-xs items-start gap-3">
+                      <Switch
+                        id={`external-key-relay-${key.id}`}
+                        checked={key.relayOnly}
+                        onCheckedChange={(checked) =>
+                          updateKeyRelay({ id: key.id, relayOnly: checked })
+                        }
+                        disabled={
+                          !externalApiAllowed ||
+                          isUpdatingRelay ||
+                          (!relayAllowed && !key.relayOnly)
+                        }
+                        aria-label="纯中转模式"
+                      />
+                      <div className="space-y-1">
+                        <Label
+                          htmlFor={`external-key-relay-${key.id}`}
+                          className="flex items-center gap-1.5"
+                        >
+                          <ShieldCheck className="h-3.5 w-3.5" />
+                          纯中转模式（隐私）
+                        </Label>
+                        <p className="text-xs text-muted-foreground">
+                          不记录历史、不留存图片、画廊不可见；仍扣费与审核。
+                        </p>
+                      </div>
+                    </div>
                   )}
                 </div>
-                <p className="mt-1 font-mono text-xs text-muted-foreground">
-                  {key.keyPrefix}...{key.lastFour} · {t("lastUsed")}{" "}
-                  {formatDate(key.lastUsedAt, t("never"), locale, timeZone)}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {t("quota.used")}: {formatCredits(key.creditsUsed)} ·{" "}
-                  {key.creditLimit === null
-                    ? t("quota.unlimited")
-                    : `${t("quota.remaining")}: ${formatCredits(
-                        Math.max(0, key.creditLimit - key.creditsUsed)
-                      )} / ${formatCredits(key.creditLimit)}`}
-                </p>
-                {selectedKeyGroup && (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {t("backendGroup.label")}:{" "}
-                    {groupOptionLabel(selectedKeyGroup)}
-                  </p>
-                )}
-                <div className="mt-3 max-w-xs">
-                  <Label htmlFor={`external-key-moderation-${key.id}`}>
-                    {t("moderation.label")}
-                  </Label>
-                  <Select
-                    value={
-                      moderationOptionSet.has(key.moderationBlockRiskLevel)
-                        ? key.moderationBlockRiskLevel
-                        : moderationOptions.at(-1) || "low"
-                    }
-                    onValueChange={(value) =>
-                      updateKeyModeration({
-                        id: key.id,
-                        moderationBlockRiskLevel:
-                          value as ModerationBlockRiskLevel,
-                      })
-                    }
-                    disabled={
-                      !externalApiAllowed ||
-                      !moderationControlAllowed ||
-                      isUpdatingModeration
-                    }
-                  >
-                    <SelectTrigger
-                      id={`external-key-moderation-${key.id}`}
-                      className="mt-1"
-                    >
-                      <SelectValue placeholder={t("moderation.label")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {moderationOptions.map((level) => (
-                        <SelectItem key={level} value={level}>
-                          {t(`moderation.options.${level}`)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {t("moderation.hint")}
-                  </p>
-                </div>
-                <div className="mt-3 max-w-xs">
-                  <Label htmlFor={`external-key-group-${key.id}`}>
-                    {t("backendGroup.label")}
-                  </Label>
-                  <Select
-                    value={key.generationGroupId || "default"}
-                    onValueChange={(value) =>
-                      updateKeyGroup({
-                        id: key.id,
-                        generationGroupId: value,
-                      })
-                    }
-                    disabled={!externalApiAllowed || isUpdatingGroup}
-                  >
-                    <SelectTrigger
-                      id={`external-key-group-${key.id}`}
-                      className="mt-1"
-                    >
-                      <SelectValue placeholder={t("backendGroup.label")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="default">
-                        {defaultGroup
-                          ? `${t("backendGroup.default")} · ${groupOptionLabel(
-                              defaultGroup
-                            )}`
-                          : t("backendGroup.default")}
-                      </SelectItem>
-                      {groups.map((group) => (
-                        <SelectItem key={group.id} value={group.id}>
-                          {groupOptionLabel(group)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="mt-3 flex max-w-xs items-end gap-2">
-                  <div className="flex-1">
-                    <Label htmlFor={`external-key-quota-${key.id}`}>
-                      {t("quota.label")}
-                    </Label>
-                    <Input
-                      id={`external-key-quota-${key.id}`}
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={quotaDrafts[key.id] ?? ""}
-                      onChange={(event) =>
-                        setQuotaDrafts((current) => ({
-                          ...current,
-                          [key.id]: event.target.value,
-                        }))
-                      }
-                      placeholder={t("quota.placeholder")}
-                      className="mt-1"
-                      disabled={!externalApiAllowed || isUpdatingQuota}
-                    />
-                  </div>
+                {key.isActive && (
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => saveKeyQuota(key.id)}
-                    disabled={!externalApiAllowed || isUpdatingQuota}
+                    className="text-destructive"
+                    onClick={() => revokeKey({ id: key.id })}
+                    disabled={isRevoking}
                   >
-                    {t("quota.save")}
+                    <Trash2 className="mr-2 h-3 w-3" />
+                    {t("revoke")}
                   </Button>
-                </div>
-                {(relayAllowed || key.relayOnly) && (
-                  <div className="mt-3 flex max-w-xs items-start gap-3">
-                    <Switch
-                      id={`external-key-relay-${key.id}`}
-                      checked={key.relayOnly}
-                      onCheckedChange={(checked) =>
-                        updateKeyRelay({ id: key.id, relayOnly: checked })
-                      }
-                      disabled={
-                        !externalApiAllowed ||
-                        isUpdatingRelay ||
-                        (!relayAllowed && !key.relayOnly)
-                      }
-                      aria-label="纯中转模式"
-                    />
-                    <div className="space-y-1">
-                      <Label
-                        htmlFor={`external-key-relay-${key.id}`}
-                        className="flex items-center gap-1.5"
-                      >
-                        <ShieldCheck className="h-3.5 w-3.5" />
-                        纯中转模式（隐私）
-                      </Label>
-                      <p className="text-xs text-muted-foreground">
-                        不记录历史、不留存图片、画廊不可见；仍扣费与审核。
-                      </p>
-                    </div>
-                  </div>
                 )}
-              </div>
-              {key.isActive && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="text-destructive"
-                  onClick={() => revokeKey({ id: key.id })}
-                  disabled={isRevoking}
-                >
-                  <Trash2 className="mr-2 h-3 w-3" />
-                  {t("revoke")}
-                </Button>
-              )}
-              {!key.isActive && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="text-destructive"
-                  onClick={() => {
-                    if (!window.confirm(t("confirmDelete"))) return;
-                    deleteKey({ id: key.id });
-                  }}
-                  disabled={isDeleting}
-                >
-                  <Trash2 className="mr-2 h-3 w-3" />
-                  {t("delete")}
-                </Button>
-              )}
+                {!key.isActive && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="text-destructive"
+                    onClick={() => {
+                      if (!window.confirm(t("confirmDelete"))) return;
+                      deleteKey({ id: key.id });
+                    }}
+                    disabled={isDeleting}
+                  >
+                    <Trash2 className="mr-2 h-3 w-3" />
+                    {t("delete")}
+                  </Button>
+                )}
               </div>
             );
           })

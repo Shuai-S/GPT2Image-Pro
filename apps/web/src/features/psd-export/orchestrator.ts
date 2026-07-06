@@ -65,11 +65,17 @@ export async function exportLayeredPsdForUser(
   }
 
   let elementIndex = 0;
+  const namedStackLayers = stackLayers.map((layer) => {
+    const opaque = layer.role === "background";
+    if (opaque) return { layer, name: "背景", opaque };
+
+    elementIndex += 1;
+    return { layer, name: `元素 ${elementIndex}`, opaque };
+  });
+
   const layers: LayerSpec[] = await Promise.all(
-    stackLayers.map(async (layer) => {
+    namedStackLayers.map(async ({ layer, name, opaque }) => {
       const image = await storage.getObject(layer.storageKey, bucket);
-      const opaque = layer.role === "background";
-      const name = opaque ? "背景" : `元素 ${(elementIndex += 1)}`;
       // 背景层不抠图、铺满不透明;元素层(白底生成)交给组装环节抠白底转透明。
       return { name, image, opaque };
     })

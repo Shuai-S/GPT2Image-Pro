@@ -8,6 +8,12 @@
  * 播放产物视频。可选上传一张输入图做图生视频首帧。与图像创作解耦，作为创作页独立 tab。
  */
 
+import {
+  applyVideoBackendMultiplier,
+  getVideoCreditCost,
+  resolveVideoModelMultiplier,
+} from "@repo/shared/adobe";
+import { FIREFLY_VIDEO_FAMILIES } from "@repo/shared/adobe/firefly-direct/video-catalog";
 import { Button } from "@repo/ui/components/button";
 import { Label } from "@repo/ui/components/label";
 import {
@@ -18,12 +24,6 @@ import {
   SelectValue,
 } from "@repo/ui/components/select";
 import { Textarea } from "@repo/ui/components/textarea";
-import {
-  applyVideoBackendMultiplier,
-  getVideoCreditCost,
-  resolveVideoModelMultiplier,
-} from "@repo/shared/adobe";
-import { FIREFLY_VIDEO_FAMILIES } from "@repo/shared/adobe/firefly-direct/video-catalog";
 import { Loader2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { VideoPricingInfo } from "../video-operations";
@@ -86,7 +86,7 @@ export function VideoCreatePanel({
   const [familyId, setFamilyId] = useState(families[0]?.family ?? "sora2");
   const family = useMemo(
     () => families.find((item) => item.family === familyId) ?? families[0],
-    [families, familyId]
+    [familyId]
   );
   const [duration, setDuration] = useState<number>(family?.durations[0] ?? 8);
   const [ratio, setRatio] = useState<string>(family?.ratios[0] ?? "16:9");
@@ -244,7 +244,11 @@ export function VideoCreatePanel({
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <div className="space-y-1.5">
           <Label className="text-xs text-muted-foreground">模型</Label>
-          <Select value={familyId} onValueChange={onFamilyChange} disabled={busy}>
+          <Select
+            value={familyId}
+            onValueChange={onFamilyChange}
+            disabled={busy}
+          >
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
@@ -349,7 +353,8 @@ export function VideoCreatePanel({
                     : "border-border"
                 }`}
               >
-                {/* 历史缩略图(本站已生成图)。biome-ignore lint/performance/noImgElement: 简单缩略图选择器 */}
+                {/* 历史缩略图(本站已生成图)。 */}
+                {/* biome-ignore lint/performance/noImgElement: 简单缩略图选择器 */}
                 <img
                   src={item.imageUrl ?? ""}
                   alt=""

@@ -7,6 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@repo/ui/components/card";
+import { useEffect, useRef, useState } from "react";
 import {
   CartesianGrid,
   Line,
@@ -15,21 +16,20 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { useEffect, useRef, useState } from "react";
 import {
+  DEFAULT_IMAGE_SIZE,
   getImageBaseCreditPricing,
   getImageBaseCredits,
-  DEFAULT_IMAGE_SIZE,
-  IMAGE_1024_BASE_PIXELS,
   IMAGE_1K_BASE_SIZE,
+  IMAGE_1024_BASE_PIXELS,
+  IMAGE_MODERATION_PRICE_CNY,
+  type ImageBaseCreditPricing,
   MAX_IMAGE_ASPECT_RATIO,
   MAX_IMAGE_PIXELS,
   MIN_IMAGE_DIMENSION,
   MIN_IMAGE_PIXELS,
   REFERENCE_CREDIT_PRICE_CNY,
   TEXT_MODERATION_PRICE_CNY,
-  IMAGE_MODERATION_PRICE_CNY,
-  type ImageBaseCreditPricing,
 } from "@/features/image-generation/resolution";
 
 type ImagePricingChartCardProps = {
@@ -96,7 +96,10 @@ function formatMegapixels(value: number) {
   return `${Number(value.toFixed(2))}MP`;
 }
 
-function getExampleFormula(point: PricingPoint, pricing: ImageBaseCreditPricing) {
+function getExampleFormula(
+  point: PricingPoint,
+  pricing: ImageBaseCreditPricing
+) {
   if (point.pixels <= IMAGE_1024_BASE_PIXELS) {
     return {
       baseCredits: pricing.base1024Credits ?? 0,
@@ -175,8 +178,13 @@ export function ImagePricingChartCard({
   const groupMultiplier = Number.isFinite(billing.groupMultiplier)
     ? Math.max(0.01, billing.groupMultiplier)
     : 1;
+  const fallbackExamplePoint = data[0];
+  if (!fallbackExamplePoint) {
+    throw new Error("Image pricing chart data is empty");
+  }
   const multiplierExamplePoint =
-    data.find((point) => point.size === DEFAULT_IMAGE_SIZE) ?? data[0]!;
+    data.find((point) => point.size === DEFAULT_IMAGE_SIZE) ??
+    fallbackExamplePoint;
   const multiplierExampleBase = getImageBaseCredits(
     multiplierExamplePoint.pixels,
     normalizedPricing
@@ -317,10 +325,7 @@ export function ImagePricingChartCard({
         </div>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           {pricingItems.map((item) => (
-            <div
-              className="rounded-lg border bg-muted/30 p-3"
-              key={item.label}
-            >
+            <div className="rounded-lg border bg-muted/30 p-3" key={item.label}>
               <div className="text-xs text-muted-foreground">{item.label}</div>
               <div className="mt-1 text-sm font-medium">{item.value}</div>
             </div>

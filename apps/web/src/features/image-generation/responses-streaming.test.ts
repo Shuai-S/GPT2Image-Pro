@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@repo/shared/system-settings", () => ({
   getRuntimeSettingBoolean: vi.fn(async () => false),
-  getRuntimeSettingNumber: vi.fn(async (_key: string, fallback: number) => fallback),
+  getRuntimeSettingNumber: vi.fn(
+    async (_key: string, fallback: number) => fallback
+  ),
   getRuntimeSettingString: vi.fn(async () => ""),
 }));
 
@@ -147,9 +149,7 @@ describe("Responses streaming parser", () => {
     const firstCall = fetchMock.mock.calls.at(0) as
       | [string, RequestInit]
       | undefined;
-    const requestOptions = firstCall?.[1] as
-      | RequestInit
-      | undefined;
+    const requestOptions = firstCall?.[1] as RequestInit | undefined;
     expect(String(requestOptions?.body)).not.toContain("image_generation");
   });
 
@@ -276,7 +276,9 @@ describe("Responses streaming parser", () => {
     process.env.DATABASE_URL =
       process.env.DATABASE_URL || "postgresql://test:test@127.0.0.1:5432/test";
     const { generateImage } = await import("./service");
-    const imageBase64 = Buffer.from("responses-image-result").toString("base64");
+    const imageBase64 = Buffer.from("responses-image-result").toString(
+      "base64"
+    );
     const fetchMock = vi.fn(async () => {
       return new Response(
         sseBlock("response.completed", {
@@ -569,13 +571,13 @@ describe("Responses streaming parser", () => {
     );
 
     expect(result.responseText).toBe("native chat result");
-    expect(result.imageBase64).toBe(Buffer.from("native-image").toString("base64"));
+    expect(result.imageBase64).toBe(
+      Buffer.from("native-image").toString("base64")
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.example.test/v1/chat/completions",
       expect.objectContaining({
-        body: expect.stringMatching(
-          /"prompt_cache_key":"g2i_[a-f0-9]{32}"/
-        ),
+        body: expect.stringMatching(/"prompt_cache_key":"g2i_[a-f0-9]{32}"/),
       })
     );
     const calls = fetchMock.mock.calls;

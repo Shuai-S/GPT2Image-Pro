@@ -85,7 +85,11 @@ async function keyOutWhite(image: Buffer): Promise<Buffer> {
   for (let i = 0; i < data.length; i += 4) {
     const m = Math.min(data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0);
     const keyed =
-      m <= LOW ? 255 : m >= HIGH ? 0 : Math.round((255 * (HIGH - m)) / (HIGH - LOW));
+      m <= LOW
+        ? 255
+        : m >= HIGH
+          ? 0
+          : Math.round((255 * (HIGH - m)) / (HIGH - LOW));
     data[i + 3] = Math.min(data[i + 3] ?? 255, keyed);
   }
   return sharp(data, {

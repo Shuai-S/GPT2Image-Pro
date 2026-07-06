@@ -175,9 +175,7 @@ export const batchDeleteGenerationAction = protectedAction
           )
         );
       for (const other of otherGenerations) {
-        for (const ref of collectGenerationImageStorageReferences(
-          other
-        )) {
+        for (const ref of collectGenerationImageStorageReferences(other)) {
           uniqueRefKeys.delete(referenceKey(ref));
         }
       }
@@ -197,9 +195,7 @@ export const batchDeleteGenerationAction = protectedAction
     }
 
     // 批量删除 DB 记录
-    await db
-      .delete(generation)
-      .where(inArray(generation.id, idsToDelete));
+    await db.delete(generation).where(inArray(generation.id, idsToDelete));
 
     return { success: true, deletedCount: idsToDelete.length };
   });

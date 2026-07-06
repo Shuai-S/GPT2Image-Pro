@@ -1,14 +1,13 @@
 "use client";
 
+import { forgetPassword } from "@repo/shared/auth/client";
+import { Button } from "@repo/ui/components/button";
+import { Input } from "@repo/ui/components/input";
+import { Label } from "@repo/ui/components/label";
 import { KeyRound, Loader2, Mail } from "lucide-react";
 import Link from "next/link";
 import { useLocale } from "next-intl";
 import { useState } from "react";
-
-import { Button } from "@repo/ui/components/button";
-import { Input } from "@repo/ui/components/input";
-import { Label } from "@repo/ui/components/label";
-import { forgetPassword } from "@repo/shared/auth/client";
 
 import { AuthErrorAlert } from "./auth-error-alert";
 
@@ -114,7 +113,10 @@ export function ForgotPasswordForm() {
             {copy("Check your email", "请查看邮箱")}
           </h1>
           <p className="text-sm text-muted-foreground">
-            {copy("We've sent a password reset link to", "密码重置链接已发送至")}{" "}
+            {copy(
+              "We've sent a password reset link to",
+              "密码重置链接已发送至"
+            )}{" "}
             <span className="font-medium text-foreground">{email}</span>
           </p>
         </div>

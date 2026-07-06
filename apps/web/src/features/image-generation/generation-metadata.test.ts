@@ -42,7 +42,8 @@ describe("generation metadata image references", () => {
 
     const images = metadata.inputImages.images;
     expect(images).toHaveLength(1);
-    const image = images[0]!;
+    const image = images[0];
+    if (!image) throw new Error("expected one input image");
     expect(image.id).toBe("input-1");
     // URL 包含签名参数
     expect(image.imageUrl).toMatch(
@@ -79,7 +80,8 @@ describe("generation metadata image references", () => {
     });
 
     expect(result).toHaveLength(1);
-    const image = result[0]!;
+    const image = result[0];
+    if (!image) throw new Error("expected one reference image");
     expect(image.id).toBe("input-1");
     // 提取时应使用带签名的存储 URL（优先于 metadata 中记录的旧 imageUrl）
     expect(image.imageUrl).toMatch(

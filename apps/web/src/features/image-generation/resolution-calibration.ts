@@ -11,9 +11,9 @@
  * 设计：决策（是否需超分）是纯函数 shouldSuperResolve，便于 DB-free 单测；实际放大/
  *   缩放有副作用（CPU + IO），由 calibrateImageResolution 编排。失败时回退原图（不阻断出图）。
  */
-import sharp, { type Sharp } from "sharp";
 
 import { logWarn } from "@repo/shared/logger";
+import sharp, { type Sharp } from "sharp";
 
 import { parseImageSize } from "./resolution";
 import { superResolve } from "./super-resolution";

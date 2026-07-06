@@ -8,7 +8,7 @@ import {
 function drizzleError(): Error {
   return new Error(
     'Failed query: select "image_backend_api"."api_key" from "image_backend_api" ' +
-      "inner join \"image_backend_api_group\" ... params: true,true,active"
+      'inner join "image_backend_api_group" ... params: true,true,active'
   );
 }
 
@@ -51,7 +51,9 @@ describe("toClientErrorMessage", () => {
     expect(msg).toBe("请稍后重试");
     expect(msg).not.toContain("Failed query");
     expect(msg).not.toContain("api_key");
-    expect(toClientErrorMessage(pgError(), ctx, "请稍后重试")).toBe("请稍后重试");
+    expect(toClientErrorMessage(pgError(), ctx, "请稍后重试")).toBe(
+      "请稍后重试"
+    );
   });
 
   it("用户级错误原样透传", () => {

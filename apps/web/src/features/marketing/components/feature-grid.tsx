@@ -1,5 +1,6 @@
 "use client";
 
+import { Card, CardContent } from "@repo/ui/components/card";
 import {
   Images,
   Layers,
@@ -9,7 +10,6 @@ import {
   Wallet,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Card, CardContent } from "@repo/ui/components/card";
 
 const featureConfig = [
   { key: "ai" as const, icon: MessageSquare },

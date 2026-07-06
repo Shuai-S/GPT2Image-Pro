@@ -1,6 +1,6 @@
+import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
 
 import { BuyCreditPackagesView } from "./buy-credits-view";
 

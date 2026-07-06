@@ -14,9 +14,7 @@ describe("image stream response", () => {
   it("sets no-buffer headers for proxied SSE", async () => {
     const response = createImageStreamResponse(async () => null);
 
-    expect(response.headers.get("content-type")).toContain(
-      "text/event-stream"
-    );
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
     expect(response.headers.get("cache-control")).toContain("no-transform");
     expect(response.headers.get("cdn-cache-control")).toBe("no-store");
     expect(response.headers.get("cloudflare-cdn-cache-control")).toBe(

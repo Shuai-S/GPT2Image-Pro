@@ -1,11 +1,3 @@
-import { desc, eq, sql } from "drizzle-orm";
-import { Plus, Ticket } from "lucide-react";
-import Link from "next/link";
-import { redirect } from "next/navigation";
-import { getLocale, getTranslations } from "next-intl/server";
-import { Badge } from "@repo/ui/components/badge";
-import { Button } from "@repo/ui/components/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@repo/ui/components/card";
 import { db } from "@repo/database";
 import { ticket, user } from "@repo/database/schema";
 import { getUserRoleById } from "@repo/shared/auth/role-server";
@@ -13,6 +5,19 @@ import { isAdminRole } from "@repo/shared/auth/roles";
 import { getServerSession } from "@repo/shared/auth/server";
 import { formatDateInTimeZone } from "@repo/shared/time-zone";
 import { getAppTimeZone } from "@repo/shared/time-zone/server";
+import { Badge } from "@repo/ui/components/badge";
+import { Button } from "@repo/ui/components/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@repo/ui/components/card";
+import { desc, eq, sql } from "drizzle-orm";
+import { Plus, Ticket } from "lucide-react";
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { getLocale, getTranslations } from "next-intl/server";
 
 const userUnreadTicketSql =
   sql<boolean>`${ticket.lastAdminActivityAt} > ${ticket.userLastSeenAt}`.mapWith(
@@ -183,7 +188,10 @@ export default async function SupportPage() {
                         )}
                         <span>{tkt.subject}</span>
                         {tkt.unread && (
-                          <Badge className="bg-red-500 text-white" variant="secondary">
+                          <Badge
+                            className="bg-red-500 text-white"
+                            variant="secondary"
+                          >
                             新动态
                           </Badge>
                         )}

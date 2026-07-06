@@ -126,7 +126,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
     .where(eq(imageBackendAccount.id, accountId))
     .limit(1);
 
-  if (!account || !account.isEnabled || account.implementationMode !== "web") {
+  if (!account?.isEnabled || account.implementationMode !== "web") {
     return jsonError("Web account is unavailable", 409);
   }
 

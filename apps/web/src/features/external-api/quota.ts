@@ -51,10 +51,7 @@ export async function getExternalApiKeyQuota(params: {
     ...key,
     creditLimit,
     creditsUsed,
-    creditsRemaining: getExternalApiKeyQuotaRemaining(
-      creditLimit,
-      creditsUsed
-    ),
+    creditsRemaining: getExternalApiKeyQuotaRemaining(creditLimit, creditsUsed),
   };
 }
 

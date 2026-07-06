@@ -1,5 +1,5 @@
-import { AuthFooter } from "@/features/auth/components/auth-footer";
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
+import { AuthFooter } from "@/features/auth/components/auth-footer";
 
 /**
  * Auth 路由组布局

@@ -6,6 +6,8 @@
  * 与 credits_batch 幂等约束，避免官方支付宝渠道产生第二套财务路径。
  */
 
+import { withApiLogging } from "@repo/shared/api-logger";
+import { logError, logger } from "@repo/shared/logger";
 import {
   ALIPAY_TRADE_FINISHED,
   ALIPAY_TRADE_SUCCESS,
@@ -13,8 +15,6 @@ import {
   parseAlipayRequestParams,
   verifyRuntimeAlipayParams,
 } from "@repo/shared/payment/alipay";
-import { withApiLogging } from "@repo/shared/api-logger";
-import { logger, logError } from "@repo/shared/logger";
 import { fulfillSuccessfulEpayPayment } from "@/features/payment/epay-fulfillment";
 
 export const GET = withApiLogging(handleAlipayWebhook);

@@ -1,8 +1,8 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useState } from "react";
 import { ImageCard } from "@/features/image-generation/components/image-card";
-import dynamic from "next/dynamic";
 import type { LightboxGeneration } from "@/features/image-generation/components/image-lightbox";
 
 // 懒加载:lightbox 仅在点开某张图时才需要,改 next/dynamic 后从首屏 bundle 移出。

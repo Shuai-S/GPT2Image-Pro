@@ -1,11 +1,15 @@
 "use client";
 
-import { useTranslations } from "next-intl";
-
 import { Button } from "@repo/ui/components/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@repo/ui/components/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@repo/ui/components/card";
 import { Label } from "@repo/ui/components/label";
 import { Switch } from "@repo/ui/components/switch";
+import { useTranslations } from "next-intl";
 
 export function CookieSettingsCard() {
   const t = useTranslations("Cookie");

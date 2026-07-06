@@ -8,15 +8,14 @@
  * - 修改密码
  */
 
+import { changePassword } from "@repo/shared/auth/client";
+import { Button } from "@repo/ui/components/button";
+import { Input } from "@repo/ui/components/input";
+import { Label } from "@repo/ui/components/label";
 import { Eye, EyeOff } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
-
-import { Button } from "@repo/ui/components/button";
-import { Input } from "@repo/ui/components/input";
-import { Label } from "@repo/ui/components/label";
-import { changePassword } from "@repo/shared/auth/client";
 
 /**
  * 安全设置组件

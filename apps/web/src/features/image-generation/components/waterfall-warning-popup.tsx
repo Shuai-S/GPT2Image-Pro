@@ -8,7 +8,6 @@
 // WHY：瀑布流每批并发生成 tier 张，积分消耗远高于单图，需在前端显著提示，避免用户误扣。
 // 文案语言由父组件统一的 copy(en, zh) 注入，保证与页面其它文案语言一致。
 
-import { AlertTriangle } from "lucide-react";
 import { Button } from "@repo/ui/components/button";
 import {
   Dialog,
@@ -18,6 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@repo/ui/components/dialog";
+import { AlertTriangle } from "lucide-react";
 import { useCallback } from "react";
 
 // 与原项目保持一致的存储键，延续老用户的“已看过首次提示”标记

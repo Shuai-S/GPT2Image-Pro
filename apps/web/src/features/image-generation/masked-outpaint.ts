@@ -44,7 +44,12 @@ function axisCount(target: number, tile: number, step: number): number {
 }
 
 /** 纯函数：某方向上第 i 块的起点（均匀分布，首块 0、末块贴右/下边缘铺满）。 */
-function axisPos(i: number, count: number, target: number, tile: number): number {
+function axisPos(
+  i: number,
+  count: number,
+  target: number,
+  tile: number
+): number {
   if (count <= 1) return 0;
   return Math.round((i * (target - tile)) / (count - 1));
 }
@@ -94,11 +99,13 @@ export function tileKeepInset(
   let left = 0;
   let top = 0;
   if (tile.col > 0) {
-    const leftNb = tiles[tile.row * cols + (tile.col - 1)]!;
+    const leftNb = tiles[tile.row * cols + (tile.col - 1)];
+    if (!leftNb) throw new Error("Outpaint plan is missing left neighbor tile");
     left = Math.max(0, leftNb.x + tileW - tile.x);
   }
   if (tile.row > 0) {
-    const topNb = tiles[(tile.row - 1) * cols + tile.col]!;
+    const topNb = tiles[(tile.row - 1) * cols + tile.col];
+    if (!topNb) throw new Error("Outpaint plan is missing top neighbor tile");
     top = Math.max(0, topNb.y + tileH - tile.y);
   }
   // 防御：保留区不应吞掉整块(否则无新区域可画)。
@@ -177,8 +184,7 @@ export async function maskedOutpaintImage(
     .toBuffer();
 
   let tilesRepaired = 0;
-  for (let i = 0; i < plan.tiles.length; i++) {
-    const t = plan.tiles[i]!;
+  for (const [i, t] of plan.tiles.entries()) {
     const { left, top } = tileKeepInset(plan, t);
     // 从画布抠出本块当前状态（保留区=已提交邻块像素，其余=原图像素）。
     const tileRaw = extractTile(canvas, workW, t);
@@ -233,16 +239,13 @@ async function upscaleTo(
 ): Promise<Buffer> {
   const meta = await sharp(image).metadata();
   const srcLong = Math.max(meta.width ?? 1, meta.height ?? 1);
-  const base = Math.max(w, h) / srcLong >= 1.5 ? await superResolve(image) : image;
+  const base =
+    Math.max(w, h) / srcLong >= 1.5 ? await superResolve(image) : image;
   return sharp(base).resize(w, h, { fit: "fill" }).png().toBuffer();
 }
 
 /** 从整幅 raw RGB 抠出一块（HWC uint8）。 */
-function extractTile(
-  canvas: Buffer,
-  canvasW: number,
-  t: OutpaintTile
-): Buffer {
+function extractTile(canvas: Buffer, canvasW: number, t: OutpaintTile): Buffer {
   const out = Buffer.allocUnsafe(t.w * t.h * 3);
   for (let y = 0; y < t.h; y++) {
     const src = ((t.y + y) * canvasW + t.x) * 3;

@@ -94,15 +94,15 @@ describe("generateAvatarKey", () => {
 });
 
 describe("keyBelongsToUser", () => {
-  it("以 ${userId}- 前缀开头返回 true", () => {
+  it("以 userId- 前缀开头返回 true", () => {
     expect(keyBelongsToUser("user-1-123.png", "user-1")).toBe(true);
   });
 
-  it("以 ${userId}/ 前缀开头返回 true", () => {
+  it("以 userId/ 前缀开头返回 true", () => {
     expect(keyBelongsToUser("user-1/nested/a.png", "user-1")).toBe(true);
   });
 
-  it("与 ${userId} 完全相等返回 true", () => {
+  it("与 userId 完全相等返回 true", () => {
     expect(keyBelongsToUser("user-1", "user-1")).toBe(true);
   });
 

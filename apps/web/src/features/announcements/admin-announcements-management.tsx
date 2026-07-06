@@ -1,29 +1,16 @@
 "use client";
 
 import {
-  Archive,
-  Loader2,
-  Megaphone,
-  Pencil,
-  Pin,
-  Plus,
-  Trash2,
-  Upload,
-} from "lucide-react";
-import { useMemo, useState } from "react";
-import { toast } from "sonner";
-
-import {
+  type AdminAnnouncementItem,
   createAnnouncementAction,
   deleteAnnouncementAction,
   getAdminAnnouncementsAction,
   toggleAnnouncementPublishAction,
   updateAnnouncementAction,
-  type AdminAnnouncementItem,
 } from "@repo/shared/announcements";
 import {
-  announcementSeverities,
   type AnnouncementSeverity,
+  announcementSeverities,
 } from "@repo/shared/announcements/schemas";
 import { Badge } from "@repo/ui/components/badge";
 import { Button } from "@repo/ui/components/button";
@@ -53,6 +40,18 @@ import {
 import { Switch } from "@repo/ui/components/switch";
 import { Textarea } from "@repo/ui/components/textarea";
 import { cn } from "@repo/ui/utils";
+import {
+  Archive,
+  Loader2,
+  Megaphone,
+  Pencil,
+  Pin,
+  Plus,
+  Trash2,
+  Upload,
+} from "lucide-react";
+import { useMemo, useState } from "react";
+import { toast } from "sonner";
 
 type AnnouncementFormState = {
   id?: string;
@@ -128,15 +127,12 @@ function getSeverityMeta(severity: string) {
     case "critical":
       return {
         label: "紧急",
-        className:
-          "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
+        className: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
       };
-    case "info":
     default:
       return {
         label: "普通",
-        className:
-          "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300",
+        className: "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300",
       };
   }
 }
@@ -554,19 +550,20 @@ export function AdminAnnouncementsManagement({
             </div>
 
             <div className="grid gap-3 rounded-lg border p-4 sm:grid-cols-2">
-              <label
+              <div
                 className={cn(
                   "flex items-center justify-between gap-3 rounded-md border p-3",
                   form.isPublished && "border-primary/50 bg-primary/5"
                 )}
               >
-                <span>
+                <Label htmlFor="announcement-is-published" className="block">
                   <span className="block text-sm font-medium">发布</span>
                   <span className="block text-xs text-muted-foreground">
                     打开后用户可在生效时间内看到
                   </span>
-                </span>
+                </Label>
                 <Switch
+                  id="announcement-is-published"
                   checked={form.isPublished}
                   onCheckedChange={(checked) =>
                     setForm((current) => ({
@@ -575,26 +572,27 @@ export function AdminAnnouncementsManagement({
                     }))
                   }
                 />
-              </label>
-              <label
+              </div>
+              <div
                 className={cn(
                   "flex items-center justify-between gap-3 rounded-md border p-3",
                   form.isPinned && "border-primary/50 bg-primary/5"
                 )}
               >
-                <span>
+                <Label htmlFor="announcement-is-pinned" className="block">
                   <span className="block text-sm font-medium">置顶</span>
                   <span className="block text-xs text-muted-foreground">
                     置顶公告会排在普通公告前
                   </span>
-                </span>
+                </Label>
                 <Switch
+                  id="announcement-is-pinned"
                   checked={form.isPinned}
                   onCheckedChange={(checked) =>
                     setForm((current) => ({ ...current, isPinned: checked }))
                   }
                 />
-              </label>
+              </div>
             </div>
 
             <DialogFooter>

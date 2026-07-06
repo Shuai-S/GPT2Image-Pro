@@ -1,3 +1,4 @@
+import { getInputImageUrl } from "./input-image-url";
 import type {
   ChatHistoryMessage,
   ImageInputFile,
@@ -6,7 +7,6 @@ import type {
   ResponsesPreviousResponseState,
   StickyBackendMemberState,
 } from "./types";
-import { getInputImageUrl } from "./input-image-url";
 
 export type ResponsesRequestContent =
   | { type: "input_text"; text: string }
@@ -61,7 +61,7 @@ export type ResponsesResultWithOutputLike = {
 
 export const RESPONSES_IMAGE_REFERENCE_INSTRUCTIONS = [
   "Image reference labels:",
-  "- Images may be accompanied by labels such as @图1, @第N轮图M, or XML tags like <ref id=\"...\" />.",
+  '- Images may be accompanied by labels such as @图1, @第N轮图M, or XML tags like <ref id="..." />.',
   "- Treat these labels as identifiers for the adjacent or previously stored input image, not as visible text to render into the image.",
   "- When the user mentions one of these labels, use the matching image as the visual reference for the request.",
   "- Do not ask the user to upload a labeled image again when the image is present in the current input or native Responses conversation state.",
@@ -330,7 +330,7 @@ export function getLatestResponsesPreviousResponseState(
 ): ResponsesPreviousResponseState | undefined {
   for (let index = (history || []).length - 1; index >= 0; index -= 1) {
     const message = history?.[index];
-    if (!message || message.role !== "assistant" || message.error) continue;
+    if (message?.role !== "assistant" || message.error) continue;
     const state = getHistoryVariant(message)?.responsesPreviousResponse;
     if (state?.responseId) return state;
     return undefined;
@@ -393,7 +393,12 @@ export function buildCurrentResponsesContent(
     }
     const imageContent = getInputImageContent(reference);
     if (!imageContent) continue;
-    addLabeledImageContent(content, imageContent, reference.refId, reference.prompt);
+    addLabeledImageContent(
+      content,
+      imageContent,
+      reference.refId,
+      reference.prompt
+    );
   }
   content.push({ type: "input_text", text: prompt });
   if (options?.generatedImageReferenceInstruction) {
@@ -568,7 +573,9 @@ export function buildAgentContinuationInput(params: {
           type: "input_text",
           text: `The previous native Responses output already contains ${previousImages.length} draft image(s) from Agent round ${params.currentRound}. Refer to them as ${previousImages
             .map((_, index) =>
-              referenceLabel(`agent-round-${params.currentRound}-draft-${index + 1}`)
+              referenceLabel(
+                `agent-round-${params.currentRound}-draft-${index + 1}`
+              )
             )
             .join(", ")} without asking the user to upload them again.`,
         },
@@ -727,7 +734,10 @@ export function resolveResponsesNativeState(params: {
   const canUsePreviousResponseId =
     params.enabled &&
     Boolean(previousState?.responseId) &&
-    sameStickyBackendMember(previousState?.backendMember, params.currentBackendMember);
+    sameStickyBackendMember(
+      previousState?.backendMember,
+      params.currentBackendMember
+    );
   return {
     previousState,
     canUsePreviousResponseId,

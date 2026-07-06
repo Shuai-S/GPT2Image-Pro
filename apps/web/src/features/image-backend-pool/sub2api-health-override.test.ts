@@ -15,9 +15,7 @@ async function loadOverride() {
 }
 
 type AccountOverrides = Partial<
-  Awaited<ReturnType<typeof loadOverride>> extends (
-    account: infer A
-  ) => unknown
+  Awaited<ReturnType<typeof loadOverride>> extends (account: infer A) => unknown
     ? A
     : never
 >;

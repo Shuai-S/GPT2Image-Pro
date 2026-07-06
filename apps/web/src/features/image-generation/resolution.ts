@@ -211,7 +211,8 @@ export function getImageCreditCostBreakdown(
   // 质量和思考强度仅影响上游请求，不再影响本站积分。
   const qualityMultiplier = getQualityMultiplier(options.quality);
   const thinkingMultiplier = getThinkingMultiplier(options.thinking);
-  const effectiveBaseCredits = baseCredits * qualityMultiplier * thinkingMultiplier;
+  const effectiveBaseCredits =
+    baseCredits * qualityMultiplier * thinkingMultiplier;
 
   const textModerationCount = options.textModerationCount ?? 1;
   const imageModerationCount = options.imageModerationCount ?? 0;

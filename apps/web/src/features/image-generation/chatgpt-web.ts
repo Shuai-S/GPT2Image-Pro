@@ -2,10 +2,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { logError } from "@repo/shared/logger";
 import { getRuntimeSettingString } from "@repo/shared/system-settings";
 import { parseImageSize } from "./resolution";
-import {
-  downloadWebHistoryImageReference,
-  getLatestWebHistoryImageReference,
-} from "./web-history-references";
 import type {
   ApiConfig,
   ChatGptWebConversationState,
@@ -17,6 +13,10 @@ import type {
   ResponsesInputFile,
   ThinkingLevel,
 } from "./types";
+import {
+  downloadWebHistoryImageReference,
+  getLatestWebHistoryImageReference,
+} from "./web-history-references";
 
 const CHATGPT_BASE_URL = "https://chatgpt.com";
 const USER_AGENT =
@@ -144,7 +144,7 @@ function lastWebConversationState(
 ): WebContinuationState | null {
   for (let index = (history || []).length - 1; index >= 0; index--) {
     const message = history?.[index];
-    if (!message || message.role !== "assistant" || message.error) continue;
+    if (message?.role !== "assistant" || message.error) continue;
     const variants = message.variants || [];
     const variant = variants[message.activeVariant || 0] || variants[0];
     const state = variant?.webConversation;
@@ -1555,7 +1555,9 @@ async function getConversationText(
     headers: getHeaders(config, path, { Accept: "application/json" }),
   });
   if (!response.ok) {
-    throw new Error(await webErrorMessage(response, "ChatGPT Web conversation"));
+    throw new Error(
+      await webErrorMessage(response, "ChatGPT Web conversation")
+    );
   }
   return JSON.stringify(await response.json());
 }
@@ -1637,7 +1639,9 @@ async function getDownloadUrl(
     headers: getHeaders(config, path, { Accept: "application/json" }),
   });
   if (!response.ok) {
-    throw new Error(await webErrorMessage(response, "ChatGPT Web image lookup"));
+    throw new Error(
+      await webErrorMessage(response, "ChatGPT Web image lookup")
+    );
   }
   const data = (await response.json()) as {
     download_url?: string;

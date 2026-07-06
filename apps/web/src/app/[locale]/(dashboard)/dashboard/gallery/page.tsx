@@ -274,23 +274,26 @@ export default async function GalleryPage({ searchParams }: GalleryPageProps) {
         : activeTab === "uploads"
           ? allUploadItems.slice(0, limit)
           : finalRows.map((g) => ({
-            id: g.id,
-            parentId: g.id,
-            prompt: g.prompt,
-            revisedPrompt: g.revisedPrompt,
-            promptRepairNotice: extractPromptRepairNotice(g.metadata),
-            model: g.model,
-            size: g.size,
-            status: g.status,
-            creditsConsumed: g.creditsConsumed,
-            storageKey: g.storageKey,
-            storageBucket: g.storageBucket,
-            imageUrl: buildSignedStorageImageUrl(g.storageKey, g.storageBucket),
-            createdAt: g.createdAt.toISOString(),
-            outputRole: "final" as GalleryOutputRole,
-            referenceImages: extractGenerationReferenceImages(g.metadata),
-            isLayered: hasLayeredMeta(g.metadata),
-          }));
+              id: g.id,
+              parentId: g.id,
+              prompt: g.prompt,
+              revisedPrompt: g.revisedPrompt,
+              promptRepairNotice: extractPromptRepairNotice(g.metadata),
+              model: g.model,
+              size: g.size,
+              status: g.status,
+              creditsConsumed: g.creditsConsumed,
+              storageKey: g.storageKey,
+              storageBucket: g.storageBucket,
+              imageUrl: buildSignedStorageImageUrl(
+                g.storageKey,
+                g.storageBucket
+              ),
+              createdAt: g.createdAt.toISOString(),
+              outputRole: "final" as GalleryOutputRole,
+              referenceImages: extractGenerationReferenceImages(g.metadata),
+              isLayered: hasLayeredMeta(g.metadata),
+            }));
 
   const finalCount =
     (completedStorageCountResult[0]?.count ?? 0) -

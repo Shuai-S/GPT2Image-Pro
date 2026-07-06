@@ -1,5 +1,5 @@
-import { SignInForm } from "@/features/auth/components/sign-in-form";
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
+import { SignInForm } from "@/features/auth/components/sign-in-form";
 
 function isGoogleAuthEnabled() {
   return Boolean(

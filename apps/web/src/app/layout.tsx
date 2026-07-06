@@ -1,7 +1,7 @@
-import type { Metadata } from "next";
+import { siteConfig } from "@repo/shared/config";
 
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
-import { siteConfig } from "@repo/shared/config";
+import type { Metadata } from "next";
 
 import "@repo/ui/globals.css";
 

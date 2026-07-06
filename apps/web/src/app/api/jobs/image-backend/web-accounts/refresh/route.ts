@@ -1,8 +1,7 @@
 import crypto from "node:crypto";
+import { withApiLogging } from "@repo/shared/api-logger";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-
-import { withApiLogging } from "@repo/shared/api-logger";
 
 import { runWebAccountsRefreshJob } from "@/server/scheduled-jobs";
 
@@ -14,7 +13,10 @@ async function validateCronSecret(authHeader: string | null) {
     ? authHeader.slice(7)
     : authHeader;
   if (!token) return false;
-  const tokenHash = crypto.createHash("sha256").update(Buffer.from(token)).digest();
+  const tokenHash = crypto
+    .createHash("sha256")
+    .update(Buffer.from(token))
+    .digest();
   const secretHash = crypto
     .createHash("sha256")
     .update(Buffer.from(cronSecret))

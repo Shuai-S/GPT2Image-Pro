@@ -84,7 +84,10 @@ export async function generativeRepairImage(
   try {
     const out = await repair(repairInput, rw, rh);
     // web 返回尺寸可能不精确，缩回精确修复尺寸。
-    repaired = await sharp(out).resize(rw, rh, { fit: "fill" }).png().toBuffer();
+    repaired = await sharp(out)
+      .resize(rw, rh, { fit: "fill" })
+      .png()
+      .toBuffer();
   } catch {
     return { buffer: image, repaired: false };
   }

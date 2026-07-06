@@ -1,8 +1,13 @@
 "use client";
 
-import { Star } from "lucide-react";
 import { Button } from "@repo/ui/components/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@repo/ui/components/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@repo/ui/components/card";
+import { Star } from "lucide-react";
 
 export function RepoCard() {
   return (

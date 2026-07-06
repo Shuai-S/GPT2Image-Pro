@@ -52,9 +52,7 @@ function makeParams(bucket: string, key: string[]) {
  * 构造带 nextUrl.searchParams 的 NextRequest 模拟对象。
  * avatars 桶不需要签名；generations 桶需要 sig+exp。
  */
-function makeRequest(
-  searchParams?: Record<string, string>
-): NextRequest {
+function makeRequest(searchParams?: Record<string, string>): NextRequest {
   const params = new URLSearchParams(searchParams);
   return {
     nextUrl: {
@@ -294,7 +292,10 @@ describe("GET /api/storage/[bucket]/[...key]", () => {
 
   it("路径宽度段用错误 key 的签名仍 403(宽度段不能绕过鉴权)", async () => {
     // 用 "其它/key.png" 的签名去访问 "user-123/abc.png",即便带 w128 段也应 403。
-    const { sig, exp } = generateSignedImageParams("generations", "other/key.png");
+    const { sig, exp } = generateSignedImageParams(
+      "generations",
+      "other/key.png"
+    );
     const res = await GET(
       makeRequest({ sig, exp: String(exp) }),
       makeParams("generations", ["w128", "user-123", "abc.png"])

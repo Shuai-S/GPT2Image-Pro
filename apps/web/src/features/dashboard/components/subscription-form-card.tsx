@@ -1,13 +1,18 @@
 "use client";
 
-import { useState } from "react";
 import { Button } from "@repo/ui/components/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@repo/ui/components/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@repo/ui/components/card";
 import { Checkbox } from "@repo/ui/components/checkbox";
 import { Input } from "@repo/ui/components/input";
 import { Label } from "@repo/ui/components/label";
 import { RadioGroup, RadioGroupItem } from "@repo/ui/components/radio-group";
 import { Textarea } from "@repo/ui/components/textarea";
+import { useState } from "react";
 
 export function SubscriptionFormCard() {
   const [plan, setPlan] = useState("starter");
@@ -16,9 +21,7 @@ export function SubscriptionFormCard() {
     <Card className="rounded-xl">
       <CardHeader>
         <CardTitle className="text-lg">升级订阅</CardTitle>
-        <p className="text-sm text-muted-foreground">
-          你当前使用的是免费版。
-        </p>
+        <p className="text-sm text-muted-foreground">你当前使用的是免费版。</p>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-4 md:grid-cols-2">

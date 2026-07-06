@@ -8,10 +8,11 @@
     "./schema": "./src/schema.ts"
   },
   "scripts": {
-    "db:generate": "drizzle-kit generate",
+    "db:generate": "node -e \"console.error('本仓库使用手写幂等 SQL 迁移，禁止运行 drizzle-kit generate。'); process.exit(1);\"",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
+    "lint": "pnpm --filter @repo/web exec biome lint ../../packages/database",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

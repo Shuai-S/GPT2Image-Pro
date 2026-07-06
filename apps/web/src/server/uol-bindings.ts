@@ -18,12 +18,11 @@
 // 副作用导入：触发所有操作注册到 registry
 import "@repo/shared/uol/operations";
 
+import type { OperationContext, Principal } from "@repo/shared/uol";
 import { bindExecute } from "@repo/shared/uol";
-import type { Principal, OperationContext } from "@repo/shared/uol";
-
+import { listAdminImageBackendPool } from "@/features/image-backend-pool/service";
 import { runImageGenerationForUser } from "@/features/image-generation/operations";
 import type { ImageQuality } from "@/features/image-generation/types";
-import { listAdminImageBackendPool } from "@/features/image-backend-pool/service";
 
 // ---------------------------------------------------------------------------
 // image-generation 域
@@ -51,7 +50,7 @@ bindExecute(
       extra?: Record<string, unknown>;
     },
     _principal: Principal,
-    _ctx: OperationContext,
+    _ctx: OperationContext
   ) => {
     const result = await runImageGenerationForUser({
       mode: "generate",
@@ -94,7 +93,7 @@ bindExecute(
       creditsUsed: result.creditsConsumed,
       model: result.model,
     };
-  },
+  }
 );
 
 // TODO: image.generateAction - 委托 image.generate
@@ -122,11 +121,11 @@ bindExecute(
   async (
     _input: Record<string, never>,
     _principal: Principal,
-    _ctx: OperationContext,
+    _ctx: OperationContext
   ) => {
     const pool = await listAdminImageBackendPool();
     return pool;
-  },
+  }
 );
 
 // TODO: pool.getSelectableGroups - getSelectableImageBackendGroupsAction 逻辑

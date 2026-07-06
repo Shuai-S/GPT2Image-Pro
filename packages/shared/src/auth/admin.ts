@@ -26,7 +26,7 @@ export async function checkAdmin() {
   const session = await getServerSession();
 
   // 检查用户是否登录
-  if (!session || !session.user) {
+  if (!session?.user) {
     redirect("/sign-in");
   }
 
@@ -49,7 +49,7 @@ export async function checkAdmin() {
 export async function isAdmin(): Promise<boolean> {
   const session = await getServerSession();
 
-  if (!session || !session.user) {
+  if (!session?.user) {
     return false;
   }
 

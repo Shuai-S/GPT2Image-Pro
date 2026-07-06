@@ -1,7 +1,6 @@
-import { ArrowUpRight, Database, LayoutTemplate, Route } from "lucide-react";
-
 import { Badge } from "@repo/ui/components/badge";
 import { Card, CardContent } from "@repo/ui/components/card";
+import { ArrowUpRight, Database, LayoutTemplate, Route } from "lucide-react";
 import { getPseoPages } from "@/features/pseo/lib/pseo-data";
 import { Link } from "@/i18n/routing";
 

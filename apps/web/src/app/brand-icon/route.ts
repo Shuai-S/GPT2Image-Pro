@@ -1,6 +1,5 @@
-import { NextResponse } from "next/server";
-
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
+import { NextResponse } from "next/server";
 
 /**
  * 运行时品牌图标路由。

@@ -19,7 +19,7 @@ import {
   XCircle,
 } from "lucide-react";
 import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { formatCredits } from "../../../credits/format";
@@ -420,7 +420,7 @@ export function AdminUsersManagement({
     pagination.total
   );
 
-  const loadUsers = async (nextPage = pagination.page) => {
+  const loadUsers = useCallback(async (nextPage: number) => {
     setIsLoading(true);
     try {
       const result = await getAllUsersAction({
@@ -444,11 +444,11 @@ export function AdminUsersManagement({
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [creditsStatus, pagination.pageSize, plan, query, status, subscriptionStatus]);
 
   useEffect(() => {
     void loadUsers(1);
-  }, [query, status, subscriptionStatus, creditsStatus, plan, pagination.pageSize]);
+  }, [loadUsers]);
 
   const reloadCurrent = async () => {
     await loadUsers(pagination.page);
