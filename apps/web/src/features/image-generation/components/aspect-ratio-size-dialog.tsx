@@ -43,6 +43,7 @@ type ImageAspectRatio =
 type CopyFn = (en: string, zh: string) => string;
 
 const AUTO_RATIO_LABEL = "自动(auto)";
+const AUTO_RESOLUTION_VALUE = "auto";
 
 const IMAGE_SIZE_BASES: Array<{
   value: ImageSizeBase;
@@ -52,6 +53,16 @@ const IMAGE_SIZE_BASES: Array<{
   { value: "1k", label: "1K", edge: 1024 },
   { value: "2k", label: "2K", edge: 2048 },
   { value: "4k", label: "4K", edge: 3840 },
+];
+const IMAGE_SIZE_TIERS: Array<{
+  value: ImageSizeBase | typeof AUTO_RESOLUTION_VALUE;
+  label: string;
+}> = [
+  { value: AUTO_RESOLUTION_VALUE, label: "自动" },
+  ...IMAGE_SIZE_BASES.map((item) => ({
+    value: item.value,
+    label: item.label,
+  })),
 ];
 
 const IMAGE_SIZE_MATRIX = {
@@ -240,6 +251,29 @@ function formatImageSizeForDisplay(size: string) {
 }
 
 /**
+ * 解析直接输入的分辨率，兼容 1024x1024 与 1024×1024。
+ *
+ * @param value 输入框内容。
+ * @returns 自动标记或规整后的尺寸；无法解析时返回 null。
+ */
+function parseResolutionInput(value: string) {
+  const normalized = value.trim().toLowerCase().replace("×", "x");
+  if (
+    normalized === "" ||
+    normalized === AUTO_IMAGE_SIZE ||
+    normalized === "自动"
+  ) {
+    return { auto: true, size: AUTO_IMAGE_SIZE } as const;
+  }
+  const dimensions = parseImageSize(normalized);
+  if (!dimensions) return null;
+  return {
+    auto: false,
+    size: normalizeValidImageSize(dimensions),
+  } as const;
+}
+
+/**
  * 生成比例卡片里的简化形状尺寸。
  *
  * @param ratio 比例定义。
@@ -256,6 +290,233 @@ function getRatioShapeStyle(ratio: { width: number; height: number }) {
     ? Math.max(min, Math.round((max * ratio.height) / ratio.width))
     : max;
   return { width, height };
+}
+
+/**
+ * 行内分辨率控件。直接展示最终分辨率输入框,并通过悬浮预设面板快速套用常见比例。
+ *
+ * @param props.id 输入框 id。
+ * @param props.value 当前尺寸值。
+ * @param props.onChange 尺寸变化回调。
+ * @param props.disabled 禁用状态。
+ * @param props.copy 中英文文案选择函数。
+ */
+export function InlineImageSizeControl({
+  id,
+  value,
+  onChange,
+  disabled,
+  copy,
+}: {
+  id: string;
+  value: AspectRatioSizeDialogValue;
+  onChange: (value: AspectRatioSizeDialogValue) => void;
+  disabled?: boolean;
+  copy: CopyFn;
+}) {
+  const { auto, height, mixWebFirst, width } = value;
+  const initial = inferAspectRatioState({ auto, height, mixWebFirst, width });
+  const [tier, setTier] = useState<
+    ImageSizeBase | typeof AUTO_RESOLUTION_VALUE
+  >(auto ? AUTO_RESOLUTION_VALUE : initial.base);
+  const [draft, setDraft] = useState(
+    auto ? AUTO_IMAGE_SIZE : normalizeImageSize(width, height)
+  );
+  const [presetOpen, setPresetOpen] = useState(false);
+  const parsedDraft = parseResolutionInput(draft);
+  const draftInvalid = Boolean(draft.trim()) && !parsedDraft;
+  const previewSize =
+    tier === AUTO_RESOLUTION_VALUE
+      ? AUTO_IMAGE_SIZE
+      : getNearestSupportedSizeForRatio(tier, {
+          width: 1,
+          height: 1,
+          value: "1:1",
+        });
+
+  useEffect(() => {
+    const next = inferAspectRatioState({ auto, height, mixWebFirst, width });
+    setTier(auto ? AUTO_RESOLUTION_VALUE : next.base);
+    setDraft(auto ? AUTO_IMAGE_SIZE : normalizeImageSize(width, height));
+  }, [auto, height, mixWebFirst, width]);
+
+  const applySize = (size: string) => {
+    if (size === AUTO_IMAGE_SIZE) {
+      setDraft(AUTO_IMAGE_SIZE);
+      onChange({
+        auto: true,
+        width,
+        height,
+        mixWebFirst: false,
+      });
+      return;
+    }
+
+    const dimensions = parseImageSize(size);
+    if (!dimensions) return;
+    setDraft(size);
+    onChange({
+      auto: false,
+      width: dimensions.width,
+      height: dimensions.height,
+      mixWebFirst: false,
+    });
+  };
+
+  const commitDraft = () => {
+    const parsed = parseResolutionInput(draft);
+    if (!parsed) return;
+    applySize(parsed.size);
+  };
+
+  const selectTier = (
+    nextTier: ImageSizeBase | typeof AUTO_RESOLUTION_VALUE
+  ) => {
+    setTier(nextTier);
+    if (nextTier === AUTO_RESOLUTION_VALUE) {
+      applySize(AUTO_IMAGE_SIZE);
+    }
+  };
+
+  const selectPreset = (ratio: (typeof IMAGE_ASPECT_RATIOS)[number]) => {
+    if (tier === AUTO_RESOLUTION_VALUE) {
+      applySize(AUTO_IMAGE_SIZE);
+      setPresetOpen(false);
+      return;
+    }
+    applySize(getNearestSupportedSizeForRatio(tier, ratio));
+    setPresetOpen(false);
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+        <Input
+          id={id}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commitDraft}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commitDraft();
+            }
+          }}
+          disabled={disabled}
+          placeholder="1024x1024"
+          className="h-11 rounded-xl"
+        />
+        <Popover open={presetOpen} onOpenChange={setPresetOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={disabled}
+              className="h-11 gap-2 rounded-xl px-4"
+              onMouseEnter={() => setPresetOpen(true)}
+              onFocus={() => setPresetOpen(true)}
+            >
+              {copy("Presets", "预设比例")}
+              <ChevronDown className="h-4 w-4" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="end"
+            className="w-[min(92vw,30rem)] p-3"
+            onMouseEnter={() => setPresetOpen(true)}
+            onMouseLeave={() => setPresetOpen(false)}
+          >
+            <div className="space-y-3">
+              <div>
+                <p className="text-sm font-semibold text-foreground">
+                  {copy("Canvas ratio", "画面比例")}
+                  <span className="ml-2 text-xs font-normal text-muted-foreground">
+                    {copy(
+                      "Final resolution depends on provider policy and model.",
+                      "最终分辨率受官方政策和模型影响，不做保证。"
+                    )}
+                  </span>
+                </p>
+              </div>
+              <div className="grid grid-cols-4 rounded-xl border border-border bg-muted/30 p-1">
+                {IMAGE_SIZE_TIERS.map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    onClick={() => selectTier(item.value)}
+                    className={`h-10 rounded-lg text-sm font-semibold transition ${
+                      tier === item.value
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {IMAGE_ASPECT_RATIOS.map((item) => {
+                  const itemSize =
+                    tier === AUTO_RESOLUTION_VALUE
+                      ? AUTO_IMAGE_SIZE
+                      : getNearestSupportedSizeForRatio(tier, item);
+                  const active =
+                    !auto && itemSize === normalizeImageSize(width, height);
+                  return (
+                    <button
+                      key={item.value}
+                      type="button"
+                      onClick={() => selectPreset(item)}
+                      className={`flex min-h-20 flex-col items-center justify-center gap-2 rounded-xl border px-2 text-center text-sm transition ${
+                        active
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border bg-background hover:border-primary hover:bg-primary/5 hover:text-primary"
+                      }`}
+                    >
+                      <span
+                        className={`rounded-md border-2 ${
+                          active
+                            ? "border-current"
+                            : "border-muted-foreground/35"
+                        }`}
+                        style={getRatioShapeStyle(item)}
+                      />
+                      <span>
+                        {item.value} {copy(item.labelEn, item.labelZh)}
+                      </span>
+                    </button>
+                  );
+                })}
+                <div className="flex min-h-20 flex-col justify-center rounded-xl border border-sky-200 bg-sky-50 px-3 text-center text-sky-700 dark:border-sky-500/40 dark:bg-sky-500/10 dark:text-sky-200">
+                  <span className="text-xs font-medium">
+                    {copy("Final resolution", "最终分辨率")}
+                  </span>
+                  <strong className="mt-1 text-xl">
+                    {formatImageSizeForDisplay(
+                      auto ? previewSize : normalizeImageSize(width, height)
+                    )}
+                  </strong>
+                  <span className="mt-1 text-xs">
+                    {tier === AUTO_RESOLUTION_VALUE
+                      ? copy("Backend decides", "模型自行决定")
+                      : copy("Current output", "当前输出")}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </PopoverContent>
+        </Popover>
+      </div>
+      {draftInvalid && (
+        <p className="text-xs text-destructive">
+          {copy(
+            "Use WIDTHxHEIGHT, for example 1024x1024.",
+            "请使用 WIDTHxHEIGHT 格式，例如 1024x1024。"
+          )}
+        </p>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -284,7 +545,9 @@ export function AspectRatioSizeDialog({
   copy: CopyFn;
 }) {
   const initial = inferAspectRatioState(value);
-  const [base, setBase] = useState<ImageSizeBase>(initial.base);
+  const [base, setBase] = useState<
+    ImageSizeBase | typeof AUTO_RESOLUTION_VALUE
+  >(value.auto ? AUTO_RESOLUTION_VALUE : initial.base);
   const [ratioInput, setRatioInput] = useState(initial.input);
   const [presetOpen, setPresetOpen] = useState(false);
   const { auto, height, mixWebFirst, width } = value;
@@ -297,15 +560,18 @@ export function AspectRatioSizeDialog({
       mixWebFirst,
       width,
     });
-    setBase(next.base);
+    setBase(auto ? AUTO_RESOLUTION_VALUE : next.base);
     setRatioInput(next.input);
     setPresetOpen(false);
   }, [auto, height, mixWebFirst, open, width]);
 
-  const autoSelected = isAutoRatioInput(ratioInput);
+  const autoSelected =
+    base === AUTO_RESOLUTION_VALUE || isAutoRatioInput(ratioInput);
   const parsedRatio = autoSelected ? null : parseAspectRatioInput(ratioInput);
+  const resolvedBase: ImageSizeBase =
+    base === AUTO_RESOLUTION_VALUE ? "1k" : base;
   const previewSize = parsedRatio
-    ? getNearestSupportedSizeForRatio(base, parsedRatio)
+    ? getNearestSupportedSizeForRatio(resolvedBase, parsedRatio)
     : AUTO_IMAGE_SIZE;
   const previewCheck = validateImageSize(previewSize);
   const canConfirm =
@@ -316,14 +582,23 @@ export function AspectRatioSizeDialog({
     setPresetOpen(false);
   };
 
+  const selectBase = (next: ImageSizeBase | typeof AUTO_RESOLUTION_VALUE) => {
+    setBase(next);
+    if (next === AUTO_RESOLUTION_VALUE) {
+      setRatioInput("1:1");
+    } else if (isAutoRatioInput(ratioInput)) {
+      setRatioInput("1:1");
+    }
+  };
+
   const apply = () => {
     if (!canConfirm) return;
 
     if (autoSelected) {
       onConfirm({
         auto: true,
-        width: value.width,
-        height: value.height,
+        width,
+        height,
         mixWebFirst: false,
       });
       onOpenChange(false);
@@ -331,7 +606,7 @@ export function AspectRatioSizeDialog({
     }
 
     if (!parsedRatio) return;
-    const size = getNearestSupportedSizeForRatio(base, parsedRatio);
+    const size = getNearestSupportedSizeForRatio(resolvedBase, parsedRatio);
     const dimensions = parseImageSize(size);
     if (!dimensions) return;
     onConfirm({
@@ -394,14 +669,6 @@ export function AspectRatioSizeDialog({
                   onMouseLeave={() => setPresetOpen(false)}
                 >
                   <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => selectPreset(AUTO_RATIO_LABEL)}
-                      className="flex min-h-16 items-center gap-3 rounded-lg border border-border px-3 text-left text-sm hover:border-primary hover:bg-primary/5 hover:text-primary"
-                    >
-                      <span className="h-8 w-8 rounded-md border-2 border-dashed border-current opacity-60" />
-                      <span>{AUTO_RATIO_LABEL}</span>
-                    </button>
                     {IMAGE_ASPECT_RATIOS.map((item) => (
                       <button
                         key={item.value}
@@ -429,14 +696,13 @@ export function AspectRatioSizeDialog({
             )}
           </div>
 
-          <div className="grid grid-cols-3 gap-2 rounded-xl border border-border bg-muted/30 p-2">
-            {IMAGE_SIZE_BASES.map((item) => (
+          <div className="grid grid-cols-4 gap-2 rounded-xl border border-border bg-muted/30 p-2">
+            {IMAGE_SIZE_TIERS.map((item) => (
               <button
                 key={item.value}
                 type="button"
-                onClick={() => setBase(item.value)}
-                disabled={autoSelected}
-                className={`h-10 rounded-lg text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                onClick={() => selectBase(item.value)}
+                className={`h-10 rounded-lg text-sm font-semibold transition ${
                   base === item.value
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground"

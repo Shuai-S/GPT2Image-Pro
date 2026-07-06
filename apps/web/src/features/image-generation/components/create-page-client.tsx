@@ -100,6 +100,7 @@ import {
 import type { VideoPricingInfo } from "../video-operations";
 import {
   AspectRatioSizeDialog,
+  InlineImageSizeControl,
   type AspectRatioSizeDialogValue,
 } from "./aspect-ratio-size-dialog";
 import { ImageLightbox, type LightboxGeneration } from "./image-lightbox";
@@ -2204,8 +2205,6 @@ export function CreatePageClient({
     "useAutoChatEditSize",
     false
   );
-  const [textSizeDialogOpen, setTextSizeDialogOpen] = useState(false);
-  const [editSizeDialogOpen, setEditSizeDialogOpen] = useState(false);
   const [chatSizeDialogOpen, setChatSizeDialogOpen] = useState(false);
   const [editWidth, setEditWidth] = useCreateRuntimeState(
     "editWidth",
@@ -2387,15 +2386,6 @@ export function CreatePageClient({
     }),
     [height, textMixWebFirst, useAutoSize, width]
   );
-  const editSizeDialogValue = useMemo<AspectRatioSizeDialogValue>(
-    () => ({
-      auto: useAutoEditSize,
-      width: editWidth,
-      height: editHeight,
-      mixWebFirst: editMixWebFirst,
-    }),
-    [editHeight, editMixWebFirst, editWidth, useAutoEditSize]
-  );
   const chatSizeDialogValue = useMemo<AspectRatioSizeDialogValue>(
     () =>
       hasChatImageAttachments
@@ -2508,6 +2498,18 @@ export function CreatePageClient({
     }
     return customEditSize;
   }, [customEditSize, firstImageOutputSize, useEditFirstImageSize]);
+  const editResolutionControlValue = useMemo<AspectRatioSizeDialogValue>(() => {
+    const dimensions =
+      effectiveEditSize && effectiveEditSize !== AUTO_IMAGE_SIZE
+        ? parseImageSize(effectiveEditSize)
+        : null;
+    return {
+      auto: effectiveEditSize === AUTO_IMAGE_SIZE,
+      width: dimensions?.width || editWidth,
+      height: dimensions?.height || editHeight,
+      mixWebFirst: editMixWebFirst,
+    };
+  }, [editHeight, editMixWebFirst, editWidth, effectiveEditSize]);
   const editImageCreditCost = effectiveEditSize
     ? applyBillingMultiplier(
         getPricedImageCreditCost(
@@ -7182,29 +7184,29 @@ export function CreatePageClient({
             </div>
 
             <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <span className="text-sm font-medium text-foreground">
-                    {labelWithHelp(
-                      copy("Resolution", "分辨率"),
-                      resolutionHelpText
-                    )}
-                  </span>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {copy("Current", "当前")}：
-                    {useAutoSize ? autoSizeLabel : size}
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setTextSizeDialogOpen(true)}
-                  disabled={modeBusy}
-                  className="shrink-0"
-                >
-                  {copy("Set ratio", "设置比例")}
-                </Button>
-              </div>
+              <label
+                htmlFor={`text-resolution-${mode}`}
+                className="text-sm font-medium text-foreground"
+              >
+                {labelWithHelp(
+                  copy("Resolution", "分辨率"),
+                  resolutionHelpText
+                )}
+              </label>
+              <InlineImageSizeControl
+                id={`text-resolution-${mode}`}
+                value={textSizeDialogValue}
+                disabled={modeBusy}
+                copy={copy}
+                onChange={(next) => {
+                  setUseAutoSize(next.auto);
+                  setTextMixWebFirst(next.mixWebFirst);
+                  if (!next.auto) {
+                    setWidth(next.width);
+                    setHeight(next.height);
+                  }
+                }}
+              />
             </div>
 
             {renderAdvancedImageSettings({
@@ -7932,32 +7934,45 @@ export function CreatePageClient({
                     </span>
                   </label>
 
-                  {!useEditFirstImageSize && (
-                    <div className="space-y-3 border-t border-border pt-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-xs text-muted-foreground">
-                          {copy("Current", "当前")}：
-                          <span className="font-medium text-foreground">
-                            {useAutoEditSize ? autoSizeLabel : customEditSize}
-                          </span>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setEditSizeDialogOpen(true)}
-                          disabled={isEditing}
-                          size="sm"
-                        >
-                          {copy("Set ratio", "设置比例")}
-                        </Button>
-                      </div>
-                      {!customEditSizeCheck.valid && (
-                        <p className="text-xs text-destructive">
-                          {validationMessage(customEditSizeCheck.message)}
-                        </p>
+                  <div className="space-y-3 border-t border-border pt-3">
+                    <label
+                      htmlFor="edit-resolution"
+                      className="text-sm font-medium text-foreground"
+                    >
+                      {labelWithHelp(
+                        copy("Resolution", "分辨率"),
+                        resolutionHelpText
                       )}
-                    </div>
-                  )}
+                    </label>
+                    <InlineImageSizeControl
+                      id="edit-resolution"
+                      value={editResolutionControlValue}
+                      disabled={isEditing}
+                      copy={copy}
+                      onChange={(next) => {
+                        setUseEditFirstImageSize(false);
+                        setUseAutoEditSize(next.auto);
+                        setEditMixWebFirst(next.mixWebFirst);
+                        if (!next.auto) {
+                          setEditWidth(next.width);
+                          setEditHeight(next.height);
+                        }
+                      }}
+                    />
+                    {useEditFirstImageSize && (
+                      <p className="text-xs leading-snug text-muted-foreground">
+                        {copy(
+                          "Editing the resolution switches to custom output size.",
+                          "修改分辨率会切换为自定义输出尺寸。"
+                        )}
+                      </p>
+                    )}
+                    {!useEditFirstImageSize && !customEditSizeCheck.valid && (
+                      <p className="text-xs text-destructive">
+                        {validationMessage(customEditSizeCheck.message)}
+                      </p>
+                    )}
+                  </div>
                 </div>
 
                 <div className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
@@ -9081,37 +9096,6 @@ export function CreatePageClient({
         />
       )}
 
-      <AspectRatioSizeDialog
-        open={textSizeDialogOpen}
-        onOpenChange={setTextSizeDialogOpen}
-        title={copy("Set image aspect ratio", "设置图像比例")}
-        value={textSizeDialogValue}
-        copy={copy}
-        onConfirm={(next) => {
-          setUseAutoSize(next.auto);
-          setTextMixWebFirst(next.mixWebFirst);
-          if (!next.auto) {
-            setWidth(next.width);
-            setHeight(next.height);
-          }
-        }}
-      />
-      <AspectRatioSizeDialog
-        open={editSizeDialogOpen}
-        onOpenChange={setEditSizeDialogOpen}
-        title={copy("Set image aspect ratio", "设置图像比例")}
-        value={editSizeDialogValue}
-        copy={copy}
-        onConfirm={(next) => {
-          setUseEditFirstImageSize(false);
-          setUseAutoEditSize(next.auto);
-          setEditMixWebFirst(next.mixWebFirst);
-          if (!next.auto) {
-            setEditWidth(next.width);
-            setEditHeight(next.height);
-          }
-        }}
-      />
       <AspectRatioSizeDialog
         open={chatSizeDialogOpen}
         onOpenChange={setChatSizeDialogOpen}
