@@ -101,6 +101,11 @@ const GENERATION_RESULT_SCHEMA = z.object({
 type ActiveTool = "select" | "pan" | "connect";
 type ConnectorSide = "input" | "output";
 
+type ImagePreviewState = {
+  imageUrl: string;
+  title: string;
+};
+
 type DragState =
   | {
       type: "pan";
@@ -139,6 +144,9 @@ export function InfiniteCanvasClient() {
   const [connectFromId, setConnectFromId] = useState<string | null>(null);
   const [isBooted, setBooted] = useState(false);
   const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
+  const [imagePreview, setImagePreview] = useState<ImagePreviewState | null>(
+    null
+  );
   const selectedNode = useMemo(
     () => state.nodes.find((node) => node.id === selectedIds[0]),
     [selectedIds, state.nodes]
@@ -160,6 +168,25 @@ export function InfiniteCanvasClient() {
     (en: string, zh: string) => (isZh ? zh : en),
     [isZh]
   );
+
+  /**
+   * 下载当前预览中的图片。
+   *
+   * @sideEffects 读取图片数据并触发浏览器下载；跨域受限时退回直接下载链接。
+   */
+  const downloadPreviewImage = async () => {
+    if (!imagePreview) return;
+    try {
+      await downloadCanvasImage(imagePreview.imageUrl, imagePreview.title);
+      toast.success(copy("Image download started", "图片下载已开始"));
+    } catch {
+      triggerImageDownload(
+        imagePreview.imageUrl,
+        getCanvasImageDownloadName(imagePreview.title, imagePreview.imageUrl)
+      );
+      toast.info(copy("Download link opened", "已打开下载链接"));
+    }
+  };
 
   useEffect(() => {
     try {
@@ -913,6 +940,7 @@ export function InfiniteCanvasClient() {
                   updateCanvasNode(current, node.id, patch)
                 )
               }
+              onPreviewImage={(preview) => setImagePreview(preview)}
               onRun={runSelectedGenerator}
               copy={copy}
             />
@@ -987,6 +1015,14 @@ export function InfiniteCanvasClient() {
           event.currentTarget.value = "";
         }}
       />
+      {imagePreview && (
+        <ImagePreviewDialog
+          preview={imagePreview}
+          copy={copy}
+          onClose={() => setImagePreview(null)}
+          onDownload={() => void downloadPreviewImage()}
+        />
+      )}
     </section>
   );
 }
@@ -997,6 +1033,72 @@ type ToolbarButtonProps = {
   children: React.ReactNode;
   onClick: () => void;
 };
+
+/**
+ * 渲染画布图片的大图预览层。
+ *
+ * @param props 预览图片、文案函数、关闭与下载回调。
+ * @returns 带下载入口的图片预览弹层。
+ * @sideEffects 点击遮罩关闭，点击下载触发父组件下载逻辑。
+ */
+function ImagePreviewDialog({
+  preview,
+  copy,
+  onClose,
+  onDownload,
+}: {
+  preview: ImagePreviewState;
+  copy: (en: string, zh: string) => string;
+  onClose: () => void;
+  onDownload: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-6 backdrop-blur-sm"
+      onMouseDown={onClose}
+    >
+      <div
+        className="flex h-full max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-md border border-border bg-background shadow-xl"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border px-4">
+          <div className="min-w-0 text-sm font-medium">
+            <span className="block truncate">{preview.title}</span>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              className="inline-flex h-8 items-center gap-2 rounded-md border border-border px-3 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+              onClick={onDownload}
+            >
+              <Download className="h-4 w-4" />
+              {copy("Download", "下载")}
+            </button>
+            <button
+              type="button"
+              title={copy("Close", "关闭")}
+              aria-label={copy("Close", "关闭")}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-accent hover:text-foreground"
+              onClick={onClose}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+        <div className="relative min-h-0 flex-1 bg-black/80">
+          <Image
+            src={preview.imageUrl}
+            alt={preview.title}
+            fill
+            sizes="90vw"
+            className="object-contain"
+            unoptimized
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /**
  * 渲染工具栏图标按钮。
@@ -1044,6 +1146,7 @@ type CanvasNodeViewProps = {
     event: ReactPointerEvent<HTMLButtonElement>
   ) => void;
   onPatch: (patch: Partial<Omit<CanvasNode, "id" | "kind">>) => void;
+  onPreviewImage: (preview: ImagePreviewState) => void;
   onRun: (nodeId?: string) => Promise<void>;
   copy: (en: string, zh: string) => string;
 };
@@ -1107,6 +1210,7 @@ function CanvasNodeView({
   onPointerDown,
   onConnectorPointerDown,
   onPatch,
+  onPreviewImage,
   onRun,
   copy,
 }: CanvasNodeViewProps) {
@@ -1215,7 +1319,20 @@ function CanvasNodeView({
           </div>
         )}
         {(node.kind === "image" || node.kind === "output") && node.imageUrl && (
-          <div className="relative h-56 w-full overflow-hidden rounded-md border border-border">
+          <button
+            type="button"
+            title={copy("Preview image", "预览图片")}
+            aria-label={copy("Preview image", "预览图片")}
+            className="relative h-56 w-full overflow-hidden rounded-md border border-border bg-muted/20"
+            onClick={() =>
+              node.imageUrl
+                ? onPreviewImage({
+                    imageUrl: node.imageUrl,
+                    title: node.title,
+                  })
+                : undefined
+            }
+          >
             <Image
               src={node.imageUrl}
               alt={node.title}
@@ -1224,7 +1341,7 @@ function CanvasNodeView({
               className="object-contain"
               unoptimized
             />
-          </div>
+          </button>
         )}
         {node.kind === "output" && !node.imageUrl && (
           <div className="flex h-32 items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
@@ -1377,6 +1494,103 @@ function CanvasEdgePath({
       />
     </g>
   );
+}
+
+/**
+ * 下载画布中的图片资源。
+ *
+ * @param imageUrl 图片 data URL 或网络 URL。
+ * @param title 用于生成下载文件名的节点标题。
+ * @sideEffects 读取图片并触发浏览器下载。
+ */
+async function downloadCanvasImage(imageUrl: string, title: string) {
+  const fileName = getCanvasImageDownloadName(title, imageUrl);
+  if (imageUrl.startsWith("data:")) {
+    triggerImageDownload(imageUrl, fileName);
+    return;
+  }
+
+  const response = await fetch(imageUrl);
+  if (!response.ok) throw new Error("Image download failed");
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    triggerImageDownload(objectUrl, fileName);
+  } finally {
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  }
+}
+
+/**
+ * 触发浏览器下载链接。
+ *
+ * @param url 下载 URL。
+ * @param fileName 文件名。
+ * @sideEffects 创建并点击临时下载链接。
+ */
+function triggerImageDownload(url: string, fileName: string) {
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.rel = "noopener";
+  link.target = "_blank";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+/**
+ * 根据节点标题和图片地址生成下载文件名。
+ *
+ * @param title 节点标题。
+ * @param imageUrl 图片地址。
+ * @returns 安全的图片文件名。
+ * @sideEffects 无。
+ */
+function getCanvasImageDownloadName(title: string, imageUrl: string) {
+  const baseName =
+    title
+      .trim()
+      .replace(/[\\/:*?"<>|]+/g, "-")
+      .replace(/\s+/g, "-")
+      .slice(0, 80) || "canvas-image";
+  return `${baseName}.${getCanvasImageExtension(imageUrl)}`;
+}
+
+/**
+ * 从图片 URL 中推断扩展名。
+ *
+ * @param imageUrl 图片地址。
+ * @returns 浏览器下载使用的扩展名。
+ * @sideEffects 无。
+ */
+function getCanvasImageExtension(imageUrl: string) {
+  const dataMatch = /^data:image\/([a-z0-9.+-]+);/i.exec(imageUrl);
+  if (dataMatch?.[1]) return normalizeImageExtension(dataMatch[1]);
+  try {
+    const pathname = new URL(imageUrl, window.location.href).pathname;
+    const extension = pathname.split(".").pop()?.toLowerCase();
+    if (extension) return normalizeImageExtension(extension);
+  } catch {
+    return "png";
+  }
+  return "png";
+}
+
+/**
+ * 把 MIME 子类型或路径扩展名归一为常见图片扩展名。
+ *
+ * @param value MIME 子类型或扩展名。
+ * @returns 可用于文件名的扩展名。
+ * @sideEffects 无。
+ */
+function normalizeImageExtension(value: string) {
+  const normalized = value.toLowerCase();
+  if (normalized === "jpeg" || normalized === "jpg") return "jpg";
+  if (normalized === "webp") return "webp";
+  if (normalized === "gif") return "gif";
+  if (normalized === "avif") return "avif";
+  return "png";
 }
 
 /**
