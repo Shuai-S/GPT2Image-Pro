@@ -43,6 +43,7 @@ import {
   Save,
   Search,
   Send,
+  Settings2,
   Trash2,
   Upload,
   Wand2,
@@ -2925,6 +2926,259 @@ export function CreatePageClient({
         />
         {copy("Matte fallback", "透明抠图回退")}
       </label>
+    );
+  };
+
+  /**
+   * 渲染文生图/图生图共用的高级参数面板。
+   *
+   * @param params.idPrefix 控件 id 前缀，保证同页多模式下 label 关联唯一。
+   * @param params.promptDisabled 提示词优化开关是否禁用。
+   * @param params.hideResponseControls 是否隐藏 Codex/Responses 专属参数。
+   * @param params.responseControlsDisabledReason 专属参数禁用时的说明。
+   * @param params.qualityDisabled 质量选择是否禁用。
+   * @param params.outputDisabled 输出格式和压缩率是否禁用。
+   * @param params.backgroundDisabled 背景与透明抠图回退是否禁用。
+   * @param params.moderationDisabled OAI 自身审核强度是否禁用。
+   * @returns 可折叠高级参数面板。
+   * @sideEffects 用户修改表单控件时更新创作页运行时状态。
+   * @failureMode Web-only 后端下隐藏 Responses-only 控件，仅保留提示词优化。
+   */
+  const renderAdvancedImageSettings = (params: {
+    idPrefix: string;
+    promptDisabled: boolean;
+    hideResponseControls: boolean;
+    responseControlsDisabledReason?: string;
+    qualityDisabled: boolean;
+    outputDisabled: boolean;
+    backgroundDisabled: boolean;
+    moderationDisabled: boolean;
+  }) => {
+    const responseControlsDisabled = Boolean(
+      params.responseControlsDisabledReason
+    );
+
+    return (
+      <details
+        className="group overflow-hidden rounded-lg border border-primary/20 bg-background shadow-sm transition-colors open:border-primary/35"
+        open
+      >
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-sm font-semibold text-foreground [&::-webkit-details-marker]:hidden">
+          <span className="inline-flex items-center gap-2">
+            <Settings2 className="h-4 w-4" />
+            {copy("Advanced settings", "高级参数")}
+          </span>
+          <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
+        </summary>
+        <div className="grid gap-4 px-3 pb-3 pt-1 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+          <div className="md:col-span-2 xl:col-span-1 2xl:col-span-2">
+            {promptOptimizationField(
+              `${params.idPrefix}-prompt-optimization`,
+              params.promptDisabled
+            )}
+          </div>
+
+          {!params.hideResponseControls && (
+            <>
+              <div
+                className={`space-y-2 ${
+                  responseControlsDisabled ? "opacity-55" : ""
+                }`}
+                title={params.responseControlsDisabledReason}
+              >
+                <label
+                  htmlFor={`${params.idPrefix}-quality`}
+                  className="text-sm font-semibold text-foreground"
+                >
+                  {copy("Quality tier", "质量档位")}
+                </label>
+                <Select
+                  value={quality}
+                  onValueChange={(value) => setQuality(value as ImageQuality)}
+                  disabled={params.qualityDisabled}
+                >
+                  <SelectTrigger
+                    id={`${params.idPrefix}-quality`}
+                    className="min-h-12 rounded-xl"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {QUALITY_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {qualityLabel(option.value)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div
+                className={`space-y-2 ${
+                  responseControlsDisabled ? "opacity-55" : ""
+                }`}
+                title={
+                  params.responseControlsDisabledReason || backgroundHelpText
+                }
+              >
+                <label
+                  htmlFor={`${params.idPrefix}-background`}
+                  className="text-sm font-semibold text-foreground"
+                >
+                  {labelWithHelp(
+                    copy("Background", "背景"),
+                    backgroundHelpText
+                  )}
+                </label>
+                {renderBackgroundSelect({
+                  id: `${params.idPrefix}-background`,
+                  disabled: params.backgroundDisabled,
+                })}
+                <p className="text-xs leading-snug text-muted-foreground">
+                  {copy(
+                    "Transparent background only applies to PNG/WebP.",
+                    "透明背景只对 PNG/WebP 生效。"
+                  )}
+                </p>
+                {renderTransparentMatteToggle({
+                  id: `${params.idPrefix}-transparent-matte`,
+                  disabled: params.backgroundDisabled,
+                })}
+              </div>
+
+              <div
+                className={`space-y-2 ${
+                  responseControlsDisabled ? "opacity-55" : ""
+                }`}
+                title={
+                  params.responseControlsDisabledReason || outputFormatHelpText
+                }
+              >
+                <label
+                  htmlFor={`${params.idPrefix}-output-format`}
+                  className="text-sm font-semibold text-foreground"
+                >
+                  {labelWithHelp(
+                    copy("Output format", "输出格式"),
+                    outputFormatHelpText
+                  )}
+                </label>
+                <Select
+                  value={outputFormat}
+                  onValueChange={(value) =>
+                    setOutputFormat(value as ImageOutputFormat)
+                  }
+                  disabled={params.outputDisabled}
+                >
+                  <SelectTrigger
+                    id={`${params.idPrefix}-output-format`}
+                    className="min-h-12 rounded-xl"
+                    title={outputFormatHelpText}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {OUTPUT_FORMAT_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {outputFormatLabel(option.value)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs leading-snug text-muted-foreground">
+                  {copy(
+                    "WebP is smaller; PNG has better compatibility.",
+                    "WebP 体积更小；PNG 兼容性更好。"
+                  )}
+                </p>
+              </div>
+
+              {outputFormat !== "png" && (
+                <div
+                  className={`space-y-2 ${
+                    responseControlsDisabled ? "opacity-55" : ""
+                  }`}
+                  title={
+                    params.responseControlsDisabledReason ||
+                    outputCompressionHelpText
+                  }
+                >
+                  <label
+                    htmlFor={`${params.idPrefix}-output-compression`}
+                    className="text-sm font-semibold text-foreground"
+                  >
+                    {labelWithHelp(
+                      copy("Compression", "压缩率"),
+                      outputCompressionHelpText
+                    )}
+                  </label>
+                  <Input
+                    id={`${params.idPrefix}-output-compression`}
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={outputCompression}
+                    onChange={(event) =>
+                      setOutputCompression(
+                        Math.min(
+                          100,
+                          Math.max(0, Number(event.target.value) || 0)
+                        )
+                      )
+                    }
+                    disabled={params.outputDisabled}
+                    title={outputCompressionHelpText}
+                    className="min-h-12 rounded-xl"
+                  />
+                </div>
+              )}
+
+              <div
+                className={`space-y-2 ${
+                  responseControlsDisabled ? "opacity-55" : ""
+                }`}
+                title={params.responseControlsDisabledReason}
+              >
+                <label
+                  htmlFor={`${params.idPrefix}-oai-moderation`}
+                  className="text-sm font-semibold text-foreground"
+                >
+                  {copy("OAI moderation strength", "OAI 自身审核强度")}
+                </label>
+                <Select
+                  value={moderation}
+                  onValueChange={(value) =>
+                    setModeration(value as ImageModeration)
+                  }
+                  disabled={params.moderationDisabled}
+                >
+                  <SelectTrigger
+                    id={`${params.idPrefix}-oai-moderation`}
+                    className="min-h-12 rounded-xl"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MODERATION_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {moderationLabel(option.value)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
+          )}
+
+          {params.responseControlsDisabledReason &&
+            !params.hideResponseControls && (
+              <p className="text-xs leading-snug text-muted-foreground md:col-span-2 xl:col-span-1 2xl:col-span-2">
+                {params.responseControlsDisabledReason}
+              </p>
+            )}
+        </div>
+      </details>
     );
   };
 
@@ -7005,171 +7259,18 @@ export function CreatePageClient({
               })}
             </div>
 
-            {!isWebOnlyBackend && (
-              <div
-                className={`grid gap-3 sm:grid-cols-2 lg:grid-cols-1 ${
-                  disableResponsesOnlyControls ? "opacity-55" : ""
-                }`}
-                title={responsesOnlyDisabledReason}
-              >
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor={`image-quality-${mode}`}
-                    className="text-xs font-medium text-muted-foreground"
-                  >
-                    {copy("Quality", "质量")}
-                  </label>
-                  <Select
-                    value={quality}
-                    onValueChange={(value) => setQuality(value as ImageQuality)}
-                    disabled={modeBusy || disableResponsesOnlyControls}
-                  >
-                    <SelectTrigger
-                      id={`image-quality-${mode}`}
-                      className="w-full"
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {QUALITY_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {qualityLabel(option.value)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor={`image-output-format-${mode}`}
-                    className="text-xs font-medium text-muted-foreground"
-                  >
-                    {labelWithHelp(
-                      copy("Output format", "输出格式"),
-                      outputFormatHelpText
-                    )}
-                  </label>
-                  <Select
-                    value={outputFormat}
-                    onValueChange={(value) =>
-                      setOutputFormat(value as ImageOutputFormat)
-                    }
-                    disabled={
-                      modeBusy ||
-                      disableResponsesOnlyControls ||
-                      textFireflyActive
-                    }
-                  >
-                    <SelectTrigger
-                      id={`image-output-format-${mode}`}
-                      className="w-full"
-                      title={outputFormatHelpText}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {OUTPUT_FORMAT_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {outputFormatLabel(option.value)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                {outputFormat !== "png" && (
-                  <div className="space-y-1.5">
-                    <label
-                      htmlFor={`image-output-compression-${mode}`}
-                      className="text-xs font-medium text-muted-foreground"
-                    >
-                      {labelWithHelp(
-                        copy("Compression", "压缩率"),
-                        outputCompressionHelpText
-                      )}
-                    </label>
-                    <Input
-                      id={`image-output-compression-${mode}`}
-                      type="number"
-                      min={0}
-                      max={100}
-                      step={1}
-                      value={outputCompression}
-                      onChange={(event) =>
-                        setOutputCompression(
-                          Math.min(
-                            100,
-                            Math.max(0, Number(event.target.value) || 0)
-                          )
-                        )
-                      }
-                      disabled={
-                        modeBusy ||
-                        disableResponsesOnlyControls ||
-                        textFireflyActive
-                      }
-                      title={outputCompressionHelpText}
-                    />
-                  </div>
-                )}
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor={`image-background-${mode}`}
-                    className="text-xs font-medium text-muted-foreground"
-                  >
-                    {labelWithHelp(
-                      copy("Background", "背景"),
-                      backgroundHelpText
-                    )}
-                  </label>
-                  {renderBackgroundSelect({
-                    id: `image-background-${mode}`,
-                    disabled: modeBusy || disableResponsesOnlyControls,
-                  })}
-                  {renderTransparentMatteToggle({
-                    id: `image-transparent-matte-${mode}`,
-                    disabled: modeBusy || disableResponsesOnlyControls,
-                  })}
-                </div>
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor={`image-oai-moderation-${mode}`}
-                    className="text-xs font-medium text-muted-foreground"
-                  >
-                    {copy("OAI moderation strength", "OAI 自身审核强度")}
-                  </label>
-                  <Select
-                    value={moderation}
-                    onValueChange={(value) =>
-                      setModeration(value as ImageModeration)
-                    }
-                    disabled={
-                      modeBusy ||
-                      disableResponsesOnlyControls ||
-                      textFireflyActive
-                    }
-                  >
-                    <SelectTrigger
-                      id={`image-oai-moderation-${mode}`}
-                      className="w-full"
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {MODERATION_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {moderationLabel(option.value)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            )}
-            {responsesOnlyDisabledReason && !isWebOnlyBackend && (
-              <p className="text-xs text-muted-foreground">
-                {responsesOnlyDisabledReason}
-              </p>
-            )}
+            {renderAdvancedImageSettings({
+              idPrefix: `image-${mode}`,
+              promptDisabled: modeBusy,
+              hideResponseControls: isWebOnlyBackend,
+              responseControlsDisabledReason: responsesOnlyDisabledReason,
+              qualityDisabled: modeBusy || disableResponsesOnlyControls,
+              outputDisabled:
+                modeBusy || disableResponsesOnlyControls || textFireflyActive,
+              backgroundDisabled: modeBusy || disableResponsesOnlyControls,
+              moderationDisabled:
+                modeBusy || disableResponsesOnlyControls || textFireflyActive,
+            })}
           </div>
 
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground lg:justify-end">
@@ -7379,10 +7480,6 @@ export function CreatePageClient({
                     disabled={isTextSingleGenerating}
                     className="min-h-28 resize-none border-input bg-background text-base"
                   />
-                  {promptOptimizationField(
-                    "text-prompt-optimization",
-                    isTextSingleGenerating
-                  )}
                   {renderVisualOutput("text-single")}
                 </div>
                 <aside className="space-y-4">
@@ -7439,10 +7536,6 @@ export function CreatePageClient({
                       </span>
                     </span>
                   </div>
-                  {promptOptimizationField(
-                    "text-line-prompt-optimization",
-                    isTextLinesGenerating
-                  )}
                   {renderVisualOutput("text-lines")}
                 </div>
                 <aside className="space-y-4">
@@ -7535,10 +7628,6 @@ export function CreatePageClient({
             <p className="text-xs leading-snug text-muted-foreground xl:col-start-1">
               {editReferenceMentionStatusText}
             </p>
-            <div className="xl:col-start-1">
-              {promptOptimizationField("edit-prompt-optimization", isEditing)}
-            </div>
-
             <div className="space-y-4 rounded-lg border border-border bg-background p-4 xl:col-start-1">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -7856,216 +7945,20 @@ export function CreatePageClient({
                   </div>
                 )}
 
-                {!isWebOnlyBackend && (
-                  <>
-                    <div
-                      className={`space-y-2 ${
-                        editMixWebFirstActive ? "opacity-55" : ""
-                      }`}
-                      title={
-                        editMixWebFirstActive
-                          ? responsesOnlyDisabledReason
-                          : undefined
-                      }
-                    >
-                      <label
-                        htmlFor="edit-quality"
-                        className="text-sm font-medium text-foreground"
-                      >
-                        {copy("Quality", "质量")}
-                      </label>
-                      <Select
-                        value={quality}
-                        onValueChange={(value) =>
-                          setQuality(value as ImageQuality)
-                        }
-                        disabled={isEditing || editMixWebFirstActive}
-                      >
-                        <SelectTrigger id="edit-quality" className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {QUALITY_OPTIONS.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {qualityLabel(option.value)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div
-                      className={`space-y-2 ${
-                        editMixWebFirstActive ? "opacity-55" : ""
-                      }`}
-                      title={
-                        editMixWebFirstActive
-                          ? responsesOnlyDisabledReason
-                          : undefined
-                      }
-                    >
-                      <label
-                        htmlFor="edit-output-format"
-                        className="text-sm font-medium text-foreground"
-                      >
-                        {labelWithHelp(
-                          copy("Output format", "输出格式"),
-                          outputFormatHelpText
-                        )}
-                      </label>
-                      <Select
-                        value={outputFormat}
-                        onValueChange={(value) =>
-                          setOutputFormat(value as ImageOutputFormat)
-                        }
-                        disabled={
-                          isEditing ||
-                          editMixWebFirstActive ||
-                          editFireflyActive
-                        }
-                      >
-                        <SelectTrigger
-                          id="edit-output-format"
-                          className="w-full"
-                          title={outputFormatHelpText}
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {OUTPUT_FORMAT_OPTIONS.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {outputFormatLabel(option.value)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {outputFormat !== "png" && (
-                      <div
-                        className={`space-y-2 ${
-                          editMixWebFirstActive ? "opacity-55" : ""
-                        }`}
-                        title={
-                          editMixWebFirstActive
-                            ? responsesOnlyDisabledReason
-                            : undefined
-                        }
-                      >
-                        <label
-                          htmlFor="edit-output-compression"
-                          className="text-sm font-medium text-foreground"
-                        >
-                          {labelWithHelp(
-                            copy("Compression", "压缩率"),
-                            outputCompressionHelpText
-                          )}
-                        </label>
-                        <Input
-                          id="edit-output-compression"
-                          type="number"
-                          min={0}
-                          max={100}
-                          step={1}
-                          value={outputCompression}
-                          onChange={(event) =>
-                            setOutputCompression(
-                              Math.min(
-                                100,
-                                Math.max(0, Number(event.target.value) || 0)
-                              )
-                            )
-                          }
-                          disabled={
-                            isEditing ||
-                            editMixWebFirstActive ||
-                            editFireflyActive
-                          }
-                          title={outputCompressionHelpText}
-                        />
-                      </div>
-                    )}
-
-                    <div
-                      className={`space-y-2 ${
-                        editMixWebFirstActive ? "opacity-55" : ""
-                      }`}
-                      title={
-                        editMixWebFirstActive
-                          ? responsesOnlyDisabledReason
-                          : backgroundHelpText
-                      }
-                    >
-                      <label
-                        htmlFor="edit-background"
-                        className="text-sm font-medium text-foreground"
-                      >
-                        {labelWithHelp(
-                          copy("Background", "背景"),
-                          backgroundHelpText
-                        )}
-                      </label>
-                      {renderBackgroundSelect({
-                        id: "edit-background",
-                        disabled: isEditing || editMixWebFirstActive,
-                      })}
-                      {renderTransparentMatteToggle({
-                        id: "edit-transparent-matte",
-                        disabled: isEditing || editMixWebFirstActive,
-                      })}
-                    </div>
-
-                    <div
-                      className={`space-y-2 ${
-                        editMixWebFirstActive ? "opacity-55" : ""
-                      }`}
-                      title={
-                        editMixWebFirstActive
-                          ? responsesOnlyDisabledReason
-                          : undefined
-                      }
-                    >
-                      <label
-                        htmlFor="edit-oai-moderation"
-                        className="text-sm font-medium text-foreground"
-                      >
-                        {copy("OAI moderation strength", "OAI 自身审核强度")}
-                      </label>
-                      <Select
-                        value={moderation}
-                        onValueChange={(value) =>
-                          setModeration(value as ImageModeration)
-                        }
-                        disabled={
-                          isEditing ||
-                          editMixWebFirstActive ||
-                          editFireflyActive
-                        }
-                      >
-                        <SelectTrigger
-                          id="edit-oai-moderation"
-                          className="w-full"
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {MODERATION_OPTIONS.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {moderationLabel(option.value)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </>
-                )}
-                {editMixWebFirstActive &&
-                  responsesOnlyDisabledReason &&
-                  !isWebOnlyBackend && (
-                    <p className="text-xs text-muted-foreground">
-                      {responsesOnlyDisabledReason}
-                    </p>
-                  )}
+                {renderAdvancedImageSettings({
+                  idPrefix: "edit",
+                  promptDisabled: isEditing,
+                  hideResponseControls: isWebOnlyBackend,
+                  responseControlsDisabledReason: editMixWebFirstActive
+                    ? responsesOnlyDisabledReason
+                    : undefined,
+                  qualityDisabled: isEditing || editMixWebFirstActive,
+                  outputDisabled:
+                    isEditing || editMixWebFirstActive || editFireflyActive,
+                  backgroundDisabled: isEditing || editMixWebFirstActive,
+                  moderationDisabled:
+                    isEditing || editMixWebFirstActive || editFireflyActive,
+                })}
 
                 <div className="space-y-2">
                   <label
