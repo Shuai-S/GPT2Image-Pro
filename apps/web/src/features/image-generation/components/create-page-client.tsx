@@ -648,7 +648,12 @@ function ImageSizeDialog({
 
   useEffect(() => {
     if (!open) return;
-    const next = inferImageSizeDialogState(value);
+    const next = inferImageSizeDialogState({
+      auto: value.auto,
+      width: value.width,
+      height: value.height,
+      mixWebFirst: value.mixWebFirst,
+    });
     setMode(next.mode);
     setBase(next.base);
     setRatio(next.ratio);
@@ -2350,8 +2355,16 @@ export function CreatePageClient({
     setWaterfallTier((value) =>
       Math.max(1, Math.min(value, waterfallTierLimit))
     );
-  }, [batchCountMax, waterfallTierLimit]);
+  }, [
+    batchCountMax,
+    setBatchCount,
+    setEditBatchCount,
+    setLineBatchRepeatCount,
+    setWaterfallTier,
+    waterfallTierLimit,
+  ]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 处理跨页面参考图只依赖 URL 和权限输入,状态 setter 由运行期 store 保持稳定。
   useEffect(() => {
     const parseReferenceMode = (
       value: string | null | undefined
@@ -2725,7 +2738,12 @@ export function CreatePageClient({
       tier: effectiveWaterfallTier,
       count: 0,
     });
-  }, [activeMode, waterfallWarning, effectiveWaterfallTier]);
+  }, [
+    activeMode,
+    effectiveWaterfallTier,
+    setWaterfallWarning,
+    waterfallWarning,
+  ]);
   const hasChatImageAttachments = chatImageAttachmentCount > 0;
   const textSizeDialogValue = useMemo(
     () => ({
@@ -2791,6 +2809,7 @@ export function CreatePageClient({
     [width, height]
   );
   const size = useAutoSize ? AUTO_IMAGE_SIZE : manualSize;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 计费函数闭包已显式用下方依赖驱动,避免提前移动运行期状态声明。
   const textImageCreditCost = useMemo(
     () =>
       applyBillingMultiplier(
@@ -3156,7 +3175,13 @@ export function CreatePageClient({
     if (hasActiveRuntimeTask) return;
     setBalance(initialBalance);
     setRecent(initialRecent);
-  }, [hasActiveRuntimeTask, initialBalance, initialRecent]);
+  }, [
+    hasActiveRuntimeTask,
+    initialBalance,
+    initialRecent,
+    setBalance,
+    setRecent,
+  ]);
   useEffect(() => {
     if (activeMode !== "agent" || effectiveAgentAllowed) return;
     switchActiveMode("chat");
@@ -3682,6 +3707,7 @@ export function CreatePageClient({
     scrollChatToBottom();
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 切换会话时依赖运行期 ref 的当前值,补入 ref.current 会改变切换时机。
   useEffect(() => {
     try {
       window.localStorage.setItem(CREATE_ACTIVE_MODE_STORAGE_KEY, activeMode);
@@ -4292,6 +4318,7 @@ export function CreatePageClient({
     }
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 仅首次迁移本地历史记录,依赖运行期快照避免重复导入。
   useEffect(() => {
     if (didLoadChatRef.current) return;
     try {
@@ -4397,6 +4424,7 @@ export function CreatePageClient({
     }
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 持久化对话时读取运行期 ref 快照,不应因 ref.current 变化重复写入。
   useEffect(() => {
     if (!didLoadChatRef.current) return;
     try {
@@ -4466,7 +4494,13 @@ export function CreatePageClient({
     if (!gpt55ChatAllowed && imageGptModel === GPT55_CHAT_MODEL) {
       setImageGptModel("default");
     }
-  }, [chatModel, gpt55ChatAllowed, imageGptModel]);
+  }, [
+    chatModel,
+    gpt55ChatAllowed,
+    imageGptModel,
+    setChatModel,
+    setImageGptModel,
+  ]);
 
   useEffect(() => {
     if (!firstPreviewUrl) {
@@ -4498,7 +4532,13 @@ export function CreatePageClient({
       setMaskEditorOpen(false);
     };
     img.src = firstPreviewUrl;
-  }, [firstPreviewUrl]);
+  }, [
+    firstPreviewUrl,
+    setFirstImageSize,
+    setMaskEditorOpen,
+    setMaskFile,
+    setMaskPoints,
+  ]);
 
   useEffect(() => {
     if (!chatFirstPreviewUrl) {
@@ -4517,7 +4557,7 @@ export function CreatePageClient({
       setChatFirstImageSize(null);
     };
     img.src = chatFirstPreviewUrl;
-  }, [chatFirstPreviewUrl]);
+  }, [chatFirstPreviewUrl, setChatFirstImageSize]);
 
   useEffect(() => {
     const canvas = maskCanvasRef.current;
@@ -6171,6 +6211,7 @@ export function CreatePageClient({
     setIsBatchActive(false);
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 自动续批观察器依赖运行期 ref 的最新值,不随 ref.current 变化重建观察器。
   useEffect(() => {
     if (
       !isBatchActive ||
@@ -8806,327 +8847,318 @@ export function CreatePageClient({
                   </div>
                 ) : (
                   visibleChatMessages.map((message) => {
-                      const variants = getChatVariants(message);
-                      const activeVariant = getActiveChatVariant(message);
-                      const activeIndex = message.activeVariant || 0;
-                      const webChoiceVariants = variants.filter(
-                        (variant) =>
-                          variant.outputRole === "choice" && variant.imageUrl
-                      );
-                      const isStreamingMessage =
-                        chatStream?.messageId === message.id;
-                      const activeVariantPending =
-                        activeVariant?.pending === true;
+                    const variants = getChatVariants(message);
+                    const activeVariant = getActiveChatVariant(message);
+                    const activeIndex = message.activeVariant || 0;
+                    const webChoiceVariants = variants.filter(
+                      (variant) =>
+                        variant.outputRole === "choice" && variant.imageUrl
+                    );
+                    const isStreamingMessage =
+                      chatStream?.messageId === message.id;
+                    const activeVariantPending =
+                      activeVariant?.pending === true;
 
-                      return (
+                    return (
+                      <div
+                        key={message.id}
+                        className={`flex ${
+                          message.role === "user"
+                            ? "justify-end"
+                            : "justify-start"
+                        }`}
+                      >
                         <div
-                          key={message.id}
-                          className={`flex ${
-                            message.role === "user"
-                              ? "justify-end"
-                              : "justify-start"
+                          className={`max-w-[88%] ${
+                            message.role === "user" ? "text-right" : "text-left"
                           }`}
                         >
                           <div
-                            className={`max-w-[88%] ${
+                            className={`rounded-lg border px-3 py-3 text-sm ${
                               message.role === "user"
-                                ? "text-right"
-                                : "text-left"
+                                ? "border-primary/20 bg-primary text-primary-foreground"
+                                : "border-border bg-muted/35 text-foreground"
                             }`}
                           >
-                            <div
-                              className={`rounded-lg border px-3 py-3 text-sm ${
-                                message.role === "user"
-                                  ? "border-primary/20 bg-primary text-primary-foreground"
-                                  : "border-border bg-muted/35 text-foreground"
-                              }`}
-                            >
-                              {message.role === "user" ? (
-                                <div className="flex flex-col gap-3">
-                                  {message.attachments?.length ? (
-                                    <div className="flex flex-wrap justify-end gap-2">
-                                      {message.attachments.map((attachment) => (
-                                        <div
-                                          key={attachment.id}
-                                          className="relative h-12 w-12 overflow-hidden rounded-md border border-primary-foreground/25 bg-muted"
-                                        >
-                                          {attachment.kind === "file" ||
-                                          !attachment.previewUrl ? (
-                                            <span className="flex h-full w-full items-center justify-center">
-                                              <FileText className="h-5 w-5 text-muted-foreground" />
-                                            </span>
-                                          ) : (
-                                            <Image
-                                              src={attachment.previewUrl}
-                                              alt={attachment.name}
-                                              fill
-                                              sizes="48px"
-                                              className="object-cover"
-                                              unoptimized
-                                            />
-                                          )}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  ) : null}
-                                  <p className="whitespace-pre-wrap break-words">
-                                    {message.text}
-                                  </p>
-                                </div>
-                              ) : isStreamingMessage ? (
-                                renderChatStreamBubble(message.id)
-                              ) : message.error ? (
-                                <p className="text-destructive">
-                                  {message.error}
+                            {message.role === "user" ? (
+                              <div className="flex flex-col gap-3">
+                                {message.attachments?.length ? (
+                                  <div className="flex flex-wrap justify-end gap-2">
+                                    {message.attachments.map((attachment) => (
+                                      <div
+                                        key={attachment.id}
+                                        className="relative h-12 w-12 overflow-hidden rounded-md border border-primary-foreground/25 bg-muted"
+                                      >
+                                        {attachment.kind === "file" ||
+                                        !attachment.previewUrl ? (
+                                          <span className="flex h-full w-full items-center justify-center">
+                                            <FileText className="h-5 w-5 text-muted-foreground" />
+                                          </span>
+                                        ) : (
+                                          <Image
+                                            src={attachment.previewUrl}
+                                            alt={attachment.name}
+                                            fill
+                                            sizes="48px"
+                                            className="object-cover"
+                                            unoptimized
+                                          />
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : null}
+                                <p className="whitespace-pre-wrap break-words">
+                                  {message.text}
                                 </p>
-                              ) : activeVariant ? (
-                                <div>
-                                  {renderThinkingBlock(
-                                    activeVariant.responseThinking,
-                                    message.mode === "agent"
-                                  )}
-                                  {message.mode === "agent"
-                                    ? renderAgentRoundCards(
-                                        activeVariant.agentEvents,
-                                        activeVariant.responseAgent,
-                                        true
-                                      )
-                                    : null}
-                                  {activeVariant.responseText && (
-                                    <p
-                                      className={`whitespace-pre-wrap break-words leading-relaxed ${
-                                        activeVariant.imageUrl ? "mb-3" : ""
-                                      }`}
+                              </div>
+                            ) : isStreamingMessage ? (
+                              renderChatStreamBubble(message.id)
+                            ) : message.error ? (
+                              <p className="text-destructive">
+                                {message.error}
+                              </p>
+                            ) : activeVariant ? (
+                              <div>
+                                {renderThinkingBlock(
+                                  activeVariant.responseThinking,
+                                  message.mode === "agent"
+                                )}
+                                {message.mode === "agent"
+                                  ? renderAgentRoundCards(
+                                      activeVariant.agentEvents,
+                                      activeVariant.responseAgent,
+                                      true
+                                    )
+                                  : null}
+                                {activeVariant.responseText && (
+                                  <p
+                                    className={`whitespace-pre-wrap break-words leading-relaxed ${
+                                      activeVariant.imageUrl ? "mb-3" : ""
+                                    }`}
+                                  >
+                                    {activeVariant.responseText}
+                                  </p>
+                                )}
+                                {activeVariant.imageUrl && (
+                                  <div className="overflow-hidden rounded-md border bg-background">
+                                    <button
+                                      type="button"
+                                      className="group relative block w-full bg-muted"
+                                      style={{
+                                        aspectRatio: `${
+                                          parseImageSize(activeVariant.size)
+                                            ?.width || defaultDimensions.width
+                                        } / ${
+                                          parseImageSize(activeVariant.size)
+                                            ?.height || defaultDimensions.height
+                                        }`,
+                                      }}
+                                      onClick={() => {
+                                        if (activeVariant.generationId) {
+                                          setSelectedRecentId(
+                                            activeVariant.generationId
+                                          );
+                                        }
+                                      }}
+                                      title={copy(
+                                        "Open image preview",
+                                        "打开图片预览"
+                                      )}
                                     >
-                                      {activeVariant.responseText}
+                                      <Image
+                                        src={activeVariant.imageUrl}
+                                        alt={activeVariant.prompt}
+                                        fill
+                                        sizes="(max-width: 768px) 80vw, 420px"
+                                        className="object-contain"
+                                        unoptimized={shouldBypassImageOptimization(
+                                          activeVariant.imageUrl
+                                        )}
+                                      />
+                                      <span className="absolute right-2 top-2 rounded bg-background/90 px-2 py-1 text-[11px] font-medium text-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100">
+                                        <Eye className="mr-1 inline h-3 w-3" />
+                                        {copy("Preview", "预览")}
+                                      </span>
+                                    </button>
+                                    <div className="flex flex-wrap gap-2 p-2">
+                                      <Button
+                                        asChild
+                                        variant="outline"
+                                        size="xs"
+                                      >
+                                        <a
+                                          href={activeVariant.imageUrl}
+                                          download
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                        >
+                                          <Download className="h-3 w-3" />
+                                          {copy("Download", "下载")}
+                                        </a>
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="xs"
+                                        onClick={() =>
+                                          attachResultToChat(activeVariant)
+                                        }
+                                      >
+                                        <RefreshCcw className="h-3 w-3" />
+                                        {copy("Edit next", "继续编辑")}
+                                      </Button>
+                                    </div>
+                                  </div>
+                                )}
+                                {activeVariantPending && (
+                                  <div className="mt-3 flex items-center gap-2 text-muted-foreground">
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    {copy(
+                                      "Generation is still running. Reconnecting to status...",
+                                      "仍在生成中，正在恢复状态..."
+                                    )}
+                                  </div>
+                                )}
+                                {!activeVariant.responseText &&
+                                  !activeVariant.imageUrl &&
+                                  !activeVariantPending && (
+                                    <p className="text-muted-foreground">
+                                      {copy("Response generated", "回复已生成")}
                                     </p>
                                   )}
-                                  {activeVariant.imageUrl && (
-                                    <div className="overflow-hidden rounded-md border bg-background">
-                                      <button
-                                        type="button"
-                                        className="group relative block w-full bg-muted"
-                                        style={{
-                                          aspectRatio: `${
-                                            parseImageSize(activeVariant.size)
-                                              ?.width || defaultDimensions.width
-                                          } / ${
-                                            parseImageSize(activeVariant.size)
-                                              ?.height ||
-                                            defaultDimensions.height
-                                          }`,
-                                        }}
-                                        onClick={() => {
-                                          if (activeVariant.generationId) {
-                                            setSelectedRecentId(
-                                              activeVariant.generationId
-                                            );
-                                          }
-                                        }}
-                                        title={copy(
-                                          "Open image preview",
-                                          "打开图片预览"
-                                        )}
-                                      >
-                                        <Image
-                                          src={activeVariant.imageUrl}
-                                          alt={activeVariant.prompt}
-                                          fill
-                                          sizes="(max-width: 768px) 80vw, 420px"
-                                          className="object-contain"
-                                          unoptimized={shouldBypassImageOptimization(
-                                            activeVariant.imageUrl
-                                          )}
-                                        />
-                                        <span className="absolute right-2 top-2 rounded bg-background/90 px-2 py-1 text-[11px] font-medium text-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100">
-                                          <Eye className="mr-1 inline h-3 w-3" />
-                                          {copy("Preview", "预览")}
-                                        </span>
-                                      </button>
-                                      <div className="flex flex-wrap gap-2 p-2">
-                                        <Button
-                                          asChild
-                                          variant="outline"
-                                          size="xs"
-                                        >
-                                          <a
-                                            href={activeVariant.imageUrl}
-                                            download
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                          >
-                                            <Download className="h-3 w-3" />
-                                            {copy("Download", "下载")}
-                                          </a>
-                                        </Button>
-                                        <Button
-                                          type="button"
-                                          variant="outline"
-                                          size="xs"
-                                          onClick={() =>
-                                            attachResultToChat(activeVariant)
-                                          }
-                                        >
-                                          <RefreshCcw className="h-3 w-3" />
-                                          {copy("Edit next", "继续编辑")}
-                                        </Button>
-                                      </div>
-                                    </div>
-                                  )}
-                                  {activeVariantPending && (
-                                    <div className="mt-3 flex items-center gap-2 text-muted-foreground">
-                                      <Loader2 className="h-4 w-4 animate-spin" />
-                                      {copy(
-                                        "Generation is still running. Reconnecting to status...",
-                                        "仍在生成中，正在恢复状态..."
-                                      )}
-                                    </div>
-                                  )}
-                                  {!activeVariant.responseText &&
-                                    !activeVariant.imageUrl &&
-                                    !activeVariantPending && (
-                                      <p className="text-muted-foreground">
-                                        {copy(
-                                          "Response generated",
-                                          "回复已生成"
-                                        )}
-                                      </p>
-                                    )}
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-2 text-muted-foreground">
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                  {copy("Generating...", "生成中...")}
-                                </div>
-                              )}
-                            </div>
-
-                            {message.role === "assistant" && (
-                              <div className="mt-2 flex flex-wrap items-center gap-2">
-                                {variants.length > 1 && (
-                                  <div className="inline-flex items-center rounded-md border border-border bg-background text-xs text-muted-foreground">
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="icon-xs"
-                                      disabled={
-                                        isChatGenerating || activeIndex === 0
-                                      }
-                                      onClick={() =>
-                                        handleChatVariantChange(message.id, -1)
-                                      }
-                                      title={copy(
-                                        "Previous variant",
-                                        "上一个版本"
-                                      )}
-                                    >
-                                      <ChevronLeft className="h-3 w-3" />
-                                    </Button>
-                                    <span className="px-2">
-                                      {activeIndex + 1} / {variants.length}
-                                    </span>
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="icon-xs"
-                                      disabled={
-                                        isChatGenerating ||
-                                        activeIndex >= variants.length - 1
-                                      }
-                                      onClick={() =>
-                                        handleChatVariantChange(message.id, 1)
-                                      }
-                                      title={copy("Next variant", "下一个版本")}
-                                    >
-                                      <ChevronRight className="h-3 w-3" />
-                                    </Button>
-                                  </div>
-                                )}
-                                {webChoiceVariants.length > 1 && (
-                                  <div className="flex flex-wrap items-center gap-1.5">
-                                    {variants.map((variant, index) => {
-                                      if (
-                                        variant.outputRole !== "choice" ||
-                                        !variant.imageUrl
-                                      ) {
-                                        return null;
-                                      }
-                                      return (
-                                        <button
-                                          key={`${variant.generationId || index}-choice`}
-                                          type="button"
-                                          className={`relative h-10 w-10 overflow-hidden rounded-md border bg-muted ${
-                                            index === activeIndex
-                                              ? "border-primary ring-1 ring-primary"
-                                              : "border-border"
-                                          }`}
-                                          onClick={() =>
-                                            handleChatVariantSelect(
-                                              message.id,
-                                              index
-                                            )
-                                          }
-                                          title={copy(
-                                            `Choose image ${index + 1}`,
-                                            `选择第 ${index + 1} 张`
-                                          )}
-                                        >
-                                          <Image
-                                            src={thumbSrc(
-                                              variant.imageUrl,
-                                              256
-                                            )}
-                                            alt={variant.prompt}
-                                            fill
-                                            sizes="40px"
-                                            className="object-contain"
-                                            unoptimized={shouldBypassImageOptimization(
-                                              variant.imageUrl
-                                            )}
-                                          />
-                                          {index === activeIndex && (
-                                            <span className="absolute right-0.5 top-0.5 rounded-full bg-primary p-0.5 text-primary-foreground">
-                                              <Check className="h-2.5 w-2.5" />
-                                            </span>
-                                          )}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                                {variants.some(
-                                  (variant) => variant.outputRole === "choice"
-                                ) && (
-                                  <span className="text-xs text-muted-foreground">
-                                    {copy(
-                                      "Web returned multiple choices; switching syncs the selected image.",
-                                      "Web 返回了多个候选，切换时会同步选中图片。"
-                                    )}
-                                  </span>
-                                )}
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon-sm"
-                                  disabled={isChatGenerating}
-                                  onClick={() => handleChatRetry(message.id)}
-                                  title={
-                                    message.error
-                                      ? copy("Retry generation", "重试生成")
-                                      : copy(
-                                          "Generate another variant",
-                                          "再生成一个版本"
-                                        )
-                                  }
-                                >
-                                  <RefreshCcw className="h-4 w-4" />
-                                </Button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2 text-muted-foreground">
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                {copy("Generating...", "生成中...")}
                               </div>
                             )}
                           </div>
+
+                          {message.role === "assistant" && (
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              {variants.length > 1 && (
+                                <div className="inline-flex items-center rounded-md border border-border bg-background text-xs text-muted-foreground">
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon-xs"
+                                    disabled={
+                                      isChatGenerating || activeIndex === 0
+                                    }
+                                    onClick={() =>
+                                      handleChatVariantChange(message.id, -1)
+                                    }
+                                    title={copy(
+                                      "Previous variant",
+                                      "上一个版本"
+                                    )}
+                                  >
+                                    <ChevronLeft className="h-3 w-3" />
+                                  </Button>
+                                  <span className="px-2">
+                                    {activeIndex + 1} / {variants.length}
+                                  </span>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon-xs"
+                                    disabled={
+                                      isChatGenerating ||
+                                      activeIndex >= variants.length - 1
+                                    }
+                                    onClick={() =>
+                                      handleChatVariantChange(message.id, 1)
+                                    }
+                                    title={copy("Next variant", "下一个版本")}
+                                  >
+                                    <ChevronRight className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              )}
+                              {webChoiceVariants.length > 1 && (
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  {variants.map((variant, index) => {
+                                    if (
+                                      variant.outputRole !== "choice" ||
+                                      !variant.imageUrl
+                                    ) {
+                                      return null;
+                                    }
+                                    return (
+                                      <button
+                                        key={`${variant.generationId || index}-choice`}
+                                        type="button"
+                                        className={`relative h-10 w-10 overflow-hidden rounded-md border bg-muted ${
+                                          index === activeIndex
+                                            ? "border-primary ring-1 ring-primary"
+                                            : "border-border"
+                                        }`}
+                                        onClick={() =>
+                                          handleChatVariantSelect(
+                                            message.id,
+                                            index
+                                          )
+                                        }
+                                        title={copy(
+                                          `Choose image ${index + 1}`,
+                                          `选择第 ${index + 1} 张`
+                                        )}
+                                      >
+                                        <Image
+                                          src={thumbSrc(variant.imageUrl, 256)}
+                                          alt={variant.prompt}
+                                          fill
+                                          sizes="40px"
+                                          className="object-contain"
+                                          unoptimized={shouldBypassImageOptimization(
+                                            variant.imageUrl
+                                          )}
+                                        />
+                                        {index === activeIndex && (
+                                          <span className="absolute right-0.5 top-0.5 rounded-full bg-primary p-0.5 text-primary-foreground">
+                                            <Check className="h-2.5 w-2.5" />
+                                          </span>
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                              {variants.some(
+                                (variant) => variant.outputRole === "choice"
+                              ) && (
+                                <span className="text-xs text-muted-foreground">
+                                  {copy(
+                                    "Web returned multiple choices; switching syncs the selected image.",
+                                    "Web 返回了多个候选，切换时会同步选中图片。"
+                                  )}
+                                </span>
+                              )}
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                disabled={isChatGenerating}
+                                onClick={() => handleChatRetry(message.id)}
+                                title={
+                                  message.error
+                                    ? copy("Retry generation", "重试生成")
+                                    : copy(
+                                        "Generate another variant",
+                                        "再生成一个版本"
+                                      )
+                                }
+                              >
+                                <RefreshCcw className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          )}
                         </div>
-                      );
-                    })
+                      </div>
+                    );
+                  })
                 )}
 
                 {chatStream &&
