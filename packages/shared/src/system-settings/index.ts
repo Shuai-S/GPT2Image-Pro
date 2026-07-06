@@ -12,6 +12,10 @@ import {
 } from "../auth/email-domain";
 import { normalizeContactEmail } from "../config/contact";
 import {
+  getModelPricingRulesValidationIssues,
+  MODEL_PRICING_RULES_SETTING_KEY,
+} from "../model-pricing";
+import {
   isSettingKey,
   SETTING_DEFINITION_BY_KEY,
   type SettingDefinition,
@@ -323,12 +327,16 @@ function coerceValue(definition: SettingDefinition, value: unknown) {
     if (typeof value === "string") {
       const trimmed = value.trim();
       if (!trimmed) return "";
+      let parsed: unknown;
       try {
-        return JSON.parse(trimmed) as unknown;
+        parsed = JSON.parse(trimmed) as unknown;
       } catch {
         throw new Error(`${definition.label} 必须是有效 JSON`);
       }
+      validateJsonSettingValue(definition, parsed);
+      return parsed;
     }
+    validateJsonSettingValue(definition, value);
     return value;
   }
 
@@ -356,6 +364,29 @@ function coerceValue(definition: SettingDefinition, value: unknown) {
     }
   }
   return text;
+}
+
+/**
+ * 校验需要业务约束的 JSON 配置项。
+ *
+ * @param definition 设置定义。
+ * @param value 已解析的 JSON 值。
+ * @sideEffects 无；发现不可保存的业务结构时抛错。
+ */
+function validateJsonSettingValue(
+  definition: SettingDefinition,
+  value: unknown
+) {
+  if (definition.key !== MODEL_PRICING_RULES_SETTING_KEY) return;
+
+  const issues = getModelPricingRulesValidationIssues(value);
+  if (issues.length === 0) return;
+
+  throw new Error(
+    `${definition.label} 配置无效：${issues
+      .map((issue) => issue.message)
+      .join("；")}`
+  );
 }
 
 function getProcessSettingValue(definition: SettingDefinition) {

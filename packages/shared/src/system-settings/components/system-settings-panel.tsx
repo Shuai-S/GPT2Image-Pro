@@ -46,7 +46,7 @@ import { toast } from "sonner";
 import {
   DEFAULT_MODEL_PRICING_RULES,
   type ModelPricingRulesConfig,
-  normalizeModelPricingRulesConfig,
+  normalizeModelPricingRulesDraftConfig,
   type PublicModelPricingRule,
 } from "../../model-pricing";
 import { formatDateInTimeZone } from "../../time-zone";
@@ -1234,7 +1234,7 @@ function ModelPricingRulesInput({
   onChange: (value: DraftValue) => void;
 }) {
   const config = useMemo(
-    () => normalizeModelPricingRulesConfig(value),
+    () => normalizeModelPricingRulesDraftConfig(value),
     [value]
   );
   const compactConfig = useMemo(
@@ -1373,10 +1373,15 @@ function ModelPricingRulesInput({
       </div>
 
       {config.rules.map((rule, index) => (
-        <section key={rule.id} className="space-y-4 rounded-md border p-3">
+        <section
+          key={`model-pricing-rule-${index}`}
+          className="space-y-4 rounded-md border p-3"
+        >
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h4 className="text-sm font-semibold">{rule.name || rule.id}</h4>
+              <h4 className="text-sm font-semibold">
+                {rule.name || rule.id || "未命名规则"}
+              </h4>
               <p className="text-xs text-muted-foreground">
                 {rule.scope.model || rule.scope.family || rule.scope.modality}
               </p>
