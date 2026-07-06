@@ -2,8 +2,6 @@
   "pages": [
     "index",
     "---高级参考---",
-    "system",
-    "adobe-firefly-routing",
-    "adobe-firefly-compat"
+    "system"
   ]
 }
