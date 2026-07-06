@@ -88,7 +88,6 @@ import {
   IMAGE_DIMENSION_STEP,
   type ImageBaseCreditPricing,
   type ImageQualityLevel,
-  type ImageThinkingLevel,
   isFireflyModel,
   isImageSizeWithinPixelRange,
   MAX_IMAGE_DIMENSION,
@@ -439,7 +438,6 @@ function createInitialChatStreamState(params: {
 }
 
 type ChatModel = (typeof RESPONSES_IMAGE_MODELS)[number];
-type ChatThinkingLevel = "none" | "low" | "medium" | "high" | "xhigh";
 type TextGenerationMode = "single" | "lines";
 
 type BatchCard = {
@@ -694,16 +692,6 @@ function ImageCountSlider({
     </div>
   );
 }
-const CHAT_THINKING_OPTIONS: Array<{
-  value: ChatThinkingLevel;
-  label: string;
-}> = [
-  { value: "low", label: "Low" },
-  { value: "medium", label: "Medium" },
-  { value: "high", label: "High" },
-  { value: "xhigh", label: "xHigh" },
-  { value: "none", label: "None" },
-];
 const WATERFALL_ASPECT_RATIOS = ["1 / 1", "3 / 4", "4 / 3", "2 / 3"] as const;
 const CHAT_SUGGESTIONS = [
   "A serene mountain lake at sunset, oil painting",
@@ -1481,14 +1469,10 @@ export function CreatePageClient({
       ...options,
       basePricing: imageBasePricing,
       quality: (options.quality ?? quality) as ImageQualityLevel | undefined,
-      thinking: (options.thinking ?? chatThinking) as
-        | ImageThinkingLevel
-        | undefined,
     });
   const activeBackendType = selectedBackendGroup?.backendType || "mixed";
   const isWebOnlyBackend = activeBackendType === "web";
   const showImageModelControls = !isWebOnlyBackend;
-  const showThinkingControls = true;
   const showAgentProcessHint = !isWebOnlyBackend;
   const isConversationMode = (mode: ActiveMode) =>
     mode === "chat" || mode === "agent" || mode === "waterfall";
@@ -1553,18 +1537,6 @@ export function CreatePageClient({
     "Only applies to JPEG/WebP. 0 is smallest file, 100 is highest quality.",
     "仅对 JPEG/WebP 生效。0 体积最小，100 质量最高。"
   );
-  const thinkingLabel = (value: ChatThinkingLevel) =>
-    copy(
-      CHAT_THINKING_OPTIONS.find((option) => option.value === value)?.label ||
-        value,
-      {
-        high: "高",
-        low: "低",
-        medium: "中",
-        none: "无",
-        xhigh: "极高",
-      }[value]
-    );
   const helpMarker = (label: string, title: string) => (
     <span
       aria-label={title}
@@ -1585,10 +1557,6 @@ export function CreatePageClient({
   const imageModelHelpText = copy(
     "Image model for generations/edits. Web backend does not have a separate image model field and ignores this control; Codex/Responses uses it as the image_generation tool model; external image API receives it as the image model.",
     "生图/编辑图片模型。Web 后端没有独立图片模型字段，会忽略该控制；Codex/Responses 会作为 image_generation 工具模型；外接 image API 会作为图片模型传递。"
-  );
-  const thinkingHelpText = copy(
-    "Web backend uses this as paragen thinking level. If prompt optimization is off, Web thinking is forced to instant. Codex/Responses receives the selected effort when supported.",
-    "Web 后端会作为 paragen 思考强度；关闭提示词优化时，Web 思考强度会强制为 instant；Codex/Responses 在支持时接收所选强度。"
   );
   const promptOptimizationHelpText = copy(
     "Turning this off is best effort: the platform sends the original prompt and uses instant on Web, but an upstream backend may still internally revise or interpret the prompt.",
@@ -1775,8 +1743,6 @@ export function CreatePageClient({
     "chatModel",
     GPT54_CHAT_MODEL
   );
-  const [chatThinking, setChatThinking] =
-    useCreateRuntimeState<ChatThinkingLevel>("chatThinking", "low");
   const [agentForceRounds, setAgentForceRounds] = useCreateRuntimeState(
     "agentForceRounds",
     false
@@ -1790,8 +1756,6 @@ export function CreatePageClient({
     "layeredGeneration",
     false
   );
-  const [imageThinking, setImageThinking] =
-    useCreateRuntimeState<ChatThinkingLevel>("imageThinking", "low");
   const [chatFirstImageSize, setChatFirstImageSize] = useCreateRuntimeState<{
     width: number;
     height: number;
@@ -2362,7 +2326,6 @@ export function CreatePageClient({
       ),
     [
       activeBillingMultiplier,
-      chatThinking,
       imageBasePricing,
       moderationCostOptions,
       quality,
@@ -2835,39 +2798,6 @@ export function CreatePageClient({
       </SelectContent>
     </Select>
   );
-
-  const renderThinkingSelect = (params: {
-    id: string;
-    value: ChatThinkingLevel;
-    onChange: (value: ChatThinkingLevel) => void;
-    disabled?: boolean;
-    compact?: boolean;
-  }) => {
-    const control = (
-      <Select
-        value={params.value}
-        onValueChange={(value) => params.onChange(value as ChatThinkingLevel)}
-        disabled={params.disabled}
-      >
-        <SelectTrigger
-          id={params.id}
-          className={params.compact ? "h-8 w-[138px]" : "w-full"}
-          title={thinkingHelpText}
-        >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {CHAT_THINKING_OPTIONS.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {copy("Thinking", "思考")} {thinkingLabel(option.value)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    );
-
-    return control;
-  };
 
   const renderBackgroundSelect = (params: {
     id: string;
@@ -3775,9 +3705,6 @@ export function CreatePageClient({
       formData.append("model", chatModel);
       if (showImageModelControls && chatImageModel !== "default") {
         formData.append("image_model", chatImageModel);
-      }
-      if (showThinkingControls) {
-        formData.append("thinking", chatThinking);
       }
       formData.append("size", requestSize);
       formData.append("count", "1");
@@ -5466,14 +5393,6 @@ export function CreatePageClient({
               })}
             </div>
           )}
-          {showThinkingControls &&
-            renderThinkingSelect({
-              id: "chat-thinking",
-              value: chatThinking,
-              onChange: setChatThinking,
-              disabled: isChatGenerating,
-              compact: true,
-            })}
           {!isWebOnlyBackend && (
             <div
               className={chatMixWebFirstActive ? "opacity-55" : ""}
@@ -6428,7 +6347,6 @@ export function CreatePageClient({
         ...(showImageModelControls && textModel !== "default"
           ? { model: textModel }
           : {}),
-        ...(showThinkingControls ? { thinking: imageThinking } : {}),
         ...(promptOptimizationAllowed ? { promptOptimization } : {}),
         ...(textMixWebFirstActive ? { mix_web_first: true } : {}),
         hd_repair: hdRepair,
@@ -6614,9 +6532,6 @@ export function CreatePageClient({
     }
     if (showImageModelControls && editModel !== "default") {
       formData.append("model", editModel);
-    }
-    if (showThinkingControls) {
-      formData.append("thinking", imageThinking);
     }
     if (useEditFirstImageSize) {
       formData.append("displaySize", effectiveEditSize);
@@ -7191,26 +7106,6 @@ export function CreatePageClient({
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
-              )}
-
-              {showThinkingControls && !isFireflyModel(textModel) && (
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor={`text-thinking-${mode}`}
-                    className="text-xs font-medium text-muted-foreground"
-                  >
-                    {labelWithHelp(
-                      copy("Thinking", "思考强度"),
-                      thinkingHelpText
-                    )}
-                  </label>
-                  {renderThinkingSelect({
-                    id: `text-thinking-${mode}`,
-                    value: imageThinking,
-                    onChange: setImageThinking,
-                    disabled: modeBusy,
-                  })}
                 </div>
               )}
 
@@ -7926,26 +7821,6 @@ export function CreatePageClient({
                   </div>
                 )}
 
-                {showThinkingControls && !isFireflyModel(editModel) && (
-                  <div className="space-y-2">
-                    <label
-                      htmlFor="edit-thinking"
-                      className="text-sm font-medium text-foreground"
-                    >
-                      {labelWithHelp(
-                        copy("Thinking", "思考强度"),
-                        thinkingHelpText
-                      )}
-                    </label>
-                    {renderThinkingSelect({
-                      id: "edit-thinking",
-                      value: imageThinking,
-                      onChange: setImageThinking,
-                      disabled: isEditing,
-                    })}
-                  </div>
-                )}
-
                 {renderAdvancedImageSettings({
                   idPrefix: "edit",
                   promptDisabled: isEditing,
@@ -8569,12 +8444,6 @@ export function CreatePageClient({
                 {renderBackendGroupSelect({
                   id: "batch-backend-group",
                   disabled: isBatchActive,
-                  compact: true,
-                })}
-                {renderThinkingSelect({
-                  id: "batch-thinking",
-                  value: chatThinking,
-                  onChange: setChatThinking,
                   compact: true,
                 })}
                 {/* 每批并发张数(tier)：对齐原项目 TIER，可选项受套餐并发上限约束 */}
