@@ -1,7 +1,7 @@
 "use client";
 
 /*
- * 职责：提供后台系统设置与模型定价规则的可视化编辑面板。
+ * 职责：提供后台系统设置、定价设置与模型定价规则的可视化编辑面板。
  * 使用方：web 管理后台系统设置一级菜单。
  * 关键依赖：system-settings actions、设置定义、模型定价规则编辑器与 shadcn/ui 组件。
  */
@@ -80,10 +80,10 @@ type SettingUpdate = {
   clear?: boolean;
 };
 
-type SystemSettingsPanelMode = "system" | "model-pricing";
+type SystemSettingsPanelMode = "system" | "pricing" | "model-pricing";
 
 type SystemSettingsPanelProps = {
-  // 系统设置与模型定价共用同一组读写 action；mode 负责把页面入口和保存范围隔离开。
+  // 系统设置、定价设置与模型定价共用同一组读写 action；mode 负责把页面入口和保存范围隔离开。
   mode?: SystemSettingsPanelMode;
 };
 
@@ -2049,10 +2049,37 @@ function CreditPackageMatrixInput({
   );
 }
 
+const PRICING_CATEGORY_IDS = new Set<SettingCategory>(["plans", "credits"]);
+
+/**
+ * 按分类整理当前模式可见的设置项。
+ *
+ * @param settings 后台读取到的完整设置快照。
+ * @param includedCategoryIds 当前页面允许展示和保存的分类集合。
+ * @returns 以分类 ID 分组的设置项 Map。
+ * @sideEffects 无副作用，仅创建新的 Map 和数组。
+ */
+function getCategoryMap(
+  settings: SettingSnapshotItem[],
+  includedCategoryIds: Set<SettingCategory>
+) {
+  const map = new Map<SettingCategory, SettingSnapshotItem[]>();
+  for (const category of SETTING_CATEGORIES) {
+    if (includedCategoryIds.has(category.id)) {
+      map.set(category.id, []);
+    }
+  }
+  for (const setting of settings) {
+    if (!includedCategoryIds.has(setting.category)) continue;
+    map.get(setting.category)?.push(setting);
+  }
+  return map;
+}
+
 /**
  * 渲染后台系统设置编辑器。
  *
- * @param props.mode 页面模式；system 只编辑通用系统设置，model-pricing 只编辑模型定价规则。
+ * @param props.mode 页面模式；system 编辑通用系统设置，pricing 只编辑套餐和积分，model-pricing 只编辑模型定价规则。
  * @returns 可加载、编辑并保存对应设置范围的 React 面板。
  * @sideEffects 通过 next-safe-action 读取和写入 system_setting，并在保存后同步环境文件。
  */
@@ -2143,30 +2170,47 @@ export function SystemSettingsPanel({
     setClearKeys({});
   }, [settingsResult.data?.settings]);
 
-  const settingsByCategory = useMemo(() => {
-    const map = new Map<SettingCategory, SettingSnapshotItem[]>();
-    for (const category of SETTING_CATEGORIES) {
-      map.set(category.id, []);
-    }
-    for (const setting of settings) {
-      // 模型计费倍率由 Adobe 后端 tab 的「模型计费倍率」表格编辑,系统设置面板里隐藏,
-      // 避免同一份数据出现两个入口造成"重复倍率"的误解。
-      if (
-        setting.key === "IMAGE_MODEL_MULTIPLIERS" ||
-        setting.key === "VIDEO_MODEL_MULTIPLIERS" ||
-        setting.key === "MODEL_PRICING_RULES"
-      ) {
-        continue;
+  const systemCategories = useMemo(
+    () =>
+      SETTING_CATEGORIES.filter(
+        (category) => !PRICING_CATEGORY_IDS.has(category.id)
+      ),
+    []
+  );
+  const pricingCategories = useMemo(
+    () =>
+      SETTING_CATEGORIES.filter((category) =>
+        PRICING_CATEGORY_IDS.has(category.id)
+      ),
+    []
+  );
+  const systemSettingsByCategory = useMemo(() => {
+    const includedCategoryIds = new Set(
+      systemCategories.map((category) => category.id)
+    );
+    const map = getCategoryMap(settings, includedCategoryIds);
+    for (const categorySettings of map.values()) {
+      for (let index = categorySettings.length - 1; index >= 0; index -= 1) {
+        const setting = categorySettings[index];
+        if (!setting) continue;
+        // 模型计费倍率由 Adobe 后端 tab 的「模型计费倍率」表格编辑,系统设置面板里隐藏,
+        // 避免同一份数据出现两个入口造成"重复倍率"的误解。
+        if (
+          setting.key === "IMAGE_MODEL_MULTIPLIERS" ||
+          setting.key === "VIDEO_MODEL_MULTIPLIERS" ||
+          setting.key === "MODEL_PRICING_RULES" ||
+          setting.key.startsWith("CHATGPT_REGISTER_")
+        ) {
+          categorySettings.splice(index, 1);
+        }
       }
-      // 注册机相关配置（moemail、代理、IP 刷新、号池维持）统一在生图池后端的
-      // 「注册机」tab 内编辑，系统设置面板里隐藏，避免双入口。
-      if (setting.key.startsWith("CHATGPT_REGISTER_")) {
-        continue;
-      }
-      map.get(setting.category)?.push(setting);
     }
     return map;
-  }, [settings]);
+  }, [settings, systemCategories]);
+  const pricingSettingsByCategory = useMemo(
+    () => getCategoryMap(settings, PRICING_CATEGORY_IDS),
+    [settings]
+  );
   const configuredTimeZone =
     settings.find((setting) => setting.key === "APP_TIME_ZONE")?.value || "UTC";
 
@@ -2177,10 +2221,14 @@ export function SystemSettingsPanel({
         if (mode === "model-pricing" && setting.key !== "MODEL_PRICING_RULES") {
           continue;
         }
+        if (mode === "pricing" && !PRICING_CATEGORY_IDS.has(setting.category)) {
+          continue;
+        }
         // 见上:模型计费倍率不在本面板编辑,跳过,避免覆盖 Adobe tab 的改动。
         if (
           mode === "system" &&
-          (setting.key === "MODEL_PRICING_RULES" ||
+          (PRICING_CATEGORY_IDS.has(setting.category) ||
+            setting.key === "MODEL_PRICING_RULES" ||
             setting.key === "IMAGE_MODEL_MULTIPLIERS" ||
             setting.key === "VIDEO_MODEL_MULTIPLIERS")
         ) {
@@ -2245,6 +2293,13 @@ export function SystemSettingsPanel({
     (setting) => setting.key === "MODEL_PRICING_RULES"
   );
   const isModelPricingMode = mode === "model-pricing";
+  const isPricingMode = mode === "pricing";
+  const visibleCategories = isPricingMode
+    ? pricingCategories
+    : systemCategories;
+  const visibleSettingsByCategory = isPricingMode
+    ? pricingSettingsByCategory
+    : systemSettingsByCategory;
 
   const modelPricingContent = (
     <div className="space-y-4">
@@ -2326,16 +2381,22 @@ export function SystemSettingsPanel({
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">
-            {isModelPricingMode ? "模型定价" : "系统设置"}
+            {isModelPricingMode
+              ? "模型定价"
+              : isPricingMode
+                ? "定价设置"
+                : "系统设置"}
           </h2>
           <p className="text-sm text-muted-foreground">
             {isModelPricingMode
               ? "管理模型定价规则，独立于其他系统设置保存。"
-              : "管理审核、登录、支付、套餐、模型、存储和邮件等全局配置。密钥不会在页面回显。"}
+              : isPricingMode
+                ? "管理套餐价格、套餐能力、积分发放和积分包规则。"
+                : "管理审核、登录、支付、模型、存储和邮件等全局配置。密钥不会在页面回显。"}
           </p>
         </div>
         <div className="flex flex-wrap justify-end gap-2">
-          {!isModelPricingMode ? (
+          {!isModelPricingMode && !isPricingMode ? (
             <>
               <Button
                 type="button"
@@ -2382,18 +2443,20 @@ export function SystemSettingsPanel({
       <div className="rounded-lg border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
         {isModelPricingMode
           ? "模型定价保存后会写入后台配置；未保存时继续使用环境变量或代码默认规则兜底。"
-          : "已保存配置优先于环境变量；未保存时继续使用环境变量兜底。标记为“需重启”或“需重新构建”的配置，保存后要重启服务或重新部署后才完整生效。"}
+          : isPricingMode
+            ? "套餐和积分配置保存后会写入后台配置；未保存时继续使用环境变量或代码默认值兜底。支付产品 ID 和价格变更请同步确认支付渠道后台配置。"
+            : "已保存配置优先于环境变量；未保存时继续使用环境变量兜底。标记为“需重启”或“需重新构建”的配置，保存后要重启服务或重新部署后才完整生效。"}
       </div>
 
       {isModelPricingMode ? (
         modelPricingContent
       ) : (
         <Tabs
-          defaultValue={SETTING_CATEGORIES[0]?.id ?? "general"}
+          defaultValue={visibleCategories[0]?.id ?? "general"}
           className="w-full"
         >
           <TabsList className="h-auto flex-wrap justify-start bg-transparent p-0">
-            {SETTING_CATEGORIES.map((category) => (
+            {visibleCategories.map((category) => (
               <TabsTrigger
                 key={category.id}
                 value={category.id}
@@ -2404,8 +2467,9 @@ export function SystemSettingsPanel({
             ))}
           </TabsList>
 
-          {SETTING_CATEGORIES.map((category) => {
-            const categorySettings = settingsByCategory.get(category.id) ?? [];
+          {visibleCategories.map((category) => {
+            const categorySettings =
+              visibleSettingsByCategory.get(category.id) ?? [];
             return (
               <TabsContent
                 key={category.id}
@@ -2584,4 +2648,14 @@ export function SystemSettingsPanel({
  */
 export function ModelPricingSettingsPanel() {
   return <SystemSettingsPanel mode="model-pricing" />;
+}
+
+/**
+ * 渲染独立的套餐与积分定价后台菜单内容。
+ *
+ * @returns 仅编辑套餐和积分分类的系统设置面板。
+ * @sideEffects 复用 SystemSettingsPanel 的读取和保存副作用。
+ */
+export function PricingSettingsPanel() {
+  return <SystemSettingsPanel mode="pricing" />;
 }

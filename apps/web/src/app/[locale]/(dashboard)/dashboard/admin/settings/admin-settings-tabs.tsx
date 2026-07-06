@@ -1,13 +1,14 @@
 "use client";
 
 /*
- * 职责：渲染管理后台设置区的一级菜单，隔离系统设置、模型定价与生图后端池。
+ * 职责：渲染管理后台设置区的一级菜单，隔离系统设置、定价设置、模型定价与生图后端池。
  * 使用方：dashboard/admin/settings/page.tsx。
  * 关键依赖：shared 系统设置面板与本应用的生图后端池管理面板。
  */
 
 import {
   ModelPricingSettingsPanel,
+  PricingSettingsPanel,
   SystemSettingsPanel,
 } from "@repo/shared/system-settings/components";
 import {
@@ -27,7 +28,11 @@ type AdminSettingsTabsProps = {
   canManageSystemSettings: boolean;
 };
 
-type AdminSettingsTab = "system" | "model-pricing" | "image-backends";
+type AdminSettingsTab =
+  | "system"
+  | "pricing"
+  | "model-pricing"
+  | "image-backends";
 
 export function AdminSettingsTabs({
   timeZone,
@@ -51,7 +56,7 @@ export function AdminSettingsTabs({
   const handleTabChange = (value: string) => {
     // 非超管禁止进入敏感配置入口，强制回落到后端池。
     const requestedTab =
-      value === "system" || value === "model-pricing"
+      value === "system" || value === "pricing" || value === "model-pricing"
         ? value
         : "image-backends";
     const nextTab: AdminSettingsTab =
@@ -86,6 +91,14 @@ export function AdminSettingsTabs({
             模型定价
           </TabsTrigger>
         ) : null}
+        {canManageSystemSettings ? (
+          <TabsTrigger
+            value="pricing"
+            className="rounded-md border border-transparent px-3 py-2 data-[state=active]:border-foreground/20 data-[state=active]:bg-foreground/5 data-[state=active]:text-foreground data-[state=active]:shadow-none"
+          >
+            定价设置
+          </TabsTrigger>
+        ) : null}
         <TabsTrigger
           value="image-backends"
           className="rounded-md border border-transparent px-3 py-2 data-[state=active]:border-foreground/20 data-[state=active]:bg-foreground/5 data-[state=active]:text-foreground data-[state=active]:shadow-none"
@@ -103,6 +116,11 @@ export function AdminSettingsTabs({
           {mountedTabs.has("model-pricing") ? (
             <ModelPricingSettingsPanel />
           ) : null}
+        </TabsContent>
+      ) : null}
+      {canManageSystemSettings ? (
+        <TabsContent value="pricing" className="mt-6">
+          {mountedTabs.has("pricing") ? <PricingSettingsPanel /> : null}
         </TabsContent>
       ) : null}
       <TabsContent value="image-backends" className="mt-6">

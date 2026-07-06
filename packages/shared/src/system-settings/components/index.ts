@@ -6,5 +6,6 @@
 
 export {
   ModelPricingSettingsPanel,
+  PricingSettingsPanel,
   SystemSettingsPanel,
 } from "./system-settings-panel";
