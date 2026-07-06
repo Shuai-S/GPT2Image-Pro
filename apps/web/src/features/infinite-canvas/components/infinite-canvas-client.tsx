@@ -78,9 +78,11 @@ const DEFAULT_NODE_POSITION = { x: 80, y: 80 };
 const DEFAULT_CANVAS_IMAGE_DIMENSIONS = { width: 1024, height: 1024 };
 const GENERATION_STATUS_POLL_INTERVAL_MS = 1500;
 const GENERATION_STATUS_TIMEOUT_MS = 180_000;
+const GENERATION_STATUS_MISSING_GRACE_MS = 15_000;
 const GENERATION_RESULT_SCHEMA = z.object({
   error: z.string().optional(),
   generationId: z.string().optional(),
+  generation_id: z.string().optional(),
   status: z.enum(["pending", "completed", "failed"]).optional(),
   imageUrl: z.string().optional(),
   imageBase64: z.string().optional(),
@@ -681,12 +683,24 @@ export function InfiniteCanvasClient() {
         error: undefined,
       })
     );
+    const generationId = createCanvasGenerationId();
     try {
-      const initialResult =
-        imageNodes.length > 0
-          ? await runImageEdit(prompt, node, imageNodes)
-          : await runTextToImage(prompt, node);
-      const result = await resolveGenerationResult(initialResult, copy);
+      let result: GenerationResult;
+      try {
+        const initialResult =
+          imageNodes.length > 0
+            ? await runImageEdit(prompt, node, imageNodes, generationId)
+            : await runTextToImage(prompt, node, generationId);
+        result = await resolveGenerationResult(initialResult, copy);
+      } catch (requestError) {
+        const initialError =
+          requestError instanceof Error
+            ? requestError.message
+            : copy("Generation failed", "生成失败");
+        result = await pollGenerationResult(generationId, initialError, copy, {
+          waitForMissing: true,
+        });
+      }
       if (result.error) throw new Error(result.error);
       const imageUrl = firstImageUrl(result);
       if (!imageUrl) throw new Error(copy("No image returned", "未返回图片"));
@@ -1594,6 +1608,19 @@ function normalizeImageExtension(value: string) {
 }
 
 /**
+ * 创建可传给图片生成接口并用于状态回查的 ID。
+ *
+ * @returns 图片生成记录 ID。
+ * @sideEffects 读取浏览器随机源。
+ */
+function createCanvasGenerationId() {
+  const randomPart = globalThis.crypto?.randomUUID
+    ? globalThis.crypto.randomUUID().replaceAll("-", "")
+    : `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+  return `gen_${randomPart}`;
+}
+
+/**
  * 把本地文件读取为 data URL。
  *
  * @param file 图片文件。
@@ -1618,14 +1645,20 @@ function readFileAsDataUrl(file: File) {
  *
  * @param prompt 合成后的提示词。
  * @param node 生成节点配置。
+ * @param generationId 本次请求预分配的生成记录 ID，用于失败后状态回查。
  * @returns 生成接口结果。
  * @sideEffects 发起同源网络请求并消耗用户积分。
  */
-async function runTextToImage(prompt: string, node: CanvasNode) {
+async function runTextToImage(
+  prompt: string,
+  node: CanvasNode,
+  generationId: string
+) {
   const response = await fetch("/api/images/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      generationId,
       prompt,
       size: node.size || DEFAULT_IMAGE_SIZE,
       model: node.model || undefined,
@@ -1640,15 +1673,18 @@ async function runTextToImage(prompt: string, node: CanvasNode) {
  * @param prompt 合成后的提示词。
  * @param node 生成节点配置。
  * @param imageNodes 输入图片节点。
+ * @param generationId 本次请求预分配的生成记录 ID，用于失败后状态回查。
  * @returns 生成接口结果。
  * @sideEffects 抓取图片数据、发起同源网络请求并消耗用户积分。
  */
 async function runImageEdit(
   prompt: string,
   node: CanvasNode,
-  imageNodes: CanvasNode[]
+  imageNodes: CanvasNode[],
+  generationId: string
 ) {
   const formData = new FormData();
+  formData.set("generationId", generationId);
   formData.set("prompt", prompt);
   formData.set("size", node.size || DEFAULT_IMAGE_SIZE);
   if (node.model) formData.set("model", node.model);
@@ -1705,7 +1741,10 @@ async function parseGenerationResponse(
   }
   const parsed = GENERATION_RESULT_SCHEMA.safeParse(body);
   if (!parsed.success) throw new Error("Invalid generation response");
-  return parsed.data;
+  return {
+    ...parsed.data,
+    generationId: parsed.data.generationId || parsed.data.generation_id,
+  };
 }
 
 /**
@@ -1717,15 +1756,19 @@ async function parseGenerationResponse(
  * @param generationId 生成任务 ID。
  * @param initialError 首次响应携带的错误，用于状态记录不存在时快速返回真实错误。
  * @param copy 当前语言文本函数。
+ * @param options 轮询行为选项；waitForMissing 会短暂容忍记录尚未创建。
  * @returns 最终生成结果。
  * @sideEffects 轮询同源状态接口。
  */
 async function pollGenerationResult(
   generationId: string,
   initialError: string | undefined,
-  copy: (en: string, zh: string) => string
+  copy: (en: string, zh: string) => string,
+  options: { waitForMissing?: boolean } = {}
 ): Promise<GenerationResult> {
   const deadline = Date.now() + GENERATION_STATUS_TIMEOUT_MS;
+  const missingGraceDeadline =
+    Date.now() + GENERATION_STATUS_MISSING_GRACE_MS;
   let lastError = initialError;
 
   while (Date.now() < deadline) {
@@ -1735,6 +1778,10 @@ async function pollGenerationResult(
     );
 
     if (response.status === 404 && initialError) {
+      if (options.waitForMissing && Date.now() < missingGraceDeadline) {
+        lastError = initialError;
+        continue;
+      }
       throw new Error(initialError);
     }
     if (!response.ok) {
