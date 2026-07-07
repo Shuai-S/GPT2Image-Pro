@@ -61,6 +61,13 @@ import {
   isImageDownloadUpstreamError,
 } from "./input-image-url";
 import {
+  buildGoogleImageRequest,
+  buildGoogleImageUrl,
+  getGoogleImageHeaders,
+  getGoogleImageModel,
+  parseGoogleImageResponse,
+} from "./google-image-protocol";
+import {
   appendImagesUpstreamNonce,
   buildOpenAIPromptCacheKey,
   buildPromptCacheSalt,
@@ -283,6 +290,44 @@ function getHeaders(
     ...(config.headers || {}),
     Authorization: `Bearer ${config.apiKey}`,
   };
+}
+
+// 判定当前 pool-api 后端是否选择 Google 原生图像协议；非 pool-api 一律不劫持。
+function isGoogleImageBackend(config: ApiConfig) {
+  return (
+    config.backend?.type === "pool-api" &&
+    config.backend.apiProtocol === "google"
+  );
+}
+
+// 提交一次 Google Interactions 图像请求；只在已选中 google 协议后端时调用。
+async function postGoogleImageRequest(
+  config: ApiConfig,
+  params: {
+    model: string;
+    prompt: string;
+    images?: ImageInputFile[];
+    size?: string;
+    outputFormat?: ImageOutputFormat;
+    signal?: AbortSignal;
+  }
+) {
+  const response = await fetch(buildGoogleImageUrl(config.baseUrl), {
+    method: "POST",
+    redirect: "manual",
+    signal: params.signal,
+    headers: getGoogleImageHeaders(config.apiKey),
+    body: JSON.stringify(
+      buildGoogleImageRequest({
+        model: params.model,
+        prompt: appendImagesUpstreamNonce(params.prompt),
+        images: params.images,
+        size: params.size,
+        outputFormat: params.outputFormat,
+      })
+    ),
+  });
+  return await parseGoogleImageResponse(response);
 }
 
 function normalizeResponsesModel(
@@ -4364,7 +4409,10 @@ export async function generateImage(
     // 反向转换后 size 改写一次，下游所有 params.size 读取（含 appendImageParams）即一致。
     params = { ...params, size: fireflyRewrite.size };
   }
-  const model = fireflyRewrite?.model ?? getModel(config, params.model);
+  const googleProtocol = isGoogleImageBackend(config);
+  const model = googleProtocol
+    ? getGoogleImageModel(params.model, config.model)
+    : (fireflyRewrite?.model ?? getModel(config, params.model));
   if (isPoolAccountBackend(config, "web")) {
     return requireImageOutput(
       await generateImageWithChatGptWeb(config, {
@@ -4386,6 +4434,34 @@ export async function generateImage(
         })
       )
     );
+  }
+  if (googleProtocol) {
+    try {
+      const prompt = getEffectivePrompt(params);
+      return requireImageOutput(
+        applyPromptOptimizationResultVisibility(
+          await postGoogleImageRequest(config, {
+            model,
+            prompt,
+            size: params.size || DEFAULT_IMAGE_SIZE,
+            outputFormat: normalizeOutputFormat(params.outputFormat),
+            signal: params.signal,
+          })
+        )
+      );
+    } catch (error) {
+      logImageRequestError(error, {
+        operation: "generate",
+        baseUrl: config.baseUrl,
+        path: "/interactions",
+        model,
+        useStream: false,
+      });
+      return {
+        error:
+          error instanceof Error ? error.message : "Unknown error occurred",
+      };
+    }
   }
   if (isPoolApiTaskBackend(config)) {
     try {
@@ -4567,7 +4643,10 @@ export async function editImage(
     // 反向转换后 size 改写一次，下游所有 params.size 读取（含 appendImageParams）即一致。
     params = { ...params, size: fireflyRewrite.size };
   }
-  const model = fireflyRewrite?.model ?? getModel(config, params.model);
+  const googleProtocol = isGoogleImageBackend(config);
+  const model = googleProtocol
+    ? getGoogleImageModel(params.model, config.model)
+    : (fireflyRewrite?.model ?? getModel(config, params.model));
   const editPromptRefs = resolvePromptImageReferences({
     prompt: getEffectivePrompt(params),
     images: params.images,
@@ -4603,6 +4682,36 @@ export async function editImage(
         })
       )
     );
+  }
+  if (googleProtocol) {
+    try {
+      return requireImageOutput(
+        applyPromptOptimizationResultVisibility(
+          await postGoogleImageRequest(config, {
+            model,
+            prompt: effectiveEditPrompt,
+            images: params.mask
+              ? [...params.images, params.mask]
+              : params.images,
+            size: params.size || DEFAULT_IMAGE_SIZE,
+            outputFormat: normalizeOutputFormat(params.outputFormat),
+            signal: params.signal,
+          })
+        )
+      );
+    } catch (error) {
+      logImageRequestError(error, {
+        operation: "edit",
+        baseUrl: config.baseUrl,
+        path: "/interactions",
+        model,
+        useStream: false,
+      });
+      return {
+        error:
+          error instanceof Error ? error.message : "Unknown error occurred",
+      };
+    }
   }
   if (isPoolApiTaskBackend(config)) {
     try {
@@ -4843,6 +4952,37 @@ export async function generateChatImage(
     { images: params.images, history: params.history },
     params.signal
   );
+
+  if (isGoogleImageBackend(config)) {
+    const model = getGoogleImageModel(
+      params.imageModel || params.model,
+      config.model
+    );
+    try {
+      return applyPromptOptimizationResultVisibility(
+        await postGoogleImageRequest(config, {
+          model,
+          prompt: getEffectivePrompt(params),
+          images: params.images,
+          size: params.size || DEFAULT_IMAGE_SIZE,
+          outputFormat: normalizeOutputFormat(params.outputFormat),
+          signal: params.signal,
+        })
+      );
+    } catch (error) {
+      logImageRequestError(error, {
+        operation: "chat",
+        baseUrl: config.baseUrl,
+        path: "/interactions",
+        model,
+        useStream: false,
+      });
+      return {
+        error:
+          error instanceof Error ? error.message : "Unknown error occurred",
+      };
+    }
+  }
 
   const model = await getResponsesModel(config, params.model, {
     allowGpt55: params.allowGpt55,

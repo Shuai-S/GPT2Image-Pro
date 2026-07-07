@@ -54,6 +54,7 @@ const schemaMock = vi.hoisted(() => {
       "apiKey",
       "model",
       "enabledModels",
+      "apiProtocol",
       "interfaceMode",
       "chatCompletionsUpstreamMode",
       "imageUpstreamMode",

@@ -1,4 +1,5 @@
 import type {
+  ImageBackendApiProtocol,
   ChatCompletionsUpstreamMode,
   ImageBackendApiInterfaceMode,
   ImageBackendRequestKind,
@@ -23,6 +24,12 @@ export function normalizeImagesUpstreamMode(
   value?: unknown
 ): ImagesUpstreamMode {
   return value === "responses" ? "responses" : "images";
+}
+
+export function normalizeImageBackendApiProtocol(
+  value?: unknown
+): ImageBackendApiProtocol {
+  return value === "google" ? "google" : "openai";
 }
 
 function isImageRequestKind(requestKind?: ImageBackendRequestKind) {

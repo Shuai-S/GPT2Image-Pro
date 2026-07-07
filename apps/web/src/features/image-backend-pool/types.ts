@@ -12,6 +12,7 @@ export type ImageBackendApiInterfaceMode =
   | "responses"
   | "mixed"
   | "task";
+export type ImageBackendApiProtocol = "openai" | "google";
 export type ChatCompletionsUpstreamMode = "responses" | "chat_completions";
 export type ImagesUpstreamMode = "images" | "responses";
 export type ImageBackendPreferenceMode = "always" | "mixed-only";

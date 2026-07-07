@@ -105,6 +105,7 @@ import { ChatgptRegisterTab } from "./chatgpt-register-tab";
 import type { ImageApiHealthResult } from "./health-check";
 import { parseImportTokensText } from "./import-token-parser";
 import type {
+  ImageBackendApiProtocol,
   ImageBackendApiInterfaceMode,
   ImageBackendGroupBackendType,
   ImagesUpstreamMode,
@@ -175,6 +176,7 @@ type Api = {
   baseUrl: string;
   model: string | null;
   enabledModels: string[] | null;
+  apiProtocol: ImageBackendApiProtocol;
   interfaceMode: ImageBackendApiInterfaceMode;
   chatCompletionsUpstreamMode: ChatCompletionsUpstreamModeFormValue;
   imagesUpstreamMode: ImagesUpstreamModeFormValue;
@@ -246,6 +248,7 @@ type AdobeAccountRow = {
 type ContentSafetyFormValue = "inherit" | "enabled" | "disabled";
 type AccountBackendFormValue = "web" | "responses";
 type GroupBackendTypeFormValue = ImageBackendGroupBackendType;
+type ApiProtocolFormValue = ImageBackendApiProtocol;
 type ApiInterfaceModeFormValue = ImageBackendApiInterfaceMode;
 type ChatCompletionsUpstreamModeFormValue = "responses" | "chat_completions";
 type ImagesUpstreamModeFormValue = ImagesUpstreamMode;
@@ -338,6 +341,11 @@ const COMMON_IMAGE_API_MODELS = [
   "nano-banana-pro",
 ];
 
+const COMMON_GOOGLE_IMAGE_MODELS = [
+  "gemini-2.5-flash-image",
+  "gemini-3.1-flash-image",
+];
+
 const COMMON_FIREFLY_MODELS = ADOBE_IMAGE_MULTIPLIER_FAMILIES.map(
   (family) => `firefly-${family}`
 );
@@ -420,6 +428,24 @@ const GROUP_BACKEND_TYPE_OPTIONS: Array<{
     value: "responses",
     label: "仅 Codex/Responses",
     detail: "只调度 Codex/Responses 账号，界面隐藏 Web 独有提示。",
+  },
+];
+
+const API_PROTOCOL_OPTIONS: Array<{
+  value: ApiProtocolFormValue;
+  label: string;
+  detail: string;
+}> = [
+  {
+    value: "openai",
+    label: "OpenAI 兼容",
+    detail: "沿用 /images、/responses、/chat/completions 等 OpenAI 兼容协议。",
+  },
+  {
+    value: "google",
+    label: "Google",
+    detail:
+      "使用 Google Gemini Interactions 图像协议，密钥通过 x-goog-api-key 发送。",
   },
 ];
 
@@ -915,6 +941,7 @@ export function ImageBackendPoolAdminPanel({
     apiKey: "",
     model: "",
     enabledModels: "",
+    apiProtocol: "openai" as ApiProtocolFormValue,
     interfaceMode: "mixed" as ApiInterfaceModeFormValue,
     chatCompletionsUpstreamMode:
       "responses" as ChatCompletionsUpstreamModeFormValue,
@@ -1234,6 +1261,7 @@ export function ImageBackendPoolAdminPanel({
       apiKey: "",
       model: "",
       enabledModels: "",
+      apiProtocol: "openai" as ApiProtocolFormValue,
       interfaceMode: "mixed" as ApiInterfaceModeFormValue,
       chatCompletionsUpstreamMode:
         "responses" as ChatCompletionsUpstreamModeFormValue,
@@ -1389,6 +1417,7 @@ export function ImageBackendPoolAdminPanel({
       apiKey: "",
       model: api.model || "",
       enabledModels: (api.enabledModels || []).join(","),
+      apiProtocol: api.apiProtocol || "openai",
       interfaceMode: api.interfaceMode || "images",
       chatCompletionsUpstreamMode:
         api.chatCompletionsUpstreamMode || "responses",
@@ -3832,6 +3861,36 @@ export function ImageBackendPoolAdminPanel({
                     }))
                   }
                 />
+                <div className="space-y-2">
+                  <Label>协议类型</Label>
+                  <Select
+                    value={apiForm.apiProtocol}
+                    onValueChange={(value) =>
+                      setApiForm((current) => ({
+                        ...current,
+                        apiProtocol: value as ApiProtocolFormValue,
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {API_PROTOCOL_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {
+                      API_PROTOCOL_OPTIONS.find(
+                        (option) => option.value === apiForm.apiProtocol
+                      )?.detail
+                    }
+                  </p>
+                </div>
                 <div className="space-y-2 rounded-md border p-3">
                   <div className="flex items-center justify-between gap-2">
                     <Label>所属分组</Label>
@@ -3887,29 +3946,32 @@ export function ImageBackendPoolAdminPanel({
                     }
                   />
                   <div className="flex flex-wrap gap-2">
-                    {[...COMMON_IMAGE_API_MODELS, ...COMMON_FIREFLY_MODELS].map(
-                      (model) => (
-                        <Button
-                          key={model}
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() =>
-                            setApiForm((current) => ({
-                              ...current,
-                              enabledModels: parseModelList(
-                                `${current.enabledModels}\n${model}`
-                              ).join(","),
-                            }))
-                          }
-                        >
-                          {model}
-                        </Button>
-                      )
-                    )}
+                    {[
+                      ...COMMON_IMAGE_API_MODELS,
+                      ...COMMON_GOOGLE_IMAGE_MODELS,
+                      ...COMMON_FIREFLY_MODELS,
+                    ].map((model) => (
+                      <Button
+                        key={model}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          setApiForm((current) => ({
+                            ...current,
+                            enabledModels: parseModelList(
+                              `${current.enabledModels}\n${model}`
+                            ).join(","),
+                          }))
+                        }
+                      >
+                        {model}
+                      </Button>
+                    ))}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    参考渠道设计：每个 API 后端声明可服务模型；调度时请求模型不在列表内会跳过该后端。
+                    参考渠道设计：每个 API
+                    后端声明可服务模型；调度时请求模型不在列表内会跳过该后端。
                   </p>
                 </div>
                 <div className="space-y-2">
@@ -4259,6 +4321,9 @@ export function ImageBackendPoolAdminPanel({
                         <span className="font-medium">{api.name}</span>
                         <Badge variant="outline">
                           {apiInterfaceModeLabel(api.interfaceMode)}
+                        </Badge>
+                        <Badge variant="outline">
+                          {api.apiProtocol === "google" ? "Google" : "OpenAI"}
                         </Badge>
                         <Badge variant="outline">
                           Chat:{" "}

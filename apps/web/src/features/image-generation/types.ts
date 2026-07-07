@@ -311,6 +311,7 @@ export interface ApiConfig {
     requestGroupId?: string;
     requestKind?: "image_generation" | "image_edit" | "chat" | "responses";
     accountBackend?: "web" | "responses";
+    apiProtocol?: "openai" | "google";
     apiInterfaceMode?: "images" | "responses" | "mixed" | "task";
     chatCompletionsUpstreamMode?: "responses" | "chat_completions";
     imagesUpstreamMode?: "images" | "responses";

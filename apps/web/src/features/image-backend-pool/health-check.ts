@@ -16,6 +16,7 @@ import type { ApiConfig } from "@/features/image-generation/types";
 import type {
   ChatCompletionsUpstreamMode,
   ImageBackendApiInterfaceMode,
+  ImageBackendApiProtocol,
   ImagesUpstreamMode,
 } from "./types";
 
@@ -53,6 +54,7 @@ export interface ImageApiHealthCheckInput {
   apiKey: string;
   model?: string | null;
   useStream?: boolean;
+  apiProtocol?: ImageBackendApiProtocol;
   apiInterfaceMode?: ImageBackendApiInterfaceMode;
   imagesUpstreamMode?: ImagesUpstreamMode;
   chatCompletionsUpstreamMode?: ChatCompletionsUpstreamMode;
@@ -236,6 +238,7 @@ export async function checkImageBackendApiHealth(
     backend: {
       type: input.backendType ?? "pool-api",
       requestKind: "image_generation",
+      apiProtocol: input.apiProtocol,
       apiInterfaceMode: input.apiInterfaceMode,
       imagesUpstreamMode: input.imagesUpstreamMode,
       chatCompletionsUpstreamMode: input.chatCompletionsUpstreamMode,

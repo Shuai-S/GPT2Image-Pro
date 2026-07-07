@@ -22,6 +22,7 @@ function backendScope(config: ApiConfig) {
     backend.type,
     backend.id,
     backend.accountBackend,
+    backend.apiProtocol,
     backend.apiInterfaceMode,
     backend.imagesUpstreamMode,
     backend.chatCompletionsUpstreamMode,

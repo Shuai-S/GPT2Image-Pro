@@ -87,6 +87,7 @@ const optionalGroupIdSchema = z
 const safetyOverrideSchema = z.enum(["inherit", "enabled", "disabled"]);
 const accountBackendSchema = z.enum(["web", "responses"]);
 const groupBackendTypeSchema = z.enum(["mixed", "web", "responses"]);
+const apiProtocolSchema = z.enum(["openai", "google"]);
 const apiInterfaceModeSchema = z.enum(["images", "responses", "mixed", "task"]);
 const chatCompletionsUpstreamModeSchema = z.enum([
   "responses",
@@ -559,6 +560,7 @@ export const saveImageBackendApiAction = withImageBackendPoolAdminAction(
         .array(z.string().trim().min(1).max(120))
         .max(200)
         .optional(),
+      apiProtocol: apiProtocolSchema.default("openai"),
       interfaceMode: apiInterfaceModeSchema.default("mixed"),
       chatCompletionsUpstreamMode:
         chatCompletionsUpstreamModeSchema.default("responses"),
@@ -594,6 +596,7 @@ export const saveImageBackendApiAction = withImageBackendPoolAdminAction(
       apiKey: parsedInput.apiKey || undefined,
       model: parsedInput.model || null,
       enabledModels: parsedInput.enabledModels ?? null,
+      apiProtocol: parsedInput.apiProtocol,
       interfaceMode: parsedInput.interfaceMode,
       chatCompletionsUpstreamMode: parsedInput.chatCompletionsUpstreamMode,
       imagesUpstreamMode: parsedInput.imagesUpstreamMode,

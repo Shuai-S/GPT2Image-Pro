@@ -303,6 +303,7 @@ export const saveApi = defineOperation({
     apiKey: z.string().optional(),
     model: z.string().optional(),
     enabledModels: z.array(z.string()).optional(),
+    apiProtocol: z.enum(["openai", "google"]).optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
   }),
   output: z.object({

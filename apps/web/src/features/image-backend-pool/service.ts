@@ -60,6 +60,7 @@ import type { ApiConfig } from "@/features/image-generation/types";
 import {
   imageBackendApiInterfaceAllowsRequest,
   normalizeChatCompletionsUpstreamMode,
+  normalizeImageBackendApiProtocol,
   normalizeImageBackendApiInterfaceMode,
   normalizeImagesUpstreamMode,
 } from "./api-interface-mode";
@@ -80,6 +81,7 @@ import type {
   ChatCompletionsUpstreamMode,
   ContentSafetyOverride,
   ImageBackendAccountBackend,
+  ImageBackendApiProtocol,
   ImageBackendApiInterfaceMode,
   ImageBackendGroupBackendType,
   ImageBackendGroupSummary,
@@ -175,6 +177,7 @@ type PoolMember =
       apiKey: string;
       model: string | null;
       enabledModels: string[] | null;
+      apiProtocol: ImageBackendApiProtocol;
       interfaceMode: ImageBackendApiInterfaceMode;
       chatCompletionsUpstreamMode: ChatCompletionsUpstreamMode;
       imagesUpstreamMode: ImagesUpstreamMode;
@@ -2702,6 +2705,7 @@ async function selectPoolMember(
           apiKey: imageBackendApi.apiKey,
           model: imageBackendApi.model,
           enabledModels: imageBackendApi.enabledModels,
+          apiProtocol: imageBackendApi.apiProtocol,
           interfaceMode: imageBackendApi.interfaceMode,
           chatCompletionsUpstreamMode:
             imageBackendApi.chatCompletionsUpstreamMode,
@@ -2742,6 +2746,7 @@ async function selectPoolMember(
           apiKey: imageBackendApi.apiKey,
           model: imageBackendApi.model,
           enabledModels: imageBackendApi.enabledModels,
+          apiProtocol: imageBackendApi.apiProtocol,
           interfaceMode: imageBackendApi.interfaceMode,
           chatCompletionsUpstreamMode:
             imageBackendApi.chatCompletionsUpstreamMode,
@@ -2908,6 +2913,7 @@ async function selectPoolMember(
         apiKey: row.apiKey,
         model: row.model,
         enabledModels: row.enabledModels ?? null,
+        apiProtocol: normalizeImageBackendApiProtocol(row.apiProtocol),
         interfaceMode: normalizeImageBackendApiInterfaceMode(row.interfaceMode),
         chatCompletionsUpstreamMode: normalizeChatCompletionsUpstreamMode(
           row.chatCompletionsUpstreamMode
@@ -3323,6 +3329,7 @@ function toResolvedPoolConfig(
           apiKeyId: options.apiKeyId,
           requestGroupId: options.requestGroupId,
           requestKind: options.requestKind,
+          apiProtocol: member.apiProtocol,
           apiInterfaceMode: member.interfaceMode,
           chatCompletionsUpstreamMode: member.chatCompletionsUpstreamMode,
           imagesUpstreamMode: member.imagesUpstreamMode,
@@ -7255,6 +7262,7 @@ type UpsertApiInput = {
   apiKey?: string;
   model?: string | null;
   enabledModels?: string[] | null;
+  apiProtocol?: ImageBackendApiProtocol;
   interfaceMode?: ImageBackendApiInterfaceMode;
   chatCompletionsUpstreamMode?: ChatCompletionsUpstreamMode;
   imagesUpstreamMode?: ImagesUpstreamMode;
@@ -7328,6 +7336,7 @@ export async function upsertImageBackendApi(input: UpsertApiInput) {
     baseUrl: stripTrailingSlash(input.baseUrl),
     model: input.model || null,
     enabledModels: input.enabledModels ?? null,
+    apiProtocol: normalizeImageBackendApiProtocol(input.apiProtocol),
     interfaceMode: normalizeImageBackendApiInterfaceMode(input.interfaceMode),
     chatCompletionsUpstreamMode: normalizeChatCompletionsUpstreamMode(
       input.chatCompletionsUpstreamMode
@@ -7674,6 +7683,7 @@ export async function probeImageBackendApi(id: string): Promise<{
       apiKey: imageBackendApi.apiKey,
       model: imageBackendApi.model,
       useStream: imageBackendApi.useStream,
+      apiProtocol: imageBackendApi.apiProtocol,
       interfaceMode: imageBackendApi.interfaceMode,
       imageUpstreamMode: imageBackendApi.imageUpstreamMode,
       chatCompletionsUpstreamMode: imageBackendApi.chatCompletionsUpstreamMode,
@@ -7692,6 +7702,7 @@ export async function probeImageBackendApi(id: string): Promise<{
     apiKey: api.apiKey,
     model: api.model,
     useStream: api.useStream,
+    apiProtocol: normalizeImageBackendApiProtocol(api.apiProtocol),
     apiInterfaceMode: normalizeImageBackendApiInterfaceMode(api.interfaceMode),
     imagesUpstreamMode: normalizeImagesUpstreamMode(api.imageUpstreamMode),
     chatCompletionsUpstreamMode: normalizeChatCompletionsUpstreamMode(
@@ -7878,6 +7889,7 @@ export async function listAdminImageBackendPool() {
       baseUrl: imageBackendApi.baseUrl,
       model: imageBackendApi.model,
       enabledModels: imageBackendApi.enabledModels,
+      apiProtocol: imageBackendApi.apiProtocol,
       interfaceMode: imageBackendApi.interfaceMode,
       chatCompletionsUpstreamMode: imageBackendApi.chatCompletionsUpstreamMode,
       imagesUpstreamMode: imageBackendApi.imageUpstreamMode,

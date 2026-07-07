@@ -1088,6 +1088,9 @@ export const imageBackendApi = pgTable("image_backend_api", {
   // 该 API 后端可承接的模型列表。为空表示不限制；调度时会按请求模型过滤候选，
   // 避免把请求派给不支持该模型的上游渠道。
   enabledModels: json("enabled_models").$type<string[]>(),
+  // 上游协议族：openai 走 OpenAI 兼容 /images|/responses|/chat；
+  // google 走 Google Gemini/Interactions 图像协议（x-goog-api-key）。
+  apiProtocol: text("api_protocol").notNull().default("openai"),
   interfaceMode: text("interface_mode").notNull().default("images"),
   useStream: boolean("use_stream").notNull().default(false),
   chatCompletionsUpstreamMode: text("chat_completions_upstream_mode")
