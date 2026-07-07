@@ -35,7 +35,9 @@
 - 触发：推送到 `my-main`、推送形如 `v*` 的 tag、或手动触发。
 - 镜像命名空间：运行时从 `GITHUB_REPOSITORY_OWNER` 小写化得到，例如 fork `Shuai-S/GPT2Image-Pro` 会推送到 `ghcr.io/shuai-s/*`。
 - 构建 + 推送到 GHCR（`ghcr.io`）4 个镜像：`web`、`migrate`、`chatgpt-web-proxy`、`chatgpt-register`。
-- 分支推送生成 `my-main`、`latest`、`sha-<sha>` 标签；版本 tag 额外生成 `vX.Y.Z`、`X.Y.Z`、`X.Y`、`X`、`latest`、`sha-<sha>` 标签。
+- 每次镜像发布先统一生成 UTC 时间戳标签 `YYYYMMDDHHMMSS`，同一次 workflow
+  的 4 个镜像共用同一个时间戳，便于保留可回滚的历史镜像。
+- 分支推送生成 `my-main`、`latest`、`YYYYMMDDHHMMSS`、`sha-<sha>` 标签；版本 tag 额外生成 `vX.Y.Z`、`X.Y.Z`、`X.Y`、`X`、`latest`、`YYYYMMDDHHMMSS`、`sha-<sha>` 标签。
 - `my-main` 分支构建 `linux/amd64`；版本 tag 为 `web`、`migrate`、`chatgpt-web-proxy` 构建 `linux/amd64,linux/arm64`，`chatgpt-register` 因 Wine/x86 依赖仅构建 `linux/amd64`。
 - tag 触发时起草（draft）一份 GitHub Release，附 docker-compose 部署包（`.tar.gz` / `.zip`）。
 
@@ -44,7 +46,7 @@
 版本格式：`v<MAJOR>.<MINOR>.<PATCH>-<alpha|beta|rc>.<N>`（正式版去后缀）。
 
 ```bash
-# 推送 my-main 会构建并推送 latest / my-main / sha-<sha> 镜像：
+# 推送 my-main 会构建并推送 latest / my-main / YYYYMMDDHHMMSS / sha-<sha> 镜像：
 git push origin my-main
 
 # 在目标提交上打 tag 会触发版本镜像与 Release 草稿：
