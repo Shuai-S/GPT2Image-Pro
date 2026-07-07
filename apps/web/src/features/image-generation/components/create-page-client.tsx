@@ -2233,6 +2233,10 @@ export function CreatePageClient({
     "maskEditorOpen",
     false
   );
+  const [maskSourceIndex, setMaskSourceIndex] = useCreateRuntimeState(
+    "maskSourceIndex",
+    0
+  );
   const [maskPoints, setMaskPoints] = useCreateRuntimeState<MaskPoint[]>(
     "maskPoints",
     []
@@ -2245,6 +2249,10 @@ export function CreatePageClient({
     width: number;
     height: number;
   } | null>("firstImageSize", null);
+  const [maskSourceImageSize, setMaskSourceImageSize] = useCreateRuntimeState<{
+    width: number;
+    height: number;
+  } | null>("maskSourceImageSize", null);
   const [isEditing, setIsEditing] = useCreateRuntimeState("isEditing", false);
   const [isTextSingleGenerating, setIsTextSingleGenerating] =
     useCreateRuntimeState("isTextSingleGenerating", false);
@@ -2337,7 +2345,6 @@ export function CreatePageClient({
   const triggerBatchGenerationRef = useRef<
     ((options?: { retryCardId?: string }) => Promise<void>) | null
   >(null);
-  const maskInputRef = useRef<HTMLInputElement | null>(null);
   const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const isDrawingRef = useRef(false);
   const lastMaskPointRef = useRef<{ x: number; y: number } | null>(null);
@@ -2833,6 +2840,14 @@ export function CreatePageClient({
     switchActiveMode,
   ]);
   const firstPreviewUrl = editImages[0]?.previewUrl || null;
+  const maskSourceImage = editImages[maskSourceIndex] || editImages[0] || null;
+  const maskSourcePreviewUrl = maskSourceImage?.previewUrl || null;
+  const maskSourceDisplayIndex = maskSourceImage
+    ? Math.max(
+        0,
+        editImages.findIndex((item) => item.previewUrl === maskSourcePreviewUrl)
+      )
+    : 0;
   const chatFirstPreviewUrl =
     chatAttachments.find((item) => item.kind === "image")?.previewUrl || null;
   const autoSizeLabel = copy("Auto", "自动");
@@ -4353,6 +4368,36 @@ export function CreatePageClient({
   useEffect(() => {
     if (!firstPreviewUrl) {
       setFirstImageSize(null);
+      return;
+    }
+
+    const img = new window.Image();
+    img.onload = () => {
+      const nextImageSize = {
+        width: img.naturalWidth || img.width,
+        height: img.naturalHeight || img.height,
+      };
+      setFirstImageSize(nextImageSize);
+    };
+    img.onerror = () => {
+      setFirstImageSize(null);
+    };
+    img.src = firstPreviewUrl;
+  }, [firstPreviewUrl, setFirstImageSize]);
+
+  useEffect(() => {
+    if (editImages.length === 0) {
+      if (maskSourceIndex !== 0) setMaskSourceIndex(0);
+      return;
+    }
+    if (maskSourceIndex >= editImages.length) {
+      setMaskSourceIndex(editImages.length - 1);
+    }
+  }, [editImages.length, maskSourceIndex, setMaskSourceIndex]);
+
+  useEffect(() => {
+    if (!maskSourcePreviewUrl) {
+      setMaskSourceImageSize(null);
       setMaskEditorOpen(false);
       setMaskPoints([]);
       setMaskFile((prev) => {
@@ -4364,11 +4409,10 @@ export function CreatePageClient({
 
     const img = new window.Image();
     img.onload = () => {
-      const nextImageSize = {
+      setMaskSourceImageSize({
         width: img.naturalWidth || img.width,
         height: img.naturalHeight || img.height,
-      };
-      setFirstImageSize(nextImageSize);
+      });
       setMaskPoints([]);
       setMaskFile((prev) => {
         if (prev) revokePreview(prev.previewUrl);
@@ -4376,16 +4420,16 @@ export function CreatePageClient({
       });
     };
     img.onerror = () => {
-      setFirstImageSize(null);
+      setMaskSourceImageSize(null);
       setMaskEditorOpen(false);
     };
-    img.src = firstPreviewUrl;
+    img.src = maskSourcePreviewUrl;
   }, [
-    firstPreviewUrl,
-    setFirstImageSize,
+    maskSourcePreviewUrl,
     setMaskEditorOpen,
     setMaskFile,
     setMaskPoints,
+    setMaskSourceImageSize,
   ]);
 
   useEffect(() => {
@@ -4409,7 +4453,7 @@ export function CreatePageClient({
 
   useEffect(() => {
     const canvas = maskCanvasRef.current;
-    if (!canvas || !firstImageSize) return;
+    if (!canvas || !maskSourceImageSize) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
@@ -4420,7 +4464,7 @@ export function CreatePageClient({
       ctx.arc(point.x, point.y, point.size, 0, Math.PI * 2);
       ctx.fill();
     }
-  }, [maskPoints, firstImageSize]);
+  }, [maskPoints, maskSourceImageSize]);
 
   const addSuccessfulResult = (
     data: ChatResultInput,
@@ -6547,10 +6591,6 @@ export function CreatePageClient({
       );
       return;
     }
-    if (maskPoints.length > 0 && !maskFile) {
-      toast.error(copy("Save the mask before editing", "编辑前请先保存蒙版"));
-      return;
-    }
     if (!effectiveEditSize) {
       toast.error(copy("Waiting for source image size", "正在读取源图片尺寸"), {
         description: copy(
@@ -6575,9 +6615,22 @@ export function CreatePageClient({
       showGenerationError("Insufficient credits");
       return;
     }
+    const effectiveMaskFile =
+      maskFile ||
+      (maskPoints.length > 0
+        ? await saveDrawnMask({ silent: true })
+        : null);
+    if (maskPoints.length > 0 && !effectiveMaskFile) return;
+    const orderedEditImages =
+      effectiveMaskFile && maskSourceIndex > 0
+        ? [
+            editImages[maskSourceIndex],
+            ...editImages.filter((_, index) => index !== maskSourceIndex),
+          ].filter((item): item is EditImageFile => Boolean(item))
+        : editImages;
     const totalUploadSize =
-      editImages.reduce((total, item) => total + item.file.size, 0) +
-      (maskFile?.file.size || 0);
+      orderedEditImages.reduce((total, item) => total + item.file.size, 0) +
+      (effectiveMaskFile?.file.size || 0);
     if (totalUploadSize > maxEditRequestBytes) {
       toast.error(copy("Upload is too large", "上传内容过大"), {
         description: copy(
@@ -6620,10 +6673,13 @@ export function CreatePageClient({
     } else {
       formData.append("size", effectiveEditSize);
     }
-    editImages.forEach(({ file }) => {
-      formData.append(editImages.length === 1 ? "image" : "image[]", file);
+    orderedEditImages.forEach(({ file }) => {
+      formData.append(
+        orderedEditImages.length === 1 ? "image" : "image[]",
+        file
+      );
     });
-    if (maskFile) formData.append("mask", maskFile.file);
+    if (effectiveMaskFile) formData.append("mask", effectiveMaskFile.file);
     formData.append("count", String(editBatchCount));
     if (generationIds.length === 1) {
       const generationId = generationIds[0];
@@ -6772,6 +6828,11 @@ export function CreatePageClient({
       if (target) revokePreview(target.previewUrl);
       return prev.filter((_, itemIndex) => itemIndex !== index);
     });
+    setMaskSourceIndex((prev) => {
+      if (prev === index) return Math.max(0, prev - 1);
+      if (prev > index) return prev - 1;
+      return prev;
+    });
   };
 
   const clearEditImages = () => {
@@ -6782,62 +6843,9 @@ export function CreatePageClient({
       return [];
     });
     setMaskEditorOpen(false);
+    setMaskSourceIndex(0);
     setMaskPoints([]);
     clearMask();
-  };
-
-  const setMask = (files: FileList | null) => {
-    const file = files?.[0];
-    if (!file) return;
-    if (file.type !== "image/png") {
-      toast.error(copy("Mask must be a PNG file", "蒙版必须是 PNG 文件"));
-      return;
-    }
-    if (file.size > maxImageBytes) {
-      toast.error(copy("Mask is too large", "蒙版文件过大"), {
-        description: copy(
-          `Maximum size is ${formatMegabytes(maxImageBytes)}.`,
-          `最大支持 ${formatMegabytes(maxImageBytes)}。`
-        ),
-      });
-      return;
-    }
-
-    const previewUrl = URL.createObjectURL(file);
-    const img = new window.Image();
-    img.onload = () => {
-      if (
-        firstImageSize &&
-        (img.naturalWidth !== firstImageSize.width ||
-          img.naturalHeight !== firstImageSize.height)
-      ) {
-        URL.revokeObjectURL(previewUrl);
-        toast.error(
-          copy(
-            "Mask dimensions must match the first source image",
-            "蒙版尺寸必须与第一张源图片一致"
-          ),
-          {
-            description: copy(
-              `Expected ${firstImageSize.width}x${firstImageSize.height}.`,
-              `应为 ${firstImageSize.width}x${firstImageSize.height}。`
-            ),
-          }
-        );
-        return;
-      }
-
-      setMaskFile((prev) => {
-        if (prev) revokePreview(prev.previewUrl);
-        return { file, previewUrl };
-      });
-      setMaskPoints([]);
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(previewUrl);
-      toast.error(copy("Failed to load mask image", "蒙版图片加载失败"));
-    };
-    img.src = previewUrl;
   };
 
   const clearMask = () => {
@@ -6921,42 +6929,62 @@ export function CreatePageClient({
     lastMaskPointRef.current = null;
   };
 
-  const saveDrawnMask = () => {
-    if (!firstImageSize || maskPoints.length === 0) {
-      toast.error(copy("Draw a mask area first", "请先绘制蒙版区域"));
-      return;
-    }
-
-    const canvas = document.createElement("canvas");
-    canvas.width = firstImageSize.width;
-    canvas.height = firstImageSize.height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    ctx.fillStyle = "#000";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.globalCompositeOperation = "destination-out";
-    for (const point of maskPoints) {
-      ctx.beginPath();
-      ctx.arc(point.x, point.y, point.size, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    const previewUrl = canvas.toDataURL("image/png");
-    canvas.toBlob((blob) => {
-      if (!blob) {
-        toast.error(copy("Failed to save mask", "保存蒙版失败"));
+  const saveDrawnMask = (options?: { silent?: boolean }) =>
+    new Promise<EditImageFile | null>((resolve) => {
+      if (!maskSourceImageSize || maskPoints.length === 0) {
+        if (!options?.silent) {
+          toast.error(copy("Draw a mask area first", "请先绘制蒙版区域"));
+        }
+        resolve(null);
         return;
       }
-      const file = new File([blob], "generated-mask.png", {
-        type: "image/png",
-      });
-      setMaskFile((prev) => {
-        if (prev) revokePreview(prev.previewUrl);
-        return { file, previewUrl };
-      });
-      toast.success(copy("Mask saved", "蒙版已保存"));
-    }, "image/png");
+
+      const canvas = document.createElement("canvas");
+      canvas.width = maskSourceImageSize.width;
+      canvas.height = maskSourceImageSize.height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        resolve(null);
+        return;
+      }
+
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.globalCompositeOperation = "destination-out";
+      for (const point of maskPoints) {
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, point.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      const previewUrl = canvas.toDataURL("image/png");
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          if (!options?.silent) {
+            toast.error(copy("Failed to save mask", "保存蒙版失败"));
+          }
+          resolve(null);
+          return;
+        }
+        const file = new File([blob], "generated-mask.png", {
+          type: "image/png",
+        });
+        const item = { file, previewUrl };
+        setMaskFile((prev) => {
+          if (prev) revokePreview(prev.previewUrl);
+          return item;
+        });
+        if (!options?.silent) {
+          toast.success(copy("Mask saved", "蒙版已保存"));
+        }
+        resolve(item);
+      }, "image/png");
+    });
+
+  const openMaskEditorForImage = (index: number) => {
+    if (isEditing) return;
+    setMaskSourceIndex(index);
+    setMaskEditorOpen(true);
   };
 
   const applyResultAsReference = async (sourceResult = result) => {
@@ -7558,6 +7586,224 @@ export function CreatePageClient({
             className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_360px] xl:gap-6"
           >
             <div className="xl:col-start-1">{renderVisualOutput("image")}</div>
+            <div className="space-y-4 rounded-lg border border-border bg-background p-4 xl:col-start-1">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <span className="text-sm font-medium text-foreground">
+                    {copy("Source images", "源图片")}
+                  </span>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {copy(
+                      `Upload PNG, JPEG, or WebP. Click an uploaded image to edit its mask. Up to ${maxEditImages} images, ${formatMegabytes(maxEditRequestBytes)} total.`,
+                      `上传 PNG、JPEG 或 WebP。点击已上传图片即可编辑它的蒙版。最多 ${maxEditImages} 张，总大小不超过 ${formatMegabytes(maxEditRequestBytes)}。`
+                    )}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => imageInputRef.current?.click()}
+                    disabled={isEditing || editImages.length >= maxEditImages}
+                  >
+                    <Upload className="mr-2 h-4 w-4" />
+                    {copy("Upload images", "上传图片")}
+                  </Button>
+                  {editImages.length > 0 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={clearEditImages}
+                      disabled={isEditing}
+                    >
+                      {copy("Clear all", "全部清除")}
+                    </Button>
+                  )}
+                </div>
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  multiple
+                  accept={IMAGE_ACCEPT}
+                  className="sr-only"
+                  onChange={(e) => {
+                    addImages(e.target.files);
+                    e.target.value = "";
+                  }}
+                />
+              </div>
+
+              {editImages.length > 0 && (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 md:grid-cols-6">
+                  {editImages.map((item, index) => {
+                    const isMaskSource =
+                      maskEditorOpen && index === maskSourceDisplayIndex;
+                    return (
+                      <div
+                        key={`${item.file.name}-${item.previewUrl}`}
+                        className={`group relative aspect-square overflow-hidden rounded-md border bg-muted outline-none transition focus-visible:ring-2 focus-visible:ring-ring ${
+                          isMaskSource
+                            ? "border-primary ring-2 ring-primary/50"
+                            : "hover:border-foreground/40"
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          className="absolute inset-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed"
+                          title={copy(
+                            "Edit mask on this image",
+                            "编辑这张图的蒙版"
+                          )}
+                          disabled={isEditing}
+                          onClick={() => openMaskEditorForImage(index)}
+                        >
+                          <span className="absolute left-1 top-1 z-10 rounded bg-background/90 px-1.5 py-0.5 text-[10px] font-medium text-foreground shadow-sm">
+                            {index + 1}
+                          </span>
+                          <Image
+                            src={item.previewUrl}
+                            alt={
+                              item.file.name ||
+                              copy(
+                                `Source image ${index + 1}`,
+                                `源图片 ${index + 1}`
+                              )
+                            }
+                            fill
+                            sizes="160px"
+                            className="object-cover"
+                            unoptimized
+                          />
+                          {isMaskSource && (
+                            <span className="absolute inset-x-1 bottom-1 z-10 inline-flex items-center justify-center rounded bg-background/90 px-1.5 py-1 text-[10px] font-medium text-foreground shadow-sm">
+                              <Brush className="mr-1 h-3 w-3" />
+                              {copy("Mask editing", "蒙版编辑中")}
+                            </span>
+                          )}
+                        </button>
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="icon-xs"
+                          className="absolute right-1 top-1 z-20 opacity-95"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            removeImage(index);
+                          }}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {maskEditorOpen && maskSourcePreviewUrl && maskSourceImageSize && (
+                <div className="space-y-3 rounded-md border border-border bg-muted/20 p-3">
+                  <div
+                    className="relative mx-auto w-full max-w-2xl overflow-hidden rounded-md border bg-muted"
+                    style={{
+                      aspectRatio: `${maskSourceImageSize.width} / ${maskSourceImageSize.height}`,
+                    }}
+                  >
+                    <Image
+                      src={maskSourcePreviewUrl}
+                      alt={copy(
+                        "Source image for mask editing",
+                        "用于蒙版编辑的源图片"
+                      )}
+                      fill
+                      sizes="(max-width: 1024px) 100vw, 640px"
+                      className="object-contain"
+                      unoptimized
+                    />
+                    <canvas
+                      ref={maskCanvasRef}
+                      width={maskSourceImageSize.width}
+                      height={maskSourceImageSize.height}
+                      className="absolute inset-0 h-full w-full cursor-crosshair touch-none"
+                      onMouseDown={startMaskDrawing}
+                      onMouseMove={drawMaskLine}
+                      onMouseUp={stopMaskDrawing}
+                      onMouseLeave={stopMaskDrawing}
+                      onTouchStart={startMaskDrawing}
+                      onTouchMove={drawMaskLine}
+                      onTouchEnd={stopMaskDrawing}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <label
+                      htmlFor="mask-brush-size"
+                      className="flex items-center gap-2 text-xs font-medium text-muted-foreground"
+                    >
+                      {copy("Brush", "画笔")} {maskBrushSize}px
+                      <input
+                        id="mask-brush-size"
+                        type="range"
+                        min={4}
+                        max={128}
+                        step={1}
+                        value={maskBrushSize}
+                        onChange={(event) =>
+                          setMaskBrushSize(Number(event.target.value))
+                        }
+                        className="w-40 accent-primary"
+                      />
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={clearDrawnMask}
+                        disabled={isEditing}
+                      >
+                        <Eraser className="mr-2 h-4 w-4" />
+                        {copy("Clear mask", "清除蒙版")}
+                      </Button>
+                      {maskFile && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={clearMask}
+                          disabled={isEditing}
+                        >
+                          {copy("Clear saved", "清除已保存")}
+                        </Button>
+                      )}
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => void saveDrawnMask()}
+                        disabled={isEditing || maskPoints.length === 0}
+                      >
+                        <Save className="mr-2 h-4 w-4" />
+                        {copy("Save mask", "保存蒙版")}
+                      </Button>
+                    </div>
+                  </div>
+                  {maskFile && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        {copy("Saved mask", "已保存蒙版")}
+                      </p>
+                      <div className="relative aspect-video w-44 overflow-hidden rounded-md border bg-muted">
+                        <Image
+                          src={maskFile.previewUrl}
+                          alt={copy("Mask preview", "蒙版预览")}
+                          fill
+                          sizes="176px"
+                          className="object-contain"
+                          unoptimized
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
             <div className="relative xl:col-start-1">
               {renderReferenceMentionMenu({
                 open: Boolean(editMention?.open) && canUseEditReferenceMentions,
@@ -7611,242 +7857,7 @@ export function CreatePageClient({
             <p className="text-xs leading-snug text-muted-foreground xl:col-start-1">
               {editReferenceMentionStatusText}
             </p>
-            <div className="space-y-4 rounded-lg border border-border bg-background p-4 xl:col-start-1">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <span className="text-sm font-medium text-foreground">
-                    {copy("Source images", "源图片")}
-                  </span>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {copy(
-                      `Upload PNG, JPEG, or WebP. Up to ${maxEditImages} images, ${formatMegabytes(maxEditRequestBytes)} total.`,
-                      `上传 PNG、JPEG 或 WebP，最多 ${maxEditImages} 张，总大小不超过 ${formatMegabytes(maxEditRequestBytes)}。`
-                    )}
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => imageInputRef.current?.click()}
-                  disabled={isEditing || editImages.length >= maxEditImages}
-                >
-                  <Upload className="mr-2 h-4 w-4" />
-                  {copy("Upload images", "上传图片")}
-                </Button>
-                {editImages.length > 0 && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={clearEditImages}
-                    disabled={isEditing}
-                  >
-                    {copy("Clear all", "全部清除")}
-                  </Button>
-                )}
-                <input
-                  ref={imageInputRef}
-                  type="file"
-                  multiple
-                  accept={IMAGE_ACCEPT}
-                  className="sr-only"
-                  onChange={(e) => {
-                    addImages(e.target.files);
-                    e.target.value = "";
-                  }}
-                />
-              </div>
-
-              {editImages.length > 0 && (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 md:grid-cols-6">
-                  {editImages.map((item, index) => (
-                    <div
-                      key={`${item.file.name}-${item.previewUrl}`}
-                      className="group relative aspect-square overflow-hidden rounded-md border bg-muted"
-                    >
-                      <span className="absolute left-1 top-1 z-10 rounded bg-background/90 px-1.5 py-0.5 text-[10px] font-medium text-foreground shadow-sm">
-                        {index + 1}
-                      </span>
-                      <Image
-                        src={item.previewUrl}
-                        alt={
-                          item.file.name ||
-                          copy(
-                            `Source image ${index + 1}`,
-                            `源图片 ${index + 1}`
-                          )
-                        }
-                        fill
-                        sizes="160px"
-                        className="object-cover"
-                        unoptimized
-                      />
-                      <Button
-                        type="button"
-                        variant="destructive"
-                        size="icon-xs"
-                        className="absolute right-1 top-1 opacity-95"
-                        onClick={() => removeImage(index)}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
             <div className="grid gap-4 xl:contents">
-              <div className="space-y-4 rounded-lg border border-border bg-background p-4 xl:col-start-1">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <span className="text-sm font-medium text-foreground">
-                      {copy("Optional mask", "可选蒙版")}
-                    </span>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {copy(
-                        "Draw on the first source image or upload a PNG mask. Transparent areas are edited.",
-                        "在第一张源图上绘制，或上传 PNG 蒙版。透明区域会被编辑。"
-                      )}
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setMaskEditorOpen((value) => !value)}
-                      disabled={isEditing || !firstImageSize}
-                    >
-                      <Brush className="mr-2 h-4 w-4" />
-                      {maskEditorOpen
-                        ? copy("Close editor", "关闭编辑器")
-                        : copy("Draw mask", "绘制蒙版")}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => maskInputRef.current?.click()}
-                      disabled={isEditing || !firstImageSize}
-                    >
-                      <Upload className="mr-2 h-4 w-4" />
-                      {copy("Upload mask", "上传蒙版")}
-                    </Button>
-                    {maskFile && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        onClick={clearMask}
-                        disabled={isEditing}
-                      >
-                        {copy("Clear", "清除")}
-                      </Button>
-                    )}
-                  </div>
-                  <input
-                    ref={maskInputRef}
-                    type="file"
-                    accept="image/png"
-                    className="sr-only"
-                    onChange={(e) => {
-                      setMask(e.target.files);
-                      e.target.value = "";
-                    }}
-                  />
-                </div>
-                {maskEditorOpen && firstPreviewUrl && firstImageSize && (
-                  <div className="space-y-3 rounded-md border border-border bg-muted/20 p-3">
-                    <div
-                      className="relative mx-auto w-full max-w-2xl overflow-hidden rounded-md border bg-muted"
-                      style={{
-                        aspectRatio: `${firstImageSize.width} / ${firstImageSize.height}`,
-                      }}
-                    >
-                      <Image
-                        src={firstPreviewUrl}
-                        alt={copy(
-                          "Source image for mask editing",
-                          "用于蒙版编辑的源图片"
-                        )}
-                        fill
-                        sizes="(max-width: 1024px) 100vw, 640px"
-                        className="object-contain"
-                        unoptimized
-                      />
-                      <canvas
-                        ref={maskCanvasRef}
-                        width={firstImageSize.width}
-                        height={firstImageSize.height}
-                        className="absolute inset-0 h-full w-full cursor-crosshair touch-none"
-                        onMouseDown={startMaskDrawing}
-                        onMouseMove={drawMaskLine}
-                        onMouseUp={stopMaskDrawing}
-                        onMouseLeave={stopMaskDrawing}
-                        onTouchStart={startMaskDrawing}
-                        onTouchMove={drawMaskLine}
-                        onTouchEnd={stopMaskDrawing}
-                      />
-                    </div>
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <label
-                        htmlFor="mask-brush-size"
-                        className="flex items-center gap-2 text-xs font-medium text-muted-foreground"
-                      >
-                        {copy("Brush", "画笔")} {maskBrushSize}px
-                        <input
-                          id="mask-brush-size"
-                          type="range"
-                          min={4}
-                          max={128}
-                          step={1}
-                          value={maskBrushSize}
-                          onChange={(event) =>
-                            setMaskBrushSize(Number(event.target.value))
-                          }
-                          className="w-40 accent-primary"
-                        />
-                      </label>
-                      <div className="flex gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={clearDrawnMask}
-                          disabled={isEditing}
-                        >
-                          <Eraser className="mr-2 h-4 w-4" />
-                          {copy("Clear mask", "清除蒙版")}
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          onClick={saveDrawnMask}
-                          disabled={isEditing || maskPoints.length === 0}
-                        >
-                          <Save className="mr-2 h-4 w-4" />
-                          {copy("Save mask", "保存蒙版")}
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {maskFile && (
-                  <div className="space-y-2">
-                    <p className="text-xs font-medium text-muted-foreground">
-                      {copy("Saved mask", "已保存蒙版")}
-                    </p>
-                    <div className="relative aspect-video w-44 overflow-hidden rounded-md border bg-muted">
-                      <Image
-                        src={maskFile.previewUrl}
-                        alt={copy("Mask preview", "蒙版预览")}
-                        fill
-                        sizes="176px"
-                        className="object-contain"
-                        unoptimized
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-
               <div className="space-y-4 rounded-lg border border-border bg-background p-4 shadow-sm xl:sticky xl:top-6 xl:col-start-2 xl:row-start-1">
                 <div className="border-b border-border pb-3">
                   <h2 className="text-sm font-semibold text-foreground">
