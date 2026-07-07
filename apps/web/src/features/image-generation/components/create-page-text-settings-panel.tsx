@@ -25,6 +25,7 @@ import type { TextGenerationMode } from "./create-page-types";
  * @param props.mode 文生图子模式。
  * @param props.modeBusy 当前子模式是否生成中。
  * @param props.copy 中英文文案选择器。
+ * @param props.actionButton 固定在参数栏底部的提交按钮。
  * @returns 文生图参数面板。
  * @sideEffects 用户修改控件时通过回调更新父组件状态。
  * @failureMode 尺寸非法时展示父组件传入的校验消息。
@@ -60,6 +61,7 @@ export function CreatePageTextSettingsPanel({
   qualityDisabled,
   outputDisabled,
   backgroundDisabled,
+  actionButton,
 }: {
   mode: TextGenerationMode;
   modeBusy: boolean;
@@ -104,11 +106,12 @@ export function CreatePageTextSettingsPanel({
   qualityDisabled: boolean;
   outputDisabled: boolean;
   backgroundDisabled: boolean;
+  actionButton: ReactNode;
 }) {
   const isLineMode = mode === "lines";
 
   return (
-    <div className="space-y-4 rounded-lg border border-border bg-background p-4 shadow-sm lg:sticky lg:top-6">
+    <div className="space-y-4 rounded-lg border border-border bg-background p-4 shadow-sm">
       <div className="space-y-4">
         <div className="border-b border-border pb-3">
           <h2 className="text-sm font-semibold text-foreground">
@@ -230,6 +233,9 @@ export function CreatePageTextSettingsPanel({
           {validationMessage(sizeCheckMessage)}
         </p>
       )}
+      <div className="sticky bottom-0 -mx-4 -mb-4 border-t border-border bg-background/95 p-4 backdrop-blur">
+        {actionButton}
+      </div>
     </div>
   );
 }

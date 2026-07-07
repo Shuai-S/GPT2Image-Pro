@@ -32,6 +32,7 @@ type EditSourceImagesPanelProps = {
   onAddImages: (files: FileList | null) => void;
   onClearEditImages: () => void;
   onOpenMaskEditorForImage: (index: number) => void;
+  onCloseMaskEditor: () => void;
   onRemoveImage: (index: number) => void;
   onStartMaskDrawing: (
     event:
@@ -77,6 +78,7 @@ export function EditSourceImagesPanel({
   onAddImages,
   onClearEditImages,
   onOpenMaskEditorForImage,
+  onCloseMaskEditor,
   onRemoveImage,
   onStartMaskDrawing,
   onDrawMaskLine,
@@ -153,7 +155,13 @@ export function EditSourceImagesPanel({
                   className="absolute inset-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed"
                   title={copy("Edit mask on this image", "编辑这张图的蒙版")}
                   disabled={isEditing}
-                  onClick={() => onOpenMaskEditorForImage(index)}
+                  onClick={() => {
+                    if (isMaskSource) {
+                      onCloseMaskEditor();
+                      return;
+                    }
+                    onOpenMaskEditorForImage(index);
+                  }}
                 >
                   <span className="absolute left-1 top-1 z-10 rounded bg-background/90 px-1.5 py-0.5 text-[10px] font-medium text-foreground shadow-sm">
                     {index + 1}
@@ -196,6 +204,32 @@ export function EditSourceImagesPanel({
 
       {maskEditorOpen && maskSourcePreviewUrl && maskSourceImageSize && (
         <div className="space-y-3 rounded-md border border-border bg-muted/20 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-foreground">
+                {copy(
+                  `Editing mask on image ${maskSourceDisplayIndex + 1}`,
+                  `正在编辑第 ${maskSourceDisplayIndex + 1} 张图的蒙版`
+                )}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {copy(
+                  "Click the same thumbnail again or close this editor when finished.",
+                  "再次点击同一缩略图或关闭编辑器即可收起蒙版。"
+                )}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={onCloseMaskEditor}
+              disabled={isEditing}
+              aria-label={copy("Close mask editor", "关闭蒙版编辑器")}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
           <div
             className="relative mx-auto w-full max-w-2xl overflow-hidden rounded-md border bg-muted"
             style={{

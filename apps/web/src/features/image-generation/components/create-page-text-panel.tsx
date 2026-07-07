@@ -32,7 +32,7 @@ import type {
  * @param props.onSingleSubmit 单提示词提交回调。
  * @param props.onLinesSubmit 逐行批量提交回调。
  * @param props.renderVisualOutput 输出预览区渲染器。
- * @param props.renderSettingsPanel 参数面板渲染器。
+ * @param props.renderSettingsPanel 参数面板渲染器,接收底部提交按钮。
  * @returns 文生图 tab 内容。
  * @sideEffects 用户输入和提交通过回调交给父组件。
  * @failureMode 禁用状态由父组件控制,本组件不直接校验生成参数。
@@ -72,7 +72,10 @@ export function CreatePageTextPanel({
   onSingleSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onLinesSubmit: (event: FormEvent<HTMLFormElement>) => void;
   renderVisualOutput: (mode: VisualOutputMode) => ReactNode;
-  renderSettingsPanel: (mode: TextGenerationMode) => ReactNode;
+  renderSettingsPanel: (
+    mode: TextGenerationMode,
+    actionButton: ReactNode
+  ) => ReactNode;
 }) {
   return (
     <div
@@ -107,25 +110,27 @@ export function CreatePageTextPanel({
               />
               <TextModeTabs copy={copy} />
             </div>
-            <aside className="space-y-4 xl:col-start-2 xl:row-start-1">
-              {renderSettingsPanel("single")}
-              <Button
-                type="submit"
-                disabled={isTextSingleGenerating || !prompt.trim()}
-                className="w-full"
-              >
-                {isTextSingleGenerating ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    {copy("Generating", "生成中")}
-                  </>
-                ) : (
-                  <>
-                    <ImagePlus className="mr-2 h-4 w-4" />
-                    {copy("Generate", "生成")}
-                  </>
-                )}
-              </Button>
+            <aside className="xl:sticky xl:top-6 xl:col-start-2 xl:row-start-1">
+              {renderSettingsPanel(
+                "single",
+                <Button
+                  type="submit"
+                  disabled={isTextSingleGenerating || !prompt.trim()}
+                  className="w-full"
+                >
+                  {isTextSingleGenerating ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      {copy("Generating", "生成中")}
+                    </>
+                  ) : (
+                    <>
+                      <ImagePlus className="mr-2 h-4 w-4" />
+                      {copy("Generate", "生成")}
+                    </>
+                  )}
+                </Button>
+              )}
             </aside>
           </form>
         </div>
@@ -168,25 +173,27 @@ export function CreatePageTextPanel({
                 </span>
               </div>
             </div>
-            <aside className="space-y-4 xl:col-start-2 xl:row-start-1">
-              {renderSettingsPanel("lines")}
-              <Button
-                type="submit"
-                disabled={isTextLinesGenerating || linePromptCount === 0}
-                className="w-full"
-              >
-                {isTextLinesGenerating ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    {copy("Generating", "生成中")}
-                  </>
-                ) : (
-                  <>
-                    <ImagePlus className="mr-2 h-4 w-4" />
-                    {copy("Generate line batch", "生成逐行批量")}
-                  </>
-                )}
-              </Button>
+            <aside className="xl:sticky xl:top-6 xl:col-start-2 xl:row-start-1">
+              {renderSettingsPanel(
+                "lines",
+                <Button
+                  type="submit"
+                  disabled={isTextLinesGenerating || linePromptCount === 0}
+                  className="w-full"
+                >
+                  {isTextLinesGenerating ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      {copy("Generating", "生成中")}
+                    </>
+                  ) : (
+                    <>
+                      <ImagePlus className="mr-2 h-4 w-4" />
+                      {copy("Generate line batch", "生成逐行批量")}
+                    </>
+                  )}
+                </Button>
+              )}
             </aside>
           </form>
         </div>

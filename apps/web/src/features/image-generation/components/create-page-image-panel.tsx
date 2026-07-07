@@ -81,6 +81,7 @@ export function CreatePageImagePanel({
   onAddImages,
   onClearEditImages,
   onOpenMaskEditorForImage,
+  onCloseMaskEditor,
   onRemoveImage,
   onStartMaskDrawing,
   onDrawMaskLine,
@@ -174,6 +175,7 @@ export function CreatePageImagePanel({
   onAddImages: (files: FileList | File[] | null) => void;
   onClearEditImages: () => void;
   onOpenMaskEditorForImage: (index: number) => void;
+  onCloseMaskEditor: () => void;
   onRemoveImage: (index: number) => void;
   onStartMaskDrawing: (
     event: MouseEvent<HTMLCanvasElement> | TouchEvent<HTMLCanvasElement>
@@ -257,6 +259,7 @@ export function CreatePageImagePanel({
           onAddImages={onAddImages}
           onClearEditImages={onClearEditImages}
           onOpenMaskEditorForImage={onOpenMaskEditorForImage}
+          onCloseMaskEditor={onCloseMaskEditor}
           onRemoveImage={onRemoveImage}
           onStartMaskDrawing={onStartMaskDrawing}
           onDrawMaskLine={onDrawMaskLine}
@@ -316,196 +319,197 @@ export function CreatePageImagePanel({
         <p className="text-xs leading-snug text-muted-foreground xl:col-start-1">
           {editReferenceMentionStatusText}
         </p>
-        <div className="grid gap-4 xl:contents">
-          <div className="space-y-4 rounded-lg border border-border bg-background p-4 shadow-sm xl:sticky xl:top-6 xl:col-start-2 xl:row-start-1">
-            <div className="border-b border-border pb-3">
-              <h2 className="text-sm font-semibold text-foreground">
-                {copy("Parameters", "参数")}
-              </h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {copy(
-                  "Reference, size, output, and billing for this edit.",
-                  "本次改图的参考、尺寸、输出与费用。"
-                )}
-              </p>
-            </div>
-            {renderBackendGroupSelect({
-              id: "edit-backend-group",
-              disabled: isEditing,
-            })}
-            {showImageModelControls && (
+        <aside className="space-y-4 rounded-lg border border-border bg-background p-4 shadow-sm xl:sticky xl:top-6 xl:col-start-2 xl:row-start-1">
+          <div className="space-y-4">
+            <div className="space-y-4">
+              <div className="border-b border-border pb-3">
+                <h2 className="text-sm font-semibold text-foreground">
+                  {copy("Parameters", "参数")}
+                </h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {copy(
+                    "Reference, size, output, and billing for this edit.",
+                    "本次改图的参考、尺寸、输出与费用。"
+                  )}
+                </p>
+              </div>
+              {renderBackendGroupSelect({
+                id: "edit-backend-group",
+                disabled: isEditing,
+              })}
+              {showImageModelControls && (
+                <div className="space-y-2">
+                  <label
+                    htmlFor="edit-model"
+                    className="text-sm font-medium text-foreground"
+                  >
+                    {labelWithHelp(
+                      copy("Image model", "图片模型"),
+                      imageModelHelpText
+                    )}
+                  </label>
+                  <Select
+                    value={editModel}
+                    onValueChange={onEditModelChange}
+                    disabled={isEditing}
+                  >
+                    <SelectTrigger
+                      id="edit-model"
+                      className="w-full"
+                      title={imageModelHelpText}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editModelOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {editModelLabel(option.label)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {renderAdvancedImageSettings({
+                idPrefix: "edit",
+                promptDisabled: isEditing,
+                repairDisabled: isEditing,
+                hideResponseControls,
+                qualityDisabled,
+                outputDisabled,
+                backgroundDisabled,
+              })}
+
               <div className="space-y-2">
                 <label
-                  htmlFor="edit-model"
+                  htmlFor="edit-batch-count"
                   className="text-sm font-medium text-foreground"
                 >
-                  {labelWithHelp(
-                    copy("Image model", "图片模型"),
-                    imageModelHelpText
-                  )}
+                  {copy("Batch", "批量")}
                 </label>
-                <Select
-                  value={editModel}
-                  onValueChange={onEditModelChange}
+                <ConcurrencyNumberInput
+                  id="edit-batch-count"
+                  value={editBatchCount}
+                  max={batchCountMax}
                   disabled={isEditing}
-                >
-                  <SelectTrigger
-                    id="edit-model"
-                    className="w-full"
-                    title={imageModelHelpText}
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {editModelOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {editModelLabel(option.label)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            {renderAdvancedImageSettings({
-              idPrefix: "edit",
-              promptDisabled: isEditing,
-              repairDisabled: isEditing,
-              hideResponseControls,
-              qualityDisabled,
-              outputDisabled,
-              backgroundDisabled,
-            })}
-
-            <div className="space-y-2">
-              <label
-                htmlFor="edit-batch-count"
-                className="text-sm font-medium text-foreground"
-              >
-                {copy("Batch", "批量")}
-              </label>
-              <ConcurrencyNumberInput
-                id="edit-batch-count"
-                value={editBatchCount}
-                max={batchCountMax}
-                disabled={isEditing}
-                onChange={onEditBatchCountChange}
-              />
-            </div>
-
-            <div className="space-y-3 rounded-md bg-muted/40 p-3">
-              <label
-                htmlFor="edit-use-source-size"
-                className="flex cursor-pointer items-start gap-2 text-sm font-medium text-foreground"
-              >
-                <Checkbox
-                  id="edit-use-source-size"
-                  checked={useEditFirstImageSize}
-                  onCheckedChange={(checked) => {
-                    onUseEditFirstImageSizeChange(checked === true);
-                    if (checked === true) onUseAutoEditSizeChange(false);
-                  }}
-                  disabled={isEditing}
-                  className="mt-0.5"
+                  onChange={onEditBatchCountChange}
                 />
-                <span>
-                  {copy("Use first image resolution", "使用第一张图片分辨率")}
-                  <span className="mt-1 block text-xs font-normal text-muted-foreground">
-                    {copy(
-                      "Default for edits. If the reference dimensions are not supported as an output size, the request is rounded to the nearest valid size. Turn off for outpainting or canvas extension.",
-                      "编辑默认使用该尺寸；如果参考图尺寸不能作为输出尺寸，请求会贴近到合法尺寸。扩图或扩展画布时可关闭。"
-                    )}
-                  </span>
-                </span>
-              </label>
+              </div>
 
-              <div className="space-y-3 border-t border-border pt-3">
+              <div className="space-y-3 rounded-md bg-muted/40 p-3">
                 <label
-                  htmlFor="edit-resolution"
-                  className="text-sm font-medium text-foreground"
+                  htmlFor="edit-use-source-size"
+                  className="flex cursor-pointer items-start gap-2 text-sm font-medium text-foreground"
                 >
+                  <Checkbox
+                    id="edit-use-source-size"
+                    checked={useEditFirstImageSize}
+                    onCheckedChange={(checked) => {
+                      onUseEditFirstImageSizeChange(checked === true);
+                      if (checked === true) onUseAutoEditSizeChange(false);
+                    }}
+                    disabled={isEditing}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    {copy("Use first image resolution", "使用第一张图片分辨率")}
+                    <span className="mt-1 block text-xs font-normal text-muted-foreground">
+                      {copy(
+                        "Default for edits. If the reference dimensions are not supported as an output size, the request is rounded to the nearest valid size. Turn off for outpainting or canvas extension.",
+                        "编辑默认使用该尺寸；如果参考图尺寸不能作为输出尺寸，请求会贴近到合法尺寸。扩图或扩展画布时可关闭。"
+                      )}
+                    </span>
+                  </span>
+                </label>
+
+                <div className="space-y-3 border-t border-border pt-3">
+                  <label
+                    htmlFor="edit-resolution"
+                    className="text-sm font-medium text-foreground"
+                  >
+                    {labelWithHelp(
+                      copy("Resolution", "分辨率"),
+                      resolutionHelpText
+                    )}
+                  </label>
+                  <InlineImageSizeControl
+                    id="edit-resolution"
+                    value={editResolutionControlValue}
+                    disabled={isEditing}
+                    copy={copy}
+                    onChange={onEditResolutionChange}
+                  />
+                  {useEditFirstImageSize && (
+                    <p className="text-xs leading-snug text-muted-foreground">
+                      {copy(
+                        "Editing the resolution switches to custom output size.",
+                        "修改分辨率会切换为自定义输出尺寸。"
+                      )}
+                    </p>
+                  )}
+                  {!useEditFirstImageSize && !customEditSizeCheckValid && (
+                    <p className="text-xs text-destructive">
+                      {validationMessage(customEditSizeCheckMessage)}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
+                <p>
                   {labelWithHelp(
-                    copy("Resolution", "分辨率"),
+                    copy("Output size", "输出尺寸"),
                     resolutionHelpText
                   )}
-                </label>
-                <InlineImageSizeControl
-                  id="edit-resolution"
-                  value={editResolutionControlValue}
-                  disabled={isEditing}
-                  copy={copy}
-                  onChange={onEditResolutionChange}
-                />
-                {useEditFirstImageSize && (
-                  <p className="text-xs leading-snug text-muted-foreground">
-                    {copy(
-                      "Editing the resolution switches to custom output size.",
-                      "修改分辨率会切换为自定义输出尺寸。"
-                    )}
-                  </p>
+                  :{" "}
+                  <span className="font-medium text-foreground">
+                    {editDisplaySize}
+                  </span>
+                </p>
+                {editReferenceSizeNote && (
+                  <p className="mt-1">{editReferenceSizeNote}</p>
                 )}
-                {!useEditFirstImageSize && !customEditSizeCheckValid && (
-                  <p className="text-xs text-destructive">
-                    {validationMessage(customEditSizeCheckMessage)}
-                  </p>
-                )}
+                <p className="mt-1">
+                  {customApiActive && !editHasImageReference ? (
+                    <span className="font-medium text-foreground">
+                      {customApiBillingLabel}
+                    </span>
+                  ) : (
+                    <>
+                      {copy("Cost", "费用")}:{" "}
+                      <span className="font-medium text-foreground">
+                        {formattedEditBatchCreditCost}
+                      </span>
+                      {batchCostSuffix(editBatchCount)}
+                    </>
+                  )}
+                </p>
               </div>
             </div>
-
-            <div className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
-              <p>
-                {labelWithHelp(
-                  copy("Output size", "输出尺寸"),
-                  resolutionHelpText
-                )}
-                :{" "}
-                <span className="font-medium text-foreground">
-                  {editDisplaySize}
-                </span>
-              </p>
-              {editReferenceSizeNote && (
-                <p className="mt-1">{editReferenceSizeNote}</p>
-              )}
-              <p className="mt-1">
-                {customApiActive && !editHasImageReference ? (
-                  <span className="font-medium text-foreground">
-                    {customApiBillingLabel}
-                  </span>
-                ) : (
-                  <>
-                    {copy("Cost", "费用")}:{" "}
-                    <span className="font-medium text-foreground">
-                      {formattedEditBatchCreditCost}
-                    </span>
-                    {batchCostSuffix(editBatchCount)}
-                  </>
-                )}
-              </p>
-            </div>
           </div>
-        </div>
-
-        <div className="flex justify-end xl:col-start-2">
-          <Button
-            type="submit"
-            disabled={
-              isEditing || !editPrompt.trim() || editImages.length === 0
-            }
-            className="w-full xl:w-full"
-          >
-            {isEditing ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                {copy("Editing", "编辑中")}
-              </>
-            ) : (
-              <>
-                <ImagePlus className="mr-2 h-4 w-4" />
-                {copy("Edit image", "编辑图片")}
-              </>
-            )}
-          </Button>
-        </div>
+          <div className="sticky bottom-0 -mx-4 -mb-4 border-t border-border bg-background/95 p-4 backdrop-blur">
+            <Button
+              type="submit"
+              disabled={
+                isEditing || !editPrompt.trim() || editImages.length === 0
+              }
+              className="w-full"
+            >
+              {isEditing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  {copy("Editing", "编辑中")}
+                </>
+              ) : (
+                <>
+                  <ImagePlus className="mr-2 h-4 w-4" />
+                  {copy("Edit image", "编辑图片")}
+                </>
+              )}
+            </Button>
+          </div>
+        </aside>
       </form>
     </div>
   );

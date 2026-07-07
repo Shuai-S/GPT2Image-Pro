@@ -18,7 +18,7 @@ import { Textarea } from "@repo/ui/components/textarea";
 import { CircleHelp, ImagePlus, Loader2, Send } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useLocale } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { toast } from "sonner";
 import { getImageBatchCountLimit } from "@/features/image-generation/batch-limits";
 import {
@@ -1255,8 +1255,8 @@ export function CreatePageClient({
     );
   const agentBackendUnavailableReason = isWebOnlyBackend
     ? copy(
-        "Agent mode requires Codex/Responses backend. Web backend keeps the original ChatGPT Web route and does not expose Agent tools.",
-        "Agent 模式需要 Codex/Responses 后端。Web 后端保持原 ChatGPT Web 路线，不提供 Agent 工具。"
+        "Agent mode is unavailable for the current backend group.",
+        "当前后端分组暂不支持 Agent 模式。"
       )
     : undefined;
   const effectiveAgentAllowed = agentAllowed && !agentBackendUnavailableReason;
@@ -1449,8 +1449,8 @@ export function CreatePageClient({
           "本次请求包含 @ 引用，将走 Codex/Responses；即使自填 API 或 Mixed Web-first 已开启也不会走这些路线。"
         )
       : copy(
-          "Type @ to choose a source image. Using @ references routes this request to Codex/Responses so the backend can attach the selected image as real input.",
-          "输入 @ 可选择源图片。使用 @ 引用时，本次请求会走 Codex/Responses，以便后端把选中的图片作为真实图片输入。"
+          "Type @ to choose a source image. The selected image will be attached as real input.",
+          "输入 @ 可选择源图片。选中的图片会作为真实图片输入。"
         );
   const chatReferenceMentionStatusText = !canUseChatReferenceMentions
     ? copy(
@@ -1459,12 +1459,12 @@ export function CreatePageClient({
       )
     : chatHasImageReference
       ? copy(
-          "This message contains @ references and will use Codex/Responses, bypassing custom API and Web-first routing. Agent normally carries image context, but @ pins the exact attachment or draft.",
-          "本条消息包含 @ 引用，将走 Codex/Responses，并绕过自填 API 和 Web-first。Agent 通常会带图片上下文，但 @ 会明确钉住指定附件或草稿。"
+          "This message contains @ references. Agent normally carries image context, but @ pins the exact attachment or draft.",
+          "本条消息包含 @ 引用。Agent 通常会带图片上下文，但 @ 会明确钉住指定附件或草稿。"
         )
       : copy(
-          "Type @ to choose current attachments or generated history images. In Mixed groups, @ references bypass Web-first routing and use Codex/Responses. Agent already carries image context, but @ is useful when you need one exact draft or round.",
-          "输入 @ 可选择当前附件或历史生成图。Mixed 分组中，使用 @ 引用会跳过 Web-first 并走 Codex/Responses。Agent 默认会带图片上下文，但 @ 适合在多图、多轮草稿中明确指定某一张。"
+          "Type @ to choose current attachments or generated history images. Agent already carries image context, but @ is useful when you need one exact draft or round.",
+          "输入 @ 可选择当前附件或历史生成图。Agent 默认会带图片上下文，但 @ 适合在多图、多轮草稿中明确指定某一张。"
         );
   const customApiBillingLabel = copy(
     "Custom API active, no site credits",
@@ -3842,8 +3842,8 @@ export function CreatePageClient({
         ),
         {
           description: copy(
-            "Use Chat or Agent with Codex/Responses to reference a specific image.",
-            "请在 Chat 或 Agent 中使用 Codex/Responses 精确引用指定图片。"
+            "Use Chat or Agent to reference a specific image.",
+            "请在 Chat 或 Agent 中精确引用指定图片。"
           ),
         }
       );
@@ -5036,6 +5036,21 @@ export function CreatePageClient({
     if (isEditing) return;
     setMaskSourceIndex(index);
     setMaskEditorOpen(true);
+    // 重新打开画板时 canvas 会重新挂载,克隆点位触发重绘以保留未保存笔迹。
+    setMaskPoints((prev) => [...prev]);
+  };
+
+  /**
+   * 收起当前蒙版画板,保留已绘制点位和已保存蒙版供后续提交使用。
+   *
+   * @returns 无返回值。
+   * @sideEffects 终止当前绘制手势并关闭蒙版编辑 UI。
+   * @failureMode 生成中时不允许关闭,避免提交过程中的状态抖动。
+   */
+  const closeMaskEditor = () => {
+    if (isEditing) return;
+    stopMaskDrawing();
+    setMaskEditorOpen(false);
   };
 
   const applyResultAsReference = async (sourceResult = result) => {
@@ -5187,7 +5202,10 @@ export function CreatePageClient({
       )[0] ??
     null;
 
-  const textSettingsPanel = (mode: TextGenerationMode) => {
+  const textSettingsPanel = (
+    mode: TextGenerationMode,
+    actionButton: ReactNode
+  ) => {
     const isLineMode = mode === "lines";
     const modeBusy = isLineMode
       ? isTextLinesGenerating
@@ -5252,6 +5270,7 @@ export function CreatePageClient({
           modeBusy || disableResponsesOnlyControls || textFireflyActive
         }
         backgroundDisabled={modeBusy || disableResponsesOnlyControls}
+        actionButton={actionButton}
       />
     );
   };
@@ -5344,6 +5363,7 @@ export function CreatePageClient({
           onAddImages={addImages}
           onClearEditImages={clearEditImages}
           onOpenMaskEditorForImage={openMaskEditorForImage}
+          onCloseMaskEditor={closeMaskEditor}
           onRemoveImage={removeImage}
           onStartMaskDrawing={startMaskDrawing}
           onDrawMaskLine={drawMaskLine}
