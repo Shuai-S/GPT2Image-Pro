@@ -1446,6 +1446,45 @@ export async function releaseImageBackendInflightLease(input: {
   }
 }
 
+/**
+ * 为已持有的持久化并发租约续期。
+ *
+ * @param input 当前池成员与租约标识；缺少持久租约时无副作用。
+ * @returns 无返回值；续期失败只记录日志，不中断正在执行的生图请求。
+ */
+export async function renewImageBackendInflightLease(input: {
+  memberType?: "api" | "account" | "adobe";
+  memberId?: string;
+  leaseId?: string | null;
+  leasePersisted?: boolean | null;
+}) {
+  if (!input.memberType || !input.memberId) return;
+  if (!input.leaseId || input.leasePersisted !== true) return;
+  const now = new Date();
+  const expiresAt = new Date(
+    now.getTime() + IMAGE_BACKEND_INFLIGHT_LEASE_TTL_MS
+  );
+  try {
+    await db
+      .update(imageBackendInflightLease)
+      .set({ expiresAt })
+      .where(
+        and(
+          eq(imageBackendInflightLease.id, input.leaseId),
+          eq(imageBackendInflightLease.memberType, input.memberType),
+          eq(imageBackendInflightLease.memberId, input.memberId)
+        )
+      );
+  } catch (error) {
+    logWarn("生图后端并发租约续期失败", {
+      memberType: input.memberType,
+      memberId: input.memberId,
+      leaseId: input.leaseId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 function isRecoverableBackendError(error?: string | null) {
   const normalized = (error || "").toLowerCase();
   return (

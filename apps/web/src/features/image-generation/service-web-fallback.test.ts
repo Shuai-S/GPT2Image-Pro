@@ -21,6 +21,7 @@ const backendPoolMock = vi.hoisted(() => {
     bindImageBackendStickyMember: vi.fn(async () => undefined),
     releaseImageBackendInflight: vi.fn(),
     releaseImageBackendInflightLease: vi.fn(async () => undefined),
+    renewImageBackendInflightLease: vi.fn(async () => undefined),
     recordImageBackendSchedulerSwitch: vi.fn(async () => undefined),
     isImageBackendSwitchableError: vi.fn((error?: string | null) =>
       (error || "").includes("terminated")
@@ -46,6 +47,7 @@ vi.mock("./chatgpt-web", () => ({
 describe("image service Web-first fallback", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.useRealTimers();
     vi.clearAllMocks();
   });
 
@@ -367,6 +369,70 @@ describe("image service Web-first fallback", () => {
     expect(backendPoolMock.resolveImageBackendPoolConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         excludedMemberKeys: ["api:api-1"],
+      })
+    );
+  });
+
+  it("renews persisted pool leases while a generation is still running", async () => {
+    process.env.DATABASE_URL =
+      process.env.DATABASE_URL || "postgresql://test:test@127.0.0.1:5432/test";
+    vi.useFakeTimers();
+    const { generateImage } = await import("./service");
+    const imageBase64 = Buffer.from("slow-api-image").toString("base64");
+    const fetchMock = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 61_000));
+      return new Response(
+        JSON.stringify({ data: [{ b64_json: imageBase64 }] }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resultPromise = generateImage(
+      {
+        baseUrl: "https://api-lease.example.test/v1",
+        apiKey: "api-key-lease",
+        model: "gpt-image-2",
+        backend: {
+          type: "pool-api",
+          id: "api-lease",
+          groupId: "group-1",
+          userId: "user-1",
+          requestKind: "image_generation",
+          reportResult: true,
+          inflightLease: true,
+          inflightLeaseId: "lease-1",
+          inflightLeasePersisted: true,
+        },
+      },
+      {
+        prompt: "make an icon",
+        model: "gpt-image-2",
+        size: "1024x1024",
+      }
+    );
+
+    await vi.advanceTimersByTimeAsync(61_000);
+    const result = await resultPromise;
+
+    expect(result.imageBase64).toBe(imageBase64);
+    expect(backendPoolMock.renewImageBackendInflightLease).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memberType: "api",
+        memberId: "api-lease",
+        leaseId: "lease-1",
+        leasePersisted: true,
+      })
+    );
+    expect(backendPoolMock.releaseImageBackendInflightLease).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memberType: "api",
+        memberId: "api-lease",
+        leaseId: "lease-1",
+        leasePersisted: true,
       })
     );
   });

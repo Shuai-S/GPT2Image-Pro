@@ -32,6 +32,7 @@ import {
   releaseImageBackendInflightLease,
   reportImageBackendResult,
   resolveImageBackendPoolConfig,
+  renewImageBackendInflightLease,
 } from "@/features/image-backend-pool/service";
 import type {
   ImageBackendAccountBackend,
@@ -1142,6 +1143,7 @@ async function fetchResponsesWithPreviousResponseFallback(
 // 未知(未被任何分类记录)错误允许的最大切换次数：这类错误疑似平台问题，给
 // 有限次换后端机会兜底新形态错误，同时防止真终态错误在大池子里无限放大。
 const MAX_UNCLASSIFIED_ERROR_SWITCHES = 3;
+const IMAGE_BACKEND_LEASE_RENEW_INTERVAL_MS = 60_000;
 
 // 将 API 后端的“失败切换次数上限”收窄为非负整数；null 表示不限制。
 function normalizePoolApiRetrySwitchLimit(value: unknown): number | null {
@@ -1157,6 +1159,43 @@ function isAdobeRoutedBackend(backend: ApiConfig["backend"]): boolean {
     backend.type === "pool-adobe" ||
     (backend.type === "pool-api" && backend.adobeSourced === true)
   );
+}
+
+/**
+ * 在长耗时生图执行期间为 DB 并发租约做心跳续期。
+ *
+ * @param backend 当前执行的池后端配置。
+ * @returns 停止续期的清理函数；无持久租约时返回空清理函数。
+ */
+function startPoolBackendLeaseRenewal(backend: ApiConfig["backend"]) {
+  if (
+    !backend?.inflightLease ||
+    !backend.inflightLeaseId ||
+    backend.inflightLeasePersisted !== true ||
+    (backend.type !== "pool-api" &&
+      backend.type !== "pool-account" &&
+      backend.type !== "pool-adobe")
+  ) {
+    return () => undefined;
+  }
+  const input = {
+    memberType: poolBackendMemberType(backend.type),
+    memberId: backend.id,
+    leaseId: backend.inflightLeaseId,
+    leasePersisted: backend.inflightLeasePersisted,
+  };
+  const timer = setInterval(() => {
+    void renewImageBackendInflightLease(input);
+  }, IMAGE_BACKEND_LEASE_RENEW_INTERVAL_MS);
+  if (
+    typeof timer === "object" &&
+    timer !== null &&
+    "unref" in timer &&
+    typeof timer.unref === "function"
+  ) {
+    timer.unref();
+  }
+  return () => clearInterval(timer);
 }
 
 async function retryPoolBackendResult(
@@ -1251,9 +1290,13 @@ async function retryPoolBackendResult(
         memberId: currentBackend.id,
       });
     }
+    const stopLeaseRenewal = hasPoolBackend
+      ? startPoolBackendLeaseRenewal(currentBackend)
+      : () => undefined;
     try {
       result = await run(withoutPoolBackendReport(candidate));
     } finally {
+      stopLeaseRenewal();
       if (hasPoolBackend) {
         await releaseImageBackendInflightLease({
           memberType: poolBackendMemberType(currentBackend.type),
