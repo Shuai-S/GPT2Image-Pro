@@ -183,6 +183,7 @@ type Api = {
   isEnabled: boolean;
   alwaysActive: boolean;
   failureCooldownEnabled: boolean;
+  retrySwitchLimit: number | null;
   priority: number;
   concurrency: number;
   adobeSourced: boolean;
@@ -923,6 +924,7 @@ export function ImageBackendPoolAdminPanel({
     isEnabled: true,
     alwaysActive: false,
     failureCooldownEnabled: false,
+    retrySwitchLimit: "",
     priority: 50,
     concurrency: 10,
     // Adobe 来源：上游实为 Adobe 的 gpt 格式 api（计费吃成员倍率 + 进 firefly 候选）。
@@ -1241,6 +1243,7 @@ export function ImageBackendPoolAdminPanel({
       isEnabled: true,
       alwaysActive: false,
       failureCooldownEnabled: false,
+      retrySwitchLimit: "",
       priority: 50,
       concurrency: 10,
       adobeSourced: false,
@@ -1395,6 +1398,10 @@ export function ImageBackendPoolAdminPanel({
       isEnabled: api.isEnabled,
       alwaysActive: api.alwaysActive,
       failureCooldownEnabled: api.failureCooldownEnabled,
+      retrySwitchLimit:
+        api.retrySwitchLimit === null || api.retrySwitchLimit === undefined
+          ? ""
+          : String(api.retrySwitchLimit),
       priority: api.priority,
       concurrency: api.concurrency,
       adobeSourced: api.adobeSourced ?? false,
@@ -4099,6 +4106,26 @@ export function ImageBackendPoolAdminPanel({
                     }
                   />
                 </div>
+                <div className="space-y-1.5 rounded-md border p-3">
+                  <Label>API 后端失败切换次数上限</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={1000}
+                    placeholder="留空表示不限制"
+                    value={apiForm.retrySwitchLimit}
+                    onChange={(event) =>
+                      setApiForm((current) => ({
+                        ...current,
+                        retrySwitchLimit: event.target.value,
+                      }))
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    该 API 作为首个命中渠道时，失败后最多切换多少个其它后端。
+                    留空沿用旧行为；0 表示该渠道失败即返回，不再换后端。
+                  </p>
+                </div>
                 <div className="flex items-center justify-between gap-4 rounded-md border p-3">
                   <div>
                     <Label>Adobe 来源（按 Adobe 计费 + 进 firefly 调度）</Label>
@@ -4188,6 +4215,10 @@ export function ImageBackendPoolAdminPanel({
                       groupId: apiForm.groupIds[0] || "default",
                       groupIds: apiForm.groupIds,
                       enabledModels: parseModelList(apiForm.enabledModels),
+                      retrySwitchLimit:
+                        apiForm.retrySwitchLimit === ""
+                          ? null
+                          : Number(apiForm.retrySwitchLimit),
                     })
                   }
                   disabled={
@@ -4254,6 +4285,13 @@ export function ImageBackendPoolAdminPanel({
                         {api.alwaysActive && (
                           <Badge variant="outline">遇错常驻</Badge>
                         )}
+                        <Badge variant="outline">
+                          失败切换{" "}
+                          {api.retrySwitchLimit === null ||
+                          api.retrySwitchLimit === undefined
+                            ? "不限"
+                            : api.retrySwitchLimit}
+                        </Badge>
                       </div>
                       <p className="mt-1 text-sm text-muted-foreground">
                         {api.baseUrl} · {groupNames(groups, apiGroupIds(api))} ·{" "}

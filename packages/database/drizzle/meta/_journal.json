@@ -358,6 +358,13 @@
       "when": 1780401260000,
       "tag": "0050_image_backend_api_enabled_models",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1783353600000,
+      "tag": "0051_image_backend_api_retry_switch_limit",
+      "breakpoints": true
     }
   ]
 }

@@ -259,4 +259,115 @@ describe("image service Web-first fallback", () => {
       })
     );
   });
+
+  it("does not switch API backend when retry switch limit is zero", async () => {
+    process.env.DATABASE_URL =
+      process.env.DATABASE_URL || "postgresql://test:test@127.0.0.1:5432/test";
+    const { generateImage } = await import("./service");
+    const fetchMock = vi.fn(async () => {
+      return new Response(JSON.stringify({ error: "rate limited" }), {
+        status: 429,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await generateImage(
+      {
+        baseUrl: "https://api-1.example.test/v1",
+        apiKey: "api-key-1",
+        model: "gpt-image-2",
+        backend: {
+          type: "pool-api",
+          id: "api-1",
+          groupId: "group-1",
+          userId: "user-1",
+          requestKind: "image_generation",
+          retrySwitchLimit: 0,
+          reportResult: true,
+        },
+      },
+      {
+        prompt: "make an icon",
+        model: "gpt-image-2",
+        size: "1024x1024",
+      }
+    );
+
+    expect(result.error).toContain("429");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(backendPoolMock.resolveImageBackendPoolConfig).not.toHaveBeenCalled();
+  });
+
+  it("switches API backend up to configured retry switch limit", async () => {
+    process.env.DATABASE_URL =
+      process.env.DATABASE_URL || "postgresql://test:test@127.0.0.1:5432/test";
+    const { generateImage } = await import("./service");
+    const imageBase64 = Buffer.from("api-retry-image").toString("base64");
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        return new Response(JSON.stringify({ error: "rate limited" }), {
+          status: 429,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(
+        JSON.stringify({ data: [{ b64_json: imageBase64 }] }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    backendPoolMock.resolveImageBackendPoolConfig.mockResolvedValueOnce({
+      config: {
+        baseUrl: "https://api-2.example.test/v1",
+        apiKey: "api-key-2",
+        model: "gpt-image-2",
+        backend: {
+          type: "pool-api",
+          id: "api-2",
+          groupId: "group-1",
+          userId: "user-1",
+          requestKind: "image_generation",
+          reportResult: true,
+        },
+      },
+    });
+
+    const result = await generateImage(
+      {
+        baseUrl: "https://api-1.example.test/v1",
+        apiKey: "api-key-1",
+        model: "gpt-image-2",
+        backend: {
+          type: "pool-api",
+          id: "api-1",
+          groupId: "group-1",
+          userId: "user-1",
+          requestKind: "image_generation",
+          retrySwitchLimit: 1,
+          reportResult: true,
+        },
+      },
+      {
+        prompt: "make an icon",
+        model: "gpt-image-2",
+        size: "1024x1024",
+      }
+    );
+
+    expect(result.imageBase64).toBe(imageBase64);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(backendPoolMock.resolveImageBackendPoolConfig).toHaveBeenCalledTimes(
+      1
+    );
+    expect(backendPoolMock.resolveImageBackendPoolConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        excludedMemberKeys: ["api:api-1"],
+      })
+    );
+  });
 });

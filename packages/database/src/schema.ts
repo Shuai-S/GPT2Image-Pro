@@ -1118,6 +1118,9 @@ export const imageBackendApi = pgTable("image_backend_api", {
   failureCooldownEnabled: boolean("failure_cooldown_enabled")
     .notNull()
     .default(false),
+  // 该 API 作为本次请求首个命中渠道时，失败后最多允许切换其它后端的次数。
+  // null 表示沿用旧行为：只要后端池还有可切换成员就继续尝试；0 表示该渠道失败即返回。
+  retrySwitchLimit: integer("retry_switch_limit"),
   successCount: integer("success_count").notNull().default(0),
   failCount: integer("fail_count").notNull().default(0),
   status: text("status").notNull().default("active"),

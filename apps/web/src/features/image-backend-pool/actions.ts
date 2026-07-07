@@ -568,6 +568,13 @@ export const saveImageBackendApiAction = withImageBackendPoolAdminAction(
       isEnabled: z.boolean().default(true),
       alwaysActive: z.boolean().default(false),
       failureCooldownEnabled: z.boolean().default(false),
+      retrySwitchLimit: z.coerce
+        .number()
+        .int()
+        .min(0)
+        .max(1000)
+        .nullable()
+        .optional(),
       priority: z.coerce.number().int().min(0).max(10000).default(50),
       concurrency: z.coerce.number().int().min(1).max(10000).default(10),
       // Adobe 来源：上游实为 Adobe 的 gpt 格式 api。开启后吃成员倍率并进 firefly 候选。
@@ -595,6 +602,7 @@ export const saveImageBackendApiAction = withImageBackendPoolAdminAction(
       isEnabled: parsedInput.isEnabled,
       alwaysActive: parsedInput.alwaysActive,
       failureCooldownEnabled: parsedInput.failureCooldownEnabled,
+      retrySwitchLimit: parsedInput.retrySwitchLimit ?? null,
       priority: parsedInput.priority,
       concurrency: parsedInput.concurrency,
       adobeSourced: parsedInput.adobeSourced,

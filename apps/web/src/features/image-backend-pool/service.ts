@@ -178,6 +178,7 @@ type PoolMember =
       interfaceMode: ImageBackendApiInterfaceMode;
       chatCompletionsUpstreamMode: ChatCompletionsUpstreamMode;
       imagesUpstreamMode: ImagesUpstreamMode;
+      retrySwitchLimit: number | null;
       useStream: boolean;
       // Adobe 来源：上游实为 Adobe 的 gpt 格式 api。开启后计费套用下方 billingMultiplier
       // （与分组倍率相乘，复用 Adobe 伪账号倍率链），并参与 firefly 候选（含反向转换）。
@@ -2705,6 +2706,7 @@ async function selectPoolMember(
           chatCompletionsUpstreamMode:
             imageBackendApi.chatCompletionsUpstreamMode,
           imageUpstreamMode: imageBackendApi.imageUpstreamMode,
+          retrySwitchLimit: imageBackendApi.retrySwitchLimit,
           useStream: imageBackendApi.useStream,
           adobeSourced: imageBackendApi.adobeSourced,
           billingMultiplier: imageBackendApi.billingMultiplier,
@@ -2744,6 +2746,7 @@ async function selectPoolMember(
           chatCompletionsUpstreamMode:
             imageBackendApi.chatCompletionsUpstreamMode,
           imageUpstreamMode: imageBackendApi.imageUpstreamMode,
+          retrySwitchLimit: imageBackendApi.retrySwitchLimit,
           useStream: imageBackendApi.useStream,
           adobeSourced: imageBackendApi.adobeSourced,
           billingMultiplier: imageBackendApi.billingMultiplier,
@@ -2910,6 +2913,7 @@ async function selectPoolMember(
           row.chatCompletionsUpstreamMode
         ),
         imagesUpstreamMode: normalizeImagesUpstreamMode(row.imageUpstreamMode),
+        retrySwitchLimit: row.retrySwitchLimit,
         useStream: row.useStream,
         adobeSourced: row.adobeSourced,
         billingMultiplier: Number(row.billingMultiplier) || 1,
@@ -3325,6 +3329,7 @@ function toResolvedPoolConfig(
           apiForceResponsesEndpoint:
             options.accountBackendPreference === "responses",
           apiEnabledModels: member.enabledModels,
+          retrySwitchLimit: member.retrySwitchLimit,
           adobeSourced: member.adobeSourced,
           billingGroupId: fallbackGroupId,
           // Adobe 来源 api：组倍率 × 本后端倍率（复用 Adobe 伪账号同一倍率链）；
@@ -7258,6 +7263,7 @@ type UpsertApiInput = {
   isEnabled: boolean;
   alwaysActive: boolean;
   failureCooldownEnabled: boolean;
+  retrySwitchLimit?: number | null;
   priority: number;
   concurrency: number;
   // Adobe 来源标记 + 成员计费倍率（仅 adobeSourced 时生效）。
@@ -7294,6 +7300,14 @@ async function setImageBackendApiGroups(input: {
     .onConflictDoNothing();
 }
 
+// API 后端表允许 null 表示“沿用旧行为，不限制可切换次数”；
+// 非空值统一收窄为 0-1000 的整数，避免异常表单值放大重试风暴。
+function normalizeApiRetrySwitchLimit(value: number | null | undefined) {
+  if (value === null || value === undefined) return null;
+  if (!Number.isFinite(value)) return null;
+  return Math.max(0, Math.min(1000, Math.floor(value)));
+}
+
 export async function upsertImageBackendApi(input: UpsertApiInput) {
   // groupIds 为多分组真相,primaryGroupId 保留为主分组/向后兼容(取首个分组)。
   const groupIds = accountGroupIdsFromInput(input);
@@ -7324,6 +7338,7 @@ export async function upsertImageBackendApi(input: UpsertApiInput) {
     isEnabled: input.isEnabled,
     alwaysActive: input.alwaysActive,
     failureCooldownEnabled: input.failureCooldownEnabled,
+    retrySwitchLimit: normalizeApiRetrySwitchLimit(input.retrySwitchLimit),
     priority: input.priority,
     concurrency: Math.max(1, Math.min(10000, input.concurrency)),
     adobeSourced: input.adobeSourced ?? false,
@@ -7871,6 +7886,7 @@ export async function listAdminImageBackendPool() {
       isEnabled: imageBackendApi.isEnabled,
       alwaysActive: imageBackendApi.alwaysActive,
       failureCooldownEnabled: imageBackendApi.failureCooldownEnabled,
+      retrySwitchLimit: imageBackendApi.retrySwitchLimit,
       priority: imageBackendApi.priority,
       concurrency: imageBackendApi.concurrency,
       adobeSourced: imageBackendApi.adobeSourced,

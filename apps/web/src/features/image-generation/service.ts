@@ -1098,6 +1098,12 @@ async function fetchResponsesWithPreviousResponseFallback(
 // 有限次换后端机会兜底新形态错误，同时防止真终态错误在大池子里无限放大。
 const MAX_UNCLASSIFIED_ERROR_SWITCHES = 3;
 
+// 将 API 后端的“失败切换次数上限”收窄为非负整数；null 表示不限制。
+function normalizePoolApiRetrySwitchLimit(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.min(1000, Math.floor(value)));
+}
+
 // firefly-* / force_firefly 请求只允许落 Adobe：pool-adobe 直连,或上游即 Adobe 的
 // adobe_sourced pool-api。换号重试时据此约束目标,防止按 Adobe 计费的请求漂到非 Adobe。
 function isAdobeRoutedBackend(backend: ApiConfig["backend"]): boolean {
@@ -1131,12 +1137,17 @@ async function retryPoolBackendResult(
   // forceFirefly 以保持「只走 Adobe」,并对换号结果做不变量校验兜底。
   const fireflyRequest = config.backend.fireflyOnly === true;
   const excluded = new Set<string>();
+  const initialApiRetrySwitchLimit =
+    config.backend?.type === "pool-api"
+      ? normalizePoolApiRetrySwitchLimit(config.backend.retrySwitchLimit)
+      : null;
   let accountBackendPreference: ImageBackendAccountBackend | undefined =
     options?.accountBackendPreference ||
     (options?.mixWebFirst ? "web" : undefined);
   let candidate = config;
   let lastResult: GenerateImageResult | null = null;
   let attempt = 0;
+  let backendSwitchCount = 0;
   let unclassifiedErrorSwitches = 0;
   const shouldFallbackFromWebPreference = () =>
     accountBackendPreference === "web" &&
@@ -1236,6 +1247,18 @@ async function retryPoolBackendResult(
     const memberKey = poolBackendMemberKey(candidate);
     if (memberKey) excluded.add(memberKey);
     if (!requestKind || !config.backend.userId) break;
+    if (
+      initialApiRetrySwitchLimit !== null &&
+      backendSwitchCount >= initialApiRetrySwitchLimit
+    ) {
+      logWarn("API 后端失败切换次数上限已用尽，停止切换", {
+        attempt,
+        requestKind,
+        retrySwitchLimit: initialApiRetrySwitchLimit,
+        lastError: result.error,
+      });
+      break;
+    }
     const backend = candidate.backend;
     if (
       !backend ||
@@ -1340,6 +1363,7 @@ async function retryPoolBackendResult(
       memberId: next.config.backend.id,
       groupId: next.config.backend.groupId,
     });
+    backendSwitchCount += 1;
     candidate = next.config;
   }
 

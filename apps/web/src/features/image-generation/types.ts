@@ -318,6 +318,9 @@ export interface ApiConfig {
     // pool-api 专属：该 API 后端可承接的模型列表。为空表示不限制；用于调度候选
     // 过滤与后续诊断展示，不改变出站 model 覆盖规则。
     apiEnabledModels?: string[] | null;
+    // pool-api 专属：作为本次请求首个命中 API 时，失败后允许切换其它后端的次数。
+    // null/undefined 表示不限制，沿用旧的“池内可切换即继续尝试”行为。
+    retrySwitchLimit?: number | null;
     // pool-api 专属：该 api 后端上游实为 Adobe（adobe-sourced）。为真时计费吃成员倍率
     // （见 service.ts），且 firefly-* 请求经反向转换（截家族名 + 推 size）后由本后端服务。
     adobeSourced?: boolean;
