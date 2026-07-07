@@ -15,7 +15,7 @@ import {
   SelectValue,
 } from "@repo/ui/components/select";
 import { Textarea } from "@repo/ui/components/textarea";
-import { CircleHelp, Coins, ImagePlus, Loader2, Send } from "lucide-react";
+import { CircleHelp, ImagePlus, Loader2, Send } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useLocale } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -56,7 +56,6 @@ import {
 import {
   type AspectRatioSizeDialogValue,
   ImageSizePresetButton,
-  InlineImageSizeControl,
 } from "./aspect-ratio-size-dialog";
 import {
   CreatePageAgentBlock,
@@ -67,7 +66,6 @@ import { CreatePageAdvancedImageSettings } from "./create-page-advanced-settings
 import { CreatePageChatInput } from "./create-page-chat-input";
 import { CreatePageChatAgentHeader } from "./create-page-chat-agent-panel";
 import { CreatePageChatMessageList } from "./create-page-chat-message-list";
-import { ImageCountSlider } from "./create-page-controls";
 import {
   BACKGROUND_OPTIONS,
   CHAT_ATTACHMENT_ACCEPT,
@@ -167,6 +165,7 @@ import {
 import { CreatePageImagePanel } from "./create-page-image-panel";
 import { CreatePageRecentPanel } from "./create-page-recent-panel";
 import { CreatePageTextPanel } from "./create-page-text-panel";
+import { CreatePageTextSettingsPanel } from "./create-page-text-settings-panel";
 import { CreatePageVisualOutputPanel } from "./create-page-visual-output-panel";
 import { CreatePageWaterfallGrid } from "./create-page-waterfall-grid";
 import type { EditImageFile, MaskPoint } from "./image-edit-types";
@@ -5213,140 +5212,47 @@ export function CreatePageClient({
       : batchCostSuffix(batchCount);
 
     return (
-      <div className="space-y-4 rounded-lg border border-border bg-background p-4 shadow-sm lg:sticky lg:top-6">
-        <div className="space-y-4">
-          <div className="border-b border-border pb-3">
-            <h2 className="text-sm font-semibold text-foreground">
-              {copy("Parameters", "参数")}
-            </h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {copy(
-                "Models, size, output, and billing for this run.",
-                "本次生成的模型、尺寸、输出与费用。"
-              )}
-            </p>
-          </div>
-          <div className="space-y-3">
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-              <div className="sm:col-span-2 lg:col-span-1">
-                {renderBackendGroupSelect({
-                  id: `image-backend-group-${mode}`,
-                  disabled: modeBusy,
-                })}
-              </div>
-              {showImageModelControls && (
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor={`text-model-${mode}`}
-                    className="text-xs font-medium text-muted-foreground"
-                  >
-                    {labelWithHelp(
-                      copy("Image model", "图片模型"),
-                      imageModelHelpText
-                    )}
-                  </label>
-                  <Select
-                    value={textModel}
-                    onValueChange={setTextModel}
-                    disabled={modeBusy}
-                  >
-                    <SelectTrigger
-                      id={`text-model-${mode}`}
-                      className="w-full"
-                      title={imageModelHelpText}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {textModelOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {textModelLabel(option.label)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-
-              <ImageCountSlider
-                id={isLineMode ? "line-repeat-count" : "batch-count"}
-                label={
-                  isLineMode
-                    ? copy("Images per line", "每行张数")
-                    : copy("Images", "张数")
-                }
-                value={countValue}
-                max={textImageCountMax}
-                disabled={modeBusy}
-                onChange={setCountValue}
-              />
-            </div>
-
-            <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
-              <label
-                htmlFor={`text-resolution-${mode}`}
-                className="text-sm font-medium text-foreground"
-              >
-                {labelWithHelp(
-                  copy("Resolution", "分辨率"),
-                  resolutionHelpText
-                )}
-              </label>
-              <InlineImageSizeControl
-                id={`text-resolution-${mode}`}
-                value={textSizeDialogValue}
-                disabled={modeBusy}
-                copy={copy}
-                onChange={(next) => {
-                  setUseAutoSize(next.auto);
-                  setTextMixWebFirst(next.mixWebFirst);
-                  if (!next.auto) {
-                    setWidth(next.width);
-                    setHeight(next.height);
-                  }
-                }}
-              />
-            </div>
-
-            {renderAdvancedImageSettings({
-              idPrefix: `image-${mode}`,
-              promptDisabled: modeBusy,
-              repairDisabled: modeBusy,
-              hideResponseControls: isWebOnlyBackend,
-              qualityDisabled: modeBusy || disableResponsesOnlyControls,
-              outputDisabled:
-                modeBusy || disableResponsesOnlyControls || textFireflyActive,
-              backgroundDisabled: modeBusy || disableResponsesOnlyControls,
-            })}
-          </div>
-
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground lg:justify-end">
-            <Coins className="h-3.5 w-3.5" />
-            {customApiActive ? (
-              <span className="font-medium text-foreground">
-                {customApiBillingLabel}
-              </span>
-            ) : (
-              <span>
-                {copy("Balance", "余额")}:{" "}
-                <span className="font-medium text-foreground">
-                  {formattedBalance}
-                </span>{" "}
-                · {copy("Cost", "费用")}:{" "}
-                <span className="font-medium text-foreground">
-                  {formattedCost}
-                </span>
-                {costSuffix}
-              </span>
-            )}
-          </div>
-        </div>
-        {!sizeCheck.valid && (
-          <p className="text-xs text-destructive">
-            {validationMessage(sizeCheck.message)}
-          </p>
-        )}
-      </div>
+      <CreatePageTextSettingsPanel
+        mode={mode}
+        modeBusy={modeBusy}
+        copy={copy}
+        renderBackendGroupSelect={renderBackendGroupSelect}
+        renderAdvancedImageSettings={renderAdvancedImageSettings}
+        showImageModelControls={showImageModelControls}
+        labelWithHelp={labelWithHelp}
+        imageModelHelpText={imageModelHelpText}
+        textModel={textModel}
+        textModelOptions={textModelOptions}
+        textModelLabel={textModelLabel}
+        onTextModelChange={setTextModel}
+        countValue={countValue}
+        countMax={textImageCountMax}
+        onCountChange={setCountValue}
+        textSizeDialogValue={textSizeDialogValue}
+        onTextSizeChange={(next) => {
+          setUseAutoSize(next.auto);
+          setTextMixWebFirst(next.mixWebFirst);
+          if (!next.auto) {
+            setWidth(next.width);
+            setHeight(next.height);
+          }
+        }}
+        resolutionHelpText={resolutionHelpText}
+        formattedBalance={formattedBalance}
+        formattedCost={formattedCost}
+        costSuffix={costSuffix}
+        customApiActive={customApiActive}
+        customApiBillingLabel={customApiBillingLabel}
+        sizeCheckValid={sizeCheck.valid}
+        sizeCheckMessage={sizeCheck.valid ? undefined : sizeCheck.message}
+        validationMessage={validationMessage}
+        hideResponseControls={isWebOnlyBackend}
+        qualityDisabled={modeBusy || disableResponsesOnlyControls}
+        outputDisabled={
+          modeBusy || disableResponsesOnlyControls || textFireflyActive
+        }
+        backgroundDisabled={modeBusy || disableResponsesOnlyControls}
+      />
     );
   };
 
