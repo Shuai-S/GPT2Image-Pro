@@ -961,6 +961,9 @@ export function CreatePageClient({
   const [visualResults, setVisualResults] = useCreateRuntimeState<
     Partial<Record<VisualOutputMode, ResultState | null>>
   >("visualResults", {});
+  const [visualResultLists, setVisualResultLists] = useCreateRuntimeState<
+    Partial<Record<VisualOutputMode, ResultState[]>>
+  >("visualResultLists", {});
   const [recent, setRecent] = useCreateRuntimeState<ChatRecentGeneration[]>(
     "recent",
     initialRecent
@@ -3209,6 +3212,34 @@ export function CreatePageClient({
         variants.unshift(variant);
       }
     }
+    const previewMode = options?.previewMode;
+    if (previewMode) {
+      const nextResults = variants.flatMap((variant): ResultState[] => {
+        if (!variant.generationId || !variant.imageUrl) return [];
+        const nextResult: ResultState = {
+          generationId: variant.generationId,
+          imageUrl: variant.imageUrl,
+          prompt: resultPrompt,
+          model: variant.model,
+          size: variant.size,
+          creditsConsumed: variant.creditsConsumed,
+        };
+        if (variant.revisedPrompt) {
+          nextResult.revisedPrompt = variant.revisedPrompt;
+        }
+        if (variant.promptRepairNotice) {
+          nextResult.promptRepairNotice = variant.promptRepairNotice;
+        }
+        return [nextResult];
+      });
+      setVisualResultLists((prev) => {
+        const previousResults = prev[previewMode] || [];
+        return {
+          ...prev,
+          [previewMode]: [...previousResults, ...nextResults],
+        };
+      });
+    }
 
     return variants;
   };
@@ -4448,6 +4479,7 @@ export function CreatePageClient({
       createGenerationId()
     );
     setVisualResults((prev) => ({ ...prev, [previewMode]: null }));
+    setVisualResultLists((prev) => ({ ...prev, [previewMode]: [] }));
     setVisualModeLoading(previewMode, { size: requestSize });
     clearVisualStreamingPreview(previewMode);
     setIsTextSingleGenerating(true);
@@ -4577,6 +4609,7 @@ export function CreatePageClient({
       Array.from({ length: lineBatchRepeatCount }, () => createGenerationId())
     );
     setVisualResults((prev) => ({ ...prev, [previewMode]: null }));
+    setVisualResultLists((prev) => ({ ...prev, [previewMode]: [] }));
     setVisualModeLoading(previewMode, { size: requestSize });
     clearVisualStreamingPreview(previewMode);
     setIsTextLinesGenerating(true);
@@ -4751,6 +4784,7 @@ export function CreatePageClient({
     }
 
     setVisualResults((prev) => ({ ...prev, image: null }));
+    setVisualResultLists((prev) => ({ ...prev, image: [] }));
     setVisualModeLoading("image", { size: effectiveEditSize });
     setIsEditing(true);
     clearVisualStreamingPreview("image");
@@ -5200,6 +5234,23 @@ export function CreatePageClient({
           canDelete: false,
         })
       )[0] ??
+    Object.values(visualResultLists)
+      .flatMap((items) => items || [])
+      .filter((result) => result.generationId === selectedRecentId)
+      .map(
+        (result): ChatRecentGeneration => ({
+          id: result.generationId,
+          prompt: result.prompt,
+          revisedPrompt: result.revisedPrompt ?? null,
+          model: result.model,
+          size: result.size,
+          creditsConsumed: result.creditsConsumed ?? 0,
+          status: "completed",
+          imageUrl: result.imageUrl,
+          createdAt: new Date().toISOString(),
+          canDelete: false,
+        })
+      )[0] ??
     null;
 
   const textSettingsPanel = (
@@ -5278,16 +5329,25 @@ export function CreatePageClient({
   const renderVisualOutput = (mode: VisualOutputMode) => {
     const loading = isVisualModeLoading(mode);
     const modeResult = visualResults[mode] || null;
+    const modeResults = visualResultLists[mode] || [];
     const dimensions = getVisualLoadingDimensions(mode);
     const previewUrl = visualPreviewUrls[mode] || null;
     const resultDimensions = modeResult
       ? parseImageSize(modeResult.size)
       : null;
+    const placeholderCount =
+      mode === "image"
+        ? editBatchCount
+        : mode === "text-lines"
+          ? lineBatchTotalCount
+          : batchCount;
 
     return (
       <CreatePageVisualOutputPanel
         loading={loading}
         modeResult={modeResult}
+        modeResults={modeResults}
+        placeholderCount={placeholderCount}
         dimensions={dimensions}
         resultDimensions={resultDimensions}
         previewUrl={previewUrl}
