@@ -51,7 +51,7 @@ export const TEXT_MODEL_OPTIONS = [
   ...FIREFLY_MODEL_OPTIONS,
 ] as const;
 
-// 对话生图/Agent 走 Codex/Responses,因此不暴露 Firefly 直连模型。
+// 对话生图/Agent 当前不暴露 Firefly 直连模型。
 export const CHAT_IMAGE_MODEL_OPTIONS = TEXT_MODEL_OPTIONS.filter(
   (option) => !option.value.startsWith("firefly-")
 );

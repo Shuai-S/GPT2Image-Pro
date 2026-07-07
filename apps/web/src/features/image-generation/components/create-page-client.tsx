@@ -1297,7 +1297,7 @@ export function CreatePageClient({
   );
   // 高级参数是否可配置只跟当前选中分组的后端类型绑定：
   // web 分组不展示 Codex/Responses 专属参数；mixed/responses 分组允许用户预先配置，
-  // 即使 mixed 当前可能先尝试 Web，这些参数也会在走 Codex/Responses 车道时生效。
+  // 即使 mixed 当前可能先尝试 Web，这些参数也会在需要时生效。
   const disableResponsesOnlyControls = isWebOnlyBackend;
   const batchSingleCreditCost = applyBillingMultiplier(
     getPricedImageCreditCost(
@@ -1445,8 +1445,8 @@ export function CreatePageClient({
       )
     : editHasImageReference
       ? copy(
-          "This request contains @ references and will use Codex/Responses, even if custom API or Mixed Web-first routing is enabled.",
-          "本次请求包含 @ 引用，将走 Codex/Responses；即使自填 API 或 Mixed Web-first 已开启也不会走这些路线。"
+          "This request contains @ references and has exact source images selected.",
+          "本次请求包含 @ 引用，已明确指定源图片。"
         )
       : copy(
           "Type @ to choose a source image. The selected image will be attached as real input.",

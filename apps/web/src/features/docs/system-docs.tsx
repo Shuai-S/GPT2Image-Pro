@@ -157,7 +157,7 @@ const sections = {
           "创作页 Agent 生图",
           "/api/images/chat",
           "agent",
-          "同一站内接口，但强制走 Codex/Responses 能力；默认提供 image_generation、web_search、continue_generation 等工具，并展示工具任务卡。",
+          "同一站内接口，默认提供 image_generation、web_search、continue_generation 等工具，并展示工具任务卡。",
         ],
       ],
       apiRows: [
@@ -207,7 +207,7 @@ const sections = {
           "GPT2IMAGE Agent image run",
           "/v1/agents/images",
           "agent",
-          "本站扩展接口。验证 externalApi.agent 能力后走 Codex/Responses 调度，不会选择 Web 后端；可流式返回 Agent 任务事件和多轮成图。",
+          "本站扩展接口。验证 externalApi.agent 能力后按 Agent 能力调度，可流式返回 Agent 任务事件和多轮成图。",
         ],
         [
           "OpenAI models",
@@ -308,7 +308,7 @@ const sections = {
         "外接 API Key 可设置独立积分限额；GET /v1/credits 可查询 Key 限额、已用额度和账户余额。",
         "用户已启用“接入其他站 API”时，普通 /v1/chat/completions、/v1/images/generations、/v1/images/edits 和 /v1/responses 仍优先使用用户自接 API；命中时 credits_consumed 为 0，不扣本站余额，也不增加本站 API Key 已用额度。",
         "/v1/agents/images 和需要 Codex/Responses 能力的页面功能会忽略用户自接 API，按平台后端池或外接后端池结算本站积分。",
-        "image 接口的 web_first / webFirst / force_web / forceWeb（chat 对应 mix_web_first）是 Web-first 优先路由，不是硬性只走 Web，且默认开启。开启时（不传或显式 true）按 Web-first 像素区间（IMAGE_FORCE_WEB_MIN_PIXELS / IMAGE_FORCE_WEB_MAX_PIXELS，默认 0.66MP-2MP）判定：尺寸落在区间内才优先 Web、失败回退 Codex/Responses，超出区间（如 4K）则走正常调度；auto 或无法解析的尺寸视为可优先 Web。显式传 false 则不优先 Web。该路由只对 mixed 后端分组生效（纯 Web / 纯 Codex-Responses 分组无此概念），不会覆盖用户自接 API；agent 始终走 Codex/Responses，不受此项影响。",
+        "image 接口的 web_first / webFirst / force_web / forceWeb（chat 对应 mix_web_first）是 Web-first 优先路由，不是硬性只走 Web，且默认开启。开启时（不传或显式 true）按 Web-first 像素区间（IMAGE_FORCE_WEB_MIN_PIXELS / IMAGE_FORCE_WEB_MAX_PIXELS，默认 0.66MP-2MP）判定：尺寸落在区间内才优先 Web、失败则回到正常调度，超出区间（如 4K）则走正常调度；auto 或无法解析的尺寸视为可优先 Web。显式传 false 则不优先 Web。该路由只对 mixed 后端分组生效（纯 Web / 纯 Codex-Responses 分组无此概念），不会覆盖用户自接 API；agent 不受此项影响。",
         "Adobe（Firefly）后端：作为特殊成员按 priority 挂入分组同池调度——firefly-* 模型或 force_firefly=true 会把候选收敛到仅 Adobe；普通请求则只有当组内 web/codex/api 限流/耗尽/可切换失败时才兜底到 Adobe（取决于 Adobe 是否在该组及其优先级，priority 越大越靠后）。是否进 Adobe、计费倍率均随 admin「Adobe 后端」tab 配置变化。图像计费 = 尺寸基础积分 × 模型族倍率 × Adobe 后端倍率 × 分组倍率；视频计费见 /v1/videos/generations。路由兜底详见 /docs/adobe-firefly-routing，兼容转换（站内参数→Adobe 字段、被忽略参数、算例）详见 /docs/adobe-firefly-compat。",
         "异步任务（async）：body async:true 或 URL ?async=true（等价、不能与 stream 同用）会立即返回 task_... 任务，需用 GET /v1/images/{task_id} 轮询；task_... 为进程内内存对象，30 分钟后过期，服务重启或多实例切换即无法再查询。若需持久查询，改用响应里的 generation_id（gen_...）作为 GET /v1/images/{id} 的路径参数——它从数据库取回，跨重启/多实例都可查（同步请求也可用此方式按 generation_id 复查）。callback_url 是可选的完成回调 webhook——任务结束时服务端把任务对象 POST 到该公网地址，已发出的回调不受过期/重启影响。视频同理：/v1/videos/generations 传 async:true（或 ?async=true）即立即返回 task_...，用 GET /v1/videos/{id} 轮询（task_... 30 分钟过期，或用响应里的 generation_id 持久查），或用 callback_url 完成回调——视频是长任务，强烈建议异步，以免同步连接被中途掐断丢产物。",
       ],
@@ -669,7 +669,7 @@ data: {"id":"chatcmpl_...","object":"chat.completion.chunk","choices":[{"index":
               requirement: "可选",
               custom: true,
               description:
-                "本站扩展：强制本次 Chat 走 Codex/Responses 能力，不走 Web；开启时同时忽略用户自接 API（等同 agent 行为），按平台/外接后端池结算本站积分。",
+                "本站扩展：本次 Chat 使用 Agent 同类后端能力，不走 Web；开启时同时忽略用户自接 API（等同 agent 行为），按平台/外接后端池结算本站积分。",
             },
           ],
           responses: [
@@ -1954,7 +1954,7 @@ data: {"type":"agent.completed","generation_id":"...","generationId":"...","agen
             {
               name: "credits_consumed",
               description:
-                "本站结算积分。Agent 接口固定走 Codex/Responses 能力，不使用用户自接 API；计费 = Agent 每轮基础积分 + 最终图片输出积分 + 审核积分，并叠加分组倍率。",
+                "本站结算积分。Agent 接口使用 Agent 后端能力，不使用用户自接 API；计费 = Agent 每轮基础积分 + 最终图片输出积分 + 审核积分，并叠加分组倍率。",
               custom: true,
             },
             {
@@ -2482,7 +2482,7 @@ data: {"type":"response.completed","response":{"id":"resp_...","object":"respons
           "Create page Agent run",
           "/api/images/chat",
           "agent",
-          "Same internal endpoint, but uses Codex/Responses capability; it provides image_generation, web_search, continue_generation, and visible task cards.",
+          "Same internal endpoint, providing image_generation, web_search, continue_generation, and visible task cards.",
         ],
       ],
       apiRows: [
@@ -2532,7 +2532,7 @@ data: {"type":"response.completed","response":{"id":"resp_...","object":"respons
           "GPT2IMAGE Agent image run",
           "/v1/agents/images",
           "agent",
-          "GPT2IMAGE extension. Requires externalApi.agent, routes to Codex/Responses only, and can stream Agent task events plus multi-round image outputs.",
+          "GPT2IMAGE extension. Requires externalApi.agent and can stream Agent task events plus multi-round image outputs.",
         ],
         [
           "OpenAI models",
@@ -2633,7 +2633,7 @@ data: {"type":"response.completed","response":{"id":"resp_...","object":"respons
         "External API keys can have independent credit limits. GET /v1/credits returns key quota, used credits, and account balance.",
         "If the user has enabled a custom upstream API, ordinary /v1/chat/completions, /v1/images/generations, /v1/images/edits, and /v1/responses still use that custom API first. When it wins, credits_consumed is 0 and GPT2IMAGE does not charge account credits or API key quota.",
         "/v1/agents/images and page features that require Codex/Responses capability ignore user custom API and are billed through the platform or external backend pool.",
-        "Image endpoint web_first / webFirst / force_web / forceWeb (chat: mix_web_first) is a Web-first preference route, not hard Web-only, and is on by default. When on (omitted or explicit true) it uses the Web-first pixel range (IMAGE_FORCE_WEB_MIN_PIXELS / IMAGE_FORCE_WEB_MAX_PIXELS, default 0.66MP-2MP): only sizes inside the range prefer Web (fall back to Codex/Responses on failure), sizes outside (e.g. 4K) use normal scheduling, auto or unparseable sizes may prefer Web; explicit false disables it. It only applies to mixed backend groups (no effect for Web-only / Codex-Responses-only groups) and never overrides user custom API; agent always uses Codex/Responses and is unaffected.",
+        "Image endpoint web_first / webFirst / force_web / forceWeb (chat: mix_web_first) is a Web-first preference route, not hard Web-only, and is on by default. When on (omitted or explicit true) it uses the Web-first pixel range (IMAGE_FORCE_WEB_MIN_PIXELS / IMAGE_FORCE_WEB_MAX_PIXELS, default 0.66MP-2MP): only sizes inside the range prefer Web and return to normal scheduling on failure, sizes outside (e.g. 4K) use normal scheduling, auto or unparseable sizes may prefer Web; explicit false disables it. It only applies to mixed backend groups (no effect for Web-only / Codex-Responses-only groups) and never overrides user custom API; agent is unaffected.",
         "Adobe (Firefly) backend: it joins the group as a special pool member ranked by priority. A firefly-* model or force_firefly=true narrows candidates to Adobe only; ordinary requests only fall back to Adobe once the group's web/codex/api members are rate-limited, exhausted, or fail with a switchable error (and only if Adobe is in that group — the larger its priority, the later it is tried). Whether a request reaches Adobe and its billing multiplier follow the admin 'Adobe backend' tab config. Image billing = size base credits × model-family multiplier × Adobe backend multiplier × group multiplier; see /v1/videos/generations for video billing. Routing/fallback: /docs/adobe-firefly-routing; compatibility conversion (in-app params → Adobe fields, ignored params, worked example): /docs/adobe-firefly-compat.",
         "Async tasks (async): body async:true or URL ?async=true (equivalent, and cannot be combined with stream) returns a task_... object immediately; poll GET /v1/images/{task_id} for the result. Tasks are in-memory objects that expire after 30 minutes and become unavailable after a restart or multi-instance switch. For persistent lookups, use the generation_id (gen_...) from the response as the GET /v1/images/{id} path parameter — it is read from the DB and survives restarts / multi-instance switches (sync requests can re-query by generation_id this way too). callback_url is an optional completion webhook — when the task finishes the server POSTs the task object to that public URL, and an already-sent callback is unaffected by expiry or restart. Video works the same way: POST /v1/videos/generations with async:true (or ?async=true) returns a task_... immediately; poll GET /v1/videos/{id} (task_... expires after 30 minutes, or use the generation_id for persistent lookups) or rely on callback_url — video is long-running, so async is strongly recommended to avoid a synchronous connection being cut mid-way and losing the output.",
       ],
@@ -2982,7 +2982,7 @@ data: {"id":"chatcmpl_...","object":"chat.completion.chunk","choices":[{"index":
               requirement: "Optional",
               custom: true,
               description:
-                "GPT2IMAGE extension. Forces this Chat request to Codex/Responses capability instead of Web; when enabled it also bypasses the user's own connected API (like agent behavior) and settles GPT2IMAGE credits via the platform / external backend pool.",
+                "GPT2IMAGE extension. Uses Agent-like backend capability instead of Web; when enabled it also bypasses the user's own connected API (like agent behavior) and settles GPT2IMAGE credits via the platform / external backend pool.",
             },
           ],
           responses: [
@@ -3992,7 +3992,7 @@ curl https://gpt2image.superapi.buzz/v1/videos/task_... \\
           path: "/v1/agents/images",
           contentType: "application/json or multipart/form-data",
           description:
-            "GPT2IMAGE extension that exposes the page Agent run style to external API clients. It uses Codex/Responses scheduling, web search, tool loop continuation, attachment context, and multi-round image iteration.",
+            "GPT2IMAGE extension that exposes the page Agent run style to external API clients, with web search, tool loop continuation, attachment context, and multi-round image iteration.",
           example: `# 1. JSON Agent image run. Ultra is required by default; admins can change externalApi.agent.
 curl https://gpt2image.superapi.buzz/v1/agents/images \\
   -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
@@ -4234,7 +4234,7 @@ data: {"type":"agent.completed","generation_id":"...","generationId":"...","agen
               name: "credits_consumed",
               custom: true,
               description:
-                "GPT2IMAGE-billed credits. Agent always requires Codex/Responses capability and does not use user custom API. Billing = Agent base round credits + final image output credits + moderation credits, with backend group multipliers applied.",
+                "GPT2IMAGE-billed credits. Agent uses Agent backend capability and does not use user custom API. Billing = Agent base round credits + final image output credits + moderation credits, with backend group multipliers applied.",
             },
             {
               name: "agent_round_count",
