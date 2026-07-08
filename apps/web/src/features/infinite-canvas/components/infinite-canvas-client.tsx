@@ -13,6 +13,7 @@ import {
   LocateFixed,
   MousePointer2,
   PanelRightOpen,
+  Repeat2,
   Save,
   Sparkles,
   TextCursorInput,
@@ -79,6 +80,8 @@ const DEFAULT_CANVAS_IMAGE_DIMENSIONS = { width: 1024, height: 1024 };
 const GENERATION_STATUS_POLL_INTERVAL_MS = 1500;
 const GENERATION_STATUS_TIMEOUT_MS = 180_000;
 const GENERATION_STATUS_MISSING_GRACE_MS = 15_000;
+const MIN_CANVAS_LOOP_COUNT = 1;
+const MAX_CANVAS_LOOP_COUNT = 12;
 const nullableStringSchema = z
   .string()
   .nullish()
@@ -112,6 +115,10 @@ const GENERATION_RESULT_SCHEMA = z.object({
   model: nullableStringSchema,
   size: nullableStringSchema,
   creditsConsumed: nullableNumberSchema,
+});
+const BATCH_GENERATION_RESULT_SCHEMA = z.object({
+  error: nullableStringSchema,
+  results: z.array(GENERATION_RESULT_SCHEMA).optional(),
 });
 
 type ActiveTool = "select" | "pan" | "connect";
@@ -632,10 +639,10 @@ export function InfiniteCanvasClient() {
   const buildGenerationInput = (node: CanvasNode) => {
     const inputs = getInputNodesForNode(state, node.id);
     const nestedInputs = inputs
-      .filter((input) => input.kind === "prompt")
+      .filter((input) => isCanvasPromptLikeNode(input))
       .flatMap((input) => getInputNodesForNode(state, input.id));
     const promptTexts = inputs
-      .filter((input) => input.kind === "prompt" && input.prompt?.trim())
+      .filter((input) => isCanvasPromptLikeNode(input) && input.prompt?.trim())
       .map((input) => input.prompt?.trim() || "");
     const prompt = [node.prompt?.trim(), ...promptTexts]
       .filter(Boolean)
@@ -663,15 +670,22 @@ export function InfiniteCanvasClient() {
       ? state.nodes.find((item) => item.id === nodeId)
       : undefined;
     const forcedRunnableNode =
-      forcedNode?.kind === "generator" || forcedNode?.kind === "prompt"
+      forcedNode?.kind === "generator" ||
+      forcedNode?.kind === "prompt" ||
+      forcedNode?.kind === "loop"
         ? forcedNode
         : undefined;
     const selectedRunnableNode =
-      selectedNode?.kind === "generator" || selectedNode?.kind === "prompt"
+      selectedNode?.kind === "generator" ||
+      selectedNode?.kind === "prompt" ||
+      selectedNode?.kind === "loop"
         ? selectedNode
         : undefined;
     const fallbackRunnableNode = state.nodes.find(
-      (item) => item.kind === "generator" || item.kind === "prompt"
+      (item) =>
+        item.kind === "generator" ||
+        item.kind === "prompt" ||
+        item.kind === "loop"
     );
     const node =
       forcedRunnableNode || selectedRunnableNode || fallbackRunnableNode;
@@ -689,6 +703,17 @@ export function InfiniteCanvasClient() {
       toast.error(copy("Prompt is required", "请输入提示词"));
       return;
     }
+    const promptPlan =
+      node.kind === "loop" ? buildCanvasLoopPromptPlan(node, prompt) : [prompt];
+    if (promptPlan.length > 1) {
+      const confirmed = window.confirm(
+        copy(
+          `This will submit ${promptPlan.length} image generations and consume credits for each result. Continue?`,
+          `本次会提交 ${promptPlan.length} 张图片生成，并按每张结果消耗积分。是否继续？`
+        )
+      );
+      if (!confirmed) return;
+    }
 
     setRunningNodeId(node.id);
     patchState((current) =>
@@ -697,49 +722,45 @@ export function InfiniteCanvasClient() {
         error: undefined,
       })
     );
-    const generationId = createCanvasGenerationId();
+    const generationIds = promptPlan.map(() => createCanvasGenerationId());
     try {
-      let result: GenerationResult;
-      try {
-        const initialResult =
-          imageNodes.length > 0
-            ? await runImageEdit(prompt, node, imageNodes, generationId)
-            : await runTextToImage(prompt, node, generationId);
-        result = await resolveGenerationResult(initialResult, copy);
-      } catch (requestError) {
-        const initialError =
-          requestError instanceof Error
-            ? requestError.message
-            : copy("Generation failed", "生成失败");
-        result = await pollGenerationResult(generationId, initialError, copy, {
-          waitForMissing: true,
-        });
+      const results = await runCanvasGenerationPlan({
+        prompts: promptPlan,
+        node,
+        imageNodes,
+        generationIds,
+        copy,
+      });
+      const outputNodes = createCanvasOutputNodes({
+        sourceNode: node,
+        prompts: promptPlan,
+        results,
+        copy,
+      });
+      if (outputNodes.length === 0) {
+        throw new Error(copy("No image returned", "未返回图片"));
       }
-      if (result.error) throw new Error(result.error);
-      const imageUrl = firstImageUrl(result);
-      if (!imageUrl) throw new Error(copy("No image returned", "未返回图片"));
-      const outputNode = createCanvasNode(
-        "output",
-        { x: node.x + node.width + 72, y: node.y },
-        {
-          title: copy("Generated Image", "生成结果"),
-          imageUrl,
-          prompt: result.revisedPrompt || prompt,
+      patchState((current) => {
+        let next = current;
+        for (const outputNode of outputNodes) {
+          next = addCanvasEdge(
+            addCanvasNode(next, outputNode),
+            node.id,
+            outputNode.id
+          );
         }
-      );
-      patchState((current) =>
-        addCanvasEdge(
-          addCanvasNode(current, outputNode),
-          node.id,
-          outputNode.id
-        )
-      );
+        return next;
+      });
       patchState((current) =>
         updateCanvasNode(current, node.id, { status: "idle", error: undefined })
       );
-      setSelectedIds([outputNode.id]);
+      setSelectedIds(outputNodes.map((outputNode) => outputNode.id));
       setSelectedEdgeIds([]);
-      toast.success(copy("Image generated", "图片已生成"));
+      toast.success(
+        outputNodes.length > 1
+          ? copy("Images generated", "图片已批量生成")
+          : copy("Image generated", "图片已生成")
+      );
     } catch (error) {
       const message =
         error instanceof Error
@@ -838,6 +859,19 @@ export function InfiniteCanvasClient() {
             }
           >
             <Wand2 className="h-4 w-4" />
+          </ToolbarButton>
+          <ToolbarButton
+            label={copy("Loop", "循环")}
+            onClick={() =>
+              addNode("loop", {
+                title: copy("Loop", "循环"),
+                prompt: "",
+                loopCount: 4,
+                loopItems: "",
+              })
+            }
+          >
+            <Repeat2 className="h-4 w-4" />
           </ToolbarButton>
           <ToolbarButton
             label={copy("Output", "输出")}
@@ -1251,8 +1285,11 @@ function CanvasNodeView({
     prompt: "border-amber-300/70",
     image: "border-emerald-300/70",
     generator: "border-violet-300/70",
+    loop: "border-sky-300/70",
     output: "border-rose-300/70",
   }[node.kind];
+  const runnable =
+    node.kind === "prompt" || node.kind === "generator" || node.kind === "loop";
 
   return (
     <div
@@ -1302,7 +1339,7 @@ function CanvasNodeView({
             onChange={(event) => onPatch({ title: event.target.value })}
           />
         </div>
-        {(node.kind === "prompt" || node.kind === "generator") && (
+        {runnable && (
           <button
             type="button"
             title={copy("Run", "运行")}
@@ -1323,7 +1360,7 @@ function CanvasNodeView({
         className="flex flex-1 flex-col gap-2 p-3"
         onPointerDown={(event) => event.stopPropagation()}
       >
-        {(node.kind === "prompt" || node.kind === "generator") && (
+        {runnable && (
           <textarea
             value={node.prompt || ""}
             aria-label={copy("Prompt", "提示词")}
@@ -1332,7 +1369,35 @@ function CanvasNodeView({
             onChange={(event) => onPatch({ prompt: event.target.value })}
           />
         )}
-        {node.kind === "generator" && (
+        {node.kind === "loop" && (
+          <div className="space-y-2">
+            <label className="grid gap-1 text-xs text-muted-foreground">
+              <span>{copy("Count", "数量")}</span>
+              <input
+                type="number"
+                min={MIN_CANVAS_LOOP_COUNT}
+                max={MAX_CANVAS_LOOP_COUNT}
+                step={1}
+                value={node.loopCount || 4}
+                aria-label={copy("Loop count", "循环数量")}
+                className="h-9 rounded-md border border-border bg-muted/40 px-2 text-sm text-foreground outline-none focus:border-foreground"
+                onChange={(event) =>
+                  onPatch({
+                    loopCount: normalizeCanvasLoopCount(event.target.value),
+                  })
+                }
+              />
+            </label>
+            <textarea
+              value={node.loopItems || ""}
+              aria-label={copy("Loop items", "循环变量")}
+              placeholder={copy("Loop items", "循环变量")}
+              className="min-h-20 resize-none rounded-md border border-border bg-muted/40 p-2 text-sm outline-none focus:border-foreground"
+              onChange={(event) => onPatch({ loopItems: event.target.value })}
+            />
+          </div>
+        )}
+        {(node.kind === "generator" || node.kind === "loop") && (
           <div className="space-y-2">
             <InlineImageSizeControl
               id={`canvas-node-size-${node.id}`}
@@ -1448,6 +1513,7 @@ function NodeIcon({ kind }: { kind: CanvasNodeKind }) {
   if (kind === "prompt") return <TextCursorInput className="h-4 w-4" />;
   if (kind === "image") return <ImageIcon className="h-4 w-4" />;
   if (kind === "generator") return <Wand2 className="h-4 w-4" />;
+  if (kind === "loop") return <Repeat2 className="h-4 w-4" />;
   return <PanelRightOpen className="h-4 w-4" />;
 }
 
@@ -1660,6 +1726,197 @@ function readFileAsDataUrl(file: File) {
 }
 
 /**
+ * 判断节点是否能向下游提供提示词文本。
+ *
+ * @param node 画布节点。
+ * @returns 是否为提示词类节点。
+ * @sideEffects 无。
+ */
+function isCanvasPromptLikeNode(node: CanvasNode) {
+  return node.kind === "prompt" || node.kind === "loop";
+}
+
+/**
+ * 将循环节点的数量输入归一到画布允许范围内。
+ *
+ * @param value 用户输入或持久化的数量。
+ * @returns 安全循环次数。
+ * @sideEffects 无。
+ */
+function normalizeCanvasLoopCount(value: unknown) {
+  const parsed =
+    typeof value === "number" ? value : Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed)) return MIN_CANVAS_LOOP_COUNT;
+  return Math.min(
+    MAX_CANVAS_LOOP_COUNT,
+    Math.max(MIN_CANVAS_LOOP_COUNT, Math.trunc(parsed))
+  );
+}
+
+/**
+ * 根据循环节点配置拆出每一轮生成要使用的提示词。
+ *
+ * WHY：每轮变量为空时保留相同提示词，后续可走后端批量 count；
+ * 每轮变量不同时逐轮请求，避免不同分镜被合并成一条提示词。
+ *
+ * @param node 循环节点。
+ * @param basePrompt 已由上游节点合成的基础提示词。
+ * @returns 每张图对应的完整提示词。
+ * @sideEffects 无。
+ */
+function buildCanvasLoopPromptPlan(node: CanvasNode, basePrompt: string) {
+  const itemLines = (node.loopItems || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const count = normalizeCanvasLoopCount(
+    itemLines.length > 0 ? itemLines.length : node.loopCount
+  );
+
+  return Array.from({ length: count }, (_, index) => {
+    const item = itemLines[index]
+      ?.replaceAll("{i}", String(index + 1))
+      .replaceAll("{n}", String(index + 1));
+    return [basePrompt, item].filter(Boolean).join("\n\n");
+  });
+}
+
+/**
+ * 执行画布生成计划，按提示词是否一致选择批量或逐轮请求。
+ *
+ * @param params 生成节点、提示词计划、输入图片与预分配生成 ID。
+ * @returns 每轮生成结果。
+ * @sideEffects 发起同源生成请求并消耗用户积分。
+ */
+async function runCanvasGenerationPlan(params: {
+  prompts: string[];
+  node: CanvasNode;
+  imageNodes: CanvasNode[];
+  generationIds: string[];
+  copy: (en: string, zh: string) => string;
+}) {
+  const { prompts, node, imageNodes, generationIds, copy } = params;
+  const firstPrompt = prompts[0] || "";
+  const canUseSingleBatchRequest =
+    prompts.length > 1 && prompts.every((prompt) => prompt === firstPrompt);
+  if (canUseSingleBatchRequest) {
+    try {
+      const initialResults =
+        imageNodes.length > 0
+          ? await runImageEditBatch(firstPrompt, node, imageNodes, generationIds)
+          : await runTextToImageBatch(firstPrompt, node, generationIds);
+      return await resolveGenerationResults(
+        initialResults,
+        generationIds,
+        copy
+      );
+    } catch (requestError) {
+      const initialError =
+        requestError instanceof Error
+          ? requestError.message
+          : copy("Generation failed", "生成失败");
+      return await Promise.all(
+        generationIds.map((generationId) =>
+          pollGenerationResult(generationId, initialError, copy, {
+            waitForMissing: true,
+          })
+        )
+      );
+    }
+  }
+
+  const results: GenerationResult[] = [];
+  for (const [index, prompt] of prompts.entries()) {
+    const generationId = generationIds[index] || createCanvasGenerationId();
+    results.push(
+      await runSingleCanvasGeneration({
+        prompt,
+        node,
+        imageNodes,
+        generationId,
+        copy,
+      })
+    );
+  }
+  return results;
+}
+
+/**
+ * 执行单张画布生成，并在首请求异常时尝试状态回查。
+ *
+ * @param params 提示词、节点配置、输入图与生成 ID。
+ * @returns 单张生成结果。
+ * @sideEffects 发起同源生成请求并消耗用户积分。
+ */
+async function runSingleCanvasGeneration(params: {
+  prompt: string;
+  node: CanvasNode;
+  imageNodes: CanvasNode[];
+  generationId: string;
+  copy: (en: string, zh: string) => string;
+}) {
+  const { prompt, node, imageNodes, generationId, copy } = params;
+  try {
+    const initialResult =
+      imageNodes.length > 0
+        ? await runImageEdit(prompt, node, imageNodes, generationId)
+        : await runTextToImage(prompt, node, generationId);
+    const result = await resolveGenerationResult(initialResult, copy);
+    if (result.error) throw new Error(result.error);
+    return result;
+  } catch (requestError) {
+    const initialError =
+      requestError instanceof Error
+        ? requestError.message
+        : copy("Generation failed", "生成失败");
+    return await pollGenerationResult(generationId, initialError, copy, {
+      waitForMissing: true,
+    });
+  }
+}
+
+/**
+ * 把多张生成结果创建成右侧网格输出节点。
+ *
+ * @param params 源节点、提示词计划、生成结果与文本函数。
+ * @returns 已带图片 URL 的输出节点列表。
+ * @sideEffects 生成节点 ID。
+ */
+function createCanvasOutputNodes(params: {
+  sourceNode: CanvasNode;
+  prompts: string[];
+  results: GenerationResult[];
+  copy: (en: string, zh: string) => string;
+}) {
+  const { sourceNode, prompts, results, copy } = params;
+  const columns = Math.min(3, Math.max(1, results.length));
+  return results.flatMap((result, index) => {
+    if (result.error) throw new Error(result.error);
+    const imageUrl = firstImageUrl(result);
+    if (!imageUrl) return [];
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    return [
+      createCanvasNode(
+        "output",
+        {
+          x: sourceNode.x + sourceNode.width + 72 + column * 320,
+          y: sourceNode.y + row * 300,
+        },
+        {
+          title:
+            results.length > 1
+              ? copy(`Generated Image ${index + 1}`, `生成结果 ${index + 1}`)
+              : copy("Generated Image", "生成结果"),
+          imageUrl,
+          prompt: result.revisedPrompt || prompts[index] || prompts[0],
+        }
+      ),
+    ];
+  });
+}
+
+/**
  * 运行文生图请求。
  *
  * @param prompt 合成后的提示词。
@@ -1684,6 +1941,34 @@ async function runTextToImage(
     }),
   });
   return parseGenerationResponse(response);
+}
+
+/**
+ * 运行文生图批量请求。
+ *
+ * @param prompt 合成后的提示词。
+ * @param node 生成节点配置。
+ * @param generationIds 本次批量请求预分配的生成记录 ID。
+ * @returns 生成接口结果列表。
+ * @sideEffects 发起同源网络请求并按张数消耗用户积分。
+ */
+async function runTextToImageBatch(
+  prompt: string,
+  node: CanvasNode,
+  generationIds: string[]
+) {
+  const response = await fetch("/api/images/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      generationIds,
+      count: generationIds.length,
+      prompt,
+      size: node.size || DEFAULT_IMAGE_SIZE,
+      model: node.model || undefined,
+    }),
+  });
+  return parseBatchGenerationResponse(response);
 }
 
 /**
@@ -1722,6 +2007,45 @@ async function runImageEdit(
     body: formData,
   });
   return parseGenerationResponse(response);
+}
+
+/**
+ * 运行图生图批量请求。
+ *
+ * @param prompt 合成后的提示词。
+ * @param node 生成节点配置。
+ * @param imageNodes 输入图片节点。
+ * @param generationIds 本次批量请求预分配的生成记录 ID。
+ * @returns 生成接口结果列表。
+ * @sideEffects 抓取图片数据、发起同源网络请求并按张数消耗用户积分。
+ */
+async function runImageEditBatch(
+  prompt: string,
+  node: CanvasNode,
+  imageNodes: CanvasNode[],
+  generationIds: string[]
+) {
+  const formData = new FormData();
+  formData.set("generationIds", JSON.stringify(generationIds));
+  formData.set("count", String(generationIds.length));
+  formData.set("prompt", prompt);
+  formData.set("size", node.size || DEFAULT_IMAGE_SIZE);
+  if (node.model) formData.set("model", node.model);
+
+  for (const [index, imageNode] of imageNodes.entries()) {
+    if (!imageNode.imageUrl) continue;
+    const file = await imageUrlToFile(
+      imageNode.imageUrl,
+      `canvas-${index}.png`
+    );
+    formData.append("image", file);
+  }
+
+  const response = await fetch("/api/images/edit", {
+    method: "POST",
+    body: formData,
+  });
+  return parseBatchGenerationResponse(response);
 }
 
 /**
@@ -1770,6 +2094,54 @@ async function parseGenerationResponse(
     ...parsed.data,
     generationId: parsed.data.generationId || parsed.data.generation_id,
   };
+}
+
+/**
+ * 解析图片批量生成响应。
+ *
+ * @param response fetch 响应。
+ * @returns 校验后的响应列表。
+ * @sideEffects 读取响应体。
+ */
+async function parseBatchGenerationResponse(
+  response: Response
+): Promise<GenerationResult[]> {
+  const body: unknown = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const record =
+      body && typeof body === "object" && !Array.isArray(body)
+        ? (body as Record<string, unknown>)
+        : {};
+    const message =
+      typeof record.error === "string"
+        ? record.error
+        : typeof record.message === "string"
+          ? record.message
+          : "Request failed";
+    throw new Error(message);
+  }
+
+  const batchParsed = BATCH_GENERATION_RESULT_SCHEMA.safeParse(body);
+  if (batchParsed.success) {
+    const results = batchParsed.data.results || [];
+    if (batchParsed.data.error && results.length === 0) {
+      throw new Error(batchParsed.data.error);
+    }
+    return results.map((result) => ({
+      ...result,
+      generationId: result.generationId || result.generation_id,
+    }));
+  }
+
+  const singleParsed = GENERATION_RESULT_SCHEMA.safeParse(body);
+  if (!singleParsed.success) throw new Error("Invalid generation response");
+  return [
+    {
+      ...singleParsed.data,
+      generationId:
+        singleParsed.data.generationId || singleParsed.data.generation_id,
+    },
+  ];
 }
 
 /**
@@ -1850,6 +2222,29 @@ async function resolveGenerationResult(
   if (firstImageUrl(result)) return result;
   if (!result.generationId) return result;
   return await pollGenerationResult(result.generationId, result.error, copy);
+}
+
+/**
+ * 将批量首次响应解析为最终可渲染结果。
+ *
+ * @param results 首次批量响应。
+ * @param generationIds 批量请求预分配 ID，用于补查缺失结果。
+ * @param copy 当前语言文本函数。
+ * @returns 与请求顺序一致的最终结果。
+ * @sideEffects 必要时轮询状态接口。
+ */
+async function resolveGenerationResults(
+  results: GenerationResult[],
+  generationIds: string[],
+  copy: (en: string, zh: string) => string
+) {
+  return await Promise.all(
+    generationIds.map(async (generationId, index) => {
+      const result = results[index];
+      if (result) return await resolveGenerationResult(result, copy);
+      return await pollGenerationResult(generationId, undefined, copy);
+    })
+  );
 }
 
 /**
