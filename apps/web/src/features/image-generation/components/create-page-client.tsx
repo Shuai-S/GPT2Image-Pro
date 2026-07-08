@@ -61,6 +61,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
+  useCreateRuntimeAccessor,
   useCreateRuntimeRef,
   useCreateRuntimeState,
   useResetCreateRuntimeKeys,
@@ -1196,6 +1197,12 @@ const CHAT_ACTIVE_AGENT_CONVERSATION_STORAGE_KEY =
 const CREATE_ACTIVE_MODE_STORAGE_KEY = "gpt2image_create_active_mode_v1";
 const CHAT_CONTEXT_MESSAGE_LIMIT = 8;
 const CHAT_CONVERSATION_LIMIT = 30;
+/**
+ * 会话持久化去抖窗口(毫秒)。流式生成期 chatMessages 每个增量都变,
+ * 若每次都同步 JSON.stringify 全部会话并写 localStorage 会逐 token 阻塞
+ * 主线程;取尾沿去抖,回合结束或停顿时才真正落库。
+ */
+const CHAT_PERSIST_DEBOUNCE_MS = 300;
 const PROMPT_IMAGE_REFERENCE_PATTERN = /@(?:第)?\d+轮图\d+|@图\d+/;
 
 function readStoredCreateActiveMode(): ActiveMode {
@@ -1294,6 +1301,66 @@ function cloneFile(file: File) {
 
 function hasPromptImageReference(text: string) {
   return PROMPT_IMAGE_REFERENCE_PATTERN.test(text);
+}
+
+type PromptTextareaFieldProps = Omit<
+  React.ComponentProps<typeof Textarea>,
+  "value" | "onChange" | "defaultValue"
+> & {
+  /** runtime store 里的提示词 key(如 "chatPrompt")。 */
+  promptKey: string;
+  /** 键入回调(新值, 光标位置),用于 mention 触发检测;不要在此做重活。 */
+  onValueChange?: (next: string, selectionStart: number) => void;
+  /** 转发给内部 textarea 的 ref(mention 插入后恢复焦点/光标用)。 */
+  textareaRef?: React.Ref<HTMLTextAreaElement>;
+};
+
+/**
+ * 提示词输入框:独立订阅 runtime store 的 promptKey,把"每次击键"的重渲
+ * 限制在本小组件内。
+ *
+ * WHY:CreatePageClient 是近万行单组件,输入框若由它受控,每个字符都会
+ * 重建整棵创作页 JSX(实测打字卡的主因之一)。下沉后父组件改用
+ * useCreateRuntimeAccessor 非订阅读写,任何一方写 promptKey(键入、发送后
+ * 清空、mention 插入)都经同一 store 汇合,不存在双份状态。
+ *
+ * 同时单点维护两个派生布尔 key(`${promptKey}HasText` / `${promptKey}HasRef`),
+ * 供父组件的发送按钮 disabled 与"@ 引用路由提示"订阅——它们只在翻转时
+ * 变化(store 的 Object.is 短路),父组件不会因逐字输入而重渲。
+ */
+function PromptTextareaField({
+  promptKey,
+  onValueChange,
+  textareaRef,
+  ...textareaProps
+}: PromptTextareaFieldProps) {
+  const [value, setValue] = useCreateRuntimeState<string>(promptKey, "");
+  const [, setHasText] = useCreateRuntimeAccessor<boolean>(
+    `${promptKey}HasText`,
+    false
+  );
+  const [, setHasRef] = useCreateRuntimeAccessor<boolean>(
+    `${promptKey}HasRef`,
+    false
+  );
+  // 派生布尔的唯一收口:父组件各处 setter(清空/插入 mention)也会经
+  // 本订阅回流到这里,不需要在每个写入点重复同步。
+  useEffect(() => {
+    setHasText(Boolean(value.trim()));
+    setHasRef(hasPromptImageReference(value));
+  }, [setHasRef, setHasText, value]);
+  return (
+    <Textarea
+      ref={textareaRef}
+      value={value}
+      onChange={(event) => {
+        const next = event.target.value;
+        setValue(next);
+        onValueChange?.(next, event.target.selectionStart ?? next.length);
+      }}
+      {...textareaProps}
+    />
+  );
 }
 
 function getMentionTrigger(text: string, cursor: number): MentionState | null {
@@ -2118,7 +2185,15 @@ export function CreatePageClient({
     "activeMode",
     readStoredCreateActiveMode()
   );
-  const [prompt, setPrompt] = useCreateRuntimeState("prompt", "");
+  // 三个高频提示词输入已下沉到 PromptTextareaField(独立订阅,击键只重渲
+  // 小组件)。父组件改用非订阅访问器:getXxx() 在事件处理器里读最新值,
+  // setXxx 各调用点(发送后清空、mention 插入等)签名不变。render 路径
+  // 依赖的"非空/含 @ 引用"改订阅派生布尔(仅翻转时重渲本组件)。
+  const [getPrompt] = useCreateRuntimeAccessor("prompt", "");
+  const [promptHasText] = useCreateRuntimeState(
+    "promptHasText",
+    () => Boolean(getPrompt().trim())
+  );
   const [textMode, setTextMode] = useCreateRuntimeState<TextGenerationMode>(
     "textMode",
     "single"
@@ -2127,12 +2202,34 @@ export function CreatePageClient({
     "linePrompts",
     ""
   );
-  const [editPrompt, setEditPrompt] = useCreateRuntimeState("editPrompt", "");
+  const [getEditPrompt, setEditPrompt] = useCreateRuntimeAccessor(
+    "editPrompt",
+    ""
+  );
+  const [editPromptHasText] = useCreateRuntimeState(
+    "editPromptHasText",
+    () => Boolean(getEditPrompt().trim())
+  );
+  const [editHasImageReference] = useCreateRuntimeState(
+    "editPromptHasRef",
+    () => hasPromptImageReference(getEditPrompt())
+  );
   const [promptOptimization, setPromptOptimization] = useCreateRuntimeState(
     "promptOptimization",
     true
   );
-  const [chatPrompt, setChatPrompt] = useCreateRuntimeState("chatPrompt", "");
+  const [getChatPrompt, setChatPrompt] = useCreateRuntimeAccessor(
+    "chatPrompt",
+    ""
+  );
+  const [chatPromptHasText] = useCreateRuntimeState(
+    "chatPromptHasText",
+    () => Boolean(getChatPrompt().trim())
+  );
+  const [chatHasImageReference] = useCreateRuntimeState(
+    "chatPromptHasRef",
+    () => hasPromptImageReference(getChatPrompt())
+  );
   // chat(web) 这一轮生成什么:image=对话式图像(走 chat 图像管线);ppt/psd=可编辑文件
   // (走 /api/editable-file/generate)。仅 chat-web tab 展示选择器。
   const [chatWebGenKind, setChatWebGenKind] = useCreateRuntimeState<
@@ -2342,8 +2439,14 @@ export function CreatePageClient({
 
     resetKeys([
       "prompt",
+      "promptHasText",
+      "promptHasRef",
       "editPrompt",
+      "editPromptHasText",
+      "editPromptHasRef",
       "chatPrompt",
+      "chatPromptHasText",
+      "chatPromptHasRef",
       "batchPrompt",
       "linePrompts",
       "chatAttachments",
@@ -2655,6 +2758,8 @@ export function CreatePageClient({
     "chatMessagesModeRef",
     null
   );
+  // 会话持久化去抖窗口内待执行的落库闭包;仅供关页/卸载时冲刷,防丢尾巴。
+  const pendingChatPersistRef = useRef<(() => void) | null>(null);
   const isCreatePageMountedRef = useRef(false);
   const appliedReferenceParamKeyRef = useRef<string | null>(null);
   const activeChatRequestGenerationIdsRef = useCreateRuntimeRef<Set<string>>(
@@ -2953,16 +3058,21 @@ export function CreatePageClient({
       ),
     [chatConversationId, currentModeConversations]
   );
-  const visibleChatMessages = chatMessages.filter((message) =>
-    isMessageInConversationMode(message, activeConversationMode)
+  // WHY useMemo:本组件重渲极频繁(输入/轮询/流式都会触发),这里若每次
+  // render 重建数组,不仅自身 O(消息数),还会因引用变化把下游
+  // chatReferenceOptions 的 useMemo 一并击穿,形成"每次击键全量遍历会话"。
+  const visibleChatMessages = useMemo(
+    () =>
+      chatMessages.filter((message) =>
+        isMessageInConversationMode(message, activeConversationMode)
+      ),
+    [activeConversationMode, chatMessages]
   );
   const canUseEditReferenceMentions =
     activeBackendType === "responses" || activeBackendType === "mixed";
   const canUseChatReferenceMentions =
     (activeBackendType === "responses" || activeBackendType === "mixed") &&
     activeMode !== "waterfall";
-  const editHasImageReference = hasPromptImageReference(editPrompt);
-  const chatHasImageReference = hasPromptImageReference(chatPrompt);
   const editReferenceOptions = useMemo<ImageReferenceMentionOption[]>(
     () =>
       editImages.map((item, index) => ({
@@ -3005,13 +3115,13 @@ export function CreatePageClient({
     }
     return options;
   }, [chatAttachments, copy, visibleChatMessages]);
-  const filteredEditReferenceOptions = filterMentionOptions(
-    editReferenceOptions,
-    editMention?.query || ""
+  const filteredEditReferenceOptions = useMemo(
+    () => filterMentionOptions(editReferenceOptions, editMention?.query || ""),
+    [editMention?.query, editReferenceOptions]
   );
-  const filteredChatReferenceOptions = filterMentionOptions(
-    chatReferenceOptions,
-    chatMention?.query || ""
+  const filteredChatReferenceOptions = useMemo(
+    () => filterMentionOptions(chatReferenceOptions, chatMention?.query || ""),
+    [chatMention?.query, chatReferenceOptions]
   );
   const editReferenceMentionStatusText = !canUseEditReferenceMentions
     ? copy(
@@ -3448,26 +3558,20 @@ export function CreatePageClient({
     );
   };
 
-  const handleEditPromptChange = (
-    event: React.ChangeEvent<HTMLTextAreaElement>
-  ) => {
-    const next = event.target.value;
-    setEditPrompt(next);
+  // 值写入由 PromptTextareaField 完成,这里只做 mention 触发检测。
+  // mention 常态为 null→null,store 的 Object.is 短路使其不触发重渲。
+  const handleEditPromptChange = (next: string, selectionStart: number) => {
     setEditMention(
       canUseEditReferenceMentions
-        ? getMentionTrigger(next, event.target.selectionStart ?? next.length)
+        ? getMentionTrigger(next, selectionStart)
         : null
     );
   };
 
-  const handleChatPromptChange = (
-    event: React.ChangeEvent<HTMLTextAreaElement>
-  ) => {
-    const next = event.target.value;
-    setChatPrompt(next);
+  const handleChatPromptChange = (next: string, selectionStart: number) => {
     setChatMention(
       canUseChatReferenceMentions
-        ? getMentionTrigger(next, event.target.selectionStart ?? next.length)
+        ? getMentionTrigger(next, selectionStart)
         : null
     );
   };
@@ -3475,7 +3579,7 @@ export function CreatePageClient({
   const selectEditMention = (option: ImageReferenceMentionOption) => {
     if (!editMention) return;
     const nextPrompt = insertMentionToken(
-      editPrompt,
+      getEditPrompt(),
       editMention,
       option.token
     );
@@ -3491,7 +3595,7 @@ export function CreatePageClient({
   const selectChatMention = (option: ImageReferenceMentionOption) => {
     if (!chatMention) return;
     const nextPrompt = insertMentionToken(
-      chatPrompt,
+      getChatPrompt(),
       chatMention,
       option.token
     );
@@ -4317,67 +4421,91 @@ export function CreatePageClient({
     }
   }, []);
 
+  // WHY 去抖:本 effect 每次 chatMessages 变化都要 sanitize + 推导标题 +
+  // JSON.stringify 全部会话并同步写 localStorage,成本随会话历史线性增长。
+  // 流式生成期 chatMessages 逐增量更新,同步执行等于每个 token 阻塞一次
+  // 主线程(实测是"生成时卡/越用越卡"的主因之一)。改为尾沿去抖后,流式
+  // 期间定时器持续被重置,回合结束或停顿 CHAT_PERSIST_DEBOUNCE_MS 后才
+  // 真正落库;关页/卸载时经 pendingChatPersistRef 冲刷,不丢最后一轮。
   useEffect(() => {
     if (!didLoadChatRef.current) return;
-    try {
-      if (
-        chatMessages.length > 0 &&
-        chatMessagesConversationIdRef.current &&
-        (chatMessagesConversationIdRef.current !== chatConversationId ||
-          (chatMessagesModeRef.current &&
-            chatMessagesModeRef.current !==
-              inferChatConversationMode(chatMessages)))
-      ) {
-        return;
-      }
-      if (chatMessages.length === 0) {
+    const persist = () => {
+      pendingChatPersistRef.current = null;
+      try {
+        if (
+          chatMessages.length > 0 &&
+          chatMessagesConversationIdRef.current &&
+          (chatMessagesConversationIdRef.current !== chatConversationId ||
+            (chatMessagesModeRef.current &&
+              chatMessagesModeRef.current !==
+                inferChatConversationMode(chatMessages)))
+        ) {
+          return;
+        }
+        if (chatMessages.length === 0) {
+          window.localStorage.removeItem(CHAT_STORAGE_KEY);
+          return;
+        }
+        const persistedMessages = sanitizePersistedChatMessages(chatMessages);
+        const conversationMode = inferChatConversationMode(persistedMessages);
+        chatMessagesConversationIdRef.current = chatConversationId;
+        chatMessagesModeRef.current = conversationMode;
+        const title = getChatConversationTitle(
+          persistedMessages.filter((message) =>
+            isMessageInConversationMode(message, conversationMode)
+          ),
+          isZh ? "未命名对话" : "Untitled chat"
+        );
+        const now = new Date().toISOString();
+        const previousConversations = chatConversationsRef.current;
+        const existing = previousConversations.find(
+          (conversation) => conversation.id === chatConversationId
+        );
+        const current: ChatConversation = {
+          id: chatConversationId,
+          mode: existing?.mode || conversationMode,
+          title,
+          messages: persistedMessages,
+          createdAt: existing?.createdAt || now,
+          updatedAt: now,
+        };
+        const nextConversations = compactChatConversations([
+          current,
+          ...previousConversations.filter(
+            (conversation) => conversation.id !== chatConversationId
+          ),
+        ]).slice(0, CHAT_CONVERSATION_LIMIT);
+        chatConversationsRef.current = nextConversations;
+        setChatConversations(nextConversations);
+        window.localStorage.setItem(
+          CHAT_CONVERSATIONS_STORAGE_KEY,
+          JSON.stringify(nextConversations)
+        );
+        window.localStorage.setItem(
+          chatActiveConversationStorageKey(current.mode),
+          chatConversationId
+        );
         window.localStorage.removeItem(CHAT_STORAGE_KEY);
-        return;
+      } catch {
+        /* ignore local storage quota errors */
       }
-      const persistedMessages = sanitizePersistedChatMessages(chatMessages);
-      const conversationMode = inferChatConversationMode(persistedMessages);
-      chatMessagesConversationIdRef.current = chatConversationId;
-      chatMessagesModeRef.current = conversationMode;
-      const title = getChatConversationTitle(
-        persistedMessages.filter((message) =>
-          isMessageInConversationMode(message, conversationMode)
-        ),
-        isZh ? "未命名对话" : "Untitled chat"
-      );
-      const now = new Date().toISOString();
-      const previousConversations = chatConversationsRef.current;
-      const existing = previousConversations.find(
-        (conversation) => conversation.id === chatConversationId
-      );
-      const current: ChatConversation = {
-        id: chatConversationId,
-        mode: existing?.mode || conversationMode,
-        title,
-        messages: persistedMessages,
-        createdAt: existing?.createdAt || now,
-        updatedAt: now,
-      };
-      const nextConversations = compactChatConversations([
-        current,
-        ...previousConversations.filter(
-          (conversation) => conversation.id !== chatConversationId
-        ),
-      ]).slice(0, CHAT_CONVERSATION_LIMIT);
-      chatConversationsRef.current = nextConversations;
-      setChatConversations(nextConversations);
-      window.localStorage.setItem(
-        CHAT_CONVERSATIONS_STORAGE_KEY,
-        JSON.stringify(nextConversations)
-      );
-      window.localStorage.setItem(
-        chatActiveConversationStorageKey(current.mode),
-        chatConversationId
-      );
-      window.localStorage.removeItem(CHAT_STORAGE_KEY);
-    } catch {
-      /* ignore local storage quota errors */
-    }
+    };
+    pendingChatPersistRef.current = persist;
+    const timer = window.setTimeout(persist, CHAT_PERSIST_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
   }, [chatConversationId, chatMessages, isZh]);
+
+  // 关页/组件卸载时冲刷去抖窗口内尚未落库的会话变更。
+  useEffect(() => {
+    const flushPendingChatPersist = () => {
+      pendingChatPersistRef.current?.();
+    };
+    window.addEventListener("beforeunload", flushPendingChatPersist);
+    return () => {
+      window.removeEventListener("beforeunload", flushPendingChatPersist);
+      flushPendingChatPersist();
+    };
+  }, []);
 
   useEffect(() => {
     if (!gpt55ChatAllowed && chatModel === GPT55_CHAT_MODEL) {
@@ -5718,10 +5846,10 @@ export function CreatePageClient({
           >
             <Upload className="h-4 w-4" />
           </Button>
-          <Textarea
-            ref={chatPromptRef}
-            value={chatPrompt}
-            onChange={handleChatPromptChange}
+          <PromptTextareaField
+            promptKey="chatPrompt"
+            textareaRef={chatPromptRef}
+            onValueChange={handleChatPromptChange}
             placeholder={copy("Continue creating...", "继续描述你的创作...")}
             rows={1}
             disabled={isChatGenerating}
@@ -5762,7 +5890,7 @@ export function CreatePageClient({
           <Button
             type="submit"
             size="icon-sm"
-            disabled={isChatGenerating || !chatPrompt.trim()}
+            disabled={isChatGenerating || !chatPromptHasText}
             title={copy("Send", "发送")}
           >
             {isChatGenerating ? (
@@ -6329,12 +6457,12 @@ export function CreatePageClient({
       });
       return;
     }
-    if (!chatPrompt.trim()) {
+    const currentPrompt = getChatPrompt().trim();
+    if (!currentPrompt) {
       toast.error(copy("Please enter a message", "请输入消息"));
       return;
     }
 
-    const currentPrompt = chatPrompt.trim();
     const requiresResponsesForReference =
       hasPromptImageReference(currentPrompt);
     const attachments = chatAttachments.map((item) => ({
@@ -6580,7 +6708,8 @@ export function CreatePageClient({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!prompt.trim()) {
+    const currentPrompt = getPrompt().trim();
+    if (!currentPrompt) {
       toast.error(copy("Please enter a prompt", "请输入提示词"));
       return;
     }
@@ -6594,7 +6723,6 @@ export function CreatePageClient({
       });
       return;
     }
-    const currentPrompt = prompt.trim();
     const requestSize = size;
     const previewMode: VisualOutputMode = "text-single";
     const generationIds = Array.from({ length: batchCount }, () =>
@@ -6788,7 +6916,8 @@ export function CreatePageClient({
 
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editPrompt.trim()) {
+    const currentEditPrompt = getEditPrompt().trim();
+    if (!currentEditPrompt) {
       toast.error(copy("Please enter an edit prompt", "请输入编辑提示词"));
       return;
     }
@@ -6818,7 +6947,7 @@ export function CreatePageClient({
       return;
     }
     const editRequiresResponsesForReference =
-      hasPromptImageReference(editPrompt);
+      hasPromptImageReference(currentEditPrompt);
     if (
       (!customApiActive || editRequiresResponsesForReference) &&
       balance < editBatchCreditCost
@@ -6839,7 +6968,6 @@ export function CreatePageClient({
       return;
     }
 
-    const currentEditPrompt = editPrompt.trim();
     const generationIds = Array.from({ length: editBatchCount }, () =>
       createGenerationId()
     );
@@ -6890,7 +7018,7 @@ export function CreatePageClient({
     if (promptOptimizationAllowed) {
       formData.append("prompt_optimization", String(promptOptimization));
     }
-    if (hasPromptImageReference(editPrompt)) {
+    if (editRequiresResponsesForReference) {
       formData.append("requires_responses_backend", "true");
     } else if (editMixWebFirstActive) {
       formData.append("mix_web_first", "true");
@@ -7775,7 +7903,7 @@ export function CreatePageClient({
               title={copy("Open image preview", "打开图片预览")}
             >
               <Image
-                src={modeResult.imageUrl}
+                src={thumbSrc(modeResult.imageUrl, 1024)}
                 alt={modeResult.prompt}
                 fill
                 sizes="(max-width: 1024px) 100vw, 768px"
@@ -7958,9 +8086,8 @@ export function CreatePageClient({
               className="mt-0"
             >
               <form onSubmit={handleSubmit} className="space-y-4">
-                <Textarea
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
+                <PromptTextareaField
+                  promptKey="prompt"
                   placeholder={copy(
                     "Describe the image you want to create...",
                     "描述你想创作的图片..."
@@ -7977,7 +8104,7 @@ export function CreatePageClient({
                 <div className="flex justify-end">
                   <Button
                     type="submit"
-                    disabled={isTextSingleGenerating || !prompt.trim()}
+                    disabled={isTextSingleGenerating || !promptHasText}
                   >
                     {isTextSingleGenerating ? (
                       <>
@@ -8070,10 +8197,10 @@ export function CreatePageClient({
                   "请先上传源图片。"
                 ),
               })}
-              <Textarea
-                ref={editPromptRef}
-                value={editPrompt}
-                onChange={handleEditPromptChange}
+              <PromptTextareaField
+                promptKey="editPrompt"
+                textareaRef={editPromptRef}
+                onValueChange={handleEditPromptChange}
                 placeholder={copy(
                   "Describe how to transform the uploaded image...",
                   "描述如何改造上传的图片..."
@@ -8760,7 +8887,7 @@ export function CreatePageClient({
               <Button
                 type="submit"
                 disabled={
-                  isEditing || !editPrompt.trim() || editImages.length === 0
+                  isEditing || !editPromptHasText || editImages.length === 0
                 }
               >
                 {isEditing ? (
@@ -9061,7 +9188,10 @@ export function CreatePageClient({
                                         )}
                                       >
                                         <Image
-                                          src={activeVariant.imageUrl}
+                                          src={thumbSrc(
+                                            activeVariant.imageUrl,
+                                            512
+                                          )}
                                           alt={activeVariant.prompt}
                                           fill
                                           sizes="(max-width: 768px) 80vw, 420px"
