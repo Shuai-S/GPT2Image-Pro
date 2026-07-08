@@ -51,6 +51,7 @@ services:
       CHATGPT_REGISTER_URL: ${CHATGPT_REGISTER_URL:-http://chatgpt-register:3023}
       CHATGPT_REGISTER_SECRET: ${CHATGPT_REGISTER_SECRET:-}
       GPT2IMAGE_BOOTSTRAP_CREDENTIALS_PATH: /app/.gpt2image/super-admin-credentials.txt
+      GPT2IMAGE_SYSTEM_LOG_PATH: /app/.gpt2image/system.log
     ports:
       - "${WEB_PORT:-3000}:3000"
     volumes:
