@@ -78,7 +78,7 @@ const STORAGE_KEY = "gpt2image.infinite-canvas.v1";
 const DEFAULT_NODE_POSITION = { x: 80, y: 80 };
 const DEFAULT_CANVAS_IMAGE_DIMENSIONS = { width: 1024, height: 1024 };
 const GENERATION_STATUS_POLL_INTERVAL_MS = 1500;
-const GENERATION_STATUS_TIMEOUT_MS = 180_000;
+const GENERATION_STATUS_TIMEOUT_MS = 900_000;
 const GENERATION_STATUS_MISSING_GRACE_MS = 15_000;
 const MIN_CANVAS_LOOP_COUNT = 1;
 const MAX_CANVAS_LOOP_COUNT = 12;
@@ -737,8 +737,12 @@ export function InfiniteCanvasClient() {
         results,
         copy,
       });
+      const failedCount = countFailedGenerationResults(results);
       if (outputNodes.length === 0) {
-        throw new Error(copy("No image returned", "未返回图片"));
+        throw new Error(
+          firstGenerationResultError(results) ||
+            copy("No image returned", "未返回图片")
+        );
       }
       patchState((current) => {
         let next = current;
@@ -751,16 +755,32 @@ export function InfiniteCanvasClient() {
         }
         return next;
       });
+      const partialMessage =
+        failedCount > 0
+          ? copy(
+              `${outputNodes.length} image(s) generated, ${failedCount} still failed or timed out.`,
+              `已生成 ${outputNodes.length} 张，${failedCount} 张失败或等待超时。`
+            )
+          : undefined;
       patchState((current) =>
-        updateCanvasNode(current, node.id, { status: "idle", error: undefined })
+        updateCanvasNode(current, node.id, {
+          status: "idle",
+          error: partialMessage,
+        })
       );
       setSelectedIds(outputNodes.map((outputNode) => outputNode.id));
       setSelectedEdgeIds([]);
-      toast.success(
-        outputNodes.length > 1
-          ? copy("Images generated", "图片已批量生成")
-          : copy("Image generated", "图片已生成")
-      );
+      if (partialMessage) {
+        toast.warning(copy("Partial results generated", "已生成部分结果"), {
+          description: partialMessage,
+        });
+      } else {
+        toast.success(
+          outputNodes.length > 1
+            ? copy("Images generated", "图片已批量生成")
+            : copy("Image generated", "图片已生成")
+        );
+      }
     } catch (error) {
       const message =
         error instanceof Error
@@ -1815,12 +1835,14 @@ async function runCanvasGenerationPlan(params: {
         requestError instanceof Error
           ? requestError.message
           : copy("Generation failed", "生成失败");
-      return await Promise.all(
+      return await settleGenerationResults(
         generationIds.map((generationId) =>
           pollGenerationResult(generationId, initialError, copy, {
             waitForMissing: true,
           })
-        )
+        ),
+        generationIds,
+        initialError
       );
     }
   }
@@ -1828,15 +1850,25 @@ async function runCanvasGenerationPlan(params: {
   const results: GenerationResult[] = [];
   for (const [index, prompt] of prompts.entries()) {
     const generationId = generationIds[index] || createCanvasGenerationId();
-    results.push(
-      await runSingleCanvasGeneration({
-        prompt,
-        node,
-        imageNodes,
+    try {
+      results.push(
+        await runSingleCanvasGeneration({
+          prompt,
+          node,
+          imageNodes,
+          generationId,
+          copy,
+        })
+      );
+    } catch (error) {
+      results.push({
         generationId,
-        copy,
-      })
-    );
+        error: getGenerationErrorMessage(
+          error,
+          copy("Generation failed", "生成失败")
+        ),
+      });
+    }
   }
   return results;
 }
@@ -1891,7 +1923,6 @@ function createCanvasOutputNodes(params: {
   const { sourceNode, prompts, results, copy } = params;
   const columns = Math.min(3, Math.max(1, results.length));
   return results.flatMap((result, index) => {
-    if (result.error) throw new Error(result.error);
     const imageUrl = firstImageUrl(result);
     if (!imageUrl) return [];
     const column = index % columns;
@@ -1914,6 +1945,67 @@ function createCanvasOutputNodes(params: {
       ),
     ];
   });
+}
+
+/**
+ * 统计没有可显示图片的生成结果数量。
+ *
+ * @param results 生成结果列表。
+ * @returns 失败、超时或未返回图片的数量。
+ * @sideEffects 无。
+ */
+function countFailedGenerationResults(results: GenerationResult[]) {
+  return results.filter((result) => !firstImageUrl(result)).length;
+}
+
+/**
+ * 提取批量生成中的第一条错误信息。
+ *
+ * @param results 生成结果列表。
+ * @returns 错误文本或 undefined。
+ * @sideEffects 无。
+ */
+function firstGenerationResultError(results: GenerationResult[]) {
+  return results.find((result) => result.error)?.error;
+}
+
+/**
+ * 将多个生成 Promise 容错收集为结果数组。
+ *
+ * WHY：后端批量生成可能部分成功、部分仍在重试。画布必须先展示已经
+ * 落库成功的图片，不能因为某一张超时而丢掉整批可见结果。
+ *
+ * @param promises 每个 generationId 对应的状态回查 Promise。
+ * @param generationIds 请求预分配 ID，用于失败项保留可定位信息。
+ * @param fallbackError 缺省错误文本。
+ * @returns 可直接用于创建输出节点的结果数组。
+ * @sideEffects 等待所有 Promise 完成。
+ */
+async function settleGenerationResults(
+  promises: Promise<GenerationResult>[],
+  generationIds: string[],
+  fallbackError: string
+) {
+  const settled = await Promise.allSettled(promises);
+  return settled.map((item, index): GenerationResult => {
+    if (item.status === "fulfilled") return item.value;
+    return {
+      generationId: generationIds[index],
+      error: getGenerationErrorMessage(item.reason, fallbackError),
+    };
+  });
+}
+
+/**
+ * 从未知异常中提取可展示的错误文本。
+ *
+ * @param error 捕获到的未知异常。
+ * @param fallback 无法识别时使用的文本。
+ * @returns 用户可读错误文本。
+ * @sideEffects 无。
+ */
+function getGenerationErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
 }
 
 /**
@@ -2161,11 +2253,13 @@ async function pollGenerationResult(
   generationId: string,
   initialError: string | undefined,
   copy: (en: string, zh: string) => string,
-  options: { waitForMissing?: boolean } = {}
+  options: { timeoutMs?: number; waitForMissing?: boolean } = {}
 ): Promise<GenerationResult> {
-  const deadline = Date.now() + GENERATION_STATUS_TIMEOUT_MS;
+  const deadline =
+    Date.now() + (options.timeoutMs || GENERATION_STATUS_TIMEOUT_MS);
   const missingGraceDeadline = Date.now() + GENERATION_STATUS_MISSING_GRACE_MS;
   let lastError = initialError;
+  let foundStatusRecord = false;
 
   while (Date.now() < deadline) {
     await delay(GENERATION_STATUS_POLL_INTERVAL_MS);
@@ -2185,6 +2279,7 @@ async function pollGenerationResult(
       continue;
     }
 
+    foundStatusRecord = true;
     const result = await parseGenerationResponse(response);
     const imageUrl = firstImageUrl(result);
     if (imageUrl) return result;
@@ -2196,6 +2291,15 @@ async function pollGenerationResult(
     if (result.error) {
       lastError = result.error;
     }
+  }
+
+  if (foundStatusRecord) {
+    throw new Error(
+      copy(
+        "Generation is still running. Check the gallery later.",
+        "生成仍在进行中，请稍后到图库查看。"
+      )
+    );
   }
 
   throw new Error(
@@ -2238,12 +2342,14 @@ async function resolveGenerationResults(
   generationIds: string[],
   copy: (en: string, zh: string) => string
 ) {
-  return await Promise.all(
+  return await settleGenerationResults(
     generationIds.map(async (generationId, index) => {
       const result = results[index];
       if (result) return await resolveGenerationResult(result, copy);
       return await pollGenerationResult(generationId, undefined, copy);
-    })
+    }),
+    generationIds,
+    copy("Generation failed", "生成失败")
   );
 }
 
