@@ -400,19 +400,20 @@ export function HistoryClient({
       </div>
 
       {totalPages > 1 && (
-        <div className="flex items-center justify-between pt-4">
+        <div className="flex flex-col gap-3 pt-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-muted-foreground">
             {copy(
               `Page ${page} of ${totalPages} · ${totalCount} total`,
               `第 ${page} / ${totalPages} 页 · 共 ${totalCount} 条`
             )}
           </p>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               asChild={page > 1}
               variant="outline"
               size="sm"
               disabled={page <= 1}
+              className="shrink-0"
             >
               {page > 1 ? (
                 <Link href={historyHref(page - 1)}>
@@ -420,10 +421,10 @@ export function HistoryClient({
                   {copy("Previous", "上一页")}
                 </Link>
               ) : (
-                <span>
+                <>
                   <ChevronLeft className="mr-1 h-4 w-4" />
                   {copy("Previous", "上一页")}
-                </span>
+                </>
               )}
             </Button>
             <input
@@ -438,9 +439,9 @@ export function HistoryClient({
               }}
               onBlur={commitPageInput}
               aria-label={copy("Page number", "页码")}
-              className="h-8 w-16 rounded border border-border bg-background text-center text-sm text-foreground"
+              className="h-8 w-16 shrink-0 rounded border border-border bg-background text-center text-sm text-foreground"
             />
-            <span className="text-xs text-muted-foreground">
+            <span className="shrink-0 text-xs text-muted-foreground">
               / {totalPages}
             </span>
             <Button
@@ -448,6 +449,7 @@ export function HistoryClient({
               variant="outline"
               size="sm"
               disabled={page >= totalPages}
+              className="shrink-0"
             >
               {page < totalPages ? (
                 <Link href={historyHref(page + 1)}>
@@ -455,10 +457,10 @@ export function HistoryClient({
                   <ChevronRight className="ml-1 h-4 w-4" />
                 </Link>
               ) : (
-                <span>
+                <>
                   {copy("Next", "下一页")}
                   <ChevronRight className="ml-1 h-4 w-4" />
-                </span>
+                </>
               )}
             </Button>
           </div>
