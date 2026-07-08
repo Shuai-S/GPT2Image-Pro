@@ -2,15 +2,20 @@
  * 日志模块
  *
  * 使用 Pino 实现结构化日志
- * 支持 Axiom 云日志服务（可选）
- * 未配置时回退到 console 输出
+ * 生产环境同时写入 stdout 与本地运行日志文件
  *
  * 环境变量:
- * - AXIOM_TOKEN: Axiom API Token（可选）
- * - AXIOM_DATASET: Axiom 数据集名称（可选，默认 "gpt2image"）
+ * - GPT2IMAGE_SYSTEM_LOG_PATH: 系统运行日志文件路径（可选，默认
+ *   "/app/.gpt2image/system.log"）
  */
 
 import pino from "pino";
+import {
+  createAsyncRotatingFileStream,
+  DEFAULT_ROTATING_LOG_MAX_BYTES,
+} from "./async-rotating-file-stream";
+
+const DEFAULT_SYSTEM_LOG_PATH = "/app/.gpt2image/system.log";
 
 // ============================================
 // 配置检查
@@ -21,6 +26,33 @@ import pino from "pino";
  */
 function isProduction(): boolean {
   return process.env.NODE_ENV === "production";
+}
+
+/**
+ * 获取系统运行日志文件路径
+ *
+ * @returns 系统运行日志文件路径。
+ */
+function getSystemLogPath(): string {
+  return process.env.GPT2IMAGE_SYSTEM_LOG_PATH ?? DEFAULT_SYSTEM_LOG_PATH;
+}
+
+/**
+ * 序列化未知错误
+ *
+ * @param error 未知错误对象。
+ * @returns 可安全写入日志的错误结构。
+ */
+function serializeUnknownError(error: unknown): unknown {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    };
+  }
+
+  return error;
 }
 
 // ============================================
@@ -35,8 +67,10 @@ function isProduction(): boolean {
  * - development: debug 及以上
  *
  * 输出目标:
- * - 配置了 Axiom: 发送到 Axiom + console
- * - 未配置 Axiom: 仅 console（开发环境美化输出）
+ * - production: stdout + 系统运行日志文件
+ * - development: console（美化输出）
+ *
+ * @returns Pino Logger 实例；文件写入失败只写 stderr，不影响 stdout 日志。
  */
 function createLogger(): pino.Logger {
   const level = isProduction() ? "info" : "debug";
@@ -94,11 +128,43 @@ function createLogger(): pino.Logger {
     }
   }
 
-  // 生产环境：结构化 JSON 输出到 stdout
-  // 注: pino transport（@axiomhq/pino）在 Turbopack 打包后无法工作
-  // 因为 transport 使用 worker_threads 按字符串路径动态加载模块
-  // 生产环境日志收集建议通过外部采集（如 Axiom 的 Vercel Integration 或 log drain）
-  return pino(baseOptions);
+  // 生产环境同时写 stdout 与持久化文件。文件落盘必须异步进行：
+  // 业务请求只把日志写入 Pino/SonicBoom 缓冲区，实际 fs 写入由后台异步完成。
+  // 文件目标失败时必须保留 stdout，避免日志问题反过来影响应用启动。
+  try {
+    const fileDestination = createAsyncRotatingFileStream({
+      filePath: getSystemLogPath(),
+      maxBytes: DEFAULT_ROTATING_LOG_MAX_BYTES,
+      onError: (error) => {
+        process.stderr.write(
+          `${JSON.stringify({
+            level: "error",
+            msg: "System log file write failed",
+            err: serializeUnknownError(error),
+            logPath: getSystemLogPath(),
+          })}\n`
+        );
+      },
+    });
+
+    return pino(
+      baseOptions,
+      pino.multistream([
+        { level, stream: pino.destination(1) },
+        { level, stream: fileDestination },
+      ])
+    );
+  } catch (error) {
+    const fallbackLogger = pino(baseOptions);
+    fallbackLogger.error(
+      {
+        err: serializeUnknownError(error),
+        logPath: getSystemLogPath(),
+      },
+      "System log file destination initialization failed"
+    );
+    return fallbackLogger;
+  }
 }
 
 // ============================================

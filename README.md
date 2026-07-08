@@ -219,6 +219,8 @@ docker compose up -d
 
 Web 镜像启动时会先修正 `/app/storage`、`/app/.gpt2image` 和 `.next/cache` 的顶层目录属主，再降权运行应用。官方 compose 使用 named volume；如果自定义 compose 改成 `./data/app-storage:/app/storage`、`./data/app-bootstrap:/app/.gpt2image` 这类 bind mount，也不需要手工 `chown`。
 
+Web 运行日志会异步输出到 `docker compose logs web` 和容器内 `/app/.gpt2image/system.log`。单个日志文件超过 100MB 时会按时间点轮转，并将旧文件压缩为同目录下的 `system-<timestamp>-<pid>-<seq>.log.gz`。官方 compose 下这些文件位于 `app-bootstrap` volume；可用 `docker compose exec web tail -f /app/.gpt2image/system.log` 查看。如果自定义 bind mount 为 `./data/app-bootstrap:/app/.gpt2image`，宿主机路径就是 `./data/app-bootstrap/system.log`。
+
 如果旧镜像首次启动已经出现过 `EACCES: permission denied, open '/app/.gpt2image/super-admin-credentials.txt'`，数据库里可能已有本地超管但密码文件缺失。升级到包含修复的镜像后，在 `web` 环境变量里临时加入：
 
 ```yaml
