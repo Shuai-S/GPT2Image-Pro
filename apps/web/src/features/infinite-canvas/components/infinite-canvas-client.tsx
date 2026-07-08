@@ -146,6 +146,33 @@ type DragState =
 type GenerationResult = z.infer<typeof GENERATION_RESULT_SCHEMA>;
 
 /**
+ * 创建完整形状的失败生成结果。
+ *
+ * @param generationId 本次请求预分配的生成记录 ID。
+ * @param error 可展示给用户的错误文本。
+ * @returns 与 GENERATION_RESULT_SCHEMA 推导类型一致的失败结果。
+ * @sideEffects 无。
+ */
+function createFailedGenerationResult(
+  generationId: string | undefined,
+  error: string
+): GenerationResult {
+  return {
+    error,
+    generationId,
+    generation_id: generationId,
+    status: "failed",
+    imageUrl: undefined,
+    imageBase64: undefined,
+    imageOutputs: undefined,
+    revisedPrompt: undefined,
+    model: undefined,
+    size: undefined,
+    creditsConsumed: undefined,
+  };
+}
+
+/**
  * 渲染无限画布并管理其客户端状态。
  *
  * @returns 无限画布编辑器界面。
@@ -1861,13 +1888,15 @@ async function runCanvasGenerationPlan(params: {
         })
       );
     } catch (error) {
-      results.push({
-        generationId,
-        error: getGenerationErrorMessage(
-          error,
-          copy("Generation failed", "生成失败")
-        ),
-      });
+      results.push(
+        createFailedGenerationResult(
+          generationId,
+          getGenerationErrorMessage(
+            error,
+            copy("Generation failed", "生成失败")
+          )
+        )
+      );
     }
   }
   return results;
@@ -1989,10 +2018,10 @@ async function settleGenerationResults(
   const settled = await Promise.allSettled(promises);
   return settled.map((item, index): GenerationResult => {
     if (item.status === "fulfilled") return item.value;
-    return {
-      generationId: generationIds[index],
-      error: getGenerationErrorMessage(item.reason, fallbackError),
-    };
+    return createFailedGenerationResult(
+      generationIds[index],
+      getGenerationErrorMessage(item.reason, fallbackError)
+    );
   });
 }
 
