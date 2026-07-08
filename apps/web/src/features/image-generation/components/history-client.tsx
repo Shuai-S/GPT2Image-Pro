@@ -48,6 +48,12 @@ export interface HistoryGeneration {
   userId: string;
   userName: string | null;
   userEmail: string | null;
+  backendChannel?: {
+    provider: string;
+    detail: string;
+    group: string | null;
+    title: string;
+  } | null;
   prompt: string;
   revisedPrompt: string | null;
   promptRepairNotice?: string | null;
@@ -227,8 +233,9 @@ export function HistoryClient({
   const createHref = `/${locale}/dashboard/create`;
   const resetHref = `/${locale}/dashboard/history`;
   const desktopGridClass = canViewAll
-    ? "md:grid-cols-[64px_180px_minmax(0,1fr)_140px_82px_110px_92px_128px]"
+    ? "md:grid-cols-[64px_170px_160px_minmax(0,1fr)_130px_82px_110px_92px_118px]"
     : "md:grid-cols-[64px_minmax(0,1fr)_150px_90px_118px_92px_128px]";
+  const desktopMinWidthClass = canViewAll ? "md:min-w-[1180px]" : "";
 
   /**
    * 处理页码输入框提交：解析、校验、导航。
@@ -285,12 +292,13 @@ export function HistoryClient({
 
   return (
     <>
-      <div className="overflow-hidden rounded-lg border border-border bg-background">
+      <div className="overflow-x-auto rounded-lg border border-border bg-background">
         <div
-          className={`hidden ${desktopGridClass} items-center gap-3 border-b border-border bg-muted/30 px-4 py-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground md:grid`}
+          className={`hidden ${desktopGridClass} ${desktopMinWidthClass} items-center gap-3 border-b border-border bg-muted/30 px-4 py-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground md:grid`}
         >
           <div>{copy("Image", "图片")}</div>
           {canViewAll && <div>{copy("User", "用户")}</div>}
+          {canViewAll && <div>{copy("Channel", "渠道")}</div>}
           <div>{copy("Prompt", "提示词")}</div>
           <div>{copy("Model", "模型")}</div>
           <div>{copy("Size", "尺寸")}</div>
@@ -308,7 +316,7 @@ export function HistoryClient({
                 <button
                   type="button"
                   onClick={() => setSelectedId(item.id)}
-                  className={`grid w-full grid-cols-[56px_minmax(0,1fr)] items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40 ${desktopGridClass} md:items-center md:gap-3`}
+                  className={`grid w-full grid-cols-[56px_minmax(0,1fr)] items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40 ${desktopGridClass} ${desktopMinWidthClass} md:items-center md:gap-3`}
                 >
                   <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded border border-border bg-muted md:h-14 md:w-14">
                     {item.imageUrl && item.status === "completed" ? (
@@ -346,6 +354,27 @@ export function HistoryClient({
                     </div>
                   )}
 
+                  {canViewAll && (
+                    <div
+                      className="hidden min-w-0 text-xs md:block"
+                      title={item.backendChannel?.title || undefined}
+                    >
+                      <p className="truncate font-medium text-foreground">
+                        {item.backendChannel?.provider || "-"}
+                      </p>
+                      {item.backendChannel?.detail && (
+                        <p className="truncate font-mono text-[10px] text-muted-foreground">
+                          {item.backendChannel.detail}
+                        </p>
+                      )}
+                      {item.backendChannel?.group && (
+                        <p className="truncate text-[10px] text-muted-foreground">
+                          {copy("Group", "分组")} {item.backendChannel.group}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   <div className="min-w-0">
                     <p className="line-clamp-2 break-words text-sm leading-snug text-foreground">
                       {item.prompt}
@@ -370,6 +399,11 @@ export function HistoryClient({
                     {canViewAll && (
                       <p className="mt-1 truncate text-[11px] text-muted-foreground md:hidden">
                         {item.userEmail || item.userName || item.userId}
+                      </p>
+                    )}
+                    {canViewAll && item.backendChannel && (
+                      <p className="mt-1 truncate text-[11px] text-muted-foreground md:hidden">
+                        {item.backendChannel.provider}
                       </p>
                     )}
                     {summary && (

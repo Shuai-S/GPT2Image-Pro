@@ -8,7 +8,14 @@
  * 关键依赖：generation/user 表、Better Auth 当前用户、客户端时区、HistoryClient。
  */
 import { db } from "@repo/database";
-import { generation, user as userTable } from "@repo/database/schema";
+import {
+  generation,
+  imageBackendAccount,
+  imageBackendAdobe,
+  imageBackendApi,
+  imageBackendGroup,
+  user as userTable,
+} from "@repo/database/schema";
 import { getUserRoleById } from "@repo/shared/auth/role-server";
 import { isSuperAdminRole } from "@repo/shared/auth/roles";
 import { getCurrentUser } from "@repo/shared/auth/server";
@@ -24,6 +31,7 @@ import {
   eq,
   gte,
   ilike,
+  inArray,
   lte,
   or,
   type SQL,
@@ -45,6 +53,31 @@ import { hasLayeredMeta } from "@/features/psd-export/layered-meta";
 const PAGE_SIZE = 20;
 const STATUS_OPTIONS = ["pending", "completed", "failed"] as const;
 type StatusFilter = (typeof STATUS_OPTIONS)[number] | "all";
+type BackendChannelKind = "api" | "account" | "adobe" | "platform" | "user-api";
+type BackendMemberKind = "api" | "account" | "adobe";
+
+interface BackendChannelReference {
+  kind: BackendChannelKind;
+  memberKind: BackendMemberKind | null;
+  id: string | null;
+  groupId: string | null;
+  accountBackend: string | null;
+  requestKind: string | null;
+  apiInterfaceMode: string | null;
+  imagesUpstreamMode: string | null;
+}
+
+interface BackendChannelLookups {
+  memberNames: Map<string, string>;
+  groupNames: Map<string, string>;
+}
+
+interface HistoryBackendChannel {
+  provider: string;
+  detail: string;
+  group: string | null;
+  title: string;
+}
 
 interface HistoryPageProps {
   searchParams: Promise<{
@@ -68,6 +101,261 @@ interface HistoryPageProps {
  */
 function cleanFilterText(value: string | undefined) {
   return typeof value === "string" ? value.trim().slice(0, 120) : "";
+}
+
+/**
+ * 判断未知值是否为普通对象。
+ *
+ * @param value 待检查的未知值。
+ * @returns 普通对象返回 true；数组、null 和标量返回 false。
+ * @sideEffects 无。
+ * @failureMode 不抛错，非法 metadata 会被调用方当作空对象处理。
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+/**
+ * 从 metadata 对象中读取非空字符串。
+ *
+ * @param record 元数据对象。
+ * @param key 字段名。
+ * @returns 去空白后的字符串；不存在或空白返回 null。
+ * @sideEffects 无。
+ * @failureMode 非字符串字段忽略，避免把异常 JSON 展示到后台。
+ */
+function metadataString(
+  record: Record<string, unknown> | null | undefined,
+  key: string
+) {
+  const value = record?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+/**
+ * 把记录中的 backend.type 归一化为展示渠道类型。
+ *
+ * @param type metadata.backend.type 或 backendMember.type。
+ * @returns 可展示的渠道类型；未知类型返回 null。
+ * @sideEffects 无。
+ * @failureMode 未知类型不展示，避免误导后台分析。
+ */
+function normalizeBackendChannelKind(type: string | null) {
+  if (type === "pool-api" || type === "api") return "api" as const;
+  if (type === "pool-account" || type === "account") return "account" as const;
+  if (type === "pool-adobe" || type === "adobe") return "adobe" as const;
+  if (type === "platform") return "platform" as const;
+  if (type === "user-api") return "user-api" as const;
+  return null;
+}
+
+/**
+ * 从使用记录 metadata 中提取实际渠道引用。
+ *
+ * @param metadata generation.metadata。
+ * @returns 渠道引用；没有可用信息时返回 null。
+ * @sideEffects 无。
+ * @failureMode metadata 缺字段或结构漂移时回退到初始 backend 快照。
+ */
+function extractBackendChannelReference(
+  metadata: Record<string, unknown> | null | undefined
+): BackendChannelReference | null {
+  const responseOutput = isRecord(metadata?.responseOutput)
+    ? metadata.responseOutput
+    : null;
+  const responseBackendMember = isRecord(responseOutput?.backendMember)
+    ? responseOutput.backendMember
+    : null;
+  const responsesPreviousResponse = isRecord(
+    responseOutput?.responsesPreviousResponse
+  )
+    ? responseOutput.responsesPreviousResponse
+    : null;
+  const previousBackendMember = isRecord(
+    responsesPreviousResponse?.backendMember
+  )
+    ? responsesPreviousResponse.backendMember
+    : null;
+  const backendMember = responseBackendMember ?? previousBackendMember;
+  if (backendMember) {
+    const kind = normalizeBackendChannelKind(
+      metadataString(backendMember, "type")
+    );
+    if (kind === "api" || kind === "account" || kind === "adobe") {
+      return {
+        kind,
+        memberKind: kind,
+        id: metadataString(backendMember, "id"),
+        groupId: metadataString(backendMember, "groupId"),
+        accountBackend: metadataString(backendMember, "accountBackend"),
+        requestKind: null,
+        apiInterfaceMode: null,
+        imagesUpstreamMode: null,
+      };
+    }
+  }
+
+  const backend = isRecord(metadata?.backend) ? metadata.backend : null;
+  const kind = normalizeBackendChannelKind(metadataString(backend, "type"));
+  if (!kind) return null;
+  const memberKind =
+    kind === "api" || kind === "account" || kind === "adobe" ? kind : null;
+  return {
+    kind,
+    memberKind,
+    id: metadataString(backend, "id"),
+    groupId: metadataString(backend, "groupId"),
+    accountBackend: metadataString(backend, "accountBackend"),
+    requestKind: metadataString(backend, "requestKind"),
+    apiInterfaceMode: metadataString(backend, "apiInterfaceMode"),
+    imagesUpstreamMode: metadataString(backend, "imagesUpstreamMode"),
+  };
+}
+
+/**
+ * 返回渠道类型的后台展示文案。
+ *
+ * @param kind 渠道类型。
+ * @param isZh 是否中文界面。
+ * @returns 本地化渠道类型标签。
+ * @sideEffects 无。
+ * @failureMode 未知类型由 TypeScript 穷尽检查兜底。
+ */
+function backendKindLabel(kind: BackendChannelKind, isZh: boolean) {
+  const labels: Record<BackendChannelKind, { en: string; zh: string }> = {
+    api: { en: "API", zh: "API" },
+    account: { en: "Account", zh: "账号" },
+    adobe: { en: "Adobe", zh: "Adobe" },
+    platform: { en: "Platform", zh: "平台" },
+    "user-api": { en: "User API", zh: "用户 API" },
+  };
+  return isZh ? labels[kind].zh : labels[kind].en;
+}
+
+/**
+ * 缩短渠道 ID，保留用于定位的首尾片段。
+ *
+ * @param id 后端池成员 ID。
+ * @returns 短 ID；空值返回 null。
+ * @sideEffects 无。
+ * @failureMode 短 ID 仅用于显示，不参与权限或查询。
+ */
+function shortBackendId(id: string | null) {
+  if (!id) return null;
+  return id.length > 12 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id;
+}
+
+/**
+ * 为超管使用记录批量加载渠道名称。
+ *
+ * @param references 当前分页记录中提取出的渠道引用。
+ * @returns 成员名称与分组名称索引。
+ * @sideEffects 读取后端池表，仅供超管页面展示。
+ * @failureMode 空引用不查库；已删除后端会在展示层回退到短 ID。
+ */
+async function loadBackendChannelLookups(
+  references: BackendChannelReference[]
+): Promise<BackendChannelLookups> {
+  const apiIds = references.flatMap((ref) =>
+    ref.memberKind === "api" && ref.id ? [ref.id] : []
+  );
+  const accountIds = references.flatMap((ref) =>
+    ref.memberKind === "account" && ref.id ? [ref.id] : []
+  );
+  const adobeIds = references.flatMap((ref) =>
+    ref.memberKind === "adobe" && ref.id ? [ref.id] : []
+  );
+  const groupIds = references.flatMap((ref) =>
+    ref.groupId ? [ref.groupId] : []
+  );
+
+  const [apiRows, accountRows, adobeRows, groupRows] = await Promise.all([
+    apiIds.length
+      ? db
+          .select({ id: imageBackendApi.id, name: imageBackendApi.name })
+          .from(imageBackendApi)
+          .where(inArray(imageBackendApi.id, [...new Set(apiIds)]))
+      : Promise.resolve([]),
+    accountIds.length
+      ? db
+          .select({
+            id: imageBackendAccount.id,
+            name: imageBackendAccount.name,
+          })
+          .from(imageBackendAccount)
+          .where(inArray(imageBackendAccount.id, [...new Set(accountIds)]))
+      : Promise.resolve([]),
+    adobeIds.length
+      ? db
+          .select({ id: imageBackendAdobe.id, name: imageBackendAdobe.name })
+          .from(imageBackendAdobe)
+          .where(inArray(imageBackendAdobe.id, [...new Set(adobeIds)]))
+      : Promise.resolve([]),
+    groupIds.length
+      ? db
+          .select({ id: imageBackendGroup.id, name: imageBackendGroup.name })
+          .from(imageBackendGroup)
+          .where(inArray(imageBackendGroup.id, [...new Set(groupIds)]))
+      : Promise.resolve([]),
+  ]);
+
+  return {
+    memberNames: new Map(
+      [...apiRows, ...accountRows, ...adobeRows].map((row) => [
+        row.id,
+        row.name,
+      ])
+    ),
+    groupNames: new Map(groupRows.map((row) => [row.id, row.name])),
+  };
+}
+
+/**
+ * 构建超管使用记录的渠道展示对象。
+ *
+ * @param reference metadata 中提取的渠道引用。
+ * @param lookups 后端池名称索引。
+ * @param isZh 是否中文界面。
+ * @returns 可渲染的渠道信息；缺失时返回 null。
+ * @sideEffects 无。
+ * @failureMode 后端已删除或名称缺失时回退到类型与短 ID。
+ */
+function buildHistoryBackendChannel(
+  reference: BackendChannelReference | null,
+  lookups: BackendChannelLookups,
+  isZh: boolean
+): HistoryBackendChannel | null {
+  if (!reference) return null;
+  const kind = backendKindLabel(reference.kind, isZh);
+  const shortId = shortBackendId(reference.id);
+  const provider =
+    (reference.id ? lookups.memberNames.get(reference.id) : null) ||
+    shortId ||
+    kind;
+  const detailParts = [
+    kind,
+    shortId,
+    reference.accountBackend,
+    reference.requestKind,
+    reference.apiInterfaceMode,
+    reference.imagesUpstreamMode,
+  ].filter((part): part is string => Boolean(part));
+  const group =
+    (reference.groupId ? lookups.groupNames.get(reference.groupId) : null) ||
+    shortBackendId(reference.groupId);
+  const detail = detailParts.join(" · ");
+  return {
+    provider,
+    detail,
+    group,
+    title: [
+      provider,
+      detail,
+      group ? `${isZh ? "分组" : "Group"}: ${group}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  };
 }
 
 /**
@@ -275,6 +563,20 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
       .where(where),
   ]);
 
+  const backendChannelReferences = canViewAll
+    ? generations.map((g) => extractBackendChannelReference(g.metadata))
+    : [];
+  const backendChannelLookups = canViewAll
+    ? await loadBackendChannelLookups(
+        backendChannelReferences.filter((ref): ref is BackendChannelReference =>
+          Boolean(ref)
+        )
+      )
+    : {
+        memberNames: new Map<string, string>(),
+        groupNames: new Map<string, string>(),
+      };
+
   const withUrls = generations.map((g) => ({
     id: g.id,
     userId: g.userId,
@@ -298,6 +600,15 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
     referenceImages: extractGenerationReferenceImages(g.metadata),
     isLayered: hasLayeredMeta(g.metadata),
     createdAt: g.createdAt.toISOString(),
+    ...(canViewAll
+      ? {
+          backendChannel: buildHistoryBackendChannel(
+            extractBackendChannelReference(g.metadata),
+            backendChannelLookups,
+            isZh
+          ),
+        }
+      : {}),
   }));
 
   return (
