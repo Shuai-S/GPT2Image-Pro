@@ -177,15 +177,15 @@ defineOperation({
 });
 
 // ---------------------------------------------------------------------------
-// 5. image.getUserGenerations - 用户生成历史（分页）
+// 5. image.getUserGenerations - 用户使用记录（分页）
 // 语义只读，可能触发过期 pending 清理（维护性写入）
 // ---------------------------------------------------------------------------
 defineOperation({
   name: "image.getUserGenerations",
   domain: "image-generation",
-  title: "获取用户生成历史",
+  title: "获取用户使用记录",
   description:
-    "分页获取用户的图像生成历史记录。" +
+    "分页获取用户的图像生成使用记录。" +
     "可能触发 expireStalePendingGenerations（维护性写入）。",
   input: z.object({
     userId: z.string(),

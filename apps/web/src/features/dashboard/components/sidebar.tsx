@@ -183,6 +183,7 @@ export function DashboardSidebar({
       Dashboard: t("nav.dashboard"),
       Gallery: t("nav.gallery"),
       History: t("nav.history"),
+      "Usage Records": t("nav.history"),
       "System Docs": t("nav.backendHelp"),
       "External API": t("nav.externalApi"),
       "Billing & Usage": t("nav.billing"),

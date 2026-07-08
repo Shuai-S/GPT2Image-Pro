@@ -209,7 +209,7 @@ export const dashboardNav: NavGroup[] = [
         icon: GalleryHorizontalEnd,
       },
       {
-        title: "History",
+        title: "Usage Records",
         href: "/dashboard/history",
         icon: Clock,
       },

@@ -1,3 +1,11 @@
+/**
+ * 使用记录客户端列表
+ *
+ * 职责：渲染图像生成使用记录表格、分页与大图详情入口。
+ *
+ * 使用方：dashboard/history 页面服务端组件。
+ * 关键依赖：ImageLightbox、存储缩略图 URL、应用时区格式化。
+ */
 "use client";
 
 import { formatCredits } from "@repo/shared/credits/format";
@@ -23,8 +31,8 @@ import type {
 } from "@/features/image-generation/components/image-lightbox";
 import { CachedImage as Image } from "@/features/shared/components/cached-image";
 
-// 懒加载:lightbox(大图查看模态)仅在点开某张图时才需要,改 next/dynamic 后从列表页
-// 首屏 bundle 移出,点开时再异步加载。
+// 懒加载:lightbox(大图查看模态)仅在点开某张图时才需要,改 next/dynamic 后从列表页首屏
+// bundle 移出,点开时再异步加载。
 const ImageLightbox = dynamic(
   () =>
     import("@/features/image-generation/components/image-lightbox").then(
@@ -37,6 +45,9 @@ import type { GenerationCreditDetails } from "@/features/image-generation/credit
 
 export interface HistoryGeneration {
   id: string;
+  userId: string;
+  userName: string | null;
+  userEmail: string | null;
   prompt: string;
   revisedPrompt: string | null;
   promptRepairNotice?: string | null;
@@ -60,8 +71,20 @@ export interface HistoryClientProps {
   page: number;
   pageSize: number;
   timeZone: string;
+  canViewAll?: boolean;
+  currentUserId: string;
+  filterQuery?: string;
+  hasActiveFilters?: boolean;
 }
 
+/**
+ * 返回使用记录状态徽章样式。
+ *
+ * @param status 生成记录状态。
+ * @returns Tailwind className 片段。
+ * @sideEffects 无。
+ * @failureMode 未知状态按 pending 弱提示样式展示。
+ */
 function statusClasses(status: HistoryGeneration["status"]): string {
   switch (status) {
     case "completed":
@@ -79,6 +102,16 @@ const STATUS_LABELS_ZH: Record<string, string> = {
   pending: "处理中",
 };
 
+/**
+ * 按应用时区格式化记录创建时间。
+ *
+ * @param iso ISO 时间字符串。
+ * @param locale 当前语言。
+ * @param timeZone 应用时区。
+ * @returns 本地化日期时间；失败时回退原始字符串。
+ * @sideEffects 无。
+ * @failureMode 日期非法或 Intl 抛错时直接返回原值，避免列表崩溃。
+ */
 function formatDate(iso: string, locale: string, timeZone: string): string {
   try {
     return formatDateInTimeZone(
@@ -99,6 +132,15 @@ function formatDate(iso: string, locale: string, timeZone: string): string {
   }
 }
 
+/**
+ * 从生成元数据中生成积分摘要。
+ *
+ * @param item 使用记录行。
+ * @param copy 双语文案选择器。
+ * @returns 可读积分明细摘要；无明细时返回 null。
+ * @sideEffects 无。
+ * @failureMode 缺少 creditDetails 时不展示摘要。
+ */
 function creditSummary(
   item: HistoryGeneration,
   copy: (en: string, zh: string) => string
@@ -126,12 +168,32 @@ function creditSummary(
   return parts.length ? parts.join(" · ") : null;
 }
 
+/**
+ * 使用记录列表组件。
+ *
+ * @param props.initialGenerations 初始分页记录。
+ * @param props.totalCount 当前过滤条件下的总记录数。
+ * @param props.page 当前页码。
+ * @param props.pageSize 每页记录数。
+ * @param props.timeZone 应用时区。
+ * @param props.canViewAll 是否展示全站用户列。
+ * @param props.currentUserId 当前登录用户 ID，仅用于保持调用契约；使用记录页不暴露删除入口。
+ * @param props.filterQuery 分页链接需要保留的筛选 query。
+ * @param props.hasActiveFilters 当前是否存在筛选条件。
+ * @returns 使用记录表格与选中记录详情弹窗。
+ * @sideEffects 用户操作时导航分页、打开 lightbox。
+ * @failureMode 空列表显示空状态；使用记录详情保持只读，不暴露删除入口。
+ */
 export function HistoryClient({
   initialGenerations,
   totalCount,
   page,
   pageSize,
   timeZone,
+  canViewAll = false,
+  currentUserId: _currentUserId,
+  filterQuery = "",
+  hasActiveFilters = false,
 }: HistoryClientProps) {
   const locale = useLocale();
   const isZh = locale === "zh";
@@ -139,7 +201,7 @@ export function HistoryClient({
   const statusLabel = (status: string) =>
     isZh ? STATUS_LABELS_ZH[status] || status : status;
   const router = useRouter();
-  const [items, setItems] = useState<HistoryGeneration[]>(initialGenerations);
+  const [items] = useState<HistoryGeneration[]>(initialGenerations);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pageInput, setPageInput] = useState(String(page));
 
@@ -150,9 +212,15 @@ export function HistoryClient({
 
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const selected = items.find((i) => i.id === selectedId) ?? null;
-  const historyHref = (nextPage: number) =>
-    `/${locale}/dashboard/history?page=${nextPage}`;
+  const historyHref = (nextPage: number) => {
+    const suffix = filterQuery ? `&${filterQuery}` : "";
+    return `/${locale}/dashboard/history?page=${nextPage}${suffix}`;
+  };
   const createHref = `/${locale}/dashboard/create`;
+  const resetHref = `/${locale}/dashboard/history`;
+  const desktopGridClass = canViewAll
+    ? "md:grid-cols-[64px_180px_minmax(0,1fr)_140px_82px_110px_92px_128px]"
+    : "md:grid-cols-[64px_minmax(0,1fr)_150px_90px_118px_92px_128px]";
 
   /**
    * 处理页码输入框提交：解析、校验、导航。
@@ -175,10 +243,6 @@ export function HistoryClient({
     router.push(historyHref(clamped));
   };
 
-  const handleDelete = (id: string) => {
-    setItems((prev) => prev.filter((x) => x.id !== id));
-  };
-
   if (items.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-background px-6 py-24 text-center">
@@ -187,16 +251,25 @@ export function HistoryClient({
           strokeWidth={1.2}
         />
         <h3 className="mt-4 font-serif text-lg font-medium text-foreground">
-          {copy("No history yet", "还没有历史记录")}
+          {copy("No usage records", "暂无使用记录")}
         </h3>
         <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-          {copy(
-            "Your generation history will appear here once you create images.",
-            "创建图片后，生成历史会显示在这里。"
-          )}
+          {hasActiveFilters
+            ? copy(
+                "No records match the current filters.",
+                "没有符合当前过滤条件的使用记录。"
+              )
+            : copy(
+                "Usage records will appear here once images are created.",
+                "创建图片后，使用记录会显示在这里。"
+              )}
         </p>
         <Button asChild variant="outline" className="mt-6">
-          <Link href={createHref}>{copy("Create an image", "创建图片")}</Link>
+          <Link href={hasActiveFilters ? resetHref : createHref}>
+            {hasActiveFilters
+              ? copy("Reset filters", "重置过滤")
+              : copy("Create an image", "创建图片")}
+          </Link>
         </Button>
       </div>
     );
@@ -205,8 +278,11 @@ export function HistoryClient({
   return (
     <>
       <div className="overflow-hidden rounded-lg border border-border bg-background">
-        <div className="hidden grid-cols-[64px_minmax(0,1fr)_150px_90px_118px_92px_128px] items-center gap-3 border-b border-border bg-muted/30 px-4 py-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground md:grid">
+        <div
+          className={`hidden ${desktopGridClass} items-center gap-3 border-b border-border bg-muted/30 px-4 py-3 text-[11px] font-medium uppercase tracking-wider text-muted-foreground md:grid`}
+        >
           <div>{copy("Image", "图片")}</div>
+          {canViewAll && <div>{copy("User", "用户")}</div>}
           <div>{copy("Prompt", "提示词")}</div>
           <div>{copy("Model", "模型")}</div>
           <div>{copy("Size", "尺寸")}</div>
@@ -223,7 +299,7 @@ export function HistoryClient({
                 <button
                   type="button"
                   onClick={() => setSelectedId(item.id)}
-                  className="grid w-full grid-cols-[56px_minmax(0,1fr)] items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40 md:grid-cols-[64px_minmax(0,1fr)_150px_90px_118px_92px_128px] md:items-center md:gap-3"
+                  className={`grid w-full grid-cols-[56px_minmax(0,1fr)] items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40 ${desktopGridClass} md:items-center md:gap-3`}
                 >
                   <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded border border-border bg-muted md:h-14 md:w-14">
                     {item.imageUrl && item.status === "completed" ? (
@@ -250,6 +326,17 @@ export function HistoryClient({
                     )}
                   </div>
 
+                  {canViewAll && (
+                    <div className="hidden min-w-0 md:block">
+                      <p className="truncate text-xs font-medium text-foreground">
+                        {item.userEmail || item.userName || item.userId}
+                      </p>
+                      <p className="truncate font-mono text-[10px] text-muted-foreground">
+                        {item.userId}
+                      </p>
+                    </div>
+                  )}
+
                   <div className="min-w-0">
                     <p className="line-clamp-2 break-words text-sm leading-snug text-foreground">
                       {item.prompt}
@@ -271,6 +358,11 @@ export function HistoryClient({
                         {statusLabel(item.status)}
                       </Badge>
                     </div>
+                    {canViewAll && (
+                      <p className="mt-1 truncate text-[11px] text-muted-foreground md:hidden">
+                        {item.userEmail || item.userName || item.userId}
+                      </p>
+                    )}
                     {summary && (
                       <p className="mt-1 text-[11px] leading-tight text-muted-foreground md:hidden">
                         {summary}
@@ -389,7 +481,6 @@ export function HistoryClient({
           open={selectedId !== null}
           timeZone={timeZone}
           onClose={() => setSelectedId(null)}
-          onDelete={handleDelete}
         />
       )}
     </>
