@@ -7,6 +7,7 @@ export {
 } from "./contact";
 export {
   adminConfig,
+  dashboardAdminNav,
   // Admin 配置
   adminNav,
   dashboardConfig,

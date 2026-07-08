@@ -1,56 +1,30 @@
+/**
+ * Dashboard 侧边栏组件
+ *
+ * 职责：组合品牌 Logo、导航列表、用户菜单以及桌面/移动端容器。
+ *
+ * 使用方：Dashboard layout。
+ * 关键依赖：useDashboardNav、useUnreadBadges、NavLinkItem、UserMenu。
+ */
 "use client";
 
-import { getMyUnreadAnnouncementCountAction } from "@repo/shared/announcements/actions";
-import { signOut } from "@repo/shared/auth/client";
-import { isAdminRole, isObserverAdminRole } from "@repo/shared/auth/roles";
-import { ModeToggle } from "@repo/shared/components";
-import type { NavGroup, NavItem } from "@repo/shared/config";
-import { dashboardConfig } from "@repo/shared/config";
+import type { NavItem } from "@repo/shared/config";
 import type { BrandingConfig } from "@repo/shared/config/branding";
-import { CreditBalanceBadge } from "@repo/shared/credits/components";
-import { getMyPlanAction } from "@repo/shared/subscription/actions/get-user-plan";
-import {
-  PlanBadge,
-  type PlanType,
-} from "@repo/shared/subscription/components/plan-badge";
-import { getMyUnreadTicketCountAction } from "@repo/shared/support/actions/ticket";
 import type { OperationFeatureFlags } from "@repo/shared/system-settings";
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarImage,
-} from "@repo/ui/components/avatar";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@repo/ui/components/popover";
-import { Separator } from "@repo/ui/components/separator";
 import { Sheet, SheetContent, SheetTitle } from "@repo/ui/components/sheet";
 import { cn } from "@repo/ui/utils";
-import {
-  Activity,
-  ChevronsUpDown,
-  CreditCard,
-  Gift,
-  LogOut,
-  Megaphone,
-  Server,
-  Settings,
-  Shield,
-  Users,
-} from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { useAction } from "next-safe-action/hooks";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type CurrentSession,
   useCurrentSession,
 } from "@/features/auth/hooks/use-current-session";
+import { NavLinkItem } from "@/features/dashboard/components/nav-link-item";
+import { UserMenu } from "@/features/dashboard/components/user-menu";
 import { useSidebar } from "@/features/dashboard/context";
+import { useDashboardNav } from "@/features/dashboard/hooks/use-dashboard-nav";
+import { useUnreadBadges } from "@/features/dashboard/hooks/use-unread-badges";
 
 /**
  * Dashboard 侧边栏组件
@@ -79,9 +53,6 @@ export function DashboardSidebar({
   branding,
   operationFlags,
 }: DashboardSidebarProps) {
-  const pathname = usePathname();
-  const router = useRouter();
-  const searchParams = useSearchParams();
   const locale = useLocale();
   const { isCollapsed, isMobileOpen, setMobileOpen, toggleSidebar } =
     useSidebar();
@@ -90,83 +61,12 @@ export function DashboardSidebar({
   // 获取当前用户会话
   const { data: session } = useCurrentSession(initialSession);
   const user = session?.user;
-  const isAdmin = isAdminRole(user?.role);
-  const isObserverAdmin = isObserverAdminRole(user?.role);
-  const lastUnreadRefreshAtRef = useRef(0);
-
-  // Popover 开关状态
-  const [open, setOpen] = useState(false);
-
-  // 获取用户订阅计划
-  const { execute: fetchPlan, result: planResult } = useAction(getMyPlanAction);
-  const userPlan = (planResult.data?.plan as PlanType) || "free";
-  const { execute: fetchUnreadTickets, result: unreadTicketsResult } =
-    useAction(getMyUnreadTicketCountAction);
-  const {
-    execute: fetchUnreadAnnouncements,
-    result: unreadAnnouncementsResult,
-  } = useAction(getMyUnreadAnnouncementCountAction);
-  const unreadTicketCount = Math.max(
-    0,
-    Number(unreadTicketsResult.data?.count ?? 0)
-  );
-  const unreadAnnouncementCount = Math.max(
-    0,
-    Number(unreadAnnouncementsResult.data?.count ?? 0)
-  );
-
-  // 用户登录后获取计划
-  useEffect(() => {
-    if (user?.id) {
-      fetchPlan();
-    }
-  }, [user?.id, fetchPlan]);
-
-  /**
-   * 刷新侧边栏角标计数。
-   *
-   * @returns 无返回值。
-   * @sideEffects 调用 server actions 读取未读工单与公告数量。
-   */
-  const refreshUnreadCounts = useCallback(() => {
-    const now = Date.now();
-    if (now - lastUnreadRefreshAtRef.current < 1000) return;
-    lastUnreadRefreshAtRef.current = now;
-    fetchUnreadTickets();
-    fetchUnreadAnnouncements();
-  }, [fetchUnreadTickets, fetchUnreadAnnouncements]);
-
-  useEffect(() => {
-    if (user?.id) {
-      refreshUnreadCounts();
-    }
-  }, [user?.id, refreshUnreadCounts]);
-
-  useEffect(() => {
-    if (!user?.id) return;
-
-    /**
-     * 页面从后台回到前台时刷新计数。
-     *
-     * @returns 无返回值。
-     * @sideEffects 触发未读计数查询；避免每次路由切换都抢占导航请求。
-     */
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") {
-        refreshUnreadCounts();
-      }
-    };
-
-    window.addEventListener("focus", refreshUnreadCounts);
-    window.addEventListener("pageshow", refreshUnreadCounts);
-    document.addEventListener("visibilitychange", refreshWhenVisible);
-
-    return () => {
-      window.removeEventListener("focus", refreshUnreadCounts);
-      window.removeEventListener("pageshow", refreshUnreadCounts);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
-    };
-  }, [user?.id, refreshUnreadCounts]);
+  const { sidebarNav, localizedHref, isNavItemActive } = useDashboardNav({
+    locale,
+    role: user?.role,
+    operationFlags,
+  });
+  const { getUnreadCount } = useUnreadBadges(user?.id);
 
   /**
    * 根据稳定翻译 key 获取导航显示标题。
@@ -178,130 +78,6 @@ export function DashboardSidebar({
    */
   const getNavTitle = (item: Pick<NavItem, "title" | "labelKey">): string => {
     return item.labelKey ? t(item.labelKey) : item.title;
-  };
-
-  /**
-   * 获取用户名首字母作为头像回退
-   */
-  const getInitials = (name: string) => {
-    return name
-      .split(" ")
-      .map((n) => n[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2);
-  };
-
-  /**
-   * 处理登出
-   */
-  const handleSignOut = async () => {
-    setOpen(false);
-    await signOut({
-      fetchOptions: {
-        onSuccess: () => {
-          router.push("/");
-        },
-      },
-    });
-  };
-
-  /**
-   * 处理设置点击
-   */
-  const handleSettingsClick = () => {
-    setOpen(false);
-    router.push(`/${locale}/dashboard/settings`);
-  };
-
-  const localizedHref = (href: string) =>
-    href.startsWith("/") ? `/${locale}${href}` : href;
-
-  /**
-   * 根据运营开关过滤 Dashboard 导航项。
-   *
-   * @param item 原始导航项。
-   * @returns 可见导航项；被关闭的功能返回 null。
-   */
-  const filterOperationalNavItem = useCallback(
-    (item: NavItem): NavItem | null => {
-      const createMode = item.href.startsWith("/dashboard/create?")
-        ? new URLSearchParams(item.href.split("?")[1] ?? "").get("mode")
-        : null;
-      if (createMode === "text" && !operationFlags.textToImage) return null;
-      if (createMode === "image" && !operationFlags.imageToImage) return null;
-      if (createMode === "chat" && !operationFlags.chat) return null;
-      if (createMode === "agent" && !operationFlags.agent) return null;
-      if (createMode === "waterfall" && !operationFlags.waterfall) return null;
-      if (createMode === "video" && !operationFlags.video) return null;
-      if (item.href === "/dashboard/canvas" && !operationFlags.infiniteCanvas) {
-        return null;
-      }
-      if (
-        item.href === "/dashboard/backend-help" &&
-        !operationFlags.systemDocs
-      ) {
-        return null;
-      }
-      if (
-        item.href === "/dashboard/external-api" &&
-        !operationFlags.externalApi
-      ) {
-        return null;
-      }
-
-      if (!item.children?.length) return item;
-
-      const children = item.children
-        .map(filterOperationalNavItem)
-        .filter((child): child is NavItem => Boolean(child));
-      if (children.length === 0) return null;
-
-      return {
-        ...item,
-        href: children[0]?.href ?? item.href,
-        children,
-      };
-    },
-    [operationFlags]
-  );
-
-  const sidebarNav = useMemo<NavGroup[]>(
-    () =>
-      dashboardConfig.sidebarNav
-        .map((group) => ({
-          ...group,
-          items: group.items
-            .map(filterOperationalNavItem)
-            .filter((item): item is NavItem => Boolean(item)),
-        }))
-        .filter((group) => group.items.length > 0),
-    [filterOperationalNavItem]
-  );
-
-  /**
-   * 判断导航项是否匹配当前地址。
-   *
-   * @param href 导航目标地址，可包含 query 参数。
-   * @returns 当前路径与查询参数是否命中该导航项。
-   */
-  const isNavItemActive = (href: string) => {
-    const normalizedPath = pathname.replace(/^\/[a-z]{2}\//, "/");
-    const [hrefPath, hrefQuery = ""] = href.split("?");
-    if (!hrefQuery) {
-      return (
-        normalizedPath === hrefPath ||
-        (hrefPath !== "/dashboard" && normalizedPath.startsWith(`${hrefPath}/`))
-      );
-    }
-    if (normalizedPath !== hrefPath) return false;
-
-    const currentParams = new URLSearchParams(searchParams.toString());
-    const hrefParams = new URLSearchParams(hrefQuery);
-    for (const [key, value] of hrefParams) {
-      if (currentParams.get(key) !== value) return false;
-    }
-    return true;
   };
 
   /**
@@ -357,270 +133,25 @@ export function DashboardSidebar({
                 </p>
               )}
               <div className="space-y-0.5">
-                {[
-                  ...group.items,
-                  ...(isAdmin
-                    ? [
-                        {
-                          title: "Global Status",
-                          labelKey: "nav.globalStatus",
-                          href: "/dashboard/admin/status",
-                          icon: Activity,
-                        },
-                        {
-                          title: "User Management",
-                          labelKey: "nav.userManagement",
-                          href: "/dashboard/admin/users",
-                          icon: Users,
-                        },
-                        {
-                          title: "Payment Management",
-                          labelKey: "nav.paymentManagement",
-                          href: "/dashboard/admin/payments",
-                          icon: CreditCard,
-                        },
-                        {
-                          title: "Announcement Management",
-                          labelKey: "nav.announcementManagement",
-                          href: "/dashboard/admin/announcements",
-                          icon: Megaphone,
-                        },
-                        {
-                          title: "Referral Management",
-                          labelKey: "nav.referralManagement",
-                          href: "/dashboard/admin/referral",
-                          icon: Gift,
-                        },
-                        {
-                          title: "System Settings",
-                          labelKey: "nav.systemSettings",
-                          href: "/dashboard/admin/settings",
-                          icon: Shield,
-                        },
-                      ]
-                    : isObserverAdmin
-                      ? [
-                          {
-                            title: "Global Status",
-                            labelKey: "nav.globalStatus",
-                            href: "/dashboard/admin/status",
-                            icon: Activity,
-                          },
-                          {
-                            title: "Image Backend Pool",
-                            labelKey: "nav.imageBackendPool",
-                            href: "/dashboard/admin/settings",
-                            icon: Server,
-                          },
-                        ]
-                      : []),
-                ].map((item) => {
-                  const isActive = item.children
-                    ? item.children.some((child) => isNavItemActive(child.href))
-                    : isNavItemActive(item.href);
-                  const Icon = item.icon;
-                  const translatedTitle = getNavTitle(item);
-                  const showSupportUnread =
-                    item.href === "/dashboard/support" && unreadTicketCount > 0;
-                  const unreadCount =
-                    item.href === "/dashboard/announcements"
-                      ? unreadAnnouncementCount
-                      : showSupportUnread
-                        ? unreadTicketCount
-                        : 0;
-                  const showUnread = unreadCount > 0;
-                  return (
-                    <div key={item.href}>
-                      <Link
-                        href={localizedHref(item.href)}
-                        title={collapsed ? translatedTitle : undefined}
-                        onClick={() => mobile && setMobileOpen(false)}
-                        className={cn(
-                          "flex items-center gap-3 rounded-md px-2 py-1.5 text-sm font-medium transition-colors",
-                          isActive
-                            ? "bg-accent text-foreground"
-                            : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",
-                          collapsed && "justify-center px-0"
-                        )}
-                      >
-                        {Icon && (
-                          <span className="relative inline-flex shrink-0">
-                            <Icon className="h-4 w-4" />
-                            {showUnread && (
-                              <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-red-500 ring-2 ring-sidebar" />
-                            )}
-                          </span>
-                        )}
-                        {!collapsed && (
-                          <>
-                            <span className="flex-1">{translatedTitle}</span>
-                            {showUnread && (
-                              <span className="min-w-5 rounded-full bg-red-500 px-1.5 py-0.5 text-center text-[10px] font-semibold leading-none text-white">
-                                {unreadCount > 99 ? "99+" : unreadCount}
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </Link>
-                      {!collapsed && item.children && isActive && (
-                        <div className="mt-1 space-y-0.5 pl-7">
-                          {item.children.map((child) => {
-                            const ChildIcon = child.icon;
-                            const childTitle = getNavTitle(child);
-                            const childActive = isNavItemActive(child.href);
-                            return (
-                              <Link
-                                key={child.href}
-                                href={localizedHref(child.href)}
-                                onClick={() => mobile && setMobileOpen(false)}
-                                className={cn(
-                                  "flex items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
-                                  childActive
-                                    ? "bg-accent/70 text-foreground"
-                                    : "text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-                                )}
-                              >
-                                {ChildIcon && (
-                                  <ChildIcon className="h-3.5 w-3.5" />
-                                )}
-                                <span className="truncate">{childTitle}</span>
-                              </Link>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                {group.items.map((item) => (
+                  <NavLinkItem
+                    key={item.href}
+                    item={item}
+                    collapsed={collapsed}
+                    mobile={mobile}
+                    localizedHref={localizedHref}
+                    isNavItemActive={isNavItemActive}
+                    getNavTitle={getNavTitle}
+                    getUnreadCount={getUnreadCount}
+                    onNavigate={() => setMobileOpen(false)}
+                  />
+                ))}
               </div>
             </div>
           ))}
         </nav>
 
-        {/* 用户信息区域 */}
-        <div
-          className="border-t border-sidebar-border p-3"
-          key={user?.id || "session-loading"}
-        >
-          {user ? (
-            <Popover key={user.id} open={open} onOpenChange={setOpen}>
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  className={cn(
-                    "flex w-full min-w-0 items-center gap-3 rounded-md px-2 py-1.5 hover:bg-sidebar-accent/50 transition-colors",
-                    collapsed && "justify-center px-0"
-                  )}
-                >
-                  <Avatar className="h-8 w-8 shrink-0">
-                    <AvatarImage
-                      key={user.image || user.id}
-                      src={user.image || undefined}
-                      alt={user.name}
-                    />
-                    <AvatarFallback className="bg-foreground text-background text-xs">
-                      {getInitials(user.name)}
-                    </AvatarFallback>
-                  </Avatar>
-                  {!collapsed && (
-                    <>
-                      <div className="min-w-0 flex-1 text-left">
-                        <div className="mb-1 flex items-center">
-                          <CreditBalanceBadge key={user.id} />
-                        </div>
-                        <p className="truncate text-sm font-medium">
-                          {user.name}
-                        </p>
-                        <p className="truncate text-xs text-muted-foreground">
-                          {user.email}
-                        </p>
-                      </div>
-                      <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    </>
-                  )}
-                </button>
-              </PopoverTrigger>
-
-              <PopoverContent
-                side="top"
-                align="start"
-                sideOffset={8}
-                className="w-64 p-0"
-              >
-                {/* 用户信息头部 */}
-                <div className="flex items-center gap-3 p-4">
-                  <Avatar className="h-10 w-10">
-                    <AvatarImage
-                      key={user.image || user.id}
-                      src={user.image || undefined}
-                      alt={user.name}
-                    />
-                    <AvatarFallback className="bg-foreground text-background">
-                      {getInitials(user.name)}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 truncate">
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium">{user.name}</p>
-                      <PlanBadge plan={userPlan} size="xs" />
-                    </div>
-                    <p className="truncate text-sm text-muted-foreground">
-                      {user.email}
-                    </p>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* 主题切换 - 使用共享 ModeToggle 组件 */}
-                <div className="flex items-center justify-center p-3">
-                  <ModeToggle variant="inline" />
-                </div>
-
-                <Separator />
-
-                {/* 菜单项 */}
-                <div className="p-2">
-                  {/* 设置 */}
-                  <button
-                    type="button"
-                    onClick={handleSettingsClick}
-                    className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted transition-colors"
-                  >
-                    <Settings className="h-4 w-4" />
-                    {t("sidebar.settings")}
-                  </button>
-
-                  {/* 登出 */}
-                  <button
-                    type="button"
-                    onClick={handleSignOut}
-                    className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted transition-colors"
-                  >
-                    <LogOut className="h-4 w-4" />
-                    {t("sidebar.logout")}
-                  </button>
-                </div>
-              </PopoverContent>
-            </Popover>
-          ) : (
-            // 加载状态
-            <div
-              className={cn(
-                "flex items-center gap-3 rounded-md px-2 py-1.5",
-                collapsed && "justify-center px-0"
-              )}
-            >
-              <div className="h-8 w-8 animate-pulse rounded-full bg-sidebar-accent shrink-0" />
-              {!collapsed && (
-                <div className="flex-1 space-y-1">
-                  <div className="h-4 w-20 animate-pulse rounded bg-sidebar-accent" />
-                  <div className="h-3 w-32 animate-pulse rounded bg-sidebar-accent" />
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+        <UserMenu user={user} collapsed={collapsed} locale={locale} />
       </>
     );
   };
