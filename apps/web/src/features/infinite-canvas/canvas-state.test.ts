@@ -77,6 +77,25 @@ describe("infinite canvas state", () => {
     expect(invalid.success).toBe(false);
   });
 
+  it("creates loop nodes with bounded batch fields", () => {
+    const loop = createCanvasNode("loop", { x: 20, y: 30 });
+    const parsed = parseCanvasState(
+      JSON.parse(
+        serializeCanvasState({
+          ...createEmptyCanvasState("Test"),
+          nodes: [loop],
+        })
+      )
+    );
+
+    expect(loop).toMatchObject({
+      kind: "loop",
+      loopCount: 4,
+      size: "1024x1024",
+    });
+    expect(parsed.success).toBe(true);
+  });
+
   it("fits viewport around existing nodes", () => {
     const nodes = [
       createCanvasNode("prompt", { x: 0, y: 0 }),

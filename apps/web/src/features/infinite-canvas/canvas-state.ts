@@ -14,7 +14,13 @@ export const DEFAULT_NODE_WIDTH = 280;
 export const DEFAULT_NODE_HEIGHT = 180;
 export const DEFAULT_VIEWPORT = { x: 0, y: 0, zoom: 1 };
 
-const canvasNodeKindSchema = z.enum(["prompt", "image", "generator", "output"]);
+const canvasNodeKindSchema = z.enum([
+  "prompt",
+  "image",
+  "generator",
+  "loop",
+  "output",
+]);
 
 export type CanvasNodeKind = z.infer<typeof canvasNodeKindSchema>;
 
@@ -34,6 +40,8 @@ export const canvasNodeSchema = z.object({
   imageUrl: z.string().max(200_000).optional(),
   model: z.string().max(128).optional(),
   size: z.string().max(32).optional(),
+  loopCount: z.number().int().min(1).max(100).optional(),
+  loopItems: z.string().max(8000).optional(),
   status: canvasNodeStatusSchema.optional(),
   error: z.string().max(1000).optional(),
 });
@@ -154,12 +162,14 @@ export function createCanvasNode(
     prompt: "Prompt",
     image: "Image",
     generator: "Generator",
+    loop: "Loop",
     output: "Output",
   };
   const defaultHeight: Record<CanvasNodeKind, number> = {
     prompt: 190,
     image: 220,
     generator: 230,
+    loop: 330,
     output: 230,
   };
 
@@ -174,7 +184,11 @@ export function createCanvasNode(
     prompt: overrides.prompt,
     imageUrl: overrides.imageUrl,
     model: overrides.model,
-    size: overrides.size || (kind === "generator" ? "1024x1024" : undefined),
+    size:
+      overrides.size ||
+      (kind === "generator" || kind === "loop" ? "1024x1024" : undefined),
+    loopCount: overrides.loopCount || (kind === "loop" ? 4 : undefined),
+    loopItems: overrides.loopItems,
     status: overrides.status || "idle",
     error: overrides.error,
   };
