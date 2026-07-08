@@ -54,6 +54,7 @@ export interface HistoryGeneration {
     group: string | null;
     title: string;
   } | null;
+  generationDurationMs?: number | null;
   prompt: string;
   revisedPrompt: string | null;
   promptRepairNotice?: string | null;
@@ -149,6 +150,43 @@ function formatHistoryDate(iso: string, locale: string): FormattedHistoryDate {
 }
 
 /**
+ * 格式化生成耗时。
+ *
+ * @param durationMs 生成创建到终态的毫秒数。
+ * @param copy 双语文案选择器。
+ * @returns 适合列表列宽的耗时文案；缺失时返回短横线。
+ * @sideEffects 无。
+ * @failureMode 非法或缺失耗时不猜测，用短横线表示仍无终态时间。
+ */
+function formatGenerationDuration(
+  durationMs: number | null | undefined,
+  copy: (en: string, zh: string) => string
+) {
+  if (typeof durationMs !== "number" || !Number.isFinite(durationMs)) {
+    return "-";
+  }
+  const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
+  if (totalSeconds < 60) {
+    return copy(`${totalSeconds}s`, `${totalSeconds} 秒`);
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) {
+    return seconds > 0
+      ? copy(`${minutes}m ${seconds}s`, `${minutes}分${seconds}秒`)
+      : copy(`${minutes}m`, `${minutes}分`);
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes > 0
+    ? copy(
+        `${hours}h ${remainingMinutes}m`,
+        `${hours}小时${remainingMinutes}分`
+      )
+    : copy(`${hours}h`, `${hours}小时`);
+}
+
+/**
  * 从生成元数据中生成积分摘要。
  *
  * @param item 使用记录行。
@@ -233,9 +271,9 @@ export function HistoryClient({
   const createHref = `/${locale}/dashboard/create`;
   const resetHref = `/${locale}/dashboard/history`;
   const desktopGridClass = canViewAll
-    ? "md:grid-cols-[64px_170px_160px_minmax(0,1fr)_130px_82px_110px_92px_118px]"
+    ? "md:grid-cols-[64px_170px_160px_minmax(0,1fr)_130px_82px_110px_92px_86px_118px]"
     : "md:grid-cols-[64px_minmax(0,1fr)_150px_90px_118px_92px_128px]";
-  const desktopMinWidthClass = canViewAll ? "md:min-w-[1180px]" : "";
+  const desktopMinWidthClass = canViewAll ? "md:min-w-[1280px]" : "";
 
   /**
    * 处理页码输入框提交：解析、校验、导航。
@@ -304,6 +342,7 @@ export function HistoryClient({
           <div>{copy("Size", "尺寸")}</div>
           <div>{copy("Credits", "积分")}</div>
           <div>{copy("Status", "状态")}</div>
+          {canViewAll && <div>{copy("Duration", "耗时")}</div>}
           <div>{copy("Date", "日期")}</div>
         </div>
 
@@ -311,6 +350,10 @@ export function HistoryClient({
           {items.map((item) => {
             const summary = creditSummary(item, copy);
             const createdAt = formatHistoryDate(item.createdAt, locale);
+            const generationDuration = formatGenerationDuration(
+              item.generationDurationMs,
+              copy
+            );
             return (
               <li key={item.id}>
                 <button
@@ -406,6 +449,11 @@ export function HistoryClient({
                         {item.backendChannel.provider}
                       </p>
                     )}
+                    {canViewAll && (
+                      <p className="mt-1 truncate text-[11px] text-muted-foreground md:hidden">
+                        {copy("Duration", "耗时")} {generationDuration}
+                      </p>
+                    )}
                     {summary && (
                       <p className="mt-1 text-[11px] leading-tight text-muted-foreground md:hidden">
                         {summary}
@@ -438,6 +486,11 @@ export function HistoryClient({
                       {statusLabel(item.status)}
                     </Badge>
                   </div>
+                  {canViewAll && (
+                    <div className="hidden font-mono text-xs text-muted-foreground md:block">
+                      {generationDuration}
+                    </div>
+                  )}
                   <div
                     className="hidden min-w-0 items-center gap-1.5 text-xs text-muted-foreground md:flex"
                     title={createdAt.title}

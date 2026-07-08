@@ -104,6 +104,23 @@ function cleanFilterText(value: string | undefined) {
 }
 
 /**
+ * 计算生成记录从创建到终态的耗时。
+ *
+ * @param createdAt 记录创建时间。
+ * @param completedAt 记录完成或失败落终态时间。
+ * @returns 非负毫秒耗时；缺少终态时间时返回 null。
+ * @sideEffects 无。
+ * @failureMode completedAt 早于 createdAt 时按 0 处理，避免历史异常数据展示负数。
+ */
+function calculateGenerationDurationMs(
+  createdAt: Date,
+  completedAt: Date | null
+) {
+  if (!completedAt) return null;
+  return Math.max(0, completedAt.getTime() - createdAt.getTime());
+}
+
+/**
  * 判断未知值是否为普通对象。
  *
  * @param value 待检查的未知值。
@@ -539,6 +556,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
         storageBucket: generation.storageBucket,
         metadata: generation.metadata,
         createdAt: generation.createdAt,
+        completedAt: generation.completedAt,
       })
       .from(generation)
       .leftJoin(userTable, eq(userTable.id, generation.userId))
@@ -602,6 +620,10 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
     createdAt: g.createdAt.toISOString(),
     ...(canViewAll
       ? {
+          generationDurationMs: calculateGenerationDurationMs(
+            g.createdAt,
+            g.completedAt
+          ),
           backendChannel: buildHistoryBackendChannel(
             extractBackendChannelReference(g.metadata),
             backendChannelLookups,
