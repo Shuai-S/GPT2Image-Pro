@@ -1,6 +1,6 @@
 "use client";
 
-import { buildStorageThumbnailUrl } from "@repo/shared/storage/signed-url";
+import { buildStorageThumbnailUrl } from "@repo/shared/storage/image-url";
 import { formatDateInTimeZone } from "@repo/shared/time-zone";
 import { Badge } from "@repo/ui/components/badge";
 import { Card } from "@repo/ui/components/card";

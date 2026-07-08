@@ -2,7 +2,7 @@
 
 import { logError } from "@repo/shared/logger";
 import { protectedAction } from "@repo/shared/safe-action";
-import { buildSignedStorageImageUrl } from "@repo/shared/storage";
+import { buildSignedStorageImageUrl } from "@repo/shared/storage/signed-url";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { getGenerationById } from "@/features/image-generation/queries";

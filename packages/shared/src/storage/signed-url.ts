@@ -1,5 +1,5 @@
 /**
- * 存储 URL 签名工具
+ * 存储 URL 签名工具（服务端专用，含 node:crypto）
  *
  * 为 generations 桶的图像 URL 提供短时签名机制，防止未授权访问。
  * 使用 HMAC-SHA256 签名，签名密钥为 BETTER_AUTH_SECRET 环境变量。
@@ -7,30 +7,20 @@
  * 签名覆盖内容：bucket + "/" + key + ":" + expiresAt（unix epoch 秒）
  * 验证使用 crypto.timingSafeEqual 防止时序攻击。
  *
- * 纯函数，不依赖数据库。供 API 路由与 URL 构建层使用。
+ * 纯函数，不依赖数据库。供 API 路由与服务端 URL 构建层使用。
+ *
+ * WHY 服务端专用：本模块顶层 import node:crypto，被客户端可达代码 import 会把
+ * 整套 crypto-browserify polyfill（约 450KB raw）打进 authed 公共包。不含
+ * crypto 的纯 URL 工具（buildStorageThumbnailUrl / parseStorageImageUrl /
+ * isPublicBucket）已拆到 ./image-url，客户端一律从那里 import；此处 re-export
+ * 仅为既有服务端调用方保持兼容。
  */
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-export type StorageImageReference = {
-  bucket: string;
-  key: string;
-};
+import { isPublicBucket, parseStorageImageUrl } from "./image-url";
 
-/**
- * 不需要签名的公开桶名集合。
- * 头像桶始终公开（OAuth 头像等场景无 cookie/token 可用）。
- */
-const PUBLIC_BUCKETS = new Set([
-  process.env.NEXT_PUBLIC_AVATARS_BUCKET_NAME || "avatars",
-]);
-
-/**
- * 判断桶是否为公开桶（不需要签名验证）
- */
-export function isPublicBucket(bucket: string): boolean {
-  return PUBLIC_BUCKETS.has(bucket);
-}
+export * from "./image-url";
 
 /**
  * 获取签名密钥。
@@ -116,47 +106,6 @@ export function generateSignedImageUrl(
 }
 
 /**
- * 把已签名的站内存储图 URL 改写成"按路径段携带宽度"的缩略图 URL。
- *
- * WHY 用路径段而非 `?w=` 查询参数:线上 Cloudflare 对 `/api/storage/*` 的边缘缓存
- * 键忽略 query(含 w),导致所有 `?w=` 缩略图请求都命中并吐回被缓存的整张原图(几百
- * KB~1.5MB),把浏览器↔CF 的单条 HTTP/2 连接带宽占满、饿死同连接上的导航 RSC 请求,
- * 表现为"加载图片时点侧边栏没反应"。把宽度放进 bucket 之后的路径段
- * (`/api/storage/<bucket>/w<width>/<key>`)后:CF 按路径区分各宽度、且是全新路径形态,
- * 不会命中旧的原图缓存键 → 边缘真正缓存源站返回的小 webp。
- *
- * 签名仅覆盖 `bucket/key`,宽度段不参与签名(由读取路由在验签前剥离),故 sig/exp 不变。
- * 仅改写本站 `/api/storage/` 相对 URL;其它(第三方/绝对/空)原样返回。
- *
- * @param signedUrl - generateSignedImageUrl 产出的 `/api/storage/<bucket>/<key>?sig=&exp=`
- * @param width - 目标宽度像素(正整数);非法或非本站 URL 时原样返回入参
- */
-export function buildStorageThumbnailUrl(
-  signedUrl: string | null | undefined,
-  width: number
-): string | null | undefined {
-  if (!signedUrl || !signedUrl.startsWith("/api/storage/")) {
-    return signedUrl;
-  }
-  if (!Number.isInteger(width) || width <= 0) {
-    return signedUrl;
-  }
-  const prefix = "/api/storage/";
-  const qIndex = signedUrl.indexOf("?");
-  const pathname = qIndex === -1 ? signedUrl : signedUrl.slice(0, qIndex);
-  const query = qIndex === -1 ? "" : signedUrl.slice(qIndex);
-  const rest = pathname.slice(prefix.length); // <bucket>/<...key>
-  const slash = rest.indexOf("/");
-  // 必须同时有 bucket 段与至少一个 key 段,否则不是可改写的图片 URL。
-  if (slash <= 0 || slash >= rest.length - 1) {
-    return signedUrl;
-  }
-  const bucket = rest.slice(0, slash);
-  const keyPath = rest.slice(slash + 1);
-  return `${prefix}${bucket}/w${width}/${keyPath}${query}`;
-}
-
-/**
  * 从数据库存储键名构造站内图像读取 URL。
  *
  * 业务层从 storageKey/storageBucket 还原图片 URL 时统一走这里：
@@ -177,58 +126,6 @@ export function buildSignedStorageImageUrl(
     process.env.NEXT_PUBLIC_GENERATIONS_BUCKET_NAME?.trim() ||
     "generations";
   return generateSignedImageUrl(bucket, key, expiresInSeconds);
-}
-
-/**
- * 解析本站 /api/storage/<bucket>/<key> 图片 URL。
- *
- * 只接受相对 URL，或与 publicBaseUrl 同源的绝对 URL；第三方对象存储/预签名
- * URL 不会被误判。返回的 key 已解码并做基础路径安全校验。
- */
-export function parseStorageImageUrl(
-  imageUrl: string | null | undefined,
-  publicBaseUrl?: string | null
-): StorageImageReference | null {
-  const raw = imageUrl?.trim();
-  if (!raw) return null;
-
-  try {
-    const base = publicBaseUrl?.trim() || "http://localhost";
-    const parsed = new URL(raw, base);
-    const isRelativeStorageUrl = raw.startsWith("/api/storage/");
-    const isOwnStorageUrl =
-      Boolean(publicBaseUrl?.trim()) &&
-      parsed.origin === new URL(base).origin &&
-      parsed.pathname.startsWith("/api/storage/");
-
-    if (!(isRelativeStorageUrl || isOwnStorageUrl)) return null;
-
-    const segments = parsed.pathname.split("/").filter(Boolean);
-    const storageIndex = segments.indexOf("storage");
-    const bucket = segments[storageIndex + 1];
-    const keySegments = segments.slice(storageIndex + 2);
-    if (storageIndex < 0 || !bucket || keySegments.length === 0) return null;
-
-    const key = keySegments
-      .map((segment) => decodeURIComponent(segment))
-      .join("/");
-    if (
-      !key ||
-      key.startsWith("/") ||
-      key.includes("\\") ||
-      key.includes("\0") ||
-      key.split("/").some((segment) => segment === "." || segment === "..")
-    ) {
-      return null;
-    }
-
-    return {
-      bucket: decodeURIComponent(bucket),
-      key,
-    };
-  } catch {
-    return null;
-  }
 }
 
 function isOwnStorageImageUrl(raw: string, publicBaseUrl?: string | null) {

@@ -1,7 +1,7 @@
 "use client";
 
 import { formatCredits } from "@repo/shared/credits/format";
-import { buildStorageThumbnailUrl } from "@repo/shared/storage/signed-url";
+import { buildStorageThumbnailUrl } from "@repo/shared/storage/image-url";
 import { formatDateInTimeZone } from "@repo/shared/time-zone";
 import { Badge } from "@repo/ui/components/badge";
 import { Button } from "@repo/ui/components/button";

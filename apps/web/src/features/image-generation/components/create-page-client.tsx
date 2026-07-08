@@ -52,7 +52,7 @@ import {
   Wand2,
   X,
 } from "lucide-react";
-import { buildStorageThumbnailUrl } from "@repo/shared/storage/signed-url";
+import { buildStorageThumbnailUrl } from "@repo/shared/storage/image-url";
 import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useLocale } from "next-intl";
