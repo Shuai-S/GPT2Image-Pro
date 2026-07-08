@@ -24,7 +24,7 @@ import {
   type AspectRatioSizeDialogValue,
   InlineImageSizeControl,
 } from "./aspect-ratio-size-dialog";
-import { ConcurrencyNumberInput } from "./create-page-controls";
+import { ImageCountSlider } from "./create-page-controls";
 import type { ImageModelOption } from "./create-page-options";
 import type {
   ActiveMode,
@@ -386,21 +386,14 @@ export function CreatePageImagePanel({
                 backgroundDisabled,
               })}
 
-              <div className="space-y-2">
-                <label
-                  htmlFor="edit-batch-count"
-                  className="text-sm font-medium text-foreground"
-                >
-                  {copy("Batch", "批量")}
-                </label>
-                <ConcurrencyNumberInput
-                  id="edit-batch-count"
-                  value={editBatchCount}
-                  max={batchCountMax}
-                  disabled={isEditing}
-                  onChange={onEditBatchCountChange}
-                />
-              </div>
+              <ImageCountSlider
+                id="edit-batch-count"
+                label={copy("Images", "张数")}
+                value={editBatchCount}
+                max={batchCountMax}
+                disabled={isEditing}
+                onChange={onEditBatchCountChange}
+              />
 
               <div className="space-y-3 rounded-md bg-muted/40 p-3">
                 <label
