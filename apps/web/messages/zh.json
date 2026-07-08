@@ -590,6 +590,7 @@
       "userManagement": "用户管理",
       "announcementManagement": "公告管理",
       "referralManagement": "邀请返佣管理",
+      "paymentManagement": "支付订单",
       "systemSettings": "系统设置",
       "globalStatus": "全局状态",
       "imageBackendPool": "生图后端池",

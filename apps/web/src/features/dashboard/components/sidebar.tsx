@@ -93,8 +93,6 @@ export function DashboardSidebar({
   const isAdmin = isAdminRole(user?.role);
   const isObserverAdmin = isObserverAdminRole(user?.role);
   const lastUnreadRefreshAtRef = useRef(0);
-  const paymentManagementTitle =
-    locale === "zh" ? "支付订单" : "Payment Orders";
 
   // Popover 开关状态
   const [open, setOpen] = useState(false);
@@ -170,44 +168,16 @@ export function DashboardSidebar({
     };
   }, [user?.id, refreshUnreadCounts]);
 
-  const titleMap = useMemo<Record<string, string>>(
-    () => ({
-      Create: t("nav.create"),
-      "Text to Image": t("nav.createTextToImage"),
-      "Image to Image": t("nav.createImageToImage"),
-      Chat: t("nav.createChat"),
-      Agent: t("nav.createAgent"),
-      Waterfall: t("nav.createWaterfall"),
-      Video: t("nav.createVideo"),
-      "Infinite Canvas": t("nav.infiniteCanvas"),
-      Dashboard: t("nav.dashboard"),
-      Gallery: t("nav.gallery"),
-      History: t("nav.history"),
-      "Usage Records": t("nav.history"),
-      "System Docs": t("nav.backendHelp"),
-      "External API": t("nav.externalApi"),
-      "Billing & Usage": t("nav.billing"),
-      Referral: t("nav.referral"),
-      Announcements: t("nav.announcements"),
-      Settings: t("nav.settings"),
-      "System Settings": t("nav.systemSettings"),
-      "Global Status": t("nav.globalStatus"),
-      "Announcement Management": t("nav.announcementManagement"),
-      "Image Backend Pool": t("nav.imageBackendPool"),
-      "Referral Management": t("nav.referralManagement"),
-      "Payment Management": paymentManagementTitle,
-      Support: t("nav.support"),
-      "New Ticket": t("nav.newTicket"),
-      "User Management": t("nav.userManagement"),
-    }),
-    [t, paymentManagementTitle]
-  );
-
   /**
-   * 导航项标题映射到翻译键
+   * 根据稳定翻译 key 获取导航显示标题。
+   *
+   * @param item 导航项或导航分组。
+   * @returns 本地化标题；缺少 labelKey 时回退静态 title。
+   * @sideEffects 无。
+   * @failureMode 未配置 labelKey 的旧配置继续显示 title，避免迁移中断。
    */
-  const getNavTitle = (title: string): string => {
-    return titleMap[title] || title;
+  const getNavTitle = (item: Pick<NavItem, "title" | "labelKey">): string => {
+    return item.labelKey ? t(item.labelKey) : item.title;
   };
 
   /**
@@ -383,7 +353,7 @@ export function DashboardSidebar({
               {/* Group Label - 折叠时隐藏 */}
               {!collapsed && (
                 <p className="mb-1.5 px-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  {getNavTitle(group.title)}
+                  {getNavTitle(group)}
                 </p>
               )}
               <div className="space-y-0.5">
@@ -393,31 +363,37 @@ export function DashboardSidebar({
                     ? [
                         {
                           title: "Global Status",
+                          labelKey: "nav.globalStatus",
                           href: "/dashboard/admin/status",
                           icon: Activity,
                         },
                         {
                           title: "User Management",
+                          labelKey: "nav.userManagement",
                           href: "/dashboard/admin/users",
                           icon: Users,
                         },
                         {
                           title: "Payment Management",
+                          labelKey: "nav.paymentManagement",
                           href: "/dashboard/admin/payments",
                           icon: CreditCard,
                         },
                         {
                           title: "Announcement Management",
+                          labelKey: "nav.announcementManagement",
                           href: "/dashboard/admin/announcements",
                           icon: Megaphone,
                         },
                         {
                           title: "Referral Management",
+                          labelKey: "nav.referralManagement",
                           href: "/dashboard/admin/referral",
                           icon: Gift,
                         },
                         {
                           title: "System Settings",
+                          labelKey: "nav.systemSettings",
                           href: "/dashboard/admin/settings",
                           icon: Shield,
                         },
@@ -426,11 +402,13 @@ export function DashboardSidebar({
                       ? [
                           {
                             title: "Global Status",
+                            labelKey: "nav.globalStatus",
                             href: "/dashboard/admin/status",
                             icon: Activity,
                           },
                           {
                             title: "Image Backend Pool",
+                            labelKey: "nav.imageBackendPool",
                             href: "/dashboard/admin/settings",
                             icon: Server,
                           },
@@ -441,7 +419,7 @@ export function DashboardSidebar({
                     ? item.children.some((child) => isNavItemActive(child.href))
                     : isNavItemActive(item.href);
                   const Icon = item.icon;
-                  const translatedTitle = getNavTitle(item.title);
+                  const translatedTitle = getNavTitle(item);
                   const showSupportUnread =
                     item.href === "/dashboard/support" && unreadTicketCount > 0;
                   const unreadCount =
@@ -488,7 +466,7 @@ export function DashboardSidebar({
                         <div className="mt-1 space-y-0.5 pl-7">
                           {item.children.map((child) => {
                             const ChildIcon = child.icon;
-                            const childTitle = getNavTitle(child.title);
+                            const childTitle = getNavTitle(child);
                             const childActive = isNavItemActive(child.href);
                             return (
                               <Link

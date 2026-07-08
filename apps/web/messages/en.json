@@ -590,6 +590,7 @@
       "userManagement": "User Management",
       "announcementManagement": "Announcement Management",
       "referralManagement": "Referral Management",
+      "paymentManagement": "Payment Orders",
       "systemSettings": "System Settings",
       "globalStatus": "Global Status",
       "imageBackendPool": "Image Backend Pool",

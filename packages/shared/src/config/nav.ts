@@ -27,6 +27,7 @@ import {
  */
 export interface NavItem {
   title: string;
+  labelKey?: string;
   href: string;
   disabled?: boolean;
   external?: boolean;
@@ -40,6 +41,7 @@ export interface NavItem {
  */
 export interface NavGroup {
   title: string;
+  labelKey?: string;
   items: NavItem[];
 }
 
@@ -155,44 +157,53 @@ export const footerNav = {
 export const dashboardNav: NavGroup[] = [
   {
     title: "Dashboard",
+    labelKey: "nav.dashboard",
     items: [
       {
         title: "Dashboard",
+        labelKey: "nav.dashboard",
         href: "/dashboard",
         icon: LayoutDashboard,
       },
       {
         title: "Create",
+        labelKey: "nav.create",
         href: "/dashboard/create?mode=text",
         icon: ImagePlus,
         children: [
           {
             title: "Text to Image",
+            labelKey: "nav.createTextToImage",
             href: "/dashboard/create?mode=text",
             icon: Wand2,
           },
           {
             title: "Image to Image",
+            labelKey: "nav.createImageToImage",
             href: "/dashboard/create?mode=image",
             icon: Image,
           },
           {
             title: "Chat",
+            labelKey: "nav.createChat",
             href: "/dashboard/create?mode=chat",
             icon: MessageSquare,
           },
           {
             title: "Agent",
+            labelKey: "nav.createAgent",
             href: "/dashboard/create?mode=agent",
             icon: Bot,
           },
           {
             title: "Waterfall",
+            labelKey: "nav.createWaterfall",
             href: "/dashboard/create?mode=waterfall",
             icon: Layers,
           },
           {
             title: "Video",
+            labelKey: "nav.createVideo",
             href: "/dashboard/create?mode=video",
             icon: Video,
           },
@@ -200,51 +211,61 @@ export const dashboardNav: NavGroup[] = [
       },
       {
         title: "Infinite Canvas",
+        labelKey: "nav.infiniteCanvas",
         href: "/dashboard/canvas",
         icon: Workflow,
       },
       {
         title: "Gallery",
+        labelKey: "nav.gallery",
         href: "/dashboard/gallery",
         icon: GalleryHorizontalEnd,
       },
       {
         title: "Usage Records",
+        labelKey: "nav.history",
         href: "/dashboard/history",
         icon: Clock,
       },
       {
         title: "System Docs",
+        labelKey: "nav.backendHelp",
         href: "/dashboard/backend-help",
         icon: BookOpen,
       },
       {
         title: "External API",
+        labelKey: "nav.externalApi",
         href: "/dashboard/external-api",
         icon: KeyRound,
       },
       {
         title: "Billing & Usage",
+        labelKey: "nav.billing",
         href: "/dashboard/billing",
         icon: Coins,
       },
       {
         title: "Referral",
+        labelKey: "nav.referral",
         href: "/dashboard/referral",
         icon: Gift,
       },
       {
         title: "Announcements",
+        labelKey: "nav.announcements",
         href: "/dashboard/announcements",
         icon: Megaphone,
       },
       {
         title: "Settings",
+        labelKey: "nav.settings",
         href: "/dashboard/settings",
         icon: Settings,
       },
       {
         title: "Support",
+        labelKey: "nav.support",
         href: "/dashboard/support",
         icon: Headset,
       },
