@@ -38,6 +38,10 @@ import {
 } from "@/features/external-api/safe-image-fetch";
 import { getImageBatchCountLimit } from "@/features/image-generation/batch-limits";
 import { runBatchImageGeneration } from "@/features/image-generation/batch-runner";
+import {
+  getEffectiveImageEditMaxReferenceImages,
+  getRuntimeImageEditMaxReferenceImages,
+} from "@/features/image-generation/edit-reference-limits";
 import { runImageGenerationForUser } from "@/features/image-generation/operations";
 import {
   normalizeImageBackground,
@@ -549,6 +553,10 @@ export const postExternalImageEdits = withApiLogging(
     const plan = await getUserPlan(auth.userId);
     const planLimits = await getPlanLimits(plan.plan);
     const batchCountLimit = getImageBatchCountLimit(planLimits);
+    const maxEditImages = getEffectiveImageEditMaxReferenceImages(
+      planLimits.maxEditImages,
+      await getRuntimeImageEditMaxReferenceImages()
+    );
     const uploadLimits = await getPlanUploadLimits(plan.plan);
     const maxImageBytes = uploadLimits.maxFileSizeBytes;
     const maxRequestBytes = uploadLimits.maxUploadBytes;
@@ -706,9 +714,9 @@ export const postExternalImageEdits = withApiLogging(
     if (imageReferences.length === 0) {
       return openAIImageError("At least one source image is required.");
     }
-    if (imageReferences.length > planLimits.maxEditImages) {
+    if (imageReferences.length > maxEditImages) {
       return openAIImageError(
-        `No more than ${planLimits.maxEditImages} images are allowed.`
+        `No more than ${maxEditImages} images are allowed.`
       );
     }
     if (

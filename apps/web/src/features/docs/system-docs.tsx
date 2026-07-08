@@ -1051,7 +1051,7 @@ curl https://gpt2image.superapi.buzz/v1/images/task_... \\
               name: "n",
               requirement: "可选",
               description:
-                "生成数量，1 到套餐允许的最大批量（默认 10，可后台按套餐配置）；n>1 需套餐开启批量（imageGeneration.batch）能力，否则返回 403 insufficient_plan。",
+                "生成数量，1 到套餐允许的最大批量（默认 4，平台硬上限 4 张）；n>1 需套餐开启批量（imageGeneration.batch）能力，否则返回 403 insufficient_plan。",
             },
             {
               name: "size",
@@ -1358,7 +1358,8 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
             {
               name: "image / image[] / image_*",
               requirement: "multipart 必填",
-              description: "参考图文件，最多 16 张。",
+              description:
+                "参考图文件，默认最多 4 张，可通过系统设置 IMAGE_EDIT_MAX_REFERENCE_IMAGES 调整，并与套餐编辑参考图数取较小值。",
             },
             {
               name: "images",
@@ -1388,7 +1389,7 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
               name: "n",
               requirement: "可选",
               description:
-                "生成数量，1 到套餐允许的最大批量（默认 10，可后台按套餐配置）；n>1 需套餐开启批量（imageGeneration.batch）能力，否则返回 403 insufficient_plan。",
+                "生成数量，1 到套餐允许的最大批量（默认 4，平台硬上限 4 张）；n>1 需套餐开启批量（imageGeneration.batch）能力，否则返回 403 insufficient_plan。",
             },
             {
               name: "size",
@@ -3364,7 +3365,7 @@ curl https://gpt2image.superapi.buzz/v1/images/task_... \\
               name: "n",
               requirement: "Optional",
               description:
-                "Number of images, 1 to the plan's max batch (default 10, admin-configurable); n>1 requires the imageGeneration.batch capability, otherwise 403 insufficient_plan.",
+                "Number of images, 1 to the plan's max batch (default 4, platform cap 4); n>1 requires the imageGeneration.batch capability, otherwise 403 insufficient_plan.",
             },
             {
               name: "size",
@@ -3508,7 +3509,7 @@ curl https://gpt2image.superapi.buzz/v1/images/task_... \\
           notes: [
             "This endpoint does not call page /api/images/generate; it directly enters the shared service layer.",
             "When routed to a Responses account, the image request is converted into a Responses image_generation tool request.",
-            "n/count is one HTTP request. A 10-image request creates 10 generation records and bills 10 outputs. GPT2IMAGE runs batch items with bounded parallelism based on the plan image-generation concurrency; items beyond that concurrency wait inside the same batch.",
+            "n/count is one HTTP request. A 4-image request creates 4 generation records and bills 4 outputs. GPT2IMAGE runs batch items with bounded parallelism based on the plan image-generation concurrency; items beyond that concurrency wait inside the same batch.",
             "Concurrency and queueing: the runtime uses one in-process image queue. Tasks are sorted by plan queue priority, then FIFO within the same priority, and are started only when both the global concurrency and per-user image-generation concurrency allow it. Global concurrency is configurable in Admin System Settings > Models > Global image generation concurrency; IMAGE_GENERATION_GLOBAL_CONCURRENCY is only the fallback default. Batch requests add a request-local bounded runner, so only the allowed number of batch items are started and the rest wait inside that batch instead of flooding the shared queue.",
             "Waiting in a queue does not create a generation record or charge image credits. If the shared queue wait exceeds IMAGE_GENERATION_QUEUE_TIMEOUT_MS, the API returns a 429-style error. The 20-minute runtime timeout starts only after an individual image task begins execution, and timeout settlement follows the failed-generation credit rules.",
             "Web backends cannot strictly control output dimensions or output format. GPT2IMAGE labels stored files by the detected image header and MIME.",
@@ -3682,7 +3683,7 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
               name: "n",
               requirement: "Optional",
               description:
-                "Number of outputs, 1 to the plan's max batch (default 10, admin-configurable); n>1 requires the imageGeneration.batch capability, otherwise 403 insufficient_plan.",
+                "Number of outputs, 1 to the plan's max batch (default 4, platform cap 4); n>1 requires the imageGeneration.batch capability, otherwise 403 insufficient_plan.",
             },
             {
               name: "size",

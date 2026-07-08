@@ -185,7 +185,7 @@ export function getPricingPlansFromConfig(config: PaymentConfig): Plan[] {
       features: [
         "100 credits (one-time)",
         "Text-to-image and image editing",
-        "Up to 10 images per batch",
+        "Up to 4 images per batch",
         "Uploads up to 5MB per image, 75MB total",
         "Up to 2 concurrent generations",
         "Download & share",
@@ -204,7 +204,7 @@ export function getPricingPlansFromConfig(config: PaymentConfig): Plan[] {
       features: [
         "5,000 credits / month",
         "Text-to-image and image editing",
-        "Up to 10 images per batch",
+        "Up to 4 images per batch",
         "Uploads up to 20MB per image, 75MB total",
         "Up to 5 concurrent generations",
         "External API key calls",
@@ -226,7 +226,7 @@ export function getPricingPlansFromConfig(config: PaymentConfig): Plan[] {
       features: [
         "20,000 credits / month",
         "Text-to-image and image editing",
-        "Up to 10 images per batch",
+        "Up to 4 images per batch",
         "Uploads up to 50MB per image, 75MB total",
         "Chat-to-image mode",
         "Priority queue, up to 15 concurrent generations",
@@ -250,7 +250,7 @@ export function getPricingPlansFromConfig(config: PaymentConfig): Plan[] {
       features: [
         "80,000 credits / month",
         "Text-to-image and image editing",
-        "Up to 10 images per batch",
+        "Up to 4 images per batch",
         "Uploads up to 100MB per image, 100MB total",
         "Chat-to-image supports GPT-5.5",
         "Moderation failures only charge review credits",
@@ -275,7 +275,7 @@ export function getPricingPlansFromConfig(config: PaymentConfig): Plan[] {
       features: [
         "320,000 credits / month",
         "Text-to-image and image editing",
-        "Up to 10 images per batch",
+        "Up to 4 images per batch",
         "Uploads up to 200MB per image, 200MB total",
         "Chat-to-image supports GPT-5.5",
         "Moderation failures only charge review credits",

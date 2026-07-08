@@ -17,6 +17,10 @@ import {
   listSelectableImageBackendGroups,
 } from "@/features/image-backend-pool/service";
 import { CreatePageClient } from "@/features/image-generation/components/create-page-client";
+import {
+  getEffectiveImageEditMaxReferenceImages,
+  getRuntimeImageEditMaxReferenceImages,
+} from "@/features/image-generation/edit-reference-limits";
 import { getRuntimeImageBaseCreditPricing } from "@/features/image-generation/pricing-settings";
 import { getUserRecentGenerations } from "@/features/image-generation/queries";
 import { getUserApiConfig } from "@/features/image-generation/service";
@@ -56,6 +60,7 @@ export default async function CreatePage() {
     forceWebMaxPixels,
     videoPricing,
     operationFlags,
+    runtimeMaxEditImages,
   ] = await Promise.all([
     getPlanCapabilitySnapshot(plan.plan),
     getRuntimeImageBaseCreditPricing(),
@@ -71,7 +76,12 @@ export default async function CreatePage() {
     ),
     getVideoPricingForUser({ userId: user.id }),
     getRuntimeOperationFeatureFlags(),
+    getRuntimeImageEditMaxReferenceImages(),
   ]);
+  const effectiveMaxEditImages = getEffectiveImageEditMaxReferenceImages(
+    capabilities.limits.maxEditImages,
+    runtimeMaxEditImages
+  );
   const forceWebPixelRange = {
     minPixels: Math.min(forceWebMinPixels, forceWebMaxPixels),
     maxPixels: Math.max(forceWebMinPixels, forceWebMaxPixels),
@@ -99,6 +109,7 @@ export default async function CreatePage() {
       plan={plan.plan}
       capabilities={capabilities}
       uploadLimits={uploadLimits}
+      maxEditImages={effectiveMaxEditImages}
       backendGroups={backendGroups.map((group) => ({
         id: group.id,
         name: group.name,

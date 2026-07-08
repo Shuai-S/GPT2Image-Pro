@@ -13,6 +13,10 @@ import {
   firstBatchError,
   runBatchImageGeneration,
 } from "@/features/image-generation/batch-runner";
+import {
+  getEffectiveImageEditMaxReferenceImages,
+  getRuntimeImageEditMaxReferenceImages,
+} from "@/features/image-generation/edit-reference-limits";
 import { runImageGenerationForUser } from "@/features/image-generation/operations";
 import {
   normalizeImageBackground,
@@ -156,6 +160,10 @@ export const POST = withApiLogging(async (request: NextRequest) => {
   const plan = await getUserPlan(session.user.id);
   const planLimits = await getPlanLimits(plan.plan);
   const batchCountLimit = getImageBatchCountLimit(planLimits);
+  const maxEditImages = getEffectiveImageEditMaxReferenceImages(
+    planLimits.maxEditImages,
+    await getRuntimeImageEditMaxReferenceImages()
+  );
   const uploadLimits = await getPlanUploadLimits(plan.plan);
   const maxImageBytes = uploadLimits.maxFileSizeBytes;
   const maxRequestBytes = uploadLimits.maxUploadBytes;
@@ -310,10 +318,8 @@ export const POST = withApiLogging(async (request: NextRequest) => {
     return errorResponse("At least one source image is required.");
   }
 
-  if (sourceFiles.length > planLimits.maxEditImages) {
-    return errorResponse(
-      `No more than ${planLimits.maxEditImages} images are allowed.`
-    );
+  if (sourceFiles.length > maxEditImages) {
+    return errorResponse(`No more than ${maxEditImages} images are allowed.`);
   }
 
   try {

@@ -341,6 +341,7 @@ export interface CreatePageClientProps {
     maxFileSizeBytes: number;
     maxUploadBytes: number;
   };
+  maxEditImages: number;
   backendGroups: BackendGroupOption[];
   selectedBackendGroupId: string | null;
   customApiActive: boolean;

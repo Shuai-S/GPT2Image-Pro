@@ -117,10 +117,10 @@ describe("external chat completions handler streaming bridge", () => {
     expect(callbacks).toBeUndefined();
   });
 
-  it("uses imageGenerationConcurrency rather than legacy maxBatchCount for n", async () => {
+  it("uses maxBatchCount rather than imageGenerationConcurrency for n", async () => {
     mocks.getPlanLimits.mockResolvedValue({
-      maxBatchCount: 1,
-      imageGenerationConcurrency: 3,
+      maxBatchCount: 4,
+      imageGenerationConcurrency: 2,
       maxChatContextChars: 10000,
       maxChatImages: 16,
       maxFileMb: 20,
@@ -132,14 +132,14 @@ describe("external chat completions handler streaming bridge", () => {
       chatCompletionsRequest({
         model: "gpt-5.4",
         messages: [{ role: "user", content: "hello" }],
-        n: 3,
+        n: 4,
       }) as never
     );
     await response.json();
 
     expect(response.status).toBe(200);
     expect(mocks.runBatchImageGeneration).toHaveBeenCalledWith(
-      expect.objectContaining({ count: 3 })
+      expect.objectContaining({ count: 4 })
     );
   });
 

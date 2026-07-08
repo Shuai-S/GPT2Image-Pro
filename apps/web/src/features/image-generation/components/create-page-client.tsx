@@ -178,6 +178,7 @@ export function CreatePageClient({
   recentGenerations: initialRecent,
   capabilities,
   uploadLimits,
+  maxEditImages,
   backendGroups,
   selectedBackendGroupId,
   customApiActive,
@@ -363,9 +364,8 @@ export function CreatePageClient({
   const gpt55ChatAllowed = capabilities.features["models.gpt55"];
   const promptOptimizationAllowed =
     capabilities.features["promptOptimization.control"];
-  const maxEditImages = capabilities.limits.maxEditImages;
   const maxChatImages = capabilities.limits.maxChatImages;
-  // 单次生成张数与服务端统一挂 imageGenerationConcurrency；maxBatchCount 是历史字段，不再拦截批量。
+  // 单次生成张数与服务端统一挂 maxBatchCount，并受平台 4 张硬上限保护。
   const batchCountMax = getImageBatchCountLimit(capabilities.limits);
   const textImageCountMax = Math.min(
     batchCountMax,

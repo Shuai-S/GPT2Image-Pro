@@ -11,6 +11,7 @@ import { getRuntimeCreditPackages } from "@repo/shared/credits/packages";
 import { getPlanCapabilityMatrix } from "@repo/shared/subscription/services/plan-capabilities";
 import { getRuntimeSettingNumber } from "@repo/shared/system-settings";
 import type { Metadata } from "next";
+import { getRuntimeImageEditMaxReferenceImages } from "@/features/image-generation/edit-reference-limits";
 import {
   getRuntimeImageBaseCreditPricing,
   getRuntimePublicModelPricingRules,
@@ -91,6 +92,7 @@ export default async function PricingPage() {
     creditPackageExpiryDays,
     imageBasePricing,
     modelPricingRules,
+    maxEditImages,
   ] = await Promise.all([
     getRuntimePaymentConfig(),
     getPlanCapabilityMatrix(),
@@ -102,6 +104,7 @@ export default async function PricingPage() {
     ),
     getRuntimeImageBaseCreditPricing(),
     getRuntimePublicModelPricingRules(),
+    getRuntimeImageEditMaxReferenceImages(),
   ]);
 
   return (
@@ -112,6 +115,7 @@ export default async function PricingPage() {
       creditPackageExpiryDays={creditPackageExpiryDays}
       imageBasePricing={imageBasePricing}
       modelPricingRules={modelPricingRules}
+      maxEditImages={maxEditImages}
     />
   );
 }

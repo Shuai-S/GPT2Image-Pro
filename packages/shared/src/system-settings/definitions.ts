@@ -140,6 +140,7 @@ export type SettingKey =
   | "PLATFORM_RESPONSES_MODEL"
   | "PLATFORM_CHAT_MODEL"
   | "IMAGE_GENERATION_GLOBAL_CONCURRENCY"
+  | "IMAGE_EDIT_MAX_REFERENCE_IMAGES"
   | "IMAGE_AGENT_MAX_ROUNDS"
   | "IMAGE_AGENT_FORCE_MAX_ROUNDS"
   | "IMAGE_RESPONSES_PREVIOUS_RESPONSE_ENABLED"
@@ -294,7 +295,7 @@ const PLAN_CAPABILITY_MATRIX_EXAMPLE = {
       queuePriority: "normal",
       imageGenerationConcurrency: 2,
       monthlyCredits: 100,
-      maxBatchCount: 10,
+      maxBatchCount: 4,
       maxEditImages: 16,
       maxChatImages: 16,
       maxChatContextChars: 30000,
@@ -305,7 +306,7 @@ const PLAN_CAPABILITY_MATRIX_EXAMPLE = {
       queuePriority: "normal",
       imageGenerationConcurrency: 5,
       monthlyCredits: 5000,
-      maxBatchCount: 10,
+      maxBatchCount: 4,
       maxEditImages: 16,
       maxChatImages: 16,
       maxChatContextChars: 30000,
@@ -316,7 +317,7 @@ const PLAN_CAPABILITY_MATRIX_EXAMPLE = {
       queuePriority: "priority",
       imageGenerationConcurrency: 15,
       monthlyCredits: 20000,
-      maxBatchCount: 10,
+      maxBatchCount: 4,
       maxEditImages: 16,
       maxChatImages: 16,
       maxChatContextChars: 30000,
@@ -327,7 +328,7 @@ const PLAN_CAPABILITY_MATRIX_EXAMPLE = {
       queuePriority: "highest",
       imageGenerationConcurrency: 50,
       monthlyCredits: 80000,
-      maxBatchCount: 10,
+      maxBatchCount: 4,
       maxEditImages: 16,
       maxChatImages: 16,
       maxChatContextChars: 30000,
@@ -338,7 +339,7 @@ const PLAN_CAPABILITY_MATRIX_EXAMPLE = {
       queuePriority: "highest",
       imageGenerationConcurrency: 100,
       monthlyCredits: 320000,
-      maxBatchCount: 10,
+      maxBatchCount: 4,
       maxEditImages: 16,
       maxChatImages: 16,
       maxChatContextChars: 30000,
@@ -1197,6 +1198,17 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     category: "models",
     valueType: "number",
     defaultValue: 500,
+  },
+  {
+    key: "IMAGE_EDIT_MAX_REFERENCE_IMAGES",
+    label: "图生图最大参考图数",
+    description:
+      "图生图/编辑单次请求允许上传或传入的源图上限。该值是全站硬上限，会与套餐能力矩阵中的编辑参考图数取较小值；默认 4 张。",
+    category: "models",
+    valueType: "number",
+    defaultValue: 4,
+    min: 1,
+    max: 10_000,
   },
   {
     key: "IMAGE_AGENT_MAX_ROUNDS",

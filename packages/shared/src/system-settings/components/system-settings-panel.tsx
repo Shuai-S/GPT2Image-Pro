@@ -258,7 +258,7 @@ const LIMIT_ROWS = [
   {
     key: "maxBatchCount",
     label: "批量张数",
-    description: "n/count 最大值",
+    description: "n/count 最大值，平台硬上限为 4 张",
     inputMode: "numeric",
   },
   {

@@ -1,13 +1,13 @@
 import {
-  MODERATION_BLOCK_RISK_LEVELS,
-  PLAN_PRIVILEGES,
-  PLAN_RANK,
-  SUBSCRIPTION_PLANS,
   isModerationBlockRiskLevel,
   isPlanAtLeast,
   isSubscriptionPlan,
+  MODERATION_BLOCK_RISK_LEVELS,
   type ModerationBlockRiskLevel,
+  PLAN_PRIVILEGES,
+  PLAN_RANK,
   type QueuePriority,
+  SUBSCRIPTION_PLANS,
   type SubscriptionPlan,
 } from "../../config/subscription-plan";
 import {
@@ -143,7 +143,7 @@ export const DEFAULT_PLAN_CAPABILITY_MATRIX: PlanCapabilityMatrix = {
       queuePriority: "normal",
       imageGenerationConcurrency: 2,
       monthlyCredits: 100,
-      maxBatchCount: 10,
+      maxBatchCount: 4,
       maxEditImages: 16,
       maxChatImages: 16,
       maxChatContextChars: 30_000,
@@ -154,7 +154,7 @@ export const DEFAULT_PLAN_CAPABILITY_MATRIX: PlanCapabilityMatrix = {
       queuePriority: "normal",
       imageGenerationConcurrency: 5,
       monthlyCredits: 5_000,
-      maxBatchCount: 10,
+      maxBatchCount: 4,
       maxEditImages: 16,
       maxChatImages: 16,
       maxChatContextChars: 30_000,
@@ -165,7 +165,7 @@ export const DEFAULT_PLAN_CAPABILITY_MATRIX: PlanCapabilityMatrix = {
       queuePriority: "priority",
       imageGenerationConcurrency: 15,
       monthlyCredits: 20_000,
-      maxBatchCount: 10,
+      maxBatchCount: 4,
       maxEditImages: 16,
       maxChatImages: 16,
       maxChatContextChars: 30_000,
@@ -176,7 +176,7 @@ export const DEFAULT_PLAN_CAPABILITY_MATRIX: PlanCapabilityMatrix = {
       queuePriority: "highest",
       imageGenerationConcurrency: 50,
       monthlyCredits: 80_000,
-      maxBatchCount: 10,
+      maxBatchCount: 4,
       maxEditImages: 16,
       maxChatImages: 16,
       maxChatContextChars: 30_000,
@@ -187,7 +187,7 @@ export const DEFAULT_PLAN_CAPABILITY_MATRIX: PlanCapabilityMatrix = {
       queuePriority: "highest",
       imageGenerationConcurrency: 100,
       monthlyCredits: 320_000,
-      maxBatchCount: 10,
+      maxBatchCount: 4,
       maxEditImages: 16,
       maxChatImages: 16,
       maxChatContextChars: 30_000,
@@ -623,7 +623,8 @@ export async function getPlanCapabilitySnapshot(
       ...moderation,
       allowedBlockRiskLevels: MODERATION_BLOCK_RISK_LEVELS.filter(
         (level) =>
-          MODERATION_RANK[level] <= MODERATION_RANK[moderation.maxBlockRiskLevel]
+          MODERATION_RANK[level] <=
+          MODERATION_RANK[moderation.maxBlockRiskLevel]
       ),
     },
     billing,

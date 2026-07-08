@@ -141,6 +141,7 @@ describe("system setting default initialization", () => {
     expect(initializedKeys).toContain("GENERATION_IMAGE_RETENTION_MODE");
     expect(initializedKeys).toContain("GENERATION_IMAGE_MAX_COUNT");
     expect(initializedKeys).toContain("IMAGE_GENERATION_GLOBAL_CONCURRENCY");
+    expect(initializedKeys).toContain("IMAGE_EDIT_MAX_REFERENCE_IMAGES");
     expect(initializedKeys).toContain("IMAGE_BASE_CREDITS_1024");
     expect(initializedKeys).toContain("IMAGE_BASE_CREDITS_4K");
     expect(initializedKeys).toContain("RATE_LIMIT_AI_REQUESTS_PER_MINUTE");
@@ -174,6 +175,7 @@ describe("system setting default initialization", () => {
     expect(store.get("GENERATION_IMAGE_MAX_COUNT")?.value).toBe(10000);
     expect(store.get("CREDITS_EXPIRY_DAYS")?.value).toBe(0);
     expect(store.get("IMAGE_GENERATION_GLOBAL_CONCURRENCY")?.value).toBe(500);
+    expect(store.get("IMAGE_EDIT_MAX_REFERENCE_IMAGES")?.value).toBe(4);
     expect(store.get("IMAGE_BASE_CREDITS_1024")?.value).toBe(1.27);
     expect(store.get("IMAGE_BASE_CREDITS_4K")?.value).toBe(10);
     expect(store.get(MODEL_PRICING_RULES_SETTING_KEY)?.value).toBeDefined();

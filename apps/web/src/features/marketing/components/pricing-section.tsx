@@ -27,6 +27,8 @@ import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useCurrentSession } from "@/features/auth/hooks/use-current-session";
+import { getImageBatchCountLimit } from "@/features/image-generation/batch-limits";
+import { getEffectiveImageEditMaxReferenceImages } from "@/features/image-generation/edit-reference-limits";
 import {
   getImageBaseCreditPricing,
   getImageCreditCostBreakdown,
@@ -95,6 +97,7 @@ interface PricingSectionProps {
   creditPackageExpiryDays?: number;
   imageBasePricing?: ImageBaseCreditPricing;
   modelPricingRules?: PublicModelPricingRule[];
+  maxEditImages?: number;
 }
 
 /**
@@ -108,6 +111,7 @@ export function PricingSection({
   creditPackageExpiryDays,
   imageBasePricing,
   modelPricingRules = [],
+  maxEditImages,
 }: PricingSectionProps) {
   const t = useTranslations("Pricing");
   const locale = useLocale();
@@ -436,10 +440,11 @@ export function PricingSection({
     }
 
     if (canUseCapability(planId, "imageGeneration.batch")) {
+      const batchLimit = getImageBatchCountLimit(limits);
       items.push(
         copy(
-          `Batch generation up to ${limits.maxBatchCount} images`,
-          `批量生成最多 ${limits.maxBatchCount} 张图`
+          `Batch generation up to ${batchLimit} images`,
+          `批量生成最多 ${batchLimit} 张图`
         )
       );
     }
@@ -454,10 +459,14 @@ export function PricingSection({
         )}`
       )
     );
+    const editReferenceLimit = getEffectiveImageEditMaxReferenceImages(
+      limits.maxEditImages,
+      maxEditImages ?? limits.maxEditImages
+    );
     items.push(
       copy(
-        `References: ${limits.maxEditImages} edit images, ${limits.maxChatImages} chat images`,
-        `参考图：编辑最多 ${limits.maxEditImages} 张，对话最多 ${limits.maxChatImages} 张`
+        `References: ${editReferenceLimit} edit images, ${limits.maxChatImages} chat images`,
+        `参考图：编辑最多 ${editReferenceLimit} 张，对话最多 ${limits.maxChatImages} 张`
       )
     );
 
