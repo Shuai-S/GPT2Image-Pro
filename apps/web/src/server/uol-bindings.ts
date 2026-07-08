@@ -31,6 +31,7 @@ import {
   listSelectableImageBackendGroups,
   setUserImageBackendPreference,
 } from "@/features/image-backend-pool/service";
+import { runEditableFileForUser } from "@/features/image-generation/editable-file-operations";
 import { runImageGenerationForUser } from "@/features/image-generation/operations";
 import type { ImageQuality } from "@/features/image-generation/types";
 
@@ -105,6 +106,44 @@ bindExecute(
     };
   }
 );
+
+/**
+ * file.generatePpt / file.generatePsd - 可编辑文件生成
+ * 源: apps/web/src/features/image-generation/editable-file-operations.ts
+ */
+function bindEditableFile(name: "file.generatePpt" | "file.generatePsd") {
+  const kind = name === "file.generatePsd" ? "psd" : "ppt";
+  bindExecute(
+    name,
+    async (
+      input: {
+        userId: string;
+        clientRequestId: string;
+        prompt: string;
+        base64Images?: string[];
+      },
+      _principal: Principal,
+      _ctx: OperationContext
+    ) => {
+      const result = await runEditableFileForUser({
+        userId: input.userId,
+        kind,
+        prompt: input.prompt,
+        base64Images: input.base64Images ?? [],
+        taskId: input.clientRequestId,
+      });
+      return {
+        taskId: input.clientRequestId,
+        kind,
+        primaryUrl: result.primaryUrl,
+        zipUrl: result.zipUrl,
+        creditsUsed: result.creditsCharged,
+      };
+    }
+  );
+}
+bindEditableFile("file.generatePpt");
+bindEditableFile("file.generatePsd");
 
 // TODO: image.generateAction - 委托 image.generate
 // TODO: image.delete - deleteGenerationAction 逻辑

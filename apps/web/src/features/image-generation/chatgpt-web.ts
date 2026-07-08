@@ -2,6 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { logError } from "@repo/shared/logger";
 import { getRuntimeSettingString } from "@repo/shared/system-settings";
 import { parseImageSize } from "./resolution";
+import { isContentSafetyRejection } from "./sla-classification";
+import {
+  buildWebHistoryTranscript,
+  downloadWebHistoryImageReference,
+  getRecentWebHistoryImageReferences,
+} from "./web-history-references";
 import type {
   ApiConfig,
   ChatGptWebConversationState,
@@ -13,10 +19,6 @@ import type {
   ResponsesInputFile,
   ThinkingLevel,
 } from "./types";
-import {
-  downloadWebHistoryImageReference,
-  getLatestWebHistoryImageReference,
-} from "./web-history-references";
 
 const CHATGPT_BASE_URL = "https://chatgpt.com";
 const USER_AGENT =
@@ -25,7 +27,11 @@ const DEFAULT_CLIENT_VERSION = "prod-be885abbfcfe7b1f511e88b3003d9ee44757fbad";
 const DEFAULT_CLIENT_BUILD_NUMBER = "5955942";
 const DEFAULT_POW_SCRIPT = "https://chatgpt.com/backend-api/sentinel/sdk.js";
 const IMAGE_POLL_TIMEOUT_MS = 120_000;
-const IMAGE_POLL_INTERVAL_MS = 4_000;
+const IMAGE_POLL_INTERVAL_MS = 6_000;
+// 生成结果轮询前的静默期:web 出图是分钟级异步任务,发起后头 ~45s 几乎不可能就绪,期间每
+// IMAGE_POLL_INTERVAL_MS 拉一次会话状态纯属无谓请求,还会把同一账号的会话查询端点打到 429。
+// 故发起后至少等这么久再开始轮询,大幅削减状态查询量、降低 429。
+const IMAGE_POLL_INITIAL_DELAY_MS = 45_000;
 const WEB_PROXY_REQUEST_TIMEOUT_MS = 310_000;
 
 type ChatRequirements = {
@@ -833,9 +839,13 @@ async function prepareImageConversation(
     promptOptimization?: boolean;
     continuation?: WebContinuationState | null;
     requestMessageId: string;
+    // 系统提示位:图像路径固定 ["picture_v2"](强制出图);网页对话路径传 []
+    // (不强制出图,让模型自行决定文字/出图)。缺省保持图像行为不变。
+    systemHints?: string[];
   }
 ) {
   const path = "/backend-api/f/conversation/prepare";
+  const systemHints = options.systemHints ?? ["picture_v2"];
   const response = await fetchChatGptWeb(config, path, path, {
     method: "POST",
     signal: config.signal,
@@ -861,7 +871,7 @@ async function prepareImageConversation(
       timezone_offset_min: -480,
       timezone: "Asia/Shanghai",
       conversation_mode: { kind: "primary_assistant" },
-      system_hints: ["picture_v2"],
+      system_hints: systemHints,
       partial_query: {
         id: options.requestMessageId,
         author: { role: "user" },
@@ -882,7 +892,9 @@ async function prepareImageConversation(
 function buildMessage(
   prompt: string,
   references: UploadedAttachment[],
-  messageId: string
+  messageId: string,
+  // 图片生成用 ["picture_v2"];可编辑文件(PPT/PSD)生成传 [](gpt-5-5-thinking + 代码解释器)。
+  systemHints: string[] = ["picture_v2"]
 ) {
   const parts = references.map((item) => ({
     content_type: item.content_type,
@@ -906,7 +918,7 @@ function buildMessage(
       ? { content_type: "multimodal_text", parts }
       : { content_type: "text", parts: [prompt] },
     metadata: {
-      system_hints: ["picture_v2"],
+      system_hints: systemHints,
       serialization_metadata: { custom_symbol_offsets: [] },
       ...(references.length
         ? {
@@ -939,17 +951,27 @@ async function startImageGeneration(
     promptOptimization?: boolean;
     continuation?: WebContinuationState | null;
     requestMessageId: string;
+    // 见 prepareImageConversation 的 systemHints 说明。缺省 ["picture_v2"]。
+    systemHints?: string[];
   },
   references: UploadedAttachment[]
 ) {
   const path = "/backend-api/f/conversation";
+  const systemHints = options.systemHints ?? ["picture_v2"];
   const response = await fetchChatGptWeb(config, path, path, {
     method: "POST",
     signal: config.signal,
     headers: imageHeaders(config, path, requirements, conduitToken),
     body: JSON.stringify({
       action: "next",
-      messages: [buildMessage(prompt, references, options.requestMessageId)],
+      messages: [
+        buildMessage(
+          prompt,
+          references,
+          options.requestMessageId,
+          systemHints
+        ),
+      ],
       ...(options.continuation?.useNativeContinuation
         ? { conversation_id: options.continuation.conversationId }
         : {}),
@@ -962,7 +984,7 @@ async function startImageGeneration(
       timezone: "Asia/Shanghai",
       conversation_mode: { kind: "primary_assistant" },
       enable_message_followups: true,
-      system_hints: ["picture_v2"],
+      system_hints: systemHints,
       supports_buffering: true,
       supported_encodings: ["v1"],
       client_contextual_info: {
@@ -1443,6 +1465,74 @@ function latestConversationMessageIdAfter(
   return latest ? conversationNodeId(latest.node, latest.id) : "";
 }
 
+// ===== 网页对话(文字问答)文本抽取 =====
+//
+// WHY:图像路径注入 picture_v2 强制出图,只回图不回文字。网页对话不注入 picture_v2,模型像
+// 正常 ChatGPT 那样回文字、仅在被要求时出图。这里从会话 mapping 里抽出 assistant 的最终文字答复
+// (content_type=text/multimodal_text 的 parts),跳过 thoughts/reasoning 中间节点;并据 end_turn
+// 判定 turn 是否收尾,供轮询决定何时返回。
+
+/** 取节点内层的 message 对象(节点可能直接是 message,也可能包一层 {message})。 */
+function nodeMessageObject(node: unknown): Record<string, unknown> | null {
+  if (!isRecord(node)) return null;
+  if (isRecord(node.message)) return node.message;
+  if (isRecord(node.content) && isRecord(node.author)) return node;
+  return null;
+}
+
+/** 节点的 author.role(user/assistant/tool/system)。 */
+function nodeAuthorRole(node: unknown): string {
+  const message = nodeMessageObject(node);
+  const author = message && isRecord(message.author) ? message.author : null;
+  return author && typeof author.role === "string" ? author.role : "";
+}
+
+/**
+ * 节点的文字内容:仅 content_type=text/multimodal_text 的字符串 parts 拼接;
+ * thoughts/reasoning/code 等非最终答复内容返回空。
+ */
+function nodeTextContent(node: unknown): string {
+  const message = nodeMessageObject(node);
+  const content = message && isRecord(message.content) ? message.content : null;
+  if (!content) return "";
+  const type =
+    typeof content.content_type === "string" ? content.content_type : "";
+  if (type !== "text" && type !== "multimodal_text") return "";
+  const parts = Array.isArray(content.parts) ? content.parts : [];
+  return parts
+    .filter((part): part is string => typeof part === "string")
+    .join("")
+    .trim();
+}
+
+/** turn 是否已收尾(最终 assistant 文字节点带 end_turn=true)。 */
+function nodeEndTurn(node: unknown): boolean {
+  const message = nodeMessageObject(node);
+  return Boolean(message && message.end_turn === true);
+}
+
+/**
+ * 从 requestMessageId 之后的节点里抽出 assistant 最终文字答复。
+ * text:最后一条 assistant text 节点的内容(定稿答复);complete:该 turn 是否已 end_turn 收尾。
+ */
+function extractAssistantAnswer(
+  conversationText: string,
+  requestMessageId: string
+): { text: string; complete: boolean } {
+  let text = "";
+  let complete = false;
+  for (const { node } of conversationNodesAfterMessage(
+    conversationText,
+    requestMessageId
+  )) {
+    if (nodeAuthorRole(node) !== "assistant") continue;
+    const part = nodeTextContent(node);
+    if (part) text = part;
+    if (part && nodeEndTurn(node)) complete = true;
+  }
+  return { text, complete };
+}
+
 /**
  * 从 ChatGPT web 流式增量(o/v 操作)里抽出"系统错误"消息(content_type=system_error)。
  *
@@ -1574,6 +1664,11 @@ function latestConversationMessageId(text: string) {
   return idMatches.at(-1)?.[1] || "";
 }
 
+// 会话查询是否被限流(429/too many requests):供轮询容错时加大退避。
+function isWebRateLimited(message: string) {
+  return /429|too many requests|rate limit/i.test(message);
+}
+
 async function pollImageIds(
   config: ApiConfig,
   conversationId: string,
@@ -1583,7 +1678,17 @@ async function pollImageIds(
   const deadline = Date.now() + IMAGE_POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
     throwIfAborted(signal);
-    const text = await getConversationText(config, conversationId, signal);
+    let text: string;
+    try {
+      text = await getConversationText(config, conversationId, signal);
+    } catch (error) {
+      // 单次状态查询失败(典型 429 会话查询限流 / 交接期瞬时错误)不该拖垮整次生成:
+      // 真 abort/超时上抛;否则按是否限流决定退避时长后继续轮询。
+      throwIfAborted(signal);
+      const message = error instanceof Error ? error.message : String(error);
+      await sleep(IMAGE_POLL_INTERVAL_MS * (isWebRateLimited(message) ? 3 : 1));
+      continue;
+    }
     const scopedText = requestMessageId
       ? scopedConversationTextAfterMessage(text, requestMessageId)
       : text;
@@ -1610,7 +1715,17 @@ async function pollImageCandidates(
   const deadline = Date.now() + IMAGE_POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
     throwIfAborted(signal);
-    const text = await getConversationText(config, conversationId, signal);
+    let text: string;
+    try {
+      text = await getConversationText(config, conversationId, signal);
+    } catch (error) {
+      // 单次状态查询失败(典型 429 会话查询限流 / 交接期瞬时错误)不该拖垮整次生成:
+      // 真 abort/超时上抛;否则按是否限流决定退避时长后继续轮询。
+      throwIfAborted(signal);
+      const message = error instanceof Error ? error.message : String(error);
+      await sleep(IMAGE_POLL_INTERVAL_MS * (isWebRateLimited(message) ? 3 : 1));
+      continue;
+    }
     const candidates = imageCandidatesAfterMessage(text, requestMessageId);
     if (candidates.length) {
       const selection = imageSelectionAfterMessage(text, requestMessageId);
@@ -1844,6 +1959,38 @@ async function downloadImageOutputs(
 // 产出几乎一样的图。进程内即可:线上正常流量全打主副本(3308),备副本仅 failover 启用。
 const inflightWebContinuations = new Set<string>();
 
+// 非原生续接时随 prompt 带上的历史文字转录上限(字符)。图不完全附带(见 downloadRecentWebHistory
+// Images 的 limit),但历史文字尽量带上、控制在此上限内(保留最近轮次)。
+const WEB_HISTORY_TRANSCRIPT_MAX_CHARS = 6000;
+
+/**
+ * 非原生续接时,把历史文字转录作为上下文前置到当前请求前(图另行以附件重附)。
+ * 明确标注为"仅供理解上下文",避免模型把历史文字直接画进图/复述。
+ */
+function withWebHistoryContext(prompt: string, transcript: string) {
+  if (!transcript) return prompt;
+  return (
+    "以下是之前的对话记录,仅供你理解上下文(不要把这些文字直接画进图或原样复述):\n" +
+    `${transcript}\n\n请据此完成当前请求:\n${prompt}`
+  );
+}
+
+// 非原生续接(换号/开新会话)时,把最近若干历史图(assistant 生成图 + 用户上传参考图)下成
+// 附件重新带上,弥补 ChatGPT 会话上下文丢失。下载失败的单张跳过,不阻断整轮。
+async function downloadRecentWebHistoryImages(
+  history: ChatHistoryMessage[] | undefined,
+  signal: AbortSignal,
+  limit = 3
+): Promise<ImageInputFile[]> {
+  const references = getRecentWebHistoryImageReferences(history, { limit });
+  const downloaded = await Promise.all(
+    references.map((reference) =>
+      downloadWebHistoryImageReference(reference, { signal }).catch(() => null)
+    )
+  );
+  return downloaded.filter((image): image is ImageInputFile => image !== null);
+}
+
 async function runWebImage(
   config: ApiConfig,
   params: WebImageParams,
@@ -1870,15 +2017,24 @@ async function runWebImage(
         claimedWebConversationId = continuation.conversationId;
       }
     }
-    const historyReference = continuation?.useNativeContinuation
-      ? null
-      : getLatestWebHistoryImageReference(params.history);
-    const prompt = applyImageSizePrompt(getPrompt(params), params.size);
-    const historyImage = historyReference
-      ? await downloadWebHistoryImageReference(historyReference, {
-          signal: abortController.signal,
-        })
-      : null;
+    // 原生续接时 ChatGPT 会话已含历史(文字+图),不重复带;换号/新会话时把历史文字转录前置、
+    // 并重附最近历史图(含用户上传),尽量还原多轮上下文。
+    const historyTranscript = continuation?.useNativeContinuation
+      ? ""
+      : buildWebHistoryTranscript(
+          params.history,
+          WEB_HISTORY_TRANSCRIPT_MAX_CHARS
+        );
+    const prompt = withWebHistoryContext(
+      applyImageSizePrompt(getPrompt(params), params.size),
+      historyTranscript
+    );
+    const historyImages = continuation?.useNativeContinuation
+      ? []
+      : await downloadRecentWebHistoryImages(
+          params.history,
+          abortController.signal
+        );
     const references = [
       ...(await Promise.all(
         images.map((image, index) =>
@@ -1887,22 +2043,22 @@ async function runWebImage(
           })
         )
       )),
-      ...(historyImage
-        ? [
-            await uploadAttachment(
-              configWithSignal,
-              historyImage,
-              images.length + 1,
-              { image: true }
-            ),
-          ]
-        : []),
+      ...(await Promise.all(
+        historyImages.map((image, index) =>
+          uploadAttachment(
+            configWithSignal,
+            image,
+            images.length + index + 1,
+            { image: true }
+          )
+        )
+      )),
       ...(await Promise.all(
         (params.files || []).map((file, index) =>
           uploadAttachment(
             configWithSignal,
             file,
-            images.length + (historyImage ? 1 : 0) + index + 1
+            images.length + historyImages.length + index + 1
           )
         )
       )),
@@ -1920,6 +2076,7 @@ async function runWebImage(
         requestMessageId,
       }
     );
+    const launchedAt = Date.now();
     const response = await startImageGeneration(
       configWithSignal,
       prompt,
@@ -1944,6 +2101,15 @@ async function runWebImage(
     let parentMessageId = extractLastMessageId(text);
     const selectionMessageIdFromStream = extractSelectionMessageId(text);
     const ids = extractImageIds(text);
+    // 发起后至少静默 IMAGE_POLL_INITIAL_DELAY_MS 再开始轮询状态:web 出图头 ~45s 几乎不可能就绪,
+    // 期间轮询纯属无谓请求且会把会话查询端点打到 429。流里已直接带出图则跳过等待(无需轮询)。
+    if (!hasImageIds(ids)) {
+      const waitMs = IMAGE_POLL_INITIAL_DELAY_MS - (Date.now() - launchedAt);
+      if (waitMs > 0) {
+        await sleep(waitMs);
+        throwIfAborted(abortController.signal);
+      }
+    }
     const resolved = await resolveImageCandidateUrls(
       configWithSignal,
       conversationId,
@@ -1954,15 +2120,39 @@ async function runWebImage(
     const candidateImages = resolved.outputs;
     parentMessageId = resolved.parentMessageId || parentMessageId;
     if (conversationId && !parentMessageId) {
-      parentMessageId = latestConversationMessageId(
-        await getConversationText(
-          configWithSignal,
-          conversationId,
-          abortController.signal
-        )
-      );
+      // best-effort:仅为补续接用的 parentMessageId,此处 429/瞬时失败不该拖垮已出图的成功单。
+      try {
+        parentMessageId = latestConversationMessageId(
+          await getConversationText(
+            configWithSignal,
+            conversationId,
+            abortController.signal
+          )
+        );
+      } catch {
+        throwIfAborted(abortController.signal);
+      }
     }
     if (!candidateImages[0]?.url) {
+      // 无图:web 对违规内容常"软拒绝"(picture_v2 不返图,只回一段拒绝文字)。抽出 assistant
+      // 文字,若命中内容安全拒绝 → 直接返回该拒绝文案:SLA 归 moderation(真实审核,而非事后
+      // 靠后端类型猜的"疑似审核"),且被 isUserRequestBackendError 判为不可切换 → 秒级失败、不再
+      // 逐个换号重试同样会被拒的内容一路 churn 到 20 分钟超时。抽不到/非拒绝则退回原 "no image output"。
+      try {
+        const answer = extractAssistantAnswer(
+          await getConversationText(
+            configWithSignal,
+            conversationId,
+            abortController.signal
+          ),
+          requestMessageId
+        );
+        if (answer.text && isContentSafetyRejection(answer.text)) {
+          return { error: answer.text.slice(0, 500) };
+        }
+      } catch {
+        throwIfAborted(abortController.signal);
+      }
       return { error: "ChatGPT Web backend returned no image output" };
     }
     const imageOutputs = await downloadImageOutputs(
@@ -2026,6 +2216,268 @@ export async function editImageWithChatGptWeb(
   return runWebImage(config, params, params.images);
 }
 
+// ===== 网页对话(文字问答 + 按需出图)=====
+//
+// WHY:chat(web) tab 是"真正的网页对话"——用户问"这是什么"要回文字,说"画一只猫"才出图,
+// 而图像路径(runWebImage)注入 picture_v2 强制出图、返回值只有图,问文字也会硬出图。
+// 这里不注入 picture_v2,发用户原始消息,轮询会话抽 assistant 最终文字答复;若模型自发出图
+// 则一并抽图下载。返回 { responseText?, imageBase64?, imageOutputs?, webConversation }。
+// 复用图像路径的 PoW/Sentinel/上传/续接/下载链路,仅 system_hints 与结果抽取不同。
+
+const WEB_CHAT_POLL_TIMEOUT_MS = 180_000;
+const WEB_CHAT_STALL_MS = 45_000;
+
+/**
+ * 轮询会话直到 assistant turn 收尾(或长时间停滞/超时),抽出文字答复与"是否出了图"。
+ * WHY 轮询而非解析 SSE:web SSE 是 o/v 增量协议,直接拼文本易错;轮询 mapping 取定稿节点更稳,
+ * 且兼容 thinking 模型的异步交接(提交前会话短暂 404)。
+ */
+async function pollWebChatResult(
+  config: ApiConfig,
+  conversationId: string,
+  requestMessageId: string,
+  signal?: AbortSignal
+): Promise<{ responseText: string; hasImage: boolean; parentMessageId: string }> {
+  const deadline = Date.now() + WEB_CHAT_POLL_TIMEOUT_MS;
+  let bestText = "";
+  let hasImage = false;
+  let parentMessageId = "";
+  let lastText = "";
+  let stableSince = 0;
+  while (Date.now() < deadline) {
+    throwIfAborted(signal);
+    let text: string;
+    try {
+      text = await getConversationText(config, conversationId, signal);
+    } catch {
+      // 交接期瞬时 404/inaccessible 视为未就绪继续轮询;真 abort/超时上抛。
+      throwIfAborted(signal);
+      await sleep(IMAGE_POLL_INTERVAL_MS);
+      continue;
+    }
+    const answer = extractAssistantAnswer(text, requestMessageId);
+    if (answer.text) bestText = answer.text;
+    if (imageCandidatesAfterMessage(text, requestMessageId).length) {
+      hasImage = true;
+    }
+    const latestParent = latestConversationMessageIdAfter(
+      text,
+      requestMessageId
+    );
+    if (latestParent) parentMessageId = latestParent;
+    // turn 收尾即定稿返回(文字答复到手;若也出了图,hasImage 已置位)。
+    if (answer.complete) {
+      return { responseText: answer.text, hasImage, parentMessageId };
+    }
+    // fail-safe:会话内容长时间不变但未标 end_turn(偶发未回收的 turn),用已抽到的文本收尾。
+    if (text === lastText) {
+      if (!stableSince) {
+        stableSince = Date.now();
+      } else if (
+        Date.now() - stableSince >= WEB_CHAT_STALL_MS &&
+        (bestText || hasImage)
+      ) {
+        return { responseText: bestText, hasImage, parentMessageId };
+      }
+    } else {
+      stableSince = 0;
+      lastText = text;
+    }
+    await sleep(IMAGE_POLL_INTERVAL_MS);
+  }
+  return { responseText: bestText, hasImage, parentMessageId };
+}
+
+async function runWebChat(
+  config: ApiConfig,
+  params: WebImageParams,
+  images: ImageInputFile[]
+): Promise<GenerateImageResult> {
+  const abortController = new AbortController();
+  const timeout = setTimeout(() => abortController.abort(), 20 * 60 * 1000);
+  let claimedWebConversationId: string | null = null;
+  try {
+    const configWithSignal = { ...config, signal: abortController.signal };
+    const requestMessageId = randomUUID();
+    let continuation = lastWebConversationState(
+      params.history,
+      config.backend?.id
+    );
+    // 并发互斥:同会话被在飞请求占用则本轮改开新对话(同图像路径逻辑)。
+    if (continuation?.useNativeContinuation && continuation.conversationId) {
+      if (inflightWebContinuations.has(continuation.conversationId)) {
+        continuation = null;
+      } else {
+        inflightWebContinuations.add(continuation.conversationId);
+        claimedWebConversationId = continuation.conversationId;
+      }
+    }
+    // 网页对话:发用户原始消息(不用图像优化后的 apiPrompt),不注入 picture_v2。
+    // 续接同一会话时上下文已在会话内;换号/新会话时把历史文字转录前置 + 重附最近历史图(含用户
+    // 上传参考图),覆盖"上一轮纯文字、参考图是用户上传"及多轮文字上下文的换号丢失场景。
+    const historyTranscript = continuation?.useNativeContinuation
+      ? ""
+      : buildWebHistoryTranscript(
+          params.history,
+          WEB_HISTORY_TRANSCRIPT_MAX_CHARS
+        );
+    const prompt = withWebHistoryContext(params.prompt, historyTranscript);
+    const historyImages = continuation?.useNativeContinuation
+      ? []
+      : await downloadRecentWebHistoryImages(
+          params.history,
+          abortController.signal
+        );
+    const references = [
+      ...(await Promise.all(
+        images.map((image, index) =>
+          uploadAttachment(configWithSignal, image, index + 1, { image: true })
+        )
+      )),
+      ...(await Promise.all(
+        historyImages.map((image, index) =>
+          uploadAttachment(
+            configWithSignal,
+            image,
+            images.length + index + 1,
+            { image: true }
+          )
+        )
+      )),
+      ...(await Promise.all(
+        (params.files || []).map((file, index) =>
+          uploadAttachment(
+            configWithSignal,
+            file,
+            images.length + historyImages.length + index + 1
+          )
+        )
+      )),
+    ];
+    const requirements = await getChatRequirements(configWithSignal);
+    const options = {
+      gptModel: params.gptModel,
+      thinking: params.thinking,
+      promptOptimization: params.promptOptimization,
+      continuation,
+      requestMessageId,
+      systemHints: [] as string[],
+    };
+    const conduitToken = await prepareImageConversation(
+      configWithSignal,
+      prompt,
+      requirements,
+      options
+    );
+    const response = await startImageGeneration(
+      configWithSignal,
+      prompt,
+      requirements,
+      conduitToken,
+      options,
+      references
+    );
+    const text = await readSseText(response);
+    throwIfAborted(abortController.signal);
+    const streamError = extractWebStreamError(text);
+    if (streamError) {
+      return { error: streamError };
+    }
+    const conversationId = extractConversationId(text);
+    if (!conversationId) {
+      return { error: "ChatGPT Web chat returned no conversation" };
+    }
+    const chat = await pollWebChatResult(
+      configWithSignal,
+      conversationId,
+      requestMessageId,
+      abortController.signal
+    );
+    let parentMessageId = chat.parentMessageId || extractLastMessageId(text);
+    let imageOutputs: NonNullable<GenerateImageResult["imageOutputs"]> = [];
+    if (chat.hasImage) {
+      const resolved = await resolveImageCandidateUrls(
+        configWithSignal,
+        conversationId,
+        extractImageIds(text),
+        requestMessageId,
+        abortController.signal
+      );
+      imageOutputs = await downloadImageOutputs(
+        configWithSignal,
+        resolved.outputs,
+        abortController.signal
+      );
+      parentMessageId = resolved.parentMessageId || parentMessageId;
+    }
+    const responseText = chat.responseText?.trim() || "";
+    if (!responseText && !imageOutputs.length) {
+      return { error: "ChatGPT Web chat returned no response" };
+    }
+    if (conversationId && !parentMessageId) {
+      // best-effort:同上,补 parentMessageId 的兜底查询失败不该拖垮已完成的回复/出图。
+      try {
+        parentMessageId = latestConversationMessageId(
+          await getConversationText(
+            configWithSignal,
+            conversationId,
+            abortController.signal
+          )
+        );
+      } catch {
+        throwIfAborted(abortController.signal);
+      }
+    }
+    return {
+      ...(responseText ? { responseText } : {}),
+      ...(imageOutputs[0]?.imageBase64
+        ? {
+            imageBase64: imageOutputs[0].imageBase64,
+            imageOutputs,
+            imageOutputCount: imageOutputs.length,
+          }
+        : {}),
+      ...(conversationId && parentMessageId
+        ? {
+            webConversation: {
+              conversationId,
+              parentMessageId,
+              accountId: config.backend?.id,
+              apiKeyId: config.backend?.apiKeyId,
+            },
+          }
+        : {}),
+    };
+  } catch (error) {
+    logError(error, {
+      source: "chatgpt-web-chat",
+      backendId: config.backend?.id,
+      requestKind: config.backend?.requestKind,
+    });
+    return {
+      error:
+        error instanceof Error ? error.message : "ChatGPT Web chat failed",
+    };
+  } finally {
+    clearTimeout(timeout);
+    if (claimedWebConversationId) {
+      inflightWebContinuations.delete(claimedWebConversationId);
+    }
+  }
+}
+
+/**
+ * 网页对话入口(chat(web) 文字轮次)。text-capable:回文字,模型自发出图时一并返回图。
+ * 与 generateImageWithChatGptWeb 的差别:不强制出图、允许 text-only 结果。
+ */
+export async function chatWithChatGptWeb(
+  config: ApiConfig,
+  params: WebImageParams,
+  images: ImageInputFile[] = []
+) {
+  return runWebChat(config, params, images);
+}
+
 export async function selectChatGptWebImageCandidate(params: {
   config: ApiConfig;
   conversationId: string;
@@ -2054,6 +2506,480 @@ export async function selectChatGptWebImageCandidate(params: {
   return true;
 }
 
+// ===== 可编辑文件生成(PPT/PSD):对话式产文件 =====
+//
+// 移植 basketikun/chatgpt2api 的机制(非 gizmo):model=gpt-5-5-thinking + thinking_effort=extended
+// + system_hints=[] + 固定中文提示词 → ChatGPT 内建生图 + 代码解释器(Python 沙盒)拼出 .pptx/.psd
+// 写到 /mnt/data,再从会话结果里抠沙盒路径/附件 file_id,按 4 端点顺序换下载链接拉二进制。
+// 复用现有 web 对话链路(PoW/Sentinel/上传/会话轮询/getDownloadUrl);不动图片生成路径。
+// 依赖账号:代码解释器 + gpt-5-5-thinking 灰度(限 plus/pro,调度层保证,见 editable-file-operations)。
+
+const EDITABLE_FILE_MODEL = "gpt-5-5-thinking";
+const EDITABLE_FILE_THINKING_EFFORT = "extended";
+const EDITABLE_FILE_POLL_TIMEOUT_MS = 600_000; // 文件生成分钟级,10min
+const EDITABLE_FILE_POLL_INTERVAL_MS = 5_000;
+// 下载就绪时序:沙盒文件在会话里"出现"(代码写了目标路径)≠"已产出可下载"——代码可能反复失败、
+// turn 未完成。故轮询时逐候选实际尝试下载,只有真解析出可下载二进制才算"找到";轮询本身即重试。
+// 主文件到手后再给 zip 一段宽限;会话内容长时间停滞且仍无产物则提前结束(避免 10min 空等)。
+const EDITABLE_ZIP_GRACE_MS = 30_000;
+const EDITABLE_STALL_MS = 120_000;
+const EDITABLE_USER_EXTRA_PREFIX = "以下是用户补充需求,请直接结合执行:\n";
+
+// 固定提示词(移植 chatgpt2api _editable_prompt 的三步/两段模板)。
+const EDITABLE_PPT_PROMPT =
+  "我需要你根据用户的需求,来制作一个可以编辑的PPT。整体流程:\n" +
+  "1. 用生图的方式,帮我生成一个精美的产品介绍ppt,5-6个页面;\n" +
+  "2. 帮我把以上涉及到的所有图像和形状素材,拆分成单独的png;\n" +
+  "3. 利用以上所有图片和形状素材,用python-pptx帮我还原你第一次生成的展示ppt,导出为可编辑的 .pptx 文件,并把用到的素材打包成 .zip。";
+const EDITABLE_PSD_PROMPT =
+  "帮我生成这个图像,并把这张海报/图像分成若干独立图层素材,再帮我把拆分的图层素材拼合成一个可编辑的 psd 文件(每个图层独立),导出 .psd 文件,并把用到的图层素材打包成 .zip。";
+
+// 沙盒路径 / asset pointer 正则(移植 chatgpt2api 常量)。
+const EDITABLE_PPT_FILE_RE =
+  /(?:sandbox:)?(\/mnt\/data\/[^\s"')\]]+\.(?:pptx?|zip))/gi;
+const EDITABLE_PSD_FILE_RE =
+  /(?:sandbox:)?(\/mnt\/data\/[^\s"')\]]+\.(?:psd|zip))/gi;
+const EDITABLE_ASSET_POINTER_RE =
+  /(?:file-service|sediment):\/\/([A-Za-z0-9_-]+)/g;
+
+export type EditableFileKind = "ppt" | "psd";
+
+/** 会话结果里定位到的一个文件产物(主文件或 zip)。 */
+type EditableArtifact = {
+  attachmentId: string;
+  fileId: string;
+  name: string;
+  mimeType: string;
+  sandboxPath: string;
+  messageId: string;
+  isZip: boolean;
+};
+
+/** 下载落地的文件二进制(不转 base64,保留 mime)。 */
+export type EditableFileBinary = {
+  buffer: Buffer;
+  fileName: string;
+  mimeType: string;
+  size: number;
+};
+
+export type EditableFileResult = {
+  conversationId: string;
+  primary: EditableFileBinary;
+  zip: EditableFileBinary | null;
+};
+
+function editableFilePrompt(kind: EditableFileKind, userPrompt: string) {
+  const base = kind === "psd" ? EDITABLE_PSD_PROMPT : EDITABLE_PPT_PROMPT;
+  const extra = userPrompt.trim();
+  return extra ? `${base}\n\n${EDITABLE_USER_EXTRA_PREFIX}${extra}` : base;
+}
+
+/** 文件模式的会话预备:去掉 picture_v2/paragen,改 gpt-5-5-thinking + thinking_effort=extended。 */
+async function prepareFileConversation(
+  config: ApiConfig,
+  prompt: string,
+  requirements: ChatRequirements,
+  requestMessageId: string
+) {
+  const path = "/backend-api/f/conversation/prepare";
+  const response = await fetchChatGptWeb(config, path, path, {
+    method: "POST",
+    signal: config.signal,
+    headers: imageHeaders(config, path, requirements),
+    body: JSON.stringify({
+      action: "next",
+      fork_from_shared_post: false,
+      parent_message_id: randomUUID(),
+      model: EDITABLE_FILE_MODEL,
+      thinking_effort: EDITABLE_FILE_THINKING_EFFORT,
+      client_prepare_state: "success",
+      timezone_offset_min: -480,
+      timezone: "Asia/Shanghai",
+      conversation_mode: { kind: "primary_assistant" },
+      system_hints: [],
+      partial_query: {
+        id: requestMessageId,
+        author: { role: "user" },
+        content: { content_type: "text", parts: [prompt] },
+      },
+      supports_buffering: true,
+      supported_encodings: ["v1"],
+      client_contextual_info: { app_name: "chatgpt.com" },
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(
+      await webErrorMessage(response, "ChatGPT Web file prepare")
+    );
+  }
+  const data = (await response.json()) as { conduit_token?: string };
+  return data.conduit_token || "";
+}
+
+/** 文件模式的会话发起:system_hints=[]、gpt-5-5-thinking + thinking_effort=extended。 */
+async function startFileConversation(
+  config: ApiConfig,
+  prompt: string,
+  requirements: ChatRequirements,
+  conduitToken: string,
+  requestMessageId: string,
+  references: UploadedAttachment[]
+) {
+  const path = "/backend-api/f/conversation";
+  const response = await fetchChatGptWeb(config, path, path, {
+    method: "POST",
+    signal: config.signal,
+    headers: imageHeaders(config, path, requirements, conduitToken),
+    body: JSON.stringify({
+      action: "next",
+      messages: [buildMessage(prompt, references, requestMessageId, [])],
+      parent_message_id: randomUUID(),
+      model: EDITABLE_FILE_MODEL,
+      thinking_effort: EDITABLE_FILE_THINKING_EFFORT,
+      client_prepare_state: "sent",
+      timezone_offset_min: -480,
+      timezone: "Asia/Shanghai",
+      conversation_mode: { kind: "primary_assistant" },
+      enable_message_followups: true,
+      system_hints: [],
+      supports_buffering: true,
+      supported_encodings: ["v1"],
+      client_contextual_info: { app_name: "chatgpt.com" },
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(
+      await webErrorMessage(response, "ChatGPT Web file request")
+    );
+  }
+  return response;
+}
+
+/** 从一条消息节点的 metadata.attachments 取附件(file_id/name/mime/attachmentId)。 */
+function attachmentsFromNode(node: unknown): Array<Record<string, unknown>> {
+  const metadata = messageMetadataFromValue(node);
+  const attachments = isRecord(metadata) ? metadata.attachments : undefined;
+  return Array.isArray(attachments)
+    ? attachments.filter((a): a is Record<string, unknown> => isRecord(a))
+    : [];
+}
+
+/**
+ * 从会话结果里提取文件产物(移植 chatgpt2api _extract_editable_artifacts):
+ * 遍历 requestMessageId 之后的 assistant/tool 节点,① 从 metadata.attachments 取附件;
+ * ② 从节点序列化文本里正则抠沙盒路径 /mnt/data/*.(pptx|psd|zip);③ 抠 asset_pointer 的 file_id。
+ * 按扩展名判定 kind 主文件 vs zip。export 供单测。
+ */
+function extractEditableArtifacts(
+  conversationText: string,
+  requestMessageId: string,
+  kind: EditableFileKind
+): EditableArtifact[] {
+  const fileRe = kind === "psd" ? EDITABLE_PSD_FILE_RE : EDITABLE_PPT_FILE_RE;
+  const primaryExt = kind === "psd" ? /\.psd$/i : /\.pptx?$/i;
+  const artifacts: EditableArtifact[] = [];
+  const seen = new Set<string>();
+  for (const { id, node } of conversationNodesAfterMessage(
+    conversationText,
+    requestMessageId
+  )) {
+    const messageId = conversationNodeId(node, id);
+    const serialized = JSON.stringify(node);
+    // 附件来源
+    for (const att of attachmentsFromNode(node)) {
+      const name = String(att.name || att.file_name || "");
+      const fileId = String(att.id || att.file_id || "");
+      if (!name || (!primaryExt.test(name) && !/\.zip$/i.test(name))) continue;
+      const key = `${fileId}:${name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      artifacts.push({
+        attachmentId: String(att.id || ""),
+        fileId,
+        name,
+        mimeType: String(att.mimeType || att.mime_type || ""),
+        sandboxPath: "",
+        messageId,
+        isZip: /\.zip$/i.test(name),
+      });
+    }
+    // 沙盒路径来源
+    for (const m of serialized.matchAll(fileRe)) {
+      const sandboxPath = m[1] || "";
+      if (!sandboxPath) continue;
+      const name = sandboxPath.split("/").pop() || sandboxPath;
+      const key = `sandbox:${sandboxPath}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const pointer = [...serialized.matchAll(EDITABLE_ASSET_POINTER_RE)][0];
+      artifacts.push({
+        attachmentId: "",
+        fileId: pointer?.[1] || "",
+        name,
+        mimeType: "",
+        sandboxPath,
+        messageId,
+        isZip: /\.zip$/i.test(name),
+      });
+    }
+  }
+  return artifacts;
+}
+
+/** 从产物按 4 端点顺序解析真实下载 URL(移植 chatgpt2api _resolve_editable_download_url)。 */
+async function resolveEditableDownloadUrl(
+  config: ApiConfig,
+  conversationId: string,
+  artifact: EditableArtifact
+): Promise<string> {
+  const candidates: string[] = [];
+  if (artifact.sandboxPath) {
+    const q = new URLSearchParams({
+      message_id: artifact.messageId,
+      sandbox_path: artifact.sandboxPath,
+    });
+    candidates.push(
+      `/backend-api/conversation/${conversationId}/interpreter/download?${q.toString()}`
+    );
+  }
+  if (artifact.attachmentId) {
+    candidates.push(
+      `/backend-api/conversation/${conversationId}/attachment/${artifact.attachmentId}/download`
+    );
+  }
+  if (artifact.fileId) {
+    candidates.push(
+      `/backend-api/files/download/${artifact.fileId}?post_id=&inline=false`
+    );
+    candidates.push(`/backend-api/files/${artifact.fileId}/download`);
+  }
+  // 按端点顺序试解析:任一返回 download_url/url 即用;未就绪(空/非 200/抛错)则试下一个,
+  // 全空返回 ""(由轮询循环下一轮重试)。
+  for (const path of candidates) {
+    try {
+      const url = await getDownloadUrl(config, path, config.signal);
+      if (url) return url;
+    } catch {
+      // 该端点未就绪或不适用,试下一个。
+    }
+  }
+  return "";
+}
+
+/**
+ * 拉取已解析出的下载 URL。按 URL 形态选路:
+ * - chatgpt.com/openai.com 后端 URL 或相对路径:走 Go 代理(WARP 出网 + cookie),
+ *   否则用机房 IP 直连会被 Cloudflare 拦(与生图同源问题)。
+ * - 外部签名 URL(oaiusercontent 等):直连 + Authorization/UA(与 downloadImage 一致)。
+ */
+async function fetchResolvedDownload(
+  config: ApiConfig,
+  url: string
+): Promise<Response> {
+  let abs: URL | null = null;
+  try {
+    abs = new URL(url);
+  } catch {
+    abs = null;
+  }
+  const isBackend =
+    !abs ||
+    abs.host.endsWith("chatgpt.com") ||
+    abs.host.endsWith("openai.com");
+  if (isBackend) {
+    const path = abs ? `${abs.pathname}${abs.search}` : url;
+    return fetchChatGptWeb(config, path, path, {
+      signal: config.signal,
+      headers: getHeaders(config, path, {
+        Accept: "application/octet-stream",
+      }),
+    });
+  }
+  return fetch(url, {
+    signal: config.signal,
+    headers: {
+      Authorization: `Bearer ${config.apiKey}`,
+      "User-Agent": USER_AGENT,
+    },
+  });
+}
+
+/**
+ * 单次尝试:解析下载 URL → 拉二进制 → EditableFileBinary(保留 mime/文件名)。
+ * 未就绪(空 url / 非 200 / 空体)返回 null;由 pollAndDownloadEditableFile 的轮询循环驱动重试。
+ */
+async function downloadEditableBinary(
+  config: ApiConfig,
+  conversationId: string,
+  artifact: EditableArtifact
+): Promise<EditableFileBinary | null> {
+  const url = await resolveEditableDownloadUrl(config, conversationId, artifact);
+  if (!url) return null;
+  const response = await fetchResolvedDownload(config, url);
+  const buffer = response.ok
+    ? Buffer.from(await response.arrayBuffer())
+    : null;
+  if (buffer && buffer.length > 0) {
+    const mimeType =
+      artifact.mimeType ||
+      response.headers.get("content-type") ||
+      "application/octet-stream";
+    return { buffer, fileName: artifact.name, mimeType, size: buffer.length };
+  }
+  return null;
+}
+
+/**
+ * 轮询会话并逐候选实际下载,凑齐可下载的「主文件」(+尽力凑「zip」)。
+ *
+ * WHY 边轮询边下载(而非先"发现路径"再下载):沙盒里 /mnt/data/x.pptx 的路径会先出现在
+ *   assistant 的**代码**里(仅是目标路径),此时文件尚未产出、甚至代码可能反复 Traceback 失败;
+ *   turn 也常未完成。只有 interpreter/download 真解析出可下载二进制,才证明文件已产出。故这里对每个
+ *   候选直接试下载,成功才计入 primary/zip;轮询本身充当"等待文件产出"的重试。
+ * WHY 容错轮询:thinking 模型走 ChatGPT 异步「缓冲流交接」(stream_handoff)——建会话 SSE 秒回
+ *   handoff、turn 在服务端 conduit 异步跑;提交前 GET 会话会短暂 404,须容忍继续轮询。
+ * 收敛:主文件到手后给 zip 一段宽限即返回(zip 可缺);会话内容长时间停滞且仍无主文件 → 提前结束
+ *   (turn 很可能结束但无产物),交由上层换号重试,避免 10min 空等。abort/超时经 throwIfAborted 上抛。
+ */
+async function pollAndDownloadEditableFile(
+  config: ApiConfig,
+  conversationId: string,
+  requestMessageId: string,
+  kind: EditableFileKind
+): Promise<{
+  primary: EditableFileBinary | null;
+  zip: EditableFileBinary | null;
+}> {
+  const deadline = Date.now() + EDITABLE_FILE_POLL_TIMEOUT_MS;
+  let primary: EditableFileBinary | null = null;
+  let zip: EditableFileBinary | null = null;
+  let everAccessible = false;
+  let lastFetchError = "";
+  let zipGraceDeadline = 0;
+  let lastText = "";
+  let stableSince = 0;
+  while (Date.now() < deadline) {
+    throwIfAborted(config.signal);
+    let text: string;
+    try {
+      text = await getConversationText(config, conversationId, config.signal);
+    } catch (error) {
+      // 真 abort/超时须上抛;交接期的瞬时 404/inaccessible 视为"尚未就绪",继续轮询。
+      throwIfAborted(config.signal);
+      lastFetchError = error instanceof Error ? error.message : String(error);
+      await sleep(EDITABLE_FILE_POLL_INTERVAL_MS);
+      continue;
+    }
+    everAccessible = true;
+    // 逐候选试下载:只有真拿到可下载二进制才计入对应槽位。
+    for (const artifact of extractEditableArtifacts(
+      text,
+      requestMessageId,
+      kind
+    )) {
+      if (artifact.isZip ? zip : primary) continue; // 槽位已满,跳过
+      const binary = await downloadEditableBinary(
+        config,
+        conversationId,
+        artifact
+      );
+      if (!binary) continue;
+      if (artifact.isZip) {
+        zip = binary;
+      } else {
+        primary = binary;
+        zipGraceDeadline = Date.now() + EDITABLE_ZIP_GRACE_MS;
+      }
+    }
+    if (primary && zip) break;
+    if (primary && Date.now() >= zipGraceDeadline) break; // 主文件到手 + zip 宽限过 → 收工
+    // fail-fast:仍无主文件且会话内容长时间不变 → turn 很可能已结束但无产物,提前结束换号。
+    if (!primary) {
+      if (text === lastText) {
+        if (!stableSince) {
+          stableSince = Date.now();
+        } else if (Date.now() - stableSince >= EDITABLE_STALL_MS) {
+          break;
+        }
+      } else {
+        stableSince = 0;
+        lastText = text;
+      }
+    }
+    await sleep(EDITABLE_FILE_POLL_INTERVAL_MS);
+  }
+  // 整段窗口都没成功抓过会话:抛真实原因(如持续 403/被墙),而非笼统的"未取到主文件"。
+  if (!everAccessible && lastFetchError) {
+    throw new Error(lastFetchError);
+  }
+  return { primary, zip };
+}
+
+/**
+ * 对话式生成可编辑文件(PPT/PSD)。上层入口(editable-file-operations 调用,传已选 plus/pro 账号 config)。
+ * 流程:getChatRequirements → 上传输入图 → prepareFileConversation → startFileConversation → 读 SSE 取
+ *   conversationId → 轮询取主文件+zip → 下载二进制。主文件缺失则抛错;zip 可缺。
+ */
+export async function generateFileWithChatGptWeb(params: {
+  config: ApiConfig;
+  kind: EditableFileKind;
+  prompt: string;
+  images: ImageInputFile[];
+}): Promise<EditableFileResult> {
+  const abortController = new AbortController();
+  const timeout = setTimeout(
+    () => abortController.abort(),
+    EDITABLE_FILE_POLL_TIMEOUT_MS + 60_000
+  );
+  try {
+    const config = { ...params.config, signal: abortController.signal };
+    const requestMessageId = randomUUID();
+    const prompt = editableFilePrompt(params.kind, params.prompt);
+    const references = await Promise.all(
+      params.images.map((image, index) =>
+        uploadAttachment(config, image, index + 1, { image: true })
+      )
+    );
+    const requirements = await getChatRequirements(config);
+    const conduitToken = await prepareFileConversation(
+      config,
+      prompt,
+      requirements,
+      requestMessageId
+    );
+    const response = await startFileConversation(
+      config,
+      prompt,
+      requirements,
+      conduitToken,
+      requestMessageId,
+      references
+    );
+    const text = await readSseText(response);
+    throwIfAborted(abortController.signal);
+    const streamError = extractWebStreamError(text);
+    const conversationId = extractConversationId(text);
+    if (streamError) throw new Error(streamError);
+    if (!conversationId) {
+      throw new Error("ChatGPT Web file: 无 conversation_id");
+    }
+    const { primary: primaryBinary, zip: zipBinary } =
+      await pollAndDownloadEditableFile(
+        config,
+        conversationId,
+        requestMessageId,
+        params.kind
+      );
+    if (!primaryBinary) {
+      throw new Error(`ChatGPT Web file: 未在超时内取到 ${params.kind} 主文件`);
+    }
+    return { conversationId, primary: primaryBinary, zip: zipBinary };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export const __testing__ = {
   extractWebErrorPayloadMessage,
   extractWebStreamError,
@@ -2064,4 +2990,7 @@ export const __testing__ = {
   extractImageIds,
   extractSelectionMessageId,
   scopedConversationTextAfterMessage,
+  extractEditableArtifacts,
+  editableFilePrompt,
+  extractAssistantAnswer,
 };

@@ -1,9 +1,16 @@
 /**
  * 掩码顺序外绘（masked sequential outpainting）——无缝分块修复。
  *
- * 职责：把图在目标分辨率上切成 1K 重叠块，按光栅顺序逐块用 gpt-image-2 的「带 mask 编辑」重绘：
- *   每块把与已完成邻块的重叠区用 mask 锁死（保留、不重绘），只重绘新区域，让模型「接着」邻块画。
- *   已提交像素永不改动、新区域由模型生成得与之连续 → 从构造上无缝（消除独立重绘+羽化的重影）。
+ * 职责：把图在目标分辨率上切成 1K 重叠块，按光栅顺序逐块用 gpt-image-2 的「带 mask 编辑」自主外绘：
+ *   每块把「待补区」填黑、只留与已完成邻块的重叠边（mask 锁死重叠边=保留、黑区=重绘），
+ *   逼模型「从边缘往黑区外绘」而非在原内容上 img2img（后者对 mask 遵守弱、易整块重调色留缝）。
+ *   不喂原图/参考——改「自主拓展」：按块的行列位置给模型位置提示词（「根据四周已渲染内容补出
+ *   [左上/右上/…某方位]，只画这个方位、别把整幅画塞进来」）。曾试过喂整幅原图→模型把整张塞进一块、
+ *   喂同框裁剪→模型照抄模糊原图，故彻底不喂参考、只靠已提交边缘 + 位置提示词自主续画。
+ *   首块无邻居，整块按原图内容重绘作种子（见 operations.ts buildOutpaintPrompt 按位置生成提示词）。
+ *   拼接用「平移最小误差对齐」+ 硬拼（不再线性羽化）：在小窗口内滑动 edited，找与已提交重叠区
+ *   差最小的偏移(=最佳叠加位置)，再把新区写为对齐后的 edited、重叠区保持 committed 不动、
+ *   滑动露出的空位填黑。硬拼不叠加两版 → 不重影（线性羽化会把两版轻微错位内容糊成重影）。
  *
  * 为什么能无缝且尺寸稳：① 1K tile —— codex/api 后端尊重 1K 尺寸（2K/4K 才不尊重，见 #19175）；
  *   ② mask —— web 后端不发 mask，故必须路由到 codex/responses/标准 API（它们把 mask 发给上游，
@@ -17,8 +24,15 @@ import sharp from "sharp";
 
 // 单块边长：web/codex 都稳的 1K。
 export const OUTPAINT_TILE = 1024;
-// 相邻块步进占块边比例（1-步进=重叠比例）。步进 0.75 → 重叠 25%，给模型足够已提交上下文续画。
+// 步进占块边比例：仅用于 axisCount 决定块数；2×2 时实际重叠由 OUTPAINT_MAX_WORKING 决定。
 export const OUTPAINT_STEP_FRACTION = 0.75;
+// 重叠占块边比例：越大 → 喂给模型的已提交上下文越多、对齐搜索余量越大，接缝越不可见
+// （代价：工作分辨率略低、外层超分多担一点）。0.4 → 2×2 时相邻块重叠约 410px。
+export const OUTPAINT_OVERLAP_FRACTION = 0.4;
+// 平移对齐搜索半径(px)与采样步长：在 [-R,R]² 内滑动 edited,按重叠区 MSE 找最佳偏移。
+// R 越大越能纠正模型的位移漂移,但更慢、露出的黑边更宽;stride 采样降算力。
+export const OUTPAINT_ALIGN_RANGE = 24;
+export const OUTPAINT_ALIGN_STRIDE = 3;
 
 export type OutpaintTile = {
   x: number;
@@ -135,40 +149,44 @@ async function buildTileMask(
     .toBuffer();
 }
 
-// 工作分辨率较长边上限：2×块 − 重叠(约 1792)。使 planOutpaintTiles 自然给 ≤2×2=4 块（控成本）；
+// 工作分辨率较长边上限 = 2×块 − 1 个重叠(约 1638)。使 planOutpaintTiles 自然给 ≤2×2=4 块（控成本）；
 // 更大目标由外层超分补足（照原设计「封顶 2×2 + 超分补足」，而非在全图上切成十几块）。
+// 2×2 时相邻块重叠 = 2×块 − 上限 ≈ 410px（=OUTPAINT_OVERLAP_FRACTION×块边），给羽化足够过渡带。
 export const OUTPAINT_MAX_WORKING =
-  2 * OUTPAINT_TILE - Math.round(OUTPAINT_TILE * (1 - OUTPAINT_STEP_FRACTION));
+  2 * OUTPAINT_TILE - Math.round(OUTPAINT_TILE * OUTPAINT_OVERLAP_FRACTION);
 
 /**
  * 编排：掩码顺序外绘修复。
  *
  * @param image 输入图片字节
  * @param targetLongEdge 期望最终较长边
- * @param editWithMask 注入回调：输入(块画布 PNG, mask PNG, 宽, 高, 块序号)，返回带 mask 编辑后的块。
- *   实际由 operations.ts 用 gpt-image-2（带 mask、路由 codex/api）实现，并逐块计费。
+ * @param editTile 注入回调：输入(块画布 PNG, mask PNG, 块位置 pos, 宽, 高, 块序号)，返回带 mask 编辑后的块。
+ *   不再喂原图/参考——改「自主拓展」：由 operations.ts 按 pos 生成位置提示词(「根据四周已渲染内容补出
+ *   [某方位]」)，让模型只从已提交的边缘往黑区补该方位。images=[块]+mask、路由 codex/api、逐块计费。
  * @param superResolve 注入的 4 倍超分（Real-ESRGAN general）；把外绘后的工作图放大补足到目标。
- * @returns { buffer, tilesRepaired }：无缝拼接(+超分)后的图，与实际重绘块数（供计费加和）
+ * @returns { buffer, tilesRepaired, tilesTotal }：拼接(+超分)后的图、成功块数、总块数（供计费/诊断）
  *
- * 流程：封顶工作分辨率(≤~1792 长边 → 2×2=4 块) → 逐块掩码外绘 → 超分补足到目标较长边。
- * 关键：只把 mask 透明(新生成)区写回画布，已提交(保留)像素原样不动 → 无缝。单块失败则整块保留原像素。
+ * 流程：封顶工作分辨率(≤~1638 长边 → 2×2=4 块) → 逐块留黑 + 位置提示词自主外绘
+ *   → 平移最小误差对齐硬拼 → 超分补足到目标较长边。
+ * 关键：非首块待补区填黑逼外绘、位置提示词框定方位、拼接用平移对齐+硬拼(不羽化,消重影)、露出空位填黑。
  */
 export async function maskedOutpaintImage(
   image: Buffer,
   targetLongEdge: number,
-  editWithMask: (
+  editTile: (
     tileCanvas: Buffer,
     mask: Buffer,
+    pos: { col: number; row: number; cols: number; rows: number },
     w: number,
     h: number,
     index: number
   ) => Promise<Buffer>,
   superResolve: (img: Buffer) => Promise<Buffer>
-): Promise<{ buffer: Buffer; tilesRepaired: number }> {
+): Promise<{ buffer: Buffer; tilesRepaired: number; tilesTotal: number }> {
   const meta = await sharp(image).metadata();
   const sW = meta.width ?? 0;
   const sH = meta.height ?? 0;
-  if (!sW || !sH) return { buffer: image, tilesRepaired: 0 };
+  if (!sW || !sH) return { buffer: image, tilesRepaired: 0, tilesTotal: 0 };
 
   // 工作分辨率：较长边封顶 OUTPAINT_MAX_WORKING(→2×2=4 块)，保持源比例。
   const workLong = Math.min(targetLongEdge, OUTPAINT_MAX_WORKING);
@@ -188,6 +206,12 @@ export async function maskedOutpaintImage(
     const { left, top } = tileKeepInset(plan, t);
     // 从画布抠出本块当前状态（保留区=已提交邻块像素，其余=原图像素）。
     const tileRaw = extractTile(canvas, workW, t);
+    // 留黑真外绘：非首块把「待补区」(x>=left && y>=top)填黑，只留与已提交邻块的重叠边，
+    // 逼模型从边缘往黑区补（内容靠位置提示词「从四周补该方位」自主生成，不再喂参考）。
+    // 首块(left=top=0，无邻居)不填黑，整块基于原图内容重绘作种子。
+    if (left > 0 || top > 0) {
+      blackenNewRegion(tileRaw, t, left, top);
+    }
     const tilePng = await sharp(tileRaw, {
       raw: { width: t.w, height: t.h, channels: 3 },
     })
@@ -195,14 +219,21 @@ export async function maskedOutpaintImage(
       .toBuffer();
     try {
       const mask = await buildTileMask(t.w, t.h, left, top);
-      const edited = await editWithMask(tilePng, mask, t.w, t.h, i);
+      const edited = await editTile(
+        tilePng,
+        mask,
+        { col: t.col, row: t.row, cols: plan.cols, rows: plan.rows },
+        t.w,
+        t.h,
+        i
+      );
       const editedRaw = await sharp(edited)
         .resize(t.w, t.h, { fit: "fill" })
         .removeAlpha()
         .raw()
         .toBuffer();
-      // 只写回「新生成区」(localX>=left && localY>=top)，保留区(已提交像素)原样不动 → 无缝。
-      writeNewRegion(canvas, workW, t, editedRaw, left, top);
+      // 平移最小误差对齐后硬拼:重叠区保持 committed、新区写对齐后的 edited、露出空位填黑 → 不重影。
+      slideAlignEditedTile(canvas, workW, t, editedRaw, left, top);
       tilesRepaired++;
     } catch {
       // 该块失败：画布保留原像素，继续下一块。
@@ -225,7 +256,7 @@ export async function maskedOutpaintImage(
       superResolve
     );
   }
-  return { buffer, tilesRepaired };
+  return { buffer, tilesRepaired, tilesTotal: plan.tiles.length };
 }
 
 /**
@@ -254,8 +285,90 @@ function extractTile(canvas: Buffer, canvasW: number, t: OutpaintTile): Buffer {
   return out;
 }
 
-/** 把编辑后块的「新生成区」(排除左/上保留缩进)写回画布。 */
-function writeNewRegion(
+/**
+ * 原地把块的「待补区」(x>=left && y>=top) 填黑（RGB=0），只保留与已提交邻块的重叠边
+ * (x<left || y<top)。配合 mask（黑区=重绘）→ 真外绘：模型只能从非黑的边缘往黑区补，
+ * 而不是在原内容上做 img2img（后者对 mask 遵守弱、易整块重调色、留缝）。
+ */
+export function blackenNewRegion(
+  tileRaw: Buffer,
+  t: OutpaintTile,
+  left: number,
+  top: number
+): void {
+  for (let y = top; y < t.h; y++) {
+    const base = (y * t.w + left) * 3;
+    tileRaw.fill(0, base, base + (t.w - left) * 3);
+  }
+}
+
+/** RGB 平方差(a[ai..]与 b[bi..]三通道)。 */
+function diff3(a: Buffer, ai: number, b: Buffer, bi: number): number {
+  const dr = (a[ai] ?? 0) - (b[bi] ?? 0);
+  const dg = (a[ai + 1] ?? 0) - (b[bi + 1] ?? 0);
+  const db = (a[ai + 2] ?? 0) - (b[bi + 2] ?? 0);
+  return dr * dr + db * db + dg * dg;
+}
+
+/**
+ * 在 [-R,R]² 平移窗口内滑动 edited，求与已提交重叠区(committed)差最小的偏移(dx,dy)。
+ * 只在重叠区(x<left || y<top，committed 有值处)按采样后的 MSE 评分；无重叠(首块)返回 (0,0)。
+ * dx,dy 语义：新区某点 (x,y) 取 edited(x-dx, y-dy)——即把 edited 整体平移 (dx,dy) 去贴合 committed。
+ *
+ * 注：export 供单测。
+ */
+export function findBestOffset(
+  canvas: Buffer,
+  canvasW: number,
+  t: OutpaintTile,
+  edited: Buffer,
+  left: number,
+  top: number,
+  range: number = OUTPAINT_ALIGN_RANGE,
+  stride: number = OUTPAINT_ALIGN_STRIDE
+): { dx: number; dy: number } {
+  const { w, h } = t;
+  let bestDx = 0;
+  let bestDy = 0;
+  let bestErr = Number.POSITIVE_INFINITY;
+  for (let dy = -range; dy <= range; dy++) {
+    for (let dx = -range; dx <= range; dx++) {
+      let sum = 0;
+      let n = 0;
+      for (let y = 0; y < h; y += stride) {
+        for (let x = 0; x < w; x += stride) {
+          if (x >= left && y >= top) continue; // 只比重叠区
+          const sx = x - dx;
+          const sy = y - dy;
+          if (sx < 0 || sx >= w || sy < 0 || sy >= h) continue;
+          const c = ((t.y + y) * canvasW + (t.x + x)) * 3;
+          const e = (sy * w + sx) * 3;
+          sum += diff3(canvas, c, edited, e);
+          n++;
+        }
+      }
+      if (n > 0) {
+        const mse = sum / n;
+        if (mse < bestErr) {
+          bestErr = mse;
+          bestDx = dx;
+          bestDy = dy;
+        }
+      }
+    }
+  }
+  return { dx: bestDx, dy: bestDy };
+}
+
+/**
+ * 平移最小误差对齐 + 硬拼(替代线性羽化,消重影)：
+ *   先 findBestOffset 求最佳偏移(dx,dy)，再把「新区」(x>=left && y>=top)写为对齐后的 edited
+ *   (读 edited(x-dx, y-dy))；重叠区(committed)原样不动；滑动后取不到 edited 的位置填黑(RGB=0)。
+ *   硬拼不混合两版 → 不重影；对齐使新区内容在边界处贴合 committed。首块(无重叠)偏移(0,0)、整块写回。
+ *
+ * 注：export 供单测；生产仅 maskedOutpaintImage 内部调用（原地改写 canvas）。
+ */
+export function slideAlignEditedTile(
   canvas: Buffer,
   canvasW: number,
   t: OutpaintTile,
@@ -263,10 +376,23 @@ function writeNewRegion(
   left: number,
   top: number
 ): void {
-  for (let y = top; y < t.h; y++) {
-    const rowSrc = (y * t.w + left) * 3;
-    const rowDst = ((t.y + y) * canvasW + (t.x + left)) * 3;
-    const bytes = (t.w - left) * 3;
-    edited.copy(canvas, rowDst, rowSrc, rowSrc + bytes);
+  const { w, h } = t;
+  const { dx, dy } = findBestOffset(canvas, canvasW, t, edited, left, top);
+  for (let y = top; y < h; y++) {
+    for (let x = left; x < w; x++) {
+      const d = ((t.y + y) * canvasW + (t.x + x)) * 3;
+      const sx = x - dx;
+      const sy = y - dy;
+      if (sx < 0 || sx >= w || sy < 0 || sy >= h) {
+        canvas[d] = 0; // 滑动露出的空位→黑
+        canvas[d + 1] = 0;
+        canvas[d + 2] = 0;
+      } else {
+        const e = (sy * w + sx) * 3;
+        canvas[d] = edited[e] ?? 0;
+        canvas[d + 1] = edited[e + 1] ?? 0;
+        canvas[d + 2] = edited[e + 2] ?? 0;
+      }
+    }
   }
 }

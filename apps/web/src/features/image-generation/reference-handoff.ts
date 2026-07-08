@@ -1,4 +1,9 @@
-export type ReferenceHandoffMode = "image" | "chat" | "agent" | "waterfall";
+export type ReferenceHandoffMode =
+  | "image"
+  | "chat"
+  | "agent"
+  | "waterfall"
+  | "chat-web";
 
 export type PendingReferenceHandoff = {
   id: string;
@@ -21,7 +26,8 @@ function isValidMode(value: unknown): value is ReferenceHandoffMode {
     value === "image" ||
     value === "chat" ||
     value === "agent" ||
-    value === "waterfall"
+    value === "waterfall" ||
+    value === "chat-web"
   );
 }
 

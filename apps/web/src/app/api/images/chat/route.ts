@@ -668,14 +668,19 @@ export const POST = withApiLogging(async (request: NextRequest) => {
     "mixWebFirst",
     "mix_web_first"
   );
+  // 网页对话轮次(chat(web) tab):走 web 池的 text-capable 路径(回文字、按需出图)。
+  const webChat = getOptionalBoolean(formData, "webChat", "web_chat") === true;
+  // webChat 必须落在 web 后端,故不因 @图 引用被强制导向 responses 后端;web 路径自行处理
+  // 参考图(最近生成图/上传图作为会话上下文)。非 webChat 时 @图 引用仍需 responses 原生解析。
   const requiresResponsesBackend =
-    getOptionalBoolean(
+    !webChat &&
+    (getOptionalBoolean(
       formData,
       "requiresResponsesBackend",
       "requires_responses_backend"
     ) === true ||
-    hasPromptImageReference(prompt) ||
-    hasPromptImageReference(apiPrompt);
+      hasPromptImageReference(prompt) ||
+      hasPromptImageReference(apiPrompt));
   let conversationMode: "chat" | "agent" | "waterfall" | undefined;
   try {
     conversationMode = getConversationMode(formData);
@@ -984,8 +989,14 @@ export const POST = withApiLogging(async (request: NextRequest) => {
           agentForceMaxRounds,
           layeredGeneration,
           waterfallMode,
-          mixWebFirst: requiresResponsesBackend ? false : mixWebFirst,
+          // webChat 强制 web-first(true),否则沿用请求值;requiresResponsesBackend 时禁用。
+          mixWebFirst: requiresResponsesBackend
+            ? false
+            : webChat
+              ? true
+              : mixWebFirst,
           requiresResponsesBackend,
+          webChat,
         },
         onPartialImage
       );

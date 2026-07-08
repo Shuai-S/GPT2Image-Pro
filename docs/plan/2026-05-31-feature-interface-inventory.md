@@ -28,6 +28,11 @@
 | createImageStreamResponse（SSE 封装） | service-fn | streaming.ts:106 | 无（传输层） | 否 | ReadableStream + keep-alive | 不适用 |
 | getUserGenerations / Count / Recent / ById / Stats（历史/画廊/统计） | service-fn | queries.ts | 查询级无强制鉴权（按 userId 过滤；Stats 全局应仅管理员） | 语义只读 | 多数先调 expireStalePendingGenerations（DB写） | 查询幂等；过期处理幂等收敛 |
 | getUserApiConfig / getEffectiveConfig（后端路由解析） | service-fn | service.ts:3346/3391 | getUserApiConfig 内部校验 customApi.configure + SSRF | 语义只读 | select + SSRF DNS + 池选号 | 解析幂等（池选号非确定） |
+| runEditableFileForUser（可编辑文件 PPT/PSD 编排） | service-fn | editable-file-operations.ts:89 | protected（userId 必填；只调付费级 web 账号 accountPlanFilter=paid） | 否 | 租号/外呼 ChatGPT Web 代码解释器/存储/扣费 | 扣费层幂等(sourceRef=editable-file:{taskId})；整体非幂等 |
+| file.generatePpt / file.generatePsd（UOL 操作） | uol-operation | uol/operations/editable-file.ts | protected + 能力位 export.ppt/export.psd | 否 | 同 runEditableFileForUser | 必需幂等键 clientRequestId(per-user) |
+| postExternalPptGenerations / PsdGenerations（POST /v1/ppts、/v1/psds） | api-route | editable-file-generations.ts | api-key + 能力位 export.ppt/export.psd；PSD 强校验非空图；支持 async + callback_url | 否 | 同 runEditableFileForUser + keep-alive/异步内存任务 | 非幂等；底层 sourceRef 幂等 |
+| getExternalEditableFileTask（GET /v1/editable-file-tasks/{task_id}） | api-route | editable-file-tasks.ts | api-key + 归属校验（userId+apiKeyId）；仅 editable_file_task | 是 | 无（读进程内内存任务） | 幂等只读；30min TTL、无 DB 持久回退 |
+| POST /api/editable-file/generate（站内 chat(web) 用） | api-route | editable-file/generate/route.ts | session + 能力位 export.ppt/export.psd | 否 | 同上，session 鉴权 | 同上（服务端自生 taskId） |
 
 接口化要点：`runImageGenerationForUser` 已是干净 domain service（5 个 v1 handler + 3 个 web 路由汇入），包一层即可统一暴露。HTTP/multipart 解析、文件读取、history 裁剪、临时图上传等"请求适配层"写死在 route.ts，需抽成与传输无关的输入构建器（File/Buffer 入参）。callbacks 是干净抽象，SSE 封装可替换。队列为进程内单例（多实例不准）。计费/审核/退款事务密集但已内聚在 operations.ts，必须整体保留在内核。web-select 强耦合 ChatGPT Web，宜作 chat 域子操作单列。
 

@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -61,18 +62,33 @@ type server struct {
 	upstreamProxy string
 	maxBodyBytes  int64
 
+	// cf_clearance 后备(仿 chatgpt2api):命中 Cloudflare 挑战时经 FlareSolverr(走同一 WARP 出口)
+	// 解挑战、拿 cf_clearance+UA,注入会话 cookie jar 并覆盖 UA/Sec-Ch-Ua 后重试。默认启用、惰性。
+	clearanceEnabled bool
+	flareSolverrURL  string
+	clearanceProxy   string
+	clearanceTimeout int
+	clearanceRefresh int
+
 	mu      sync.Mutex
 	clients map[string]*sessionClient
 }
 
 func main() {
+	upstreamProxy := strings.TrimSpace(os.Getenv("CHATGPT_WEB_UPSTREAM_PROXY_URL"))
 	s := &server{
 		secret:        strings.TrimSpace(os.Getenv("CHATGPT_WEB_PROXY_SECRET")),
 		profileName:   envString("CHATGPT_WEB_PROXY_PROFILE", defaultProfile),
 		timeoutSecs:   envInt("CHATGPT_WEB_PROXY_TIMEOUT_SECONDS", defaultTimeoutSecs),
-		upstreamProxy: strings.TrimSpace(os.Getenv("CHATGPT_WEB_UPSTREAM_PROXY_URL")),
+		upstreamProxy: upstreamProxy,
 		maxBodyBytes:  int64(envInt("CHATGPT_WEB_PROXY_MAX_BODY_MB", defaultMaxBodyMB)) * 1024 * 1024,
-		clients:       map[string]*sessionClient{},
+		// 默认启用(设 CHATGPT_WEB_CLEARANCE_MODE=off 关);出口默认复用 WARP 上游、FlareSolverr 同网络。
+		clearanceEnabled: !strings.EqualFold(envString("CHATGPT_WEB_CLEARANCE_MODE", "flaresolverr"), "off"),
+		flareSolverrURL:  envString("FLARESOLVERR_URL", "http://flaresolverr:8191"),
+		clearanceProxy:   envString("CHATGPT_WEB_CLEARANCE_PROXY_URL", upstreamProxy),
+		clearanceTimeout: envInt("CHATGPT_WEB_CLEARANCE_TIMEOUT_SECONDS", 60),
+		clearanceRefresh: envInt("CHATGPT_WEB_CLEARANCE_REFRESH_SECONDS", 3600),
+		clients:          map[string]*sessionClient{},
 	}
 
 	go s.cleanupLoop()
@@ -159,38 +175,216 @@ func (s *server) forward(payload requestPayload) (*responsePayload, error) {
 		return nil, err
 	}
 
-	var reader io.Reader
-	if len(body) > 0 {
-		reader = bytes.NewReader(body)
-	}
-
-	req, err := fhttp.NewRequest(method, targetURL, reader)
-	if err != nil {
-		return nil, err
-	}
-	applyHeaders(req, payload.Headers, payload.HeaderOrder)
-
 	client, err := s.getClient(payload.SessionKey)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := client.Do(req)
+	// 单次构建+发送:每次按当前 payload.Headers/Order 重建请求(重试时头已被 clearance 覆盖）。
+	send := func() (int, fhttp.Header, []byte, error) {
+		var reader io.Reader
+		if len(body) > 0 {
+			reader = bytes.NewReader(body)
+		}
+		req, reqErr := fhttp.NewRequest(method, targetURL, reader)
+		if reqErr != nil {
+			return 0, nil, nil, reqErr
+		}
+		applyHeaders(req, payload.Headers, payload.HeaderOrder)
+		resp, doErr := client.Do(req)
+		if doErr != nil {
+			return 0, nil, nil, doErr
+		}
+		defer resp.Body.Close()
+		rb, readErr := readLimited(resp.Body, s.maxBodyBytes)
+		if readErr != nil {
+			return 0, nil, nil, readErr
+		}
+		return resp.StatusCode, resp.Header, rb, nil
+	}
+
+	// cf_clearance 后备仅对 chatgpt.com 请求生效。已有活跃 clearance 则先注入(cookie 进 jar + 覆盖 UA)。
+	isChatGPT := strings.HasPrefix(targetURL, chatGPTOrigin)
+	if s.clearanceEnabled && isChatGPT {
+		if ua, cookies := getActiveClearance(); ua != "" {
+			applyClearanceHeaders(payload.Headers, ua)
+			s.injectCookies(client, cookies)
+		}
+	}
+
+	status, respHeaders, respBody, err := send()
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
 
-	responseBody, err := readLimited(resp.Body, s.maxBodyBytes)
-	if err != nil {
-		return nil, err
+	// 命中 Cloudflare 挑战 → 经 FlareSolverr(同一 WARP 出口)刷 clearance → 注入 → 重试一次。
+	if s.clearanceEnabled && isChatGPT && isCloudflareChallenge(status, respBody) {
+		if ua, cookies := s.refreshClearance(); ua != "" {
+			applyClearanceHeaders(payload.Headers, ua)
+			s.injectCookies(client, cookies)
+			status, respHeaders, respBody, err = send()
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	return &responsePayload{
-		Status:     resp.StatusCode,
-		Headers:    mapHeaders(resp.Header),
-		BodyBase64: base64.StdEncoding.EncodeToString(responseBody),
+		Status:     status,
+		Headers:    mapHeaders(respHeaders),
+		BodyBase64: base64.StdEncoding.EncodeToString(respBody),
 	}, nil
+}
+
+// ===== cf_clearance 后备(仿 basketikun/chatgpt2api:WARP + FlareSolverr 刷 cf_clearance) =====
+//
+// cf_clearance 绑「出口 IP + UA」不绑 ChatGPT 账号,而全池共用同一 WARP 上游 → 一份 clearance 全池通用,
+// 故用全局单例缓存 + 单飞(clrRefreshMu 串行 + 双检):一次挑战波只真解一次,不至于把 FlareSolverr
+// 的无头 Chrome 打爆。默认启用但完全惰性:无挑战时不触发、不注入,对现网零影响。
+
+var (
+	clrMu        sync.Mutex
+	clrUA        string
+	clrCookies   []*fhttp.Cookie
+	clrExpires   time.Time
+	clrRefreshMu sync.Mutex
+)
+
+var chromeMajorRe = regexp.MustCompile(`Chrome/(\d+)`)
+
+var clearanceCookieNames = map[string]bool{
+	"cf_clearance": true, "__cf_bm": true, "_cfuvid": true, "__cflb": true,
+}
+
+type flareResp struct {
+	Status   string `json:"status"`
+	Message  string `json:"message"`
+	Solution struct {
+		UserAgent string `json:"userAgent"`
+		Cookies   []struct {
+			Name  string `json:"name"`
+			Value string `json:"value"`
+		} `json:"cookies"`
+	} `json:"solution"`
+}
+
+// getActiveClearance 返回未过期的全局 clearance(UA + cookies);无/过期返回空。
+func getActiveClearance() (string, []*fhttp.Cookie) {
+	clrMu.Lock()
+	defer clrMu.Unlock()
+	if clrUA == "" || time.Now().After(clrExpires) {
+		return "", nil
+	}
+	return clrUA, clrCookies
+}
+
+// isCloudflareChallenge 判定响应是否 Cloudflare 挑战/拦截页(仅 403/503 + 特征串)。
+func isCloudflareChallenge(status int, body []byte) bool {
+	if status != 403 && status != 503 {
+		return false
+	}
+	b := strings.ToLower(string(body))
+	return strings.Contains(b, "just a moment") ||
+		strings.Contains(b, "attention required") ||
+		strings.Contains(b, "cf-chl-") ||
+		strings.Contains(b, "__cf_chl_") ||
+		strings.Contains(b, "cf-browser-verification") ||
+		strings.Contains(b, "challenge-platform")
+}
+
+func platformFromUA(ua string) string {
+	switch {
+	case strings.Contains(ua, "Windows"):
+		return "Windows"
+	case strings.Contains(ua, "Macintosh"), strings.Contains(ua, "Mac OS X"):
+		return "macOS"
+	case strings.Contains(ua, "Android"):
+		return "Android"
+	case strings.Contains(ua, "Linux"):
+		return "Linux"
+	default:
+		return "Windows"
+	}
+}
+
+// applyClearanceHeaders 覆盖 UA 与 Sec-Ch-Ua*(cf_clearance 绑 UA,必须一致,否则 UA↔Sec-Ch-Ua 打架)。
+func applyClearanceHeaders(headers map[string]string, ua string) {
+	if headers == nil {
+		return
+	}
+	headers["User-Agent"] = ua
+	if m := chromeMajorRe.FindStringSubmatch(ua); m != nil {
+		v := m[1]
+		headers["Sec-Ch-Ua"] = fmt.Sprintf(`"Chromium";v="%s", "Google Chrome";v="%s", "Not?A_Brand";v="24"`, v, v)
+		headers["Sec-Ch-Ua-Full-Version-List"] = fmt.Sprintf(`"Chromium";v="%s.0.0.0", "Google Chrome";v="%s.0.0.0", "Not?A_Brand";v="24.0.0.0"`, v, v)
+		headers["Sec-Ch-Ua-Full-Version"] = fmt.Sprintf(`"%s.0.0.0"`, v)
+	}
+	headers["Sec-Ch-Ua-Platform"] = fmt.Sprintf(`"%s"`, platformFromUA(ua))
+}
+
+// injectCookies 把 cf_clearance 等写入会话 tls-client 的 cookie jar(chatgpt.com 域),自动随后续请求发送。
+func (s *server) injectCookies(client tls_client.HttpClient, cookies []*fhttp.Cookie) {
+	if len(cookies) == 0 {
+		return
+	}
+	u, err := url.Parse(chatGPTOrigin)
+	if err != nil {
+		return
+	}
+	client.SetCookies(u, cookies)
+}
+
+// refreshClearance 经 FlareSolverr(走 WARP 出口)解 chatgpt.com 挑战,拿 cf_clearance+UA,写全局缓存。
+// clrRefreshMu 串行 + 双检 → 一次挑战波只真解一次;失败返回空并记日志(不阻断,退回原响应)。
+func (s *server) refreshClearance() (string, []*fhttp.Cookie) {
+	clrRefreshMu.Lock()
+	defer clrRefreshMu.Unlock()
+	if ua, cookies := getActiveClearance(); ua != "" {
+		return ua, cookies
+	}
+	reqBody := map[string]any{
+		"cmd":        "request.get",
+		"url":        chatGPTOrigin + "/",
+		"maxTimeout": s.clearanceTimeout * 1000,
+	}
+	if s.clearanceProxy != "" {
+		reqBody["proxy"] = map[string]string{"url": s.clearanceProxy}
+	}
+	buf, _ := json.Marshal(reqBody)
+	httpClient := &stdhttp.Client{Timeout: time.Duration(s.clearanceTimeout+20) * time.Second}
+	resp, err := httpClient.Post(strings.TrimRight(s.flareSolverrURL, "/")+"/v1", "application/json", bytes.NewReader(buf))
+	if err != nil {
+		log.Printf("cf_clearance refresh error: %v", err)
+		return "", nil
+	}
+	defer resp.Body.Close()
+	var fr flareResp
+	if decErr := json.NewDecoder(resp.Body).Decode(&fr); decErr != nil || fr.Status != "ok" {
+		log.Printf("cf_clearance refresh failed status=%s msg=%s", fr.Status, fr.Message)
+		return "", nil
+	}
+	var cookies []*fhttp.Cookie
+	hasClearance := false
+	for _, c := range fr.Solution.Cookies {
+		if clearanceCookieNames[c.Name] && c.Value != "" {
+			cookies = append(cookies, &fhttp.Cookie{Name: c.Name, Value: c.Value, Domain: "chatgpt.com", Path: "/"})
+			if c.Name == "cf_clearance" {
+				hasClearance = true
+			}
+		}
+	}
+	ua := strings.TrimSpace(fr.Solution.UserAgent)
+	if !hasClearance || ua == "" {
+		log.Printf("cf_clearance refresh: missing cf_clearance/ua")
+		return "", nil
+	}
+	clrMu.Lock()
+	clrUA = ua
+	clrCookies = cookies
+	clrExpires = time.Now().Add(time.Duration(s.clearanceRefresh) * time.Second)
+	clrMu.Unlock()
+	log.Printf("cf_clearance refreshed ua=%s cookies=%d", ua, len(cookies))
+	return ua, cookies
 }
 
 func buildTargetURL(urlPath string) (string, error) {

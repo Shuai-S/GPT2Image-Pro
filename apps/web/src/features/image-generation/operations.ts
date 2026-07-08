@@ -163,6 +163,7 @@ type RunImageGenerationInput =
       forceWebBackend?: boolean;
       forceFirefly?: boolean;
       requiresResponsesBackend?: boolean;
+      webChat?: boolean;
     } & ChatImageParams);
 
 const DEFAULT_FORCE_WEB_MIN_PIXELS = 660_000;
@@ -850,8 +851,43 @@ function resolveOutputGenerationId(
 }
 
 // 生成式修复默认提示词：整图重绘、只修不改（请求级 repair_prompt 可覆盖）。
+// 也用于掩码外绘的首块（种子块，无邻居、整块基于原图内容重绘）。
 const DEFAULT_BLOCK_REPAIR_PROMPT =
   "Redraw this entire image to restore and sharpen it: fix blurry or garbled text and fine details, keep the exact same composition, layout, colors and content unchanged. Do not add, remove, move or reinterpret anything.";
+
+/** 块在网格中的方位词（如 top-left / top-right / bottom / center）。 */
+function describeOutpaintRegion(
+  col: number,
+  row: number,
+  cols: number,
+  rows: number
+): string {
+  const h =
+    cols <= 1 ? "" : col === 0 ? "left" : col === cols - 1 ? "right" : "center";
+  const v =
+    rows <= 1 ? "" : row === 0 ? "top" : row === rows - 1 ? "bottom" : "middle";
+  return [v, h].filter(Boolean).join("-") || "whole";
+}
+
+/**
+ * 掩码外绘「自主拓展」位置提示词：不喂原图/参考,只按块方位告诉模型「根据四周已渲染内容补出该方位」。
+ * 首块(无左/上邻)=修复种子;其余=从已提交的非黑边缘往黑区补,且强调只画本方位、勿把整幅画塞进一块。
+ */
+function buildOutpaintPrompt(pos: {
+  col: number;
+  row: number;
+  cols: number;
+  rows: number;
+}): string {
+  const region = describeOutpaintRegion(pos.col, pos.row, pos.cols, pos.rows);
+  const hasLeft = pos.col > 0;
+  const hasTop = pos.row > 0;
+  if (!hasLeft && !hasTop) {
+    return `This picture is the ${region} region of a larger complete image. Restore and sharpen only this ${region} region — fix blurry or garbled text and fine details, keep the same content. Render only what belongs in this ${region} region at its true scale; do NOT zoom out or squeeze the whole scene into this frame.`;
+  }
+  const edges = hasLeft && hasTop ? "left and top" : hasLeft ? "left" : "top";
+  return `This tile is the ${region} region of a larger image. The non-black pixels along the ${edges} edge(s) are the already-rendered neighbouring region. Using those surroundings as context, extend the scene into the black area — fill in only the ${region} direction so it continues seamlessly from the ${edges} edge(s), matching style, lighting, colours and perspective. Render only this ${region} region at its true scale; do NOT zoom out or draw the whole scene, and change nothing outside the black area.`;
+}
 
 async function storeGeneratedImageOutput(params: {
   output: {
@@ -913,36 +949,66 @@ async function storeGeneratedImageOutput(params: {
         false
       );
       if (target && maskOutpaint) {
-        // 掩码顺序外绘:在目标尺寸上切 1K 重叠块,逐块带 mask 编辑(锁住已提交重叠区、只重绘新区)。
-        // 路由 codex(会发 mask、尊重 1K);只写新区、保留区不动 → 无缝。
+        // 掩码顺序外绘（留黑真外绘）:在目标尺寸上切 1K 重叠块,逐块把待补区留黑、
+        // 只留已提交邻块的边,让模型「从边缘往黑区外绘」,并严格照整幅原图参考还原该处内容。
+        // 路由 codex(会发 mask、尊重 1K)。首块(i=0,无邻居)按原图内容整块重绘作种子。
+        // 诊断日志(临时):开始/每块失败/完成都打点,便于确认外绘是否跑、每块成败(见 tileref 复盘)。
+        logWarn("掩码外绘开始", {
+          generationId: params.generationId,
+          target: `${target.width}x${target.height}`,
+        });
         try {
           const res = await maskedOutpaintImage(
             imageBuffer,
             Math.max(target.width, target.height),
-            async (tileCanvas, mask, w, h, i) => {
-              const edited = await editImage(params.config, {
-                prompt: repairPrompt,
-                images: [
-                  { data: tileCanvas, name: "tile.png", type: "image/png" },
-                ],
-                mask: { data: mask, name: "mask.png", type: "image/png" },
-                size: `${w}x${h}`,
-                model: DEFAULT_IMAGE_MODEL,
-                outputFormat: "png",
-                requiresResponsesBackend: true,
-              });
-              if (edited.error || !edited.imageBase64) {
-                throw new Error(edited.error || "掩码外绘:该块无输出");
+            async (tileCanvas, mask, pos, w, h, i) => {
+              try {
+                const edited = await editImage(params.config, {
+                  // 自主拓展:按块方位给位置提示词(「根据四周已渲染内容补出该方位」),
+                  // 不喂原图/参考。首块=修复种子;其余=从已提交边缘往黑区补该方位。
+                  prompt: buildOutpaintPrompt(pos),
+                  // images[0]=待补块（已提交邻块边缘 + 黑色待补区，mask 标黑区为重绘）；不再给参考图。
+                  images: [
+                    { data: tileCanvas, name: "tile.png", type: "image/png" },
+                  ],
+                  mask: { data: mask, name: "mask.png", type: "image/png" },
+                  size: `${w}x${h}`,
+                  model: DEFAULT_IMAGE_MODEL,
+                  outputFormat: "png",
+                  requiresResponsesBackend: true,
+                });
+                if (edited.error || !edited.imageBase64) {
+                  throw new Error(edited.error || "该块无输出");
+                }
+                await params.chargeTile?.(`${w}x${h}`, i);
+                return Buffer.from(edited.imageBase64, "base64");
+              } catch (tileError) {
+                // 每块失败原本被 maskedOutpaintImage 静默吞掉;这里显式打点便于诊断。
+                logWarn("掩码外绘该块失败", {
+                  generationId: params.generationId,
+                  tile: i,
+                  size: `${w}x${h}`,
+                  error:
+                    tileError instanceof Error
+                      ? tileError.message
+                      : String(tileError),
+                });
+                throw tileError;
               }
-              await params.chargeTile?.(`${w}x${h}`, i);
-              return Buffer.from(edited.imageBase64, "base64");
             },
             superResolve
           );
           imageBuffer = res.buffer;
           blockRepaired = res.tilesRepaired > 0;
+          logWarn("掩码外绘完成", {
+            generationId: params.generationId,
+            tilesRepaired: res.tilesRepaired,
+            tilesTotal: res.tilesTotal,
+            blockRepaired,
+          });
         } catch (error) {
           logWarn("掩码外绘修复失败，回退原图", {
+            generationId: params.generationId,
             error: error instanceof Error ? error.message : String(error),
           });
         }
@@ -2250,6 +2316,7 @@ async function runQueuedImageGenerationForUser({
               rawResponsesBody: input.rawResponsesBody,
               mixWebFirst,
               requiresResponsesBackend: input.requiresResponsesBackend,
+              webChat: input.webChat,
             },
             generationCallbacks
           )

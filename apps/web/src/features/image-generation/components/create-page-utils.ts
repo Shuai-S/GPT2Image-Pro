@@ -42,7 +42,7 @@ const PROMPT_IMAGE_REFERENCE_PATTERN = /@(?:第)?\d+轮图\d+|@图\d+/;
 export function createInitialChatStreamState(params: {
   messageId?: string;
   cardId?: string;
-  mode?: "chat" | "agent";
+  mode?: ConversationMode;
   agentMode: boolean;
   generationId?: string;
   prompt?: string;
@@ -78,6 +78,7 @@ export function readStoredCreateActiveMode(): ActiveMode {
     return value === "text" ||
       value === "image" ||
       value === "chat" ||
+      value === "chat-web" ||
       value === "agent" ||
       value === "waterfall" ||
       value === "video"
@@ -100,6 +101,7 @@ export function parseCreateModeParam(value: string | null): ActiveMode | null {
   return value === "text" ||
     value === "image" ||
     value === "chat" ||
+    value === "chat-web" ||
     value === "agent" ||
     value === "waterfall" ||
     value === "video"
@@ -585,6 +587,19 @@ export function sanitizeChatMessages(value: unknown): ChatMessage[] {
                 value.outputRole === "final"
                   ? value.outputRole
                   : undefined,
+              files: Array.isArray(value.files)
+                ? value.files
+                    .filter(
+                      (file): file is { label: string; url: string } =>
+                        Boolean(
+                          file &&
+                            typeof file === "object" &&
+                            typeof file.label === "string" &&
+                            typeof file.url === "string"
+                        )
+                    )
+                    .slice(0, 4)
+                : undefined,
             },
           ];
         })
@@ -595,7 +610,9 @@ export function sanitizeChatMessages(value: unknown): ChatMessage[] {
         role: item.role,
         text: messageText,
         mode:
-          item.mode === "agent" || item.mode === "chat" ? item.mode : undefined,
+          item.mode === "agent" || item.mode === "chat" || item.mode === "web"
+            ? item.mode
+            : undefined,
         attachments: item.attachments,
         variants,
         activeVariant: item.activeVariant,
@@ -664,13 +681,14 @@ export function createChatConversation(
  * 从消息列表推断对话模式。
  *
  * @param messages 消息列表。
- * @returns 含 Agent 消息时为 agent,否则为 chat。
+ * @returns 含 web 消息时为 web,含 Agent 消息时为 agent,否则为 chat。
  * @sideEffects 无。
  * @failureMode 空消息按 chat 处理。
  */
 export function inferChatConversationMode(
   messages: ChatMessage[]
 ): ConversationMode {
+  if (messages.some((message) => message.mode === "web")) return "web";
   return messages.some((message) => message.mode === "agent")
     ? "agent"
     : "chat";
@@ -701,7 +719,7 @@ export function chatActiveConversationStorageKey(mode: ConversationMode) {
 export function activeModeToConversationMode(
   mode: ActiveMode
 ): ConversationMode {
-  return mode === "agent" ? "agent" : "chat";
+  return mode === "agent" ? "agent" : mode === "chat-web" ? "web" : "chat";
 }
 
 /**
@@ -722,7 +740,13 @@ export function sanitizeChatConversations(value: unknown): ChatConversation[] {
     const now = new Date().toISOString();
     const baseId = typeof item.id === "string" ? item.id : createLocalId();
     const storedMode: ConversationMode | null =
-      item.mode === "agent" ? "agent" : item.mode === "chat" ? "chat" : null;
+      item.mode === "agent"
+        ? "agent"
+        : item.mode === "web"
+          ? "web"
+          : item.mode === "chat"
+            ? "chat"
+            : null;
     const storedTitle =
       typeof item.title === "string" && item.title.trim()
         ? item.title
@@ -735,11 +759,17 @@ export function sanitizeChatConversations(value: unknown): ChatConversation[] {
     }> = [
       {
         mode: "chat",
-        messages: messages.filter((message) => message.mode !== "agent"),
+        messages: messages.filter(
+          (message) => message.mode !== "agent" && message.mode !== "web"
+        ),
       },
       {
         mode: "agent",
         messages: messages.filter((message) => message.mode === "agent"),
+      },
+      {
+        mode: "web",
+        messages: messages.filter((message) => message.mode === "web"),
       },
     ];
     const byMode = modeBuckets.filter((entry) => entry.messages.length > 0);
@@ -856,7 +886,9 @@ export function persistChatConversationSnapshot(params: {
       persistedMessages.filter((message) =>
         params.mode === "agent"
           ? message.mode === "agent"
-          : message.mode !== "agent"
+          : params.mode === "web"
+            ? message.mode === "web"
+            : message.mode !== "agent" && message.mode !== "web"
       ),
       params.titleFallback
     );

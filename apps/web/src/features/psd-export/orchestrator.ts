@@ -9,7 +9,7 @@
  *
  * 使用方:apps/web 的 server action / UOL image.exportPsd。CPU 主要花在逐元素 ISNet 抠图 + ag-psd 写盘。
  */
-import { buildSignedStorageImageUrl } from "@repo/shared/storage";
+import { buildSignedStorageImageUrl } from "@repo/shared/storage/signed-url";
 import { getStorageProvider } from "@repo/shared/storage/providers";
 import { nanoid } from "nanoid";
 import { getGenerationById } from "@/features/image-generation/queries";

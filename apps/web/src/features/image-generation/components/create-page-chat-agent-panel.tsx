@@ -70,6 +70,8 @@ export function CreatePageChatAgentHeader({
           )}
           {activeMode === "agent"
             ? copy("Agent mode", "Agent 模式")
+            : activeMode === "chat-web"
+              ? copy("Chat Web", "网页对话")
             : copy("Chat mode", "对话模式")}
         </div>
         <p className="mt-1 max-w-xl text-xs text-muted-foreground">
@@ -78,6 +80,11 @@ export function CreatePageChatAgentHeader({
                 "Codex-style agent mode can search, read attached files, use tools, and show the run process.",
                 "Codex 风格 Agent 模式可联网、读取附件、调用工具，并展示运行过程。"
               )
+            : activeMode === "chat-web"
+              ? copy(
+                  "Web conversation uses ChatGPT web accounts for text replies and image creation with native context.",
+                  "网页对话使用 ChatGPT Web 账号进行文字回复和图片创作，并保留原生上下文。"
+                )
             : copy(
                 "Original chat mode keeps conversation context for text/image creation without forcing agent tools.",
                 "原对话模式保留上下文进行文字/图片创作，不强制注入 Agent 工具。"

@@ -1,4 +1,4 @@
-import { buildStorageThumbnailUrl } from "@repo/shared/storage/signed-url";
+import { buildStorageThumbnailUrl } from "@repo/shared/storage/image-url";
 import {
   DEFAULT_IMAGE_SIZE,
   IMAGE_DIMENSION_STEP,

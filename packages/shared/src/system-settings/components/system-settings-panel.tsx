@@ -144,6 +144,16 @@ const FEATURE_ROWS = [
     description: "一次请求生成多张",
   },
   {
+    key: "export.ppt",
+    label: "导出 PPT",
+    description: "对话式生成可编辑 PPT 文件（gpt-5-5-thinking + 代码解释器）",
+  },
+  {
+    key: "export.psd",
+    label: "导出 PSD",
+    description: "对话式生成可编辑 PSD 文件（gpt-5-5-thinking + 代码解释器）",
+  },
+  {
     key: "promptOptimization.control",
     label: "关闭提示词优化",
     description: "允许用户控制 prompt_optimization",

@@ -229,6 +229,9 @@ export interface ChatImageParams {
   chatCompletionsUpstreamMode?: "responses" | "chat_completions";
   mixWebFirst?: boolean;
   requiresResponsesBackend?: boolean;
+  /** 网页对话轮次(chat(web) tab):强制 web 后端且走 text-capable 路径——回文字、按需出图,
+   *  而非图像路径的强制出图。仅 chat 模式 + web 池后端下生效(见 service.generateChatImage)。 */
+  webChat?: boolean;
   /** 透明背景抠图回退(显式开关,issue #27):仅 true 且 background=transparent 时,后端不支持
    * 透明则"不透明重生成 + 服务端 ISNet 抠图"得到透明结果;不开则透明直接透传、不支持即返回真实错误。 */
   transparentMatte?: boolean;

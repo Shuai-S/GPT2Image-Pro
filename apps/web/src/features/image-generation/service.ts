@@ -54,6 +54,7 @@ import {
   ORIGINAL_PROMPT_RESPONSES_IMAGE_INSTRUCTIONS,
 } from "./agent-tools";
 import {
+  chatWithChatGptWeb,
   editImageWithChatGptWeb,
   generateImageWithChatGptWeb,
 } from "./chatgpt-web";
@@ -5055,6 +5056,10 @@ export async function generateChatImage(
       background: params.background,
       files: params.files,
     };
+    // 网页对话轮次:走 text-capable 路径(回文字、按需出图),不强制出图。
+    if (params.webChat) {
+      return chatWithChatGptWeb(config, webParams, params.images || []);
+    }
     if (params.images?.length) {
       return editImageWithChatGptWeb(config, {
         ...webParams,

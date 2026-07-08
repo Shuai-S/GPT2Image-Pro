@@ -575,6 +575,7 @@
       "createTextToImage": "Text to Image",
       "createImageToImage": "Image to Image",
       "createChat": "Chat",
+      "createChatWeb": "Chat Web",
       "createAgent": "Agent",
       "createWaterfall": "Waterfall",
       "createVideo": "Video",

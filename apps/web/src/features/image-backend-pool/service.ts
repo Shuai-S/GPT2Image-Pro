@@ -81,6 +81,7 @@ import type {
   ChatCompletionsUpstreamMode,
   ContentSafetyOverride,
   ImageBackendAccountBackend,
+  ImageBackendAccountPlanFilter,
   ImageBackendApiProtocol,
   ImageBackendApiInterfaceMode,
   ImageBackendGroupBackendType,
@@ -144,10 +145,15 @@ type ResolveBackendOptions = {
   stickySessionKey?: string;
   accountBackendPreference?: ImageBackendAccountBackend;
   accountBackendPreferenceMode?: ImageBackendPreferenceMode;
+  // 账号套餐过滤默认关闭。PPT/PSD 可编辑文件需要代码解释器能力,调用方可收敛到付费 Web 账号。
+  accountPlanFilter?: ImageBackendAccountPlanFilter;
   // 强制走 adobe（firefly）后端：与 requestedModel 为 firefly-* 前缀等价地把候选收敛到
   // 仅 adobe。供 force_firefly 请求标志使用（用户可对任意模型强制改用 adobe 出图）。
   forceFirefly?: boolean;
   allowAnyResponsesBackend?: boolean;
+  // 可编辑文件必须命中真正的付费 Web 账号。开启后跨全部可用分组选 Web 账号,
+  // 不受 API key 绑定分组或用户默认分组限制。
+  spanGroupsForWeb?: boolean;
 };
 
 type StickyBindingMember = {
@@ -2572,7 +2578,8 @@ async function selectPoolMember(
   requestedModel?: string,
   forceFirefly = false,
   staleRetryCount = 0,
-  capacityWaitCount = 0
+  capacityWaitCount = 0,
+  accountPlanFilter: ImageBackendAccountPlanFilter = "any"
 ): Promise<PoolMember | null> {
   // fireflyOnly：候选收敛到仅 adobe 的两种触发——显式 force_firefly 标志，或请求模型
   // 本身就是 firefly-* 前缀。两者语义一致：本次只调度 adobe 后端，不混入 api/account。
@@ -2618,10 +2625,20 @@ async function selectPoolMember(
   const accountBackendFilter = requiredAccountBackend
     ? eq(imageBackendAccount.implementationMode, requiredAccountBackend)
     : sql`true`;
+  // 付费账号过滤仅在调用方显式要求时启用。判断兼容手工回填的 metadata.planType
+  // 与刷新账号信息写入的 metadata.webAccount.type。
+  const accountPlanWhere =
+    accountPlanFilter === "paid"
+      ? sql`(
+          LOWER(COALESCE(${imageBackendAccount.metadata}->>'planType', '')) IN ('plus', 'pro', 'team', 'enterprise')
+          OR LOWER(COALESCE(${imageBackendAccount.metadata}->'webAccount'->>'type', '')) IN ('plus', 'pro', 'team', 'enterprise')
+        )`
+      : sql`true`;
   const now = new Date();
   const accountBaseWhere = and(
     eq(imageBackendAccount.isEnabled, true),
     accountBackendFilter,
+    accountPlanWhere,
     // always_active 的账号无视 cooldown 与临时故障始终入选,但 status="error"（终态/鉴权类:
     // 死号/封号/凭据失效）仍踢出轮换——避免死号常驻形成黑洞。其余维持原"健康且未冷却"判定。
     or(
@@ -3252,7 +3269,8 @@ async function selectPoolMember(
       requestedModel,
       forceFirefly,
       staleRetryCount + 1,
-      capacityWaitCount
+      capacityWaitCount,
+      accountPlanFilter
     );
   }
 
@@ -3281,7 +3299,8 @@ async function selectPoolMember(
       requestedModel,
       forceFirefly,
       staleRetryCount,
-      capacityWaitCount + 1
+      capacityWaitCount + 1,
+      accountPlanFilter
     );
   }
 
@@ -3490,6 +3509,9 @@ async function resolvePoolMember(
   options: ResolveBackendOptions & { excluded?: Set<string> }
 ) {
   const userPlan = await getUserPlan(options.userId);
+  if (options.spanGroupsForWeb) {
+    return await resolveAnyWebPoolMember(options, userPlan.plan);
+  }
   const requestedGroup = await resolveRequestedGroup(options, userPlan.plan);
   const canFallbackToAnyResponses =
     options.allowAnyResponsesBackend && options.requestKind === "responses";
@@ -3550,7 +3572,10 @@ async function resolvePoolMember(
     options.accountBackendPreference,
     options.accountBackendPreferenceMode,
     options.requestedModel,
-    options.forceFirefly
+    options.forceFirefly,
+    0,
+    0,
+    options.accountPlanFilter ?? "any"
   );
   if (!member) {
     const fallback = await resolveAnyResponsesMember();
@@ -3603,9 +3628,65 @@ async function resolveAnyResponsesPoolMember(
       "responses",
       options.accountBackendPreferenceMode,
       options.requestedModel,
-      options.forceFirefly
+      options.forceFirefly,
+      0,
+      0,
+      options.accountPlanFilter ?? "any"
     );
     if (member) return { group, member };
+  }
+
+  return null;
+}
+
+/**
+ * 跨组选一个真正的 ChatGPT Web 账号。用于 PPT/PSD 可编辑文件生成:
+ * 付费 Web 账号可能集中在专用分组,外部 API key 绑定的分组未必可见。
+ */
+async function resolveAnyWebPoolMember(
+  options: ResolveBackendOptions & { excluded?: Set<string> },
+  plan: SubscriptionPlan
+) {
+  const groups = await db
+    .select()
+    .from(imageBackendGroup)
+    .where(eq(imageBackendGroup.isEnabled, true))
+    .orderBy(asc(imageBackendGroup.priority), asc(imageBackendGroup.createdAt));
+
+  for (const group of groups) {
+    if (!canUseBackendGroupForPlan(group.metadata, plan)) continue;
+    if (!groupBackendAllowsRequest(group.metadata, options.requestKind)) {
+      continue;
+    }
+    const member = await selectPoolMember(
+      group.id,
+      group.metadata,
+      group.contentSafetyEnabled,
+      await listSelectableGroupContexts(group, plan, options.requestKind),
+      options.requestKind,
+      options.excluded,
+      options.preferredMemberId,
+      options.preferredMemberType,
+      null,
+      null,
+      "web",
+      options.accountBackendPreferenceMode,
+      options.requestedModel,
+      options.forceFirefly,
+      0,
+      0,
+      options.accountPlanFilter ?? "any"
+    );
+    if (!member) continue;
+    if (member.type === "account" && member.implementationMode === "web") {
+      return { group, member };
+    }
+    await releaseImageBackendInflightLease({
+      memberType: member.type,
+      memberId: member.id,
+      leaseId: member.leaseId,
+      leasePersisted: member.leasePersisted,
+    }).catch(() => {});
   }
 
   return null;

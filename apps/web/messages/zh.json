@@ -575,6 +575,7 @@
       "createTextToImage": "文生图",
       "createImageToImage": "图生图",
       "createChat": "对话",
+      "createChatWeb": "网页对话",
       "createAgent": "Agent",
       "createWaterfall": "瀑布流",
       "createVideo": "视频",

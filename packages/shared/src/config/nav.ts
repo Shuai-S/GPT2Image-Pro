@@ -201,6 +201,13 @@ export const dashboardNav: NavGroup[] = [
             icon: MessageSquare,
           },
           {
+            title: "Chat Web",
+            labelKey: "nav.createChatWeb",
+            href: "/dashboard/create?mode=chat-web",
+            featureFlag: "chat",
+            icon: MessageSquare,
+          },
+          {
             title: "Agent",
             labelKey: "nav.createAgent",
             href: "/dashboard/create?mode=agent",

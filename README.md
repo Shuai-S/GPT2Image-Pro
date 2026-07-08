@@ -102,8 +102,9 @@ Chat 模式和 Agent 模式分开：Chat 更适合用户主动对话和上下文
 
 ## 能力概览
 
-- **页面创作**：文生图、图生图、逐行批量、瀑布流、Chat 生图、Agent 自动迭代、图库、历史记录、参考图引用和发送到其他创作入口。
+- **页面创作**：文生图、图生图、逐行批量、瀑布流、chat(codex) 上下文生图、chat(web) 对话式生成（图像 / 可编辑 PPT / 分层 PSD）、Agent 自动迭代、图库、历史记录、参考图引用和发送到其他创作入口。
 - **OpenAI 兼容 API**：`/v1/chat/completions`、`/v1/images/generations`、`/v1/images/edits`、`/v1/images/{task_id}`、`/v1/responses`、`/v1/agents/images`、`/v1/models`、`/v1/credits`。
+- **可编辑文件生成 API**：`/v1/ppts`、`/v1/psds`——对话式驱动 ChatGPT 代码解释器产出可编辑 `.pptx` / 分层 `.psd`（含素材 zip），仅调付费级 Web 账号，按任务固定价扣费；支持同步 keep-alive 与 `async:true`（`GET /v1/editable-file-tasks/{task_id}` 轮询 + `callback_url` 回调）。
 - **异步图片任务**：图片生成和编辑接口支持同步返回，也支持 `async`、`callback_url` 和任务查询。
 - **账号池与调度**：Web 账号、Codex/Responses 账号、外接 API、Adobe Firefly 后端、mixed 分组、优先级、权重、并发、排队、冷却、错误标记、分组倍率和 Sub2API 同步任务。
 - **Adobe Firefly 后端**：图像（gpt-image-2/1.5、nano-banana 系列）和视频（sora2/veo31/kling 等 7 族）直连出图，挂入分组按优先级兜底，支持 `force_firefly` 强制路由、站内请求兼容转换、按模型族倍率计费和独立视频统计。
@@ -376,7 +377,7 @@ pnpm db:studio
 - **Codex 登录接口**：补充 Codex/Responses 账号登录、凭据刷新和导入接口，降低手工维护账号池的成本。
 - **Agent 分支能力**：补充类似 playground 的多轮分支/回退/重选路径，用于保留不同图片迭代方向，并处理历史图引用重映射。
 - **Agent 批量图片工具**：评估 `generate_image_batch` 类工具接入，同时解决粘性会话、计费、任务卡展示和多图引用的一致性。
-- **PSD 生成接口**：预留 PSD 生成/导出接口适配，方便后续对接分层设计图、海报编辑和素材交付场景。
+- **可编辑文件任务级幂等**：`/v1/ppts`、`/v1/psds` 已支持同步与 `async` 任务态；后续补 `client_task_id` 任务级幂等（当前为计费层幂等）与可选的 DB 持久任务表（当前异步任务为进程内内存态、30 分钟 TTL、多实例不共享）。
 
 ## 特别致谢
 

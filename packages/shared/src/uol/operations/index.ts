@@ -10,6 +10,8 @@
 
 // 图像生成域
 import "./image-generation";
+// 可编辑文件(PPT/PSD)生成(归 image-generation 域)
+import "./editable-file";
 // 积分域
 import "./credits";
 // 模型定价域

@@ -240,13 +240,21 @@ export function CreatePageClient({
   const showImageModelControls = !isWebOnlyBackend;
   const showAgentProcessHint = !isWebOnlyBackend;
   const isConversationMode = (mode: ActiveMode) =>
-    mode === "chat" || mode === "agent" || mode === "waterfall";
+    mode === "chat" ||
+    mode === "chat-web" ||
+    mode === "agent" ||
+    mode === "waterfall";
   const getConversationMode = (mode: ActiveMode): ConversationMode =>
     activeModeToConversationMode(mode);
   const isMessageInConversationMode = (
     message: ChatMessage,
     mode: ConversationMode
-  ) => (mode === "agent" ? message.mode === "agent" : message.mode !== "agent");
+  ) =>
+    mode === "agent"
+      ? message.mode === "agent"
+      : mode === "web"
+        ? message.mode === "web"
+        : message.mode !== "agent" && message.mode !== "web";
   const batchCostSuffix = (count: number) =>
     count > 1
       ? copy(` for ${count}`, `，共 ${count} 张`)
@@ -1274,7 +1282,7 @@ export function CreatePageClient({
         ? effectiveAgentAllowed
         : mode === "waterfall"
           ? waterfallAllowed
-          : mode === "chat"
+          : mode === "chat" || mode === "chat-web"
             ? chatAllowed
             : mode === "image"
               ? imageAllowed
@@ -1292,9 +1300,17 @@ export function CreatePageClient({
   );
   const fallbackMode = useMemo<ActiveMode | null>(
     () =>
-      (["text", "image", "chat", "agent", "waterfall", "video"] as const).find(
-        (mode) => isActiveModeAllowed(mode)
-      ) ?? null,
+      (
+        [
+          "text",
+          "image",
+          "chat",
+          "chat-web",
+          "agent",
+          "waterfall",
+          "video",
+        ] as const
+      ).find((mode) => isActiveModeAllowed(mode)) ?? null,
     [isActiveModeAllowed]
   );
   // 高级参数是否可配置只跟当前选中分组的后端类型绑定：
@@ -2254,6 +2270,7 @@ export function CreatePageClient({
     streamMessageId,
     streamCardId,
     agentMode,
+    webChat = false,
     signal,
   }: {
     prompt: string;
@@ -2264,18 +2281,21 @@ export function CreatePageClient({
     streamMessageId?: string;
     streamCardId?: string;
     agentMode: boolean;
+    webChat?: boolean;
     signal?: AbortSignal;
   }) => {
     if (generationId) {
       activeChatRequestGenerationIdsRef.current.add(generationId);
     }
     const executeChatRequest = async (): Promise<ImageApiResult> => {
-      const streamMode: "chat" | "agent" | undefined =
+      const streamMode: ConversationMode | undefined =
         streamCardId && !streamMessageId
           ? undefined
           : agentMode
             ? "agent"
-            : "chat";
+            : webChat
+              ? "web"
+              : "chat";
       const updateChatStream = (next: Omit<ChatStreamState, "mode">) => {
         if (streamCardId && !streamMessageId) return;
         setChatStream({ ...next, mode: streamMode });
@@ -2325,6 +2345,10 @@ export function CreatePageClient({
         agentMode ? "agent" : streamCardId ? "waterfall" : "chat"
       );
       formData.append("agent_mode", String(agentMode));
+      if (webChat) {
+        formData.append("web_chat", "true");
+        formData.append("mix_web_first", "true");
+      }
       if (agentMode) {
         formData.append("agent_max_rounds", String(agentMaxRounds));
         formData.append("agent_force_max_rounds", String(agentForceRounds));
@@ -2334,9 +2358,9 @@ export function CreatePageClient({
       if (promptOptimizationAllowed) {
         formData.append("prompt_optimization", String(promptOptimization));
       }
-      if (agentMode || hasPromptImageReference(prompt)) {
+      if (agentMode || (!webChat && hasPromptImageReference(prompt))) {
         formData.append("requires_responses_backend", "true");
-      } else if (chatMixWebFirstActive) {
+      } else if (!webChat && chatMixWebFirstActive) {
         formData.append("mix_web_first", "true");
       }
       const imageAttachments = attachments.filter(
@@ -3421,7 +3445,11 @@ export function CreatePageClient({
   const findPrecedingUserMessage = (assistantIndex: number) => {
     const assistantMessage = chatMessages[assistantIndex];
     const targetMode =
-      assistantMessage?.mode === "agent" ? "agent" : ("chat" as const);
+      assistantMessage?.mode === "agent"
+        ? "agent"
+        : assistantMessage?.mode === "web"
+          ? "web"
+          : ("chat" as const);
     for (let index = assistantIndex - 1; index >= 0; index--) {
       const message = chatMessages[index];
       if (
@@ -3517,7 +3545,11 @@ export function CreatePageClient({
       (message) => message.id === userMessage.id
     );
     const conversationMode =
-      assistantMessage.mode === "agent" ? "agent" : ("chat" as const);
+      assistantMessage.mode === "agent"
+        ? "agent"
+        : assistantMessage.mode === "web"
+          ? "web"
+          : ("chat" as const);
     const historyMessages = (
       userIndex >= 0
         ? chatMessages.slice(0, userIndex)
@@ -3579,6 +3611,7 @@ export function CreatePageClient({
         streamMessageId: assistantId,
         agentMode:
           assistantMessage.mode === "agent" || userMessage.mode === "agent",
+        webChat: assistantMessage.mode === "web" || userMessage.mode === "web",
       });
       const newVariants = addSuccessfulChatResults(
         data,
@@ -4197,7 +4230,7 @@ export function CreatePageClient({
 
   const handleChatPaste = (event: React.ClipboardEvent) => {
     if (
-      !["chat", "agent", "waterfall"].includes(activeMode) ||
+      !["chat", "chat-web", "agent", "waterfall"].includes(activeMode) ||
       isChatGenerating
     ) {
       return;
@@ -4352,6 +4385,7 @@ export function CreatePageClient({
         generationId,
         streamMessageId: assistantMessageId,
         agentMode: conversationMode === "agent",
+        webChat: conversationMode === "web",
       });
       const variants = addSuccessfulChatResults(
         data,
@@ -5482,8 +5516,11 @@ export function CreatePageClient({
         <div
           role="tabpanel"
           hidden={
-            (activeMode !== "chat" && activeMode !== "agent") ||
+            (activeMode !== "chat" &&
+              activeMode !== "chat-web" &&
+              activeMode !== "agent") ||
             (activeMode === "chat" && !chatAllowed) ||
+            (activeMode === "chat-web" && !chatAllowed) ||
             (activeMode === "agent" && !effectiveAgentAllowed)
           }
           className="mt-0"

@@ -78,7 +78,7 @@ import {
   getUserRoleLabel,
 } from "../../../auth/roles";
 import { formatCredits } from "../../../credits/format";
-import { buildStorageThumbnailUrl } from "../../../storage/signed-url";
+import { buildStorageThumbnailUrl } from "../../../storage/image-url";
 import { formatDateInTimeZone } from "../../../time-zone";
 import {
   adminAdjustCreditsAction,

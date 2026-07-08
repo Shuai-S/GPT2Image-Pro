@@ -167,6 +167,7 @@ export type ChatVariant = {
   creditsConsumed?: number;
   createdAt?: string;
   outputRole?: "final" | "agent_draft" | "choice";
+  files?: Array<{ label: string; url: string }>;
 };
 
 export type ChatRecentGeneration = RecentGeneration & {
@@ -222,7 +223,7 @@ export type ResponsesPreviousResponseState = {
   createdAt?: string;
 };
 
-export type ConversationMode = "chat" | "agent";
+export type ConversationMode = "chat" | "agent" | "web";
 
 export type ChatMessage = {
   id: string;
@@ -267,7 +268,7 @@ export type ForceWebPixelRange = {
 export type ChatStreamState = {
   messageId?: string;
   cardId?: string;
-  mode?: "chat" | "agent";
+  mode?: ConversationMode;
   text: string;
   thinking: string;
   agent: string;
@@ -314,6 +315,7 @@ export type ActiveMode =
   | "text"
   | "image"
   | "chat"
+  | "chat-web"
   | "agent"
   | "waterfall"
   | "video";

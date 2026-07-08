@@ -186,6 +186,8 @@ export type SettingKey =
   | "IMAGE_BASE_CREDITS_1024"
   | "IMAGE_BASE_CREDITS_4K"
   | "MODEL_PRICING_RULES"
+  | "EDITABLE_FILE_PPT_CREDITS"
+  | "EDITABLE_FILE_PSD_CREDITS"
   | "IMAGE_MODEL_MULTIPLIERS"
   | "IMAGE_SUPER_RESOLUTION_ENABLED"
   | "IMAGE_RESTORATION_ENABLED"
@@ -267,6 +269,8 @@ const PLAN_CAPABILITY_MATRIX_EXAMPLE = {
     "imageGeneration.agent": "pro",
     "imageGeneration.waterfall": "pro",
     "imageGeneration.batch": "free",
+    "export.ppt": "free",
+    "export.psd": "free",
     "promptOptimization.control": "pro",
     "models.gpt55": "ultra",
     "customApi.configure": "starter",
@@ -1624,6 +1628,28 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     category: "credits",
     valueType: "json",
     exampleValue: DEFAULT_MODEL_PRICING_RULES,
+  },
+  {
+    key: "EDITABLE_FILE_PPT_CREDITS",
+    label: "生成 PPT 扣积分",
+    description:
+      "对话式生成可编辑 PPT 文件每次扣的积分（按任务固定价）。默认 25；设 0 则不扣费。",
+    category: "credits",
+    valueType: "number",
+    min: 0,
+    max: 100_000,
+    defaultValue: 25,
+  },
+  {
+    key: "EDITABLE_FILE_PSD_CREDITS",
+    label: "生成 PSD 扣积分",
+    description:
+      "对话式生成可编辑 PSD 文件每次扣的积分（按任务固定价）。默认 25；设 0 则不扣费。",
+    category: "credits",
+    valueType: "number",
+    min: 0,
+    max: 100_000,
+    defaultValue: 25,
   },
   {
     key: "IMAGE_MODEL_MULTIPLIERS",

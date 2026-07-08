@@ -1,13 +1,17 @@
 /**
- * 掩码顺序外绘纯函数单测（DB-free）：切块规划与每块保留区计算。
- * 不测 maskedOutpaintImage 编排（依赖 sharp/后端回调），只测几何/保留区正确性与边界。
+ * 掩码顺序外绘纯函数单测（DB-free）：切块规划、保留区、待补区填黑与平移最小误差对齐。
+ * 不测 maskedOutpaintImage 编排（依赖 sharp/后端回调），只测几何/保留区/填黑/对齐正确性与边界。
  */
 import { describe, expect, it } from "vitest";
 
 import {
+  blackenNewRegion,
+  findBestOffset,
   OUTPAINT_MAX_WORKING,
   OUTPAINT_TILE,
+  type OutpaintTile,
   planOutpaintTiles,
+  slideAlignEditedTile,
   tileKeepInset,
 } from "./masked-outpaint";
 
@@ -73,5 +77,111 @@ describe("tileKeepInset", () => {
     const inset = tileKeepInset(p, t);
     expect(inset.left).toBeGreaterThan(0);
     expect(inset.top).toBeGreaterThan(0);
+  });
+});
+
+describe("findBestOffset", () => {
+  const tile = (over: Partial<OutpaintTile>): OutpaintTile => ({
+    x: 0,
+    y: 0,
+    w: 1,
+    h: 1,
+    col: 0,
+    row: 0,
+    ...over,
+  });
+
+  it("恢复已知平移：edited 相对 committed 右移 1px → dx=1", () => {
+    // 4px 一行,left=2(重叠 x0,1)。committed 重叠=[10,20];edited=[20,99,..],
+    // 在 dx=1 时 edited(x-1) 使重叠 x1→edited(0)=20 精确对上 committed(20) → 误差 0。
+    const canvas = Buffer.from([10, 10, 10, 20, 20, 20, 0, 0, 0, 0, 0, 0]);
+    const edited = Buffer.from([
+      20, 20, 20, 99, 99, 99, 50, 50, 50, 50, 50, 50,
+    ]);
+    const off = findBestOffset(
+      canvas,
+      4,
+      tile({ w: 4, col: 1 }),
+      edited,
+      2,
+      0,
+      2,
+      1
+    );
+    expect(off).toEqual({ dx: 1, dy: 0 });
+  });
+
+  it("无重叠(首块)→偏移(0,0)", () => {
+    const canvas = Buffer.from([0, 0, 0]);
+    const edited = Buffer.from([9, 9, 9]);
+    expect(findBestOffset(canvas, 1, tile({ w: 1 }), edited, 0, 0)).toEqual({
+      dx: 0,
+      dy: 0,
+    });
+  });
+});
+
+describe("slideAlignEditedTile", () => {
+  const solid = (n: number, v: number) => Buffer.from(new Array(n * 3).fill(v));
+  const tile = (over: Partial<OutpaintTile>): OutpaintTile => ({
+    x: 0,
+    y: 0,
+    w: 1,
+    h: 1,
+    col: 0,
+    row: 0,
+    ...over,
+  });
+
+  it("首块(无重叠)：整块写回 edited", () => {
+    const canvas = solid(3, 0);
+    const edited = solid(3, 50);
+    slideAlignEditedTile(canvas, 3, tile({ w: 3 }), edited, 0, 0);
+    expect([canvas[0], canvas[3], canvas[6]]).toEqual([50, 50, 50]);
+  });
+
+  it("对齐偏移=0：重叠区(committed)保持不动、新区写 edited", () => {
+    // 4px 一行,left=2。重叠 committed=[10,20] 与 edited 重叠[10,20]一致 → 最佳偏移 0;
+    // 新区 x2,3 写 edited(30,40),重叠 x0,1 保持 committed(10,20)。
+    const canvas = Buffer.from([
+      10, 10, 10, 20, 20, 20, 77, 77, 77, 88, 88, 88,
+    ]);
+    const edited = Buffer.from([
+      10, 10, 10, 20, 20, 20, 30, 30, 30, 40, 40, 40,
+    ]);
+    slideAlignEditedTile(canvas, 4, tile({ w: 4, col: 1 }), edited, 2, 0);
+    expect([canvas[0], canvas[3], canvas[6], canvas[9]]).toEqual([
+      10, 20, 30, 40,
+    ]);
+  });
+});
+
+describe("blackenNewRegion", () => {
+  const solid = (n: number, v: number) => Buffer.from(new Array(n * 3).fill(v));
+  const tile = (over: Partial<OutpaintTile>): OutpaintTile => ({
+    x: 0,
+    y: 0,
+    w: 1,
+    h: 1,
+    col: 0,
+    row: 0,
+    ...over,
+  });
+
+  it("左外绘块：左列(committed)保留、右侧待补区填黑", () => {
+    // 1 行 3px，left=1：x=0 保留(50)、x≥1 填黑(0)。
+    const raw = solid(3, 50);
+    blackenNewRegion(raw, tile({ w: 3, col: 1 }), 1, 0);
+    expect([raw[0], raw[3], raw[6]]).toEqual([50, 0, 0]);
+  });
+
+  it("内部块：只填待补角(x≥left&&y≥top)、L 形重叠边保留", () => {
+    // 2×2，left=1,top=1：仅 (1,1) 填黑，(0,0)(1,0)(0,1) 保留。
+    const raw = solid(4, 50);
+    blackenNewRegion(raw, tile({ w: 2, h: 2, col: 1, row: 1 }), 1, 1);
+    expect(raw[0]).toBe(50); // (y0,x0) 保留
+    expect(raw[3]).toBe(50); // (y0,x1) 上重叠保留
+    expect(raw[6]).toBe(50); // (y1,x0) 左重叠保留
+    expect(raw[9]).toBe(0); // (y1,x1) 待补区填黑
   });
 });
