@@ -15,12 +15,15 @@ import type {
   ChangeEvent,
   ClipboardEvent,
   FormEvent,
-  MutableRefObject,
   MouseEvent,
+  MutableRefObject,
   ReactNode,
   TouchEvent,
 } from "react";
-import { formatMegabytes } from "./create-page-utils";
+import {
+  type AspectRatioSizeDialogValue,
+  InlineImageSizeControl,
+} from "./aspect-ratio-size-dialog";
 import { ConcurrencyNumberInput } from "./create-page-controls";
 import type { ImageModelOption } from "./create-page-options";
 import type {
@@ -29,10 +32,7 @@ import type {
   MentionState,
   VisualOutputMode,
 } from "./create-page-types";
-import {
-  type AspectRatioSizeDialogValue,
-  InlineImageSizeControl,
-} from "./aspect-ratio-size-dialog";
+import { formatMegabytes } from "./create-page-utils";
 import { EditSourceImagesPanel } from "./edit-source-images-panel";
 import type { EditImageFile } from "./image-edit-types";
 
@@ -239,87 +239,92 @@ export function CreatePageImagePanel({
         onPaste={onPaste}
         className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_360px] xl:gap-6"
       >
-        <div className="xl:col-start-1">{renderVisualOutput("image")}</div>
-        <EditSourceImagesPanel
-          copy={copy}
-          editImages={editImages}
-          imageInputRef={imageInputRef}
-          maskCanvasRef={maskCanvasRef}
-          imageAccept={imageAccept}
-          maxEditImages={maxEditImages}
-          maxEditRequestBytesLabel={formatMegabytes(maxEditRequestBytes)}
-          isEditing={isEditing}
-          maskEditorOpen={maskEditorOpen}
-          maskSourceDisplayIndex={maskSourceDisplayIndex}
-          maskSourcePreviewUrl={maskSourcePreviewUrl}
-          maskSourceImageSize={maskSourceImageSize}
-          maskBrushSize={maskBrushSize}
-          maskHasPoints={maskHasPoints}
-          maskFile={maskFile}
-          onAddImages={onAddImages}
-          onClearEditImages={onClearEditImages}
-          onOpenMaskEditorForImage={onOpenMaskEditorForImage}
-          onCloseMaskEditor={onCloseMaskEditor}
-          onRemoveImage={onRemoveImage}
-          onStartMaskDrawing={onStartMaskDrawing}
-          onDrawMaskLine={onDrawMaskLine}
-          onStopMaskDrawing={onStopMaskDrawing}
-          onMaskBrushSizeChange={onMaskBrushSizeChange}
-          onClearDrawnMask={onClearDrawnMask}
-          onClearSavedMask={onClearSavedMask}
-          onSaveDrawnMask={onSaveDrawnMask}
-        />
-        <div className="relative xl:col-start-1">
-          {renderReferenceMentionMenu({
-            open: Boolean(editMention?.open) && canUseEditReferenceMentions,
-            options: filteredEditReferenceOptions,
-            onSelect: onSelectEditMention,
-            emptyText: copy("Upload a source image first.", "请先上传源图片。"),
-          })}
-          <Textarea
-            ref={editPromptRef}
-            value={editPrompt}
-            onChange={onEditPromptChange}
-            placeholder={copy(
-              "Describe how to transform the uploaded image...",
-              "描述如何改造上传的图片..."
-            )}
-            rows={5}
-            disabled={isEditing}
-            className="resize-none border-input bg-background text-base"
-            onBlur={() => setTimeout(() => onEditMentionChange(null), 120)}
-            onClick={(event) => {
-              const target = event.currentTarget;
-              onEditMentionChange(
-                canUseEditReferenceMentions
-                  ? getMentionTriggerForPrompt(
-                      target.value,
-                      target.selectionStart ?? target.value.length
-                    )
-                  : null
-              );
-            }}
-            onKeyDown={(event) => {
-              if (
-                event.key === "Enter" &&
-                editMention?.open &&
-                filteredEditReferenceOptions[0]
-              ) {
-                event.preventDefault();
-                onSelectEditMention(filteredEditReferenceOptions[0]);
-                return;
-              }
-              if (event.key === "Escape" && editMention?.open) {
-                event.preventDefault();
-                onEditMentionChange(null);
-              }
-            }}
+        <div className="min-w-0 space-y-4 xl:col-start-1">
+          {renderVisualOutput("image")}
+          <EditSourceImagesPanel
+            copy={copy}
+            editImages={editImages}
+            imageInputRef={imageInputRef}
+            maskCanvasRef={maskCanvasRef}
+            imageAccept={imageAccept}
+            maxEditImages={maxEditImages}
+            maxEditRequestBytesLabel={formatMegabytes(maxEditRequestBytes)}
+            isEditing={isEditing}
+            maskEditorOpen={maskEditorOpen}
+            maskSourceDisplayIndex={maskSourceDisplayIndex}
+            maskSourcePreviewUrl={maskSourcePreviewUrl}
+            maskSourceImageSize={maskSourceImageSize}
+            maskBrushSize={maskBrushSize}
+            maskHasPoints={maskHasPoints}
+            maskFile={maskFile}
+            onAddImages={onAddImages}
+            onClearEditImages={onClearEditImages}
+            onOpenMaskEditorForImage={onOpenMaskEditorForImage}
+            onCloseMaskEditor={onCloseMaskEditor}
+            onRemoveImage={onRemoveImage}
+            onStartMaskDrawing={onStartMaskDrawing}
+            onDrawMaskLine={onDrawMaskLine}
+            onStopMaskDrawing={onStopMaskDrawing}
+            onMaskBrushSizeChange={onMaskBrushSizeChange}
+            onClearDrawnMask={onClearDrawnMask}
+            onClearSavedMask={onClearSavedMask}
+            onSaveDrawnMask={onSaveDrawnMask}
           />
+          <div className="relative">
+            {renderReferenceMentionMenu({
+              open: Boolean(editMention?.open) && canUseEditReferenceMentions,
+              options: filteredEditReferenceOptions,
+              onSelect: onSelectEditMention,
+              emptyText: copy(
+                "Upload a source image first.",
+                "请先上传源图片。"
+              ),
+            })}
+            <Textarea
+              ref={editPromptRef}
+              value={editPrompt}
+              onChange={onEditPromptChange}
+              placeholder={copy(
+                "Describe how to transform the uploaded image...",
+                "描述如何改造上传的图片..."
+              )}
+              rows={5}
+              disabled={isEditing}
+              className="resize-none border-input bg-background text-base"
+              onBlur={() => setTimeout(() => onEditMentionChange(null), 120)}
+              onClick={(event) => {
+                const target = event.currentTarget;
+                onEditMentionChange(
+                  canUseEditReferenceMentions
+                    ? getMentionTriggerForPrompt(
+                        target.value,
+                        target.selectionStart ?? target.value.length
+                      )
+                    : null
+                );
+              }}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Enter" &&
+                  editMention?.open &&
+                  filteredEditReferenceOptions[0]
+                ) {
+                  event.preventDefault();
+                  onSelectEditMention(filteredEditReferenceOptions[0]);
+                  return;
+                }
+                if (event.key === "Escape" && editMention?.open) {
+                  event.preventDefault();
+                  onEditMentionChange(null);
+                }
+              }}
+            />
+          </div>
+          <p className="text-xs leading-snug text-muted-foreground">
+            {editReferenceMentionStatusText}
+          </p>
         </div>
-        <p className="text-xs leading-snug text-muted-foreground xl:col-start-1">
-          {editReferenceMentionStatusText}
-        </p>
-        <aside className="space-y-4 rounded-lg border border-border bg-background p-4 shadow-sm xl:sticky xl:top-6 xl:col-start-2 xl:row-start-1">
+        <aside className="space-y-4 rounded-lg border border-border bg-background p-4 shadow-sm xl:sticky xl:top-6 xl:col-start-2">
           <div className="space-y-4">
             <div className="space-y-4">
               <div className="border-b border-border pb-3">
