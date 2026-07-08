@@ -6,8 +6,13 @@
  * 关键依赖：system-settings 的 IMAGE_EDIT_MAX_REFERENCE_IMAGES。
  */
 import { getRuntimeSettingNumber } from "@repo/shared/system-settings";
+import { DEFAULT_IMAGE_EDIT_MAX_REFERENCE_IMAGES } from "./edit-reference-limit-utils";
 
-export const DEFAULT_IMAGE_EDIT_MAX_REFERENCE_IMAGES = 4;
+export {
+  DEFAULT_IMAGE_EDIT_MAX_REFERENCE_IMAGES,
+  getEffectiveImageEditMaxReferenceImages,
+} from "./edit-reference-limit-utils";
+
 const IMAGE_EDIT_MAX_REFERENCE_IMAGES_SETTING =
   "IMAGE_EDIT_MAX_REFERENCE_IMAGES";
 
@@ -25,26 +30,4 @@ export async function getRuntimeImageEditMaxReferenceImages() {
     { positive: true }
   );
   return Math.max(1, Math.floor(value));
-}
-
-/**
- * 计算当前请求最终允许的图生图参考图数量。
- *
- * @param planLimit 套餐能力矩阵中的编辑参考图数量上限。
- * @param runtimeLimit 全站系统设置中的图生图参考图硬上限。
- * @returns 两者交集后的正整数上限。
- * @sideEffects 无。
- * @failureMode 任一输入异常时按 1 处理，避免服务端放大上传面。
- */
-export function getEffectiveImageEditMaxReferenceImages(
-  planLimit: number,
-  runtimeLimit: number
-) {
-  const safePlanLimit = Number.isFinite(planLimit)
-    ? Math.max(1, Math.floor(planLimit))
-    : 1;
-  const safeRuntimeLimit = Number.isFinite(runtimeLimit)
-    ? Math.max(1, Math.floor(runtimeLimit))
-    : 1;
-  return Math.min(safePlanLimit, safeRuntimeLimit);
 }

@@ -28,7 +28,7 @@ import { useCallback, useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useCurrentSession } from "@/features/auth/hooks/use-current-session";
 import { getImageBatchCountLimit } from "@/features/image-generation/batch-limits";
-import { getEffectiveImageEditMaxReferenceImages } from "@/features/image-generation/edit-reference-limits";
+import { getEffectiveImageEditMaxReferenceImages } from "@/features/image-generation/edit-reference-limit-utils";
 import {
   getImageBaseCreditPricing,
   getImageCreditCostBreakdown,

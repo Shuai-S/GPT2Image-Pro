@@ -3,15 +3,11 @@
  *
  * 职责：锁定图生图参考图最终上限取套餐与系统设置交集。
  * 使用方：Vitest 测试套件。
- * 关键依赖：edit-reference-limits.ts 纯函数。
+ * 关键依赖：edit-reference-limit-utils.ts 纯函数。
  */
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-vi.mock("@repo/shared/system-settings", () => ({
-  getRuntimeSettingNumber: vi.fn(),
-}));
-
-import { getEffectiveImageEditMaxReferenceImages } from "./edit-reference-limits";
+import { getEffectiveImageEditMaxReferenceImages } from "./edit-reference-limit-utils";
 
 describe("getEffectiveImageEditMaxReferenceImages", () => {
   it("uses the stricter runtime image edit reference limit", () => {
