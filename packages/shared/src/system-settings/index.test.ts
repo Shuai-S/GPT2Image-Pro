@@ -266,6 +266,21 @@ describe("setSystemSettings", () => {
     ).rejects.toThrow(/必须是有效数字/);
   });
 
+  it("coerces moderation pricing values and rejects non-positive price", async () => {
+    await setSystemSettings(
+      [{ key: "TEXT_MODERATION_PRICE_CNY", value: "0.004" }],
+      "admin"
+    );
+    expect(store.get("TEXT_MODERATION_PRICE_CNY")?.value).toBe(0.004);
+
+    await expect(
+      setSystemSettings(
+        [{ key: "REFERENCE_CREDIT_PRICE_CNY", value: "0" }],
+        "admin"
+      )
+    ).rejects.toThrow(/不能小于/);
+  });
+
   it("enforces per-key number range bounds (coerceValue, S-M8)", async () => {
     // 经济键：价格 min=0.01 拒绝 0 与负数，max=1_000_000 拒绝异常巨大值。
     await expect(

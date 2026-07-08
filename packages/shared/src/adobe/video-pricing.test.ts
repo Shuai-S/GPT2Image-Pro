@@ -3,6 +3,7 @@ import {
   applyVideoBackendMultiplier,
   DEFAULT_VIDEO_BASE_CREDITS_PER_SECOND,
   getVideoCreditCost,
+  resolveVideoModelPricing,
   resolveVideoModelMultiplier,
 } from "./video-pricing";
 
@@ -86,5 +87,31 @@ describe("resolveVideoModelMultiplier", () => {
     expect(resolveVideoModelMultiplier("unknown", map)).toBe(1);
     expect(resolveVideoModelMultiplier("sora2", null)).toBe(1);
     expect(resolveVideoModelMultiplier(null, map)).toBe(1);
+  });
+});
+
+describe("resolveVideoModelPricing", () => {
+  it("通过统一模型定价引擎保持旧视频计费取整链", () => {
+    const result = resolveVideoModelPricing({
+      model: "firefly-sora2-5s-16x9",
+      family: "sora2",
+      durationSeconds: 5,
+      basePerSecond: 30,
+      modelMultiplier: 1.333,
+      backendMultiplier: 2,
+      groupId: "vip",
+    });
+
+    expect(result.baseCostCredits).toBe(199.95);
+    expect(result.finalCredits).toBe(400);
+    expect(result.pricingSnapshot).toMatchObject({
+      ruleId: "video-generation.firefly",
+      model: "firefly-sora2-5s-16x9",
+      family: "sora2",
+      modality: "video",
+      groupId: "vip",
+      backendMultiplier: 2,
+      finalCredits: 400,
+    });
   });
 });

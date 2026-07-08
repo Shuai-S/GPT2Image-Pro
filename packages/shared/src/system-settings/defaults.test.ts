@@ -144,6 +144,9 @@ describe("system setting default initialization", () => {
     expect(initializedKeys).toContain("IMAGE_EDIT_MAX_REFERENCE_IMAGES");
     expect(initializedKeys).toContain("IMAGE_BASE_CREDITS_1024");
     expect(initializedKeys).toContain("IMAGE_BASE_CREDITS_4K");
+    expect(initializedKeys).toContain("REFERENCE_CREDIT_PRICE_CNY");
+    expect(initializedKeys).toContain("TEXT_MODERATION_PRICE_CNY");
+    expect(initializedKeys).toContain("IMAGE_MODERATION_PRICE_CNY");
     expect(initializedKeys).toContain("RATE_LIMIT_AI_REQUESTS_PER_MINUTE");
     expect(initializedKeys).not.toContain("BETTER_AUTH_SECRET");
     expect(initializedKeys).not.toContain("CREEM_API_KEY");
@@ -178,6 +181,9 @@ describe("system setting default initialization", () => {
     expect(store.get("IMAGE_EDIT_MAX_REFERENCE_IMAGES")?.value).toBe(4);
     expect(store.get("IMAGE_BASE_CREDITS_1024")?.value).toBe(1.27);
     expect(store.get("IMAGE_BASE_CREDITS_4K")?.value).toBe(10);
+    expect(store.get("REFERENCE_CREDIT_PRICE_CNY")?.value).toBe(0.05);
+    expect(store.get("TEXT_MODERATION_PRICE_CNY")?.value).toBe(0.002);
+    expect(store.get("IMAGE_MODERATION_PRICE_CNY")?.value).toBe(0.003);
     expect(store.get(MODEL_PRICING_RULES_SETTING_KEY)?.value).toBeDefined();
     expect(store.get("RATE_LIMIT_GLOBAL_REQUESTS_PER_MINUTE")?.value).toBe(100);
     expect(store.get("RATE_LIMIT_AUTH_REQUESTS_PER_MINUTE")?.value).toBe(5);

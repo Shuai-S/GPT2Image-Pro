@@ -22,6 +22,10 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { createJsonKeepAliveResponse } from "@/features/external-api/images";
+import {
+  refundExternalApiKeyCredits,
+  reserveExternalApiKeyCredits,
+} from "@/features/external-api/quota";
 import { runEditableFileForUser } from "@/features/image-generation/editable-file-operations";
 
 const generateSchema = z.object({
@@ -86,15 +90,30 @@ export const POST = withApiLogging(async (request: NextRequest) => {
       const billing = await getPlanBillingConfig(plan.plan);
       const roundFee = Math.max(0, Math.trunc(billing.chatRoundCredits || 0));
       if (roundFee > 0) {
-        await consumeCredits({
+        await reserveExternalApiKeyCredits({
           userId,
           amount: roundFee,
-          serviceName: "editable_file_chat_round",
-          description:
-            kind === "psd" ? "chat(web) PSD 轮次" : "chat(web) PPT 轮次",
-          sourceRef: `editable-file-round:${taskId}`,
-          metadata: { kind, taskId, chatRound: true },
         });
+        let userCreditsConsumed = false;
+        try {
+          const consumeResult = await consumeCredits({
+            userId,
+            amount: roundFee,
+            serviceName: "editable_file_chat_round",
+            description:
+              kind === "psd" ? "chat(web) PSD 轮次" : "chat(web) PPT 轮次",
+            sourceRef: `editable-file-round:${taskId}`,
+            metadata: { kind, taskId, chatRound: true },
+          });
+          if (consumeResult.alreadyConsumed) {
+            await refundExternalApiKeyCredits({ userId, amount: roundFee });
+          }
+          userCreditsConsumed = true;
+        } finally {
+          if (!userCreditsConsumed) {
+            await refundExternalApiKeyCredits({ userId, amount: roundFee });
+          }
+        }
         creditsCharged += roundFee;
       }
     }

@@ -28,6 +28,10 @@ import {
   resolveImageBackendPoolConfig,
 } from "@/features/image-backend-pool/service";
 import {
+  refundExternalApiKeyCredits,
+  reserveExternalApiKeyCredits,
+} from "@/features/external-api/quota";
+import {
   type EditableFileBinary,
   type EditableFileKind,
   generateFileWithChatGptWeb,
@@ -179,19 +183,37 @@ export async function runEditableFileForUser(params: {
       );
       let creditsCharged = 0;
       if (amount > 0) {
-        await consumeCredits({
+        await reserveExternalApiKeyCredits({
+          apiKeyId,
           userId,
           amount,
-          serviceName: editableFileServiceName(kind),
-          description: kind === "psd" ? "生成 PSD 文件" : "生成 PPT 文件",
-          sourceRef: `editable-file:${taskId}`,
-          metadata: {
-            kind,
-            taskId,
-            conversationId: result.conversationId,
-            apiKeyId: apiKeyId || null,
-          },
         });
+        let userCreditsConsumed = false;
+        try {
+          const consumeResult = await consumeCredits({
+            userId,
+            amount,
+            serviceName: editableFileServiceName(kind),
+            description: kind === "psd" ? "生成 PSD 文件" : "生成 PPT 文件",
+            sourceRef: `editable-file:${taskId}`,
+            metadata: {
+              kind,
+              taskId,
+              conversationId: result.conversationId,
+              apiKeyId: apiKeyId || null,
+            },
+          });
+          if (consumeResult.alreadyConsumed) {
+            // WHY: 外部 API Key creditsUsed 没有 sourceRef 维度；重复 client_task_id
+            // 命中账本幂等时必须撤回本次预占，避免重复占用 key 额度。
+            await refundExternalApiKeyCredits({ apiKeyId, userId, amount });
+          }
+          userCreditsConsumed = true;
+        } finally {
+          if (!userCreditsConsumed) {
+            await refundExternalApiKeyCredits({ apiKeyId, userId, amount });
+          }
+        }
         creditsCharged = amount;
       }
       success = true;

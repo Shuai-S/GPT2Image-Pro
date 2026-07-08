@@ -95,6 +95,11 @@ const DEFAULT_RULES = [
     billingMode: "per_call",
     perCall: {
       creditsPerImage: 1.31,
+      creditsPerImageByResolution: {
+        "1k": 1.31,
+        "2k": 4,
+        "4k": 10.04,
+      },
     },
     roundingMode: "ceil_2dp",
     enabled: true,
@@ -425,6 +430,9 @@ function normalizePerCallConfig(
   return {
     creditsPerCall: numberValue(raw.creditsPerCall, 0),
     creditsPerImage: numberValue(raw.creditsPerImage, 0),
+    creditsPerImageByResolution: normalizeNumberRecord(
+      raw.creditsPerImageByResolution
+    ),
     creditsPerSecond: numberValue(raw.creditsPerSecond, 0),
     creditsPerToolCall: numberValue(raw.creditsPerToolCall, 0),
   };

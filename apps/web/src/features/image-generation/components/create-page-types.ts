@@ -6,7 +6,10 @@ import type { PlanCapabilitySnapshot } from "@repo/shared/subscription/services/
 import type { OperationFeatureFlags } from "@repo/shared/system-settings";
 import type { ImageBackendGroupBackendType } from "@/features/image-backend-pool/types";
 import type { ReferenceHandoffMode } from "@/features/image-generation/reference-handoff";
-import type { ImageBaseCreditPricing } from "../resolution";
+import type {
+  ImageBaseCreditPricing,
+  ImageModerationCreditPricing,
+} from "../resolution";
 import type { VideoPricingInfo } from "../video-operations";
 import type { EditImageFile } from "./image-edit-types";
 
@@ -347,6 +350,7 @@ export interface CreatePageClientProps {
   customApiActive: boolean;
   moderationEnabled: boolean;
   imageBasePricing: ImageBaseCreditPricing;
+  moderationPricing: ImageModerationCreditPricing;
   forceWebPixelRange: ForceWebPixelRange;
   videoPricing: VideoPricingInfo;
   operationFlags: OperationFeatureFlags;

@@ -184,6 +184,7 @@ export function CreatePageClient({
   customApiActive,
   moderationEnabled,
   imageBasePricing,
+  moderationPricing,
   forceWebPixelRange,
   videoPricing,
   operationFlags,
@@ -234,6 +235,7 @@ export function CreatePageClient({
     getImageCreditCost(requestedSize, {
       ...options,
       basePricing: imageBasePricing,
+      moderationPricing,
       quality: (options.quality ?? quality) as ImageQualityLevel | undefined,
     });
   const activeBackendType = selectedBackendGroup?.backendType || "mixed";
@@ -1156,6 +1158,7 @@ export function CreatePageClient({
       activeBillingMultiplier,
       imageBasePricing,
       moderationCostOptions,
+      moderationPricing,
       quality,
       size,
     ]

@@ -27,7 +27,10 @@ import {
   listImageBackendGroupOptions,
 } from "@/features/image-backend-pool/service";
 import { RecentCreationsClient } from "@/features/image-generation/components/recent-creations-client";
-import { getRuntimeImageBaseCreditPricing } from "@/features/image-generation/pricing-settings";
+import {
+  getRuntimeImageBaseCreditPricing,
+  getRuntimeModerationCreditPricing,
+} from "@/features/image-generation/pricing-settings";
 import { getImageBaseCreditPricing } from "@/features/image-generation/resolution";
 import { hasLayeredMeta } from "@/features/psd-export/layered-meta";
 import { Link } from "@/i18n/routing";
@@ -95,6 +98,7 @@ export default async function DashboardPage({
     recentGenerations,
     totalGenerationsResult,
     imageBasePricing,
+    moderationPricing,
     userPlanInfo,
   ] = await Promise.all([
     db.query.creditsBalance.findFirst({
@@ -113,6 +117,7 @@ export default async function DashboardPage({
       .from(generation)
       .where(eq(generation.userId, userId)),
     getRuntimeImageBaseCreditPricing(),
+    getRuntimeModerationCreditPricing(),
     getUserPlan(userId),
   ]);
 
@@ -230,6 +235,7 @@ export default async function DashboardPage({
             planName: userPlanInfo.planName,
           }}
           isZh={isZh}
+          moderationPricing={moderationPricing}
           pricing={normalizedImageBasePricing}
         />
 

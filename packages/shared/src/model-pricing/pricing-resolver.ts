@@ -38,6 +38,7 @@ export type TokenPricingConfig = {
 export type PerCallPricingConfig = {
   creditsPerCall?: number;
   creditsPerImage?: number;
+  creditsPerImageByResolution?: Record<string, number>;
   creditsPerSecond?: number;
   creditsPerToolCall?: number;
 };
@@ -222,7 +223,12 @@ export function resolveModelPricing(
   const parameterMultiplier =
     normalizeMultiplier(input.parameterMultiplier) *
     resolveParameterMultiplier(match.rule, input.parameterKeys);
-  const rawBaseCost = calculateBaseCost(match.rule, tokenUsage, perCallUsage);
+  const rawBaseCost = calculateBaseCost(
+    match.rule,
+    tokenUsage,
+    perCallUsage,
+    input.parameterKeys
+  );
   const roundedBaseCost =
     match.rule.baseRoundingMode === undefined
       ? rawBaseCost
@@ -360,17 +366,18 @@ function normalizePerCallUsage(
 function calculateBaseCost(
   rule: ModelPricingRule,
   tokenUsage: Required<PricingTokenUsage>,
-  perCallUsage: Required<PricingPerCallUsage>
+  perCallUsage: Required<PricingPerCallUsage>,
+  parameterKeys: PricingParameterKeys | undefined
 ) {
   if (rule.billingMode === "token") {
     return calculateTokenCost(rule.token, tokenUsage);
   }
   if (rule.billingMode === "per_call") {
-    return calculatePerCallCost(rule.perCall, perCallUsage);
+    return calculatePerCallCost(rule.perCall, perCallUsage, parameterKeys);
   }
   return (
     calculateTokenCost(rule.token, tokenUsage) +
-    calculatePerCallCost(rule.perCall, perCallUsage)
+    calculatePerCallCost(rule.perCall, perCallUsage, parameterKeys)
   );
 }
 
@@ -407,11 +414,21 @@ function calculateTokenCost(
  */
 function calculatePerCallCost(
   config: PerCallPricingConfig | undefined,
-  usage: Required<PricingPerCallUsage>
+  usage: Required<PricingPerCallUsage>,
+  parameterKeys: PricingParameterKeys | undefined
 ) {
+  const resolutionImagePrice = parameterKeys?.resolution
+    ? toNonNegativeNumber(
+        config?.creditsPerImageByResolution?.[parameterKeys.resolution]
+      )
+    : 0;
+  const imagePrice =
+    resolutionImagePrice > 0
+      ? resolutionImagePrice
+      : toNonNegativeNumber(config?.creditsPerImage);
   return (
     usage.quantity * toNonNegativeNumber(config?.creditsPerCall) +
-    usage.imageCount * toNonNegativeNumber(config?.creditsPerImage) +
+    usage.imageCount * imagePrice +
     usage.durationSeconds * toNonNegativeNumber(config?.creditsPerSecond) +
     usage.toolCallCount * toNonNegativeNumber(config?.creditsPerToolCall)
   );

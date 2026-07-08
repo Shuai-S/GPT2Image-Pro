@@ -1314,6 +1314,24 @@ function ModelPricingRulesInput({
     });
   };
 
+  const updatePerCallResolutionPrice = (
+    index: number,
+    tier: "1k" | "2k" | "4k",
+    nextValue: string
+  ) => {
+    const rule = config.rules[index];
+    if (!rule) return;
+    updateRule(index, {
+      perCall: {
+        ...rule.perCall,
+        creditsPerImageByResolution: {
+          ...rule.perCall?.creditsPerImageByResolution,
+          [tier]: Number(nextValue),
+        },
+      },
+    });
+  };
+
   const addRule = () => {
     const nextIndex = config.rules.length + 1;
     updateConfig({
@@ -1615,6 +1633,54 @@ function ModelPricingRulesInput({
               </table>
             </div>
           )}
+
+          {rule.billingMode !== "token" &&
+            rule.scope.modality === "image" && (
+              <div className="overflow-x-auto rounded-md border">
+                <table className="w-full min-w-[460px] text-sm">
+                  <thead className="bg-muted/60 text-xs text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium">
+                        1K 每张
+                      </th>
+                      <th className="px-3 py-2 text-left font-medium">
+                        2K 每张
+                      </th>
+                      <th className="px-3 py-2 text-left font-medium">
+                        4K 每张
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      {(["1k", "2k", "4k"] as const).map((tier) => (
+                        <td key={tier} className="px-3 py-2">
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={String(
+                              rule.perCall?.creditsPerImageByResolution?.[
+                                tier
+                              ] ?? 0
+                            )}
+                            disabled={disabled}
+                            className="h-9 min-w-28"
+                            onChange={(event) =>
+                              updatePerCallResolutionPrice(
+                                index,
+                                tier,
+                                event.target.value
+                              )
+                            }
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )}
 
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <div className="space-y-1.5">
@@ -2056,7 +2122,11 @@ function CreditPackageMatrixInput({
   );
 }
 
-const PRICING_CATEGORY_IDS = new Set<SettingCategory>(["plans", "credits"]);
+const PRICING_CATEGORY_IDS = new Set<SettingCategory>([
+  "plans",
+  "credits",
+  "moderationPricing",
+]);
 
 /**
  * 按分类整理当前模式可见的设置项。

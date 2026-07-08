@@ -14,6 +14,7 @@ import type { Metadata } from "next";
 import { getRuntimeImageEditMaxReferenceImages } from "@/features/image-generation/edit-reference-limits";
 import {
   getRuntimeImageBaseCreditPricing,
+  getRuntimeModerationCreditPricing,
   getRuntimePublicModelPricingRules,
 } from "@/features/image-generation/pricing-settings";
 import { PricingSection } from "@/features/marketing/components";
@@ -91,6 +92,7 @@ export default async function PricingPage() {
     creditPackages,
     creditPackageExpiryDays,
     imageBasePricing,
+    moderationPricing,
     modelPricingRules,
     maxEditImages,
   ] = await Promise.all([
@@ -103,6 +105,7 @@ export default async function PricingPage() {
       { nonNegative: true }
     ),
     getRuntimeImageBaseCreditPricing(),
+    getRuntimeModerationCreditPricing(),
     getRuntimePublicModelPricingRules(),
     getRuntimeImageEditMaxReferenceImages(),
   ]);
@@ -114,6 +117,7 @@ export default async function PricingPage() {
       creditPackages={creditPackages}
       creditPackageExpiryDays={creditPackageExpiryDays}
       imageBasePricing={imageBasePricing}
+      moderationPricing={moderationPricing}
       modelPricingRules={modelPricingRules}
       maxEditImages={maxEditImages}
     />

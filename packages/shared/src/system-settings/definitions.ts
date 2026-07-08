@@ -24,6 +24,7 @@ export type SettingCategory =
   | "storage"
   | "mail"
   | "credits"
+  | "moderationPricing"
   | "referral"
   | "analytics";
 
@@ -186,6 +187,9 @@ export type SettingKey =
   | "CREDITS_EXPIRY_DAYS"
   | "IMAGE_BASE_CREDITS_1024"
   | "IMAGE_BASE_CREDITS_4K"
+  | "REFERENCE_CREDIT_PRICE_CNY"
+  | "TEXT_MODERATION_PRICE_CNY"
+  | "IMAGE_MODERATION_PRICE_CNY"
   | "MODEL_PRICING_RULES"
   | "EDITABLE_FILE_PPT_CREDITS"
   | "EDITABLE_FILE_PSD_CREDITS"
@@ -1597,6 +1601,42 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     defaultValue: 10,
   },
   {
+    key: "REFERENCE_CREDIT_PRICE_CNY",
+    label: "积分参考单价（元）",
+    description:
+      "用于把文本/图片审核的人民币成本折算为积分：审核积分 = 审核成本 ÷ 本单价。默认 0.05 元/积分。",
+    category: "moderationPricing",
+    valueType: "number",
+    // WHY: 该值是所有审核成本折算积分的除数，必须为正；上限用于拦截误填。
+    min: 0.000001,
+    max: 100_000,
+    defaultValue: 0.05,
+  },
+  {
+    key: "TEXT_MODERATION_PRICE_CNY",
+    label: "文本审核成本（元/次）",
+    description:
+      "每次文本审核的人民币成本，用于折算为审核积分并计入生成扣费。",
+    category: "moderationPricing",
+    valueType: "number",
+    // WHY: 审核成本参与扣费，必须为正；需要免费审核时应在能力/审核开关层关闭计费口径。
+    min: 0.000001,
+    max: 100_000,
+    defaultValue: 0.002,
+  },
+  {
+    key: "IMAGE_MODERATION_PRICE_CNY",
+    label: "图片审核成本（元/张）",
+    description:
+      "每张输入图片审核的人民币成本，用于折算为审核积分并计入图生图/对话生图扣费。",
+    category: "moderationPricing",
+    valueType: "number",
+    // WHY: 同文本审核成本，禁止 0/负数避免静默绕过审核计费。
+    min: 0.000001,
+    max: 100_000,
+    defaultValue: 0.003,
+  },
+  {
     key: "IMAGE_SUPER_RESOLUTION_ENABLED",
     label: "出图分辨率超分校准",
     description:
@@ -2151,6 +2191,11 @@ export const SETTING_CATEGORIES: Array<{
     id: "credits",
     label: "积分",
     description: "注册奖励和积分有效期规则。",
+  },
+  {
+    id: "moderationPricing",
+    label: "审核定价",
+    description: "文本/图片审核成本与积分折算单价。",
   },
   {
     id: "referral",

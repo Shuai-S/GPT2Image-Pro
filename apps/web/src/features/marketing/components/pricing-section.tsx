@@ -32,10 +32,9 @@ import { getEffectiveImageEditMaxReferenceImages } from "@/features/image-genera
 import {
   getImageBaseCreditPricing,
   getImageCreditCostBreakdown,
-  IMAGE_MODERATION_PRICE_CNY,
   type ImageBaseCreditPricing,
-  REFERENCE_CREDIT_PRICE_CNY,
-  TEXT_MODERATION_PRICE_CNY,
+  getImageModerationCreditPricing,
+  type ImageModerationCreditPricing,
 } from "@/features/image-generation/resolution";
 import {
   createCheckoutSession,
@@ -96,6 +95,7 @@ interface PricingSectionProps {
   creditPackages?: RuntimeCreditPackage[];
   creditPackageExpiryDays?: number;
   imageBasePricing?: ImageBaseCreditPricing;
+  moderationPricing?: ImageModerationCreditPricing;
   modelPricingRules?: PublicModelPricingRule[];
   maxEditImages?: number;
 }
@@ -110,6 +110,7 @@ export function PricingSection({
   creditPackages = [],
   creditPackageExpiryDays,
   imageBasePricing,
+  moderationPricing,
   modelPricingRules = [],
   maxEditImages,
 }: PricingSectionProps) {
@@ -269,12 +270,17 @@ export function PricingSection({
     getPlanLimits(planId).monthlyCredits;
   const normalizedImageBasePricing =
     getImageBaseCreditPricing(imageBasePricing);
+  const normalizedModerationPricing =
+    getImageModerationCreditPricing(moderationPricing);
   const textModerationCredits =
-    TEXT_MODERATION_PRICE_CNY / REFERENCE_CREDIT_PRICE_CNY;
+    normalizedModerationPricing.textModerationPriceCny /
+    normalizedModerationPricing.referenceCreditPriceCny;
   const imageModerationCredits =
-    IMAGE_MODERATION_PRICE_CNY / REFERENCE_CREDIT_PRICE_CNY;
+    normalizedModerationPricing.imageModerationPriceCny /
+    normalizedModerationPricing.referenceCreditPriceCny;
   const textTo4kCredits = getImageCreditCostBreakdown("3840x2160", {
     basePricing: normalizedImageBasePricing,
+    moderationPricing: normalizedModerationPricing,
     imageModerationCount: 0,
     textModerationCount: 1,
   }).totalCredits;
@@ -664,6 +670,20 @@ export function PricingSection({
                   `${formatCreditAmount(rule.perCall.creditsPerImage)}/image`,
                   `${formatCreditAmount(rule.perCall.creditsPerImage)}/张`
                 )
+              : null,
+            rule.perCall?.creditsPerImageByResolution
+              ? (["1k", "2k", "4k"] as const)
+                  .map((tier) => {
+                    const value =
+                      rule.perCall?.creditsPerImageByResolution?.[tier];
+                    if (!value) return null;
+                    return copy(
+                      `${tier.toUpperCase()} ${formatCreditAmount(value)}/image`,
+                      `${tier.toUpperCase()} ${formatCreditAmount(value)}/张`
+                    );
+                  })
+                  .filter(Boolean)
+                  .join(copy(", ", "，"))
               : null,
             rule.perCall?.creditsPerSecond
               ? copy(

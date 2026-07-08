@@ -21,7 +21,10 @@ import {
   getEffectiveImageEditMaxReferenceImages,
   getRuntimeImageEditMaxReferenceImages,
 } from "@/features/image-generation/edit-reference-limits";
-import { getRuntimeImageBaseCreditPricing } from "@/features/image-generation/pricing-settings";
+import {
+  getRuntimeImageBaseCreditPricing,
+  getRuntimeModerationCreditPricing,
+} from "@/features/image-generation/pricing-settings";
 import { getUserRecentGenerations } from "@/features/image-generation/queries";
 import { getUserApiConfig } from "@/features/image-generation/service";
 import { getVideoPricingForUser } from "@/features/image-generation/video-operations";
@@ -56,6 +59,7 @@ export default async function CreatePage() {
   const [
     capabilities,
     imageBasePricing,
+    moderationPricing,
     forceWebMinPixels,
     forceWebMaxPixels,
     videoPricing,
@@ -64,6 +68,7 @@ export default async function CreatePage() {
   ] = await Promise.all([
     getPlanCapabilitySnapshot(plan.plan),
     getRuntimeImageBaseCreditPricing(),
+    getRuntimeModerationCreditPricing(),
     getRuntimeSettingNumber(
       "IMAGE_FORCE_WEB_MIN_PIXELS",
       DEFAULT_FORCE_WEB_MIN_PIXELS,
@@ -123,6 +128,7 @@ export default async function CreatePage() {
       customApiActive={Boolean(userApiConfig)}
       moderationEnabled={moderationEnabled}
       imageBasePricing={imageBasePricing}
+      moderationPricing={moderationPricing}
       forceWebPixelRange={forceWebPixelRange}
       videoPricing={videoPricing}
       operationFlags={operationFlags}

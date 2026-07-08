@@ -53,6 +53,9 @@ const tokenPricingSchema = z.object({
 const perCallPricingSchema = z.object({
   creditsPerCall: z.number().nonnegative().optional(),
   creditsPerImage: z.number().nonnegative().optional(),
+  creditsPerImageByResolution: z
+    .record(z.string(), z.number().nonnegative())
+    .optional(),
   creditsPerSecond: z.number().nonnegative().optional(),
   creditsPerToolCall: z.number().nonnegative().optional(),
 });

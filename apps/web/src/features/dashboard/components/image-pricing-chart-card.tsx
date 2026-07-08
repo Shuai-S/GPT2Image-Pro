@@ -20,16 +20,15 @@ import {
   DEFAULT_IMAGE_SIZE,
   getImageBaseCreditPricing,
   getImageBaseCredits,
+  getImageModerationCreditPricing,
   IMAGE_1K_BASE_SIZE,
   IMAGE_1024_BASE_PIXELS,
-  IMAGE_MODERATION_PRICE_CNY,
   type ImageBaseCreditPricing,
+  type ImageModerationCreditPricing,
   MAX_IMAGE_ASPECT_RATIO,
   MAX_IMAGE_PIXELS,
   MIN_IMAGE_DIMENSION,
   MIN_IMAGE_PIXELS,
-  REFERENCE_CREDIT_PRICE_CNY,
-  TEXT_MODERATION_PRICE_CNY,
 } from "@/features/image-generation/resolution";
 
 type ImagePricingChartCardProps = {
@@ -43,6 +42,7 @@ type ImagePricingChartCardProps = {
     planName: string;
   };
   isZh: boolean;
+  moderationPricing?: ImageModerationCreditPricing;
   pricing: ImageBaseCreditPricing;
 };
 
@@ -158,9 +158,12 @@ function useElementWidth() {
 export function ImagePricingChartCard({
   billing,
   isZh,
+  moderationPricing,
   pricing,
 }: ImagePricingChartCardProps) {
   const normalizedPricing = getImageBaseCreditPricing(pricing);
+  const normalizedModerationPricing =
+    getImageModerationCreditPricing(moderationPricing);
   const data = buildChartData(normalizedPricing);
   const chartXTicks = [
     Number((MIN_IMAGE_PIXELS / 1_000_000).toFixed(2)),
@@ -172,9 +175,11 @@ export function ImagePricingChartCard({
   const copy = (en: string, zh: string) => (isZh ? zh : en);
   const { ref: chartContainerRef, width: chartWidth } = useElementWidth();
   const textModerationCredits =
-    TEXT_MODERATION_PRICE_CNY / REFERENCE_CREDIT_PRICE_CNY;
+    normalizedModerationPricing.textModerationPriceCny /
+    normalizedModerationPricing.referenceCreditPriceCny;
   const imageModerationCredits =
-    IMAGE_MODERATION_PRICE_CNY / REFERENCE_CREDIT_PRICE_CNY;
+    normalizedModerationPricing.imageModerationPriceCny /
+    normalizedModerationPricing.referenceCreditPriceCny;
   const groupMultiplier = Number.isFinite(billing.groupMultiplier)
     ? Math.max(0.01, billing.groupMultiplier)
     : 1;

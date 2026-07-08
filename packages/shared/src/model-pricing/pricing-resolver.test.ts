@@ -226,6 +226,35 @@ describe("resolveModelPricing", () => {
     expect(result?.finalCredits).toBe(48);
   });
 
+  it("按图像分辨率档位选择每张图片单价", () => {
+    const result = resolveModelPricing({
+      rules: [
+        {
+          id: "image-resolution-tiers",
+          scope: { model: "firefly-gpt-image-2", modality: "image" },
+          billingMode: "per_call",
+          perCall: {
+            creditsPerImage: 1,
+            creditsPerImageByResolution: {
+              "1k": 1.31,
+              "2k": 4,
+              "4k": 10,
+            },
+          },
+          roundingMode: "ceil_2dp",
+          enabled: true,
+        },
+      ],
+      query: { model: "firefly-gpt-image-2", modality: "image" },
+      perCallUsage: { imageCount: 1 },
+      parameterKeys: { resolution: "2k" },
+      backendMultiplier: 2,
+    });
+
+    expect(result?.baseCostCredits).toBe(4);
+    expect(result?.finalCredits).toBe(8);
+  });
+
   it("组合计费支持 token 加固定图片附加费", () => {
     const result = resolveModelPricing({
       rules: [

@@ -13,9 +13,8 @@
 import { db } from "@repo/database";
 import { videoGeneration } from "@repo/database/schema";
 import {
-  applyVideoBackendMultiplier,
   DEFAULT_VIDEO_BASE_CREDITS_PER_SECOND,
-  getVideoCreditCost,
+  resolveVideoModelPricing,
   resolveVideoModelMultiplier,
 } from "@repo/shared/adobe";
 import { resolveFireflyVideoModel } from "@repo/shared/adobe/firefly-direct";
@@ -32,6 +31,10 @@ import {
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { releaseImageBackendInflightLease } from "@/features/image-backend-pool/service";
+import {
+  refundExternalApiKeyCredits,
+  reserveExternalApiKeyCredits,
+} from "@/features/external-api/quota";
 import { runAdobeDirectVideoRequest } from "./adobe-direct";
 import { getEffectiveConfig, poolBackendMemberType } from "./service";
 
@@ -92,8 +95,8 @@ const REPRESENTATIVE_VIDEO_MODEL_ID = "firefly-sora2-8s-16x9";
 
 /**
  * 取某用户的视频定价输入（基价 + 模型族倍率 + Adobe 后端倍率），供创作页前端实时预估。
- * 与扣费侧 runAdobeVideoGenerationForUser 共用同一组系统设置与 applyVideoBackendMultiplier
- * 口径，保证展示价与实扣价一致。后端倍率解析失败（无 Adobe 后端等）优雅回退 1。
+ * 与扣费侧 runAdobeVideoGenerationForUser 共用同一组系统设置与模型定价引擎口径，
+ * 保证展示价与实扣价一致。后端倍率解析失败（无 Adobe 后端等）优雅回退 1。
  */
 export async function getVideoPricingForUser(input: {
   userId: string;
@@ -167,7 +170,7 @@ export async function runAdobeVideoGenerationForUser(
     return { error: `不支持的视频模型: ${input.model}` };
   }
 
-  // 算价：每秒基价 × 时长 × 模型族倍率（从系统设置取）。
+  // 算价输入：每秒基价、模型族倍率与后端倍率在后续通过统一模型定价引擎结算。
   const basePerSecond = await getRuntimeSettingNumber(
     "VIDEO_BASE_CREDITS_PER_SECOND",
     DEFAULT_VIDEO_BASE_CREDITS_PER_SECOND
@@ -175,11 +178,7 @@ export async function runAdobeVideoGenerationForUser(
   const multipliers = parseMultipliers(
     await getRuntimeSettingJson("VIDEO_MODEL_MULTIPLIERS")
   );
-  const cost = getVideoCreditCost({
-    durationSeconds: conf.duration,
-    basePerSecond,
-    modelMultiplier: resolveVideoModelMultiplier(conf.family, multipliers),
-  });
+  const modelMultiplier = resolveVideoModelMultiplier(conf.family, multipliers);
 
   const videoId = input.videoGenerationId || nanoid();
   // 扣费/退款幂等键：派生自服务端 videoId，全局唯一。
@@ -256,17 +255,40 @@ export async function runAdobeVideoGenerationForUser(
     };
   }
 
-  // 实际计费成本 = 基价 × 后端计费倍率（组倍率已在池解析时合入 billingMultiplier）。
-  // 向上取整并非负；扣费/退款/落库一律用 billedCost，杜绝少扣/少退。与前端预估共用
-  // applyVideoBackendMultiplier，确保展示价与实扣价一致。
-  const billedCost = applyVideoBackendMultiplier(
-    cost,
-    config.backend?.billingMultiplier
-  );
+  // 实际计费成本由统一模型定价引擎计算；视频旧口径为 base 先向上取 2 位，再叠
+  // 后端计费倍率（组倍率已在池解析时合入 billingMultiplier）并向上取整。
+  const pricing = resolveVideoModelPricing({
+    model: input.model,
+    family: conf.family,
+    durationSeconds: conf.duration,
+    basePerSecond,
+    modelMultiplier,
+    backendMultiplier: config.backend?.billingMultiplier,
+    groupId: config.backend?.billingGroupId,
+  });
+  const billedCost = pricing.finalCredits;
 
   // 预扣积分（幂等 sourceRef）。不足/失败 → 标记 failed 返回。
   try {
-    await consumeCredits({
+    await reserveExternalApiKeyCredits({
+      apiKeyId: input.apiKeyId ?? undefined,
+      userId: input.userId,
+      amount: billedCost,
+    });
+  } catch (error) {
+    await releaseInflightLease();
+    await markVideoFailed(
+      videoId,
+      error instanceof Error ? error.message : "API Key 额度不足"
+    );
+    return {
+      error: error instanceof Error ? error.message : "API Key 额度不足",
+      videoGenerationId: videoId,
+    };
+  }
+  let userCreditsConsumed = false;
+  try {
+    const consumeResult = await consumeCredits({
       userId: input.userId,
       amount: billedCost,
       serviceName: "adobe-video",
@@ -275,11 +297,33 @@ export async function runAdobeVideoGenerationForUser(
       metadata: {
         videoGenerationId: videoId,
         model: input.model,
+        pricingEngine: "model-pricing",
+        pricingSnapshot: pricing.pricingSnapshot,
+        baseCostCredits: pricing.baseCostCredits,
+        modelMultiplier,
+        backendMultiplier: config.backend?.billingMultiplier ?? 1,
         durationSeconds: conf.duration,
         ...(input.apiKeyId ? { externalApiKeyId: input.apiKeyId } : {}),
       },
     });
+    if (consumeResult.alreadyConsumed) {
+      // WHY: 外部 API Key creditsUsed 没有 sourceRef 维度；重复 videoId 命中账本
+      // 幂等时要撤回本次预占，避免同一任务重试重复占用 key 配额。
+      await refundExternalApiKeyCredits({
+        apiKeyId: input.apiKeyId ?? undefined,
+        userId: input.userId,
+        amount: billedCost,
+      });
+    }
+    userCreditsConsumed = true;
   } catch (error) {
+    if (!userCreditsConsumed) {
+      await refundExternalApiKeyCredits({
+        apiKeyId: input.apiKeyId ?? undefined,
+        userId: input.userId,
+        amount: billedCost,
+      });
+    }
     await releaseInflightLease();
     await markVideoFailed(videoId, "积分不足");
     return {
@@ -293,6 +337,13 @@ export async function runAdobeVideoGenerationForUser(
     .set({
       status: "running",
       creditsConsumed: billedCost,
+      metadata: {
+        pricingEngine: "model-pricing",
+        pricingSnapshot: pricing.pricingSnapshot,
+        baseCostCredits: pricing.baseCostCredits,
+        modelMultiplier,
+        backendMultiplier: config.backend?.billingMultiplier ?? 1,
+      },
       updatedAt: new Date(),
     })
     .where(eq(videoGeneration.id, videoId));
@@ -302,7 +353,7 @@ export async function runAdobeVideoGenerationForUser(
     message: string
   ): Promise<VideoGenerationResult> => {
     await releaseInflightLease();
-    await refundGenerationCredits({
+    const refund = await refundGenerationCredits({
       generationId: videoId,
       userId: input.userId,
       amount: billedCost,
@@ -311,6 +362,15 @@ export async function runAdobeVideoGenerationForUser(
     }).catch((error) =>
       logError(error, { source: "adobe-video-refund", videoId })
     );
+    if (refund?.refunded) {
+      await refundExternalApiKeyCredits({
+        apiKeyId: input.apiKeyId ?? undefined,
+        userId: input.userId,
+        amount: billedCost,
+      }).catch((error) =>
+        logError(error, { source: "adobe-video-quota-refund", videoId })
+      );
+    }
     await db
       .update(videoGeneration)
       .set({

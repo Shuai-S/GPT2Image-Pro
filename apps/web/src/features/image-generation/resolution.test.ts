@@ -159,6 +159,32 @@ describe("image resolution credit pricing", () => {
     expect(highWithMod.totalCredits).toBe(baseWithMod.totalCredits);
   });
 
+  it("uses configured moderation prices and falls back from invalid values", () => {
+    const configured = getImageCreditCostBreakdown("1024x1024", {
+      textModerationCount: 1,
+      imageModerationCount: 2,
+      moderationPricing: {
+        referenceCreditPriceCny: 0.1,
+        textModerationPriceCny: 0.01,
+        imageModerationPriceCny: 0.02,
+      },
+    });
+    const fallback = getImageCreditCostBreakdown("1024x1024", {
+      textModerationCount: 1,
+      imageModerationCount: 0,
+      moderationPricing: {
+        referenceCreditPriceCny: 0,
+        textModerationPriceCny: -1,
+      },
+    });
+
+    expect(configured.moderationCny).toBe(0.05);
+    expect(configured.moderationCredits).toBe(0.5);
+    expect(configured.moderationOnlyCredits).toBe(0.5);
+    expect(configured.totalCredits).toBe(1.77);
+    expect(fallback.moderationCredits).toBe(0.04);
+  });
+
   it("quality=auto uses multiplier 1.0 (same as medium/default)", () => {
     const auto = getImageCreditCostBreakdown("1024x1024", {
       textModerationCount: 0,

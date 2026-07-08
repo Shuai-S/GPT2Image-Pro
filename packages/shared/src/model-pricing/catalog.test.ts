@@ -130,4 +130,34 @@ describe("model pricing catalog", () => {
       "visible",
     ]);
   });
+
+  it("保留图像按 1K/2K/4K 档位配置的每张定价", () => {
+    const config = normalizeModelPricingRulesConfig({
+      rules: [
+        {
+          id: "image-tiered",
+          name: "Image Tiered",
+          scope: { model: "firefly-gpt-image-2", modality: "image" },
+          billingMode: "per_call",
+          perCall: {
+            creditsPerImage: 1.31,
+            creditsPerImageByResolution: {
+              "1k": 1.31,
+              "2k": 4,
+              "4k": 10,
+            },
+          },
+          public: true,
+          enabled: true,
+          roundingMode: "ceil_2dp",
+        },
+      ],
+    });
+
+    expect(config.rules[0]?.perCall?.creditsPerImageByResolution).toEqual({
+      "1k": 1.31,
+      "2k": 4,
+      "4k": 10,
+    });
+  });
 });

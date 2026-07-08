@@ -111,6 +111,7 @@ export type ImageCreditCostOptions = {
   textModerationCount?: number;
   imageModerationCount?: number;
   basePricing?: ImageBaseCreditPricing;
+  moderationPricing?: ImageModerationCreditPricing | null;
   /** 图像质量等级，仅用于保留计价明细兼容字段，不影响积分。 */
   quality?: ImageQualityLevel | null;
   /** 思考/推理等级，仅用于保留计价明细兼容字段，不影响积分。 */
@@ -120,6 +121,12 @@ export type ImageCreditCostOptions = {
 export type ImageBaseCreditPricing = {
   base1024Credits?: number;
   base4kCredits?: number;
+};
+
+export type ImageModerationCreditPricing = {
+  referenceCreditPriceCny?: number;
+  textModerationPriceCny?: number;
+  imageModerationPriceCny?: number;
 };
 
 export function roundCreditAmount(value: number) {
@@ -147,6 +154,17 @@ function normalizeBaseCreditPrice(value: unknown, fallback: number) {
   return parsed;
 }
 
+function normalizeModerationCreditPrice(value: unknown, fallback: number) {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : Number.NaN;
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
 export function getImageBaseCreditPricing(
   pricing?: ImageBaseCreditPricing | null
 ) {
@@ -158,6 +176,31 @@ export function getImageBaseCreditPricing(
     base4kCredits: normalizeBaseCreditPrice(
       pricing?.base4kCredits,
       DEFAULT_IMAGE_4K_BASE_CREDIT_COST
+    ),
+  };
+}
+
+/**
+ * 规范化审核成本折算价格。
+ *
+ * @param pricing 后台运行时配置；缺失或非法时回退代码默认值。
+ * @returns 审核人民币成本与积分参考单价，均为正数。
+ */
+export function getImageModerationCreditPricing(
+  pricing?: ImageModerationCreditPricing | null
+) {
+  return {
+    referenceCreditPriceCny: normalizeModerationCreditPrice(
+      pricing?.referenceCreditPriceCny,
+      REFERENCE_CREDIT_PRICE_CNY
+    ),
+    textModerationPriceCny: normalizeModerationCreditPrice(
+      pricing?.textModerationPriceCny,
+      TEXT_MODERATION_PRICE_CNY
+    ),
+    imageModerationPriceCny: normalizeModerationCreditPrice(
+      pricing?.imageModerationPriceCny,
+      IMAGE_MODERATION_PRICE_CNY
     ),
   };
 }
@@ -216,10 +259,14 @@ export function getImageCreditCostBreakdown(
 
   const textModerationCount = options.textModerationCount ?? 1;
   const imageModerationCount = options.imageModerationCount ?? 0;
+  const moderationPricing = getImageModerationCreditPricing(
+    options.moderationPricing
+  );
   const moderationCny =
-    textModerationCount * TEXT_MODERATION_PRICE_CNY +
-    imageModerationCount * IMAGE_MODERATION_PRICE_CNY;
-  const moderationCredits = moderationCny / REFERENCE_CREDIT_PRICE_CNY;
+    textModerationCount * moderationPricing.textModerationPriceCny +
+    imageModerationCount * moderationPricing.imageModerationPriceCny;
+  const moderationCredits =
+    moderationCny / moderationPricing.referenceCreditPriceCny;
   const totalCredits = roundUpCreditAmount(
     effectiveBaseCredits + moderationCredits
   );
