@@ -62,7 +62,6 @@ export interface ImageLightboxProps {
   generation: LightboxGeneration;
   imageUrl: string | null;
   open: boolean;
-  timeZone?: string;
   onClose: () => void;
   onDelete?: (id: string) => void;
 }
@@ -74,21 +73,16 @@ const STATUS_LABELS_ZH: Record<string, string> = {
 };
 const EMPTY_REFERENCE_IMAGES: LightboxReferenceImage[] = [];
 
-function formatDate(iso: string, locale: string, timeZone?: string): string {
+function formatDate(iso: string, locale: string): string {
   try {
-    return formatDateInTimeZone(
-      iso,
-      locale,
-      {
-        month: "short",
-        day: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZoneName: "short",
-      },
-      timeZone
-    );
+    return formatDateInTimeZone(iso, locale, {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZoneName: "short",
+    });
   } catch {
     return iso;
   }
@@ -102,7 +96,6 @@ export function ImageLightbox({
   generation,
   imageUrl,
   open,
-  timeZone,
   onClose,
   onDelete,
 }: ImageLightboxProps) {
@@ -554,7 +547,7 @@ export function ImageLightbox({
                       {copy("Created", "创建时间")}
                     </dt>
                     <dd className="mt-0.5 text-xs text-foreground">
-                      {formatDate(generation.createdAt, locale, timeZone)}
+                      {formatDate(generation.createdAt, locale)}
                     </dd>
                   </div>
                 </dl>

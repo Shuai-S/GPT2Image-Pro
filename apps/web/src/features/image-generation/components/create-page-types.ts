@@ -345,7 +345,6 @@ export interface CreatePageClientProps {
   moderationEnabled: boolean;
   imageBasePricing: ImageBaseCreditPricing;
   forceWebPixelRange: ForceWebPixelRange;
-  timeZone: string;
   videoPricing: VideoPricingInfo;
   operationFlags: OperationFeatureFlags;
 }

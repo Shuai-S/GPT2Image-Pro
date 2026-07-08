@@ -17,7 +17,6 @@ import { ImageLightbox, type LightboxGeneration } from "./image-lightbox";
  * @param props.editImages 图生图已选参考图,用于展示选中态。
  * @param props.selectedRecent 当前灯箱记录。
  * @param props.selectedRecentId 当前灯箱记录 id。
- * @param props.timeZone 灯箱时间展示时区。
  * @param props.copy 中英文文案选择器。
  * @param props.isConversationMode 判断当前模式是否为对话类模式。
  * @param props.onRecentClick 缩略图点击回调。
@@ -33,7 +32,6 @@ export function CreatePageRecentPanel({
   editImages,
   selectedRecent,
   selectedRecentId,
-  timeZone,
   copy,
   isConversationMode,
   onRecentClick,
@@ -45,7 +43,6 @@ export function CreatePageRecentPanel({
   editImages: EditImageFile[];
   selectedRecent: ChatRecentGeneration | null;
   selectedRecentId: string | null;
-  timeZone: string;
   copy: (en: string, zh: string) => string;
   isConversationMode: (mode: ActiveMode) => boolean;
   onRecentClick: (generation: ChatRecentGeneration) => void;
@@ -154,7 +151,6 @@ export function CreatePageRecentPanel({
           generation={selectedRecent as LightboxGeneration}
           imageUrl={selectedRecent.imageUrl}
           open={selectedRecentId !== null}
-          timeZone={timeZone}
           onClose={onClosePreview}
           onDelete={
             selectedRecent.canDelete === false ? undefined : onDeleteRecent

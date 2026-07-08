@@ -3,8 +3,6 @@ import {
   markAnnouncementIdsReadForUser,
 } from "@repo/shared/announcements";
 import { getServerSession } from "@repo/shared/auth/server";
-import { formatDateInTimeZone } from "@repo/shared/time-zone";
-import { getAppTimeZone } from "@repo/shared/time-zone/server";
 import { Badge } from "@repo/ui/components/badge";
 import {
   Card,
@@ -16,6 +14,7 @@ import { cn } from "@repo/ui/utils";
 import { CheckCircle2, Megaphone, Pin } from "lucide-react";
 import { redirect } from "next/navigation";
 import { getLocale } from "next-intl/server";
+import { LocalDateTime } from "@/components/local-date-time";
 
 function getSeverityMeta(severity: string) {
   switch (severity) {
@@ -48,30 +47,10 @@ function getSeverityMeta(severity: string) {
   }
 }
 
-function formatDateTime(
-  value: Date | string | null | undefined,
-  locale: string,
-  timeZone: string
-) {
-  return formatDateInTimeZone(
-    value,
-    locale,
-    {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    },
-    timeZone
-  );
-}
-
 export default async function DashboardAnnouncementsPage() {
-  const [session, locale, timeZone] = await Promise.all([
+  const [session, locale] = await Promise.all([
     getServerSession(),
     getLocale(),
-    getAppTimeZone(),
   ]);
 
   if (!session?.user) {
@@ -158,18 +137,32 @@ export default async function DashboardAnnouncementsPage() {
                     <CardTitle className="text-xl">{item.title}</CardTitle>
                     <p className="mt-1 text-xs text-muted-foreground">
                       {copy("Published", "发布于")}{" "}
-                      {formatDateTime(
-                        item.publishedAt ?? item.createdAt,
-                        locale,
-                        timeZone
-                      )}
-                      {item.expiresAt
-                        ? ` · ${copy("Expires", "过期于")} ${formatDateTime(
-                            item.expiresAt,
-                            locale,
-                            timeZone
-                          )}`
-                        : ""}
+                      <LocalDateTime
+                        value={item.publishedAt ?? item.createdAt}
+                        options={{
+                          year: "numeric",
+                          month: "2-digit",
+                          day: "2-digit",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        }}
+                      />
+                      {item.expiresAt ? (
+                        <>
+                          {" · "}
+                          {copy("Expires", "过期于")}{" "}
+                          <LocalDateTime
+                            value={item.expiresAt}
+                            options={{
+                              year: "numeric",
+                              month: "2-digit",
+                              day: "2-digit",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            }}
+                          />
+                        </>
+                      ) : null}
                     </p>
                   </div>
                 </CardHeader>

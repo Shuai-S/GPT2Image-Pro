@@ -12,15 +12,14 @@
  * - 交易历史
  */
 
+import { Button } from "@repo/ui/components/button";
+import { Separator } from "@repo/ui/components/separator";
 import { Clock, Coins } from "lucide-react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { useAction } from "next-safe-action/hooks";
 import { useEffect } from "react";
-
 import { formatDateInTimeZone } from "../../time-zone";
-import { Button } from "@repo/ui/components/button";
-import { Separator } from "@repo/ui/components/separator";
 import { getMyActiveBatches, getMyCreditsBalance } from "../actions";
 import { formatCredits } from "../format";
 
@@ -29,28 +28,19 @@ import { TransactionHistory } from "./transaction-history";
 /**
  * 格式化日期
  */
-function formatDate(
-  date: Date | string | null,
-  locale: string,
-  timeZone: string
-): string {
+function formatDate(date: Date | string | null, locale: string): string {
   if (!date) return "Never";
-  return formatDateInTimeZone(
-    date,
-    locale,
-    {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    },
-    timeZone
-  );
+  return formatDateInTimeZone(date, locale, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
 }
 
 /**
  * 积分使用情况组件
  */
-export function CreditUsageSection({ timeZone }: { timeZone: string }) {
+export function CreditUsageSection() {
   const t = useTranslations("Settings.usage");
   const locale = useLocale();
 
@@ -191,7 +181,7 @@ export function CreditUsageSection({ timeZone }: { timeZone: string }) {
                 <p className="text-sm text-amber-700 dark:text-amber-400">
                   {t("expiringSoon.message", {
                     count: formatCredits(expiringBatch.remaining),
-                    date: formatDate(expiringBatch.expiresAt, locale, timeZone),
+                    date: formatDate(expiringBatch.expiresAt, locale),
                   })}
                 </p>
               </div>
@@ -203,7 +193,7 @@ export function CreditUsageSection({ timeZone }: { timeZone: string }) {
       <Separator />
 
       {/* 交易历史 */}
-      <TransactionHistory timeZone={timeZone} />
+      <TransactionHistory />
     </div>
   );
 }

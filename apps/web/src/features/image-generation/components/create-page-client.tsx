@@ -18,7 +18,7 @@ import { Textarea } from "@repo/ui/components/textarea";
 import { CircleHelp, ImagePlus, Loader2, Send } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useLocale } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import { getImageBatchCountLimit } from "@/features/image-generation/batch-limits";
 import {
@@ -57,20 +57,21 @@ import {
   type AspectRatioSizeDialogValue,
   ImageSizePresetButton,
 } from "./aspect-ratio-size-dialog";
+import { CreatePageAdvancedImageSettings } from "./create-page-advanced-settings";
 import {
   CreatePageAgentBlock,
   CreatePageAgentRoundCards,
   CreatePageThinkingBlock,
 } from "./create-page-agent-progress";
-import { CreatePageAdvancedImageSettings } from "./create-page-advanced-settings";
-import { CreatePageChatInput } from "./create-page-chat-input";
 import { CreatePageChatAgentHeader } from "./create-page-chat-agent-panel";
+import { CreatePageChatInput } from "./create-page-chat-input";
 import { CreatePageChatMessageList } from "./create-page-chat-message-list";
+import { CreatePageImagePanel } from "./create-page-image-panel";
 import {
   BACKGROUND_OPTIONS,
-  CHAT_ATTACHMENT_ACCEPT,
   CHAT_ACTIVE_AGENT_CONVERSATION_STORAGE_KEY,
   CHAT_ACTIVE_CONVERSATION_STORAGE_KEY,
+  CHAT_ATTACHMENT_ACCEPT,
   CHAT_CONVERSATION_LIMIT,
   CHAT_CONVERSATIONS_STORAGE_KEY,
   CHAT_IMAGE_MODEL_OPTIONS,
@@ -81,20 +82,23 @@ import {
   DEFAULT_MAX_EDIT_REQUEST_BYTES,
   DEFAULT_MAX_IMAGE_BYTES,
   DEFAULT_WATERFALL_TIER,
+  defaultDimensions,
   EDIT_MODEL_OPTIONS,
+  filterImageModelOptionsForGroup,
   IMAGE_ACCEPT,
+  isWithinForceWebPixelRange,
   OUTPUT_FORMAT_OPTIONS,
   QUALITY_OPTIONS,
+  shouldBypassImageOptimization,
   TEXT_IMAGE_COUNT_SLIDER_MAX,
   TEXT_MODEL_OPTIONS,
   WATERFALL_ASPECT_RATIOS,
   WATERFALL_CONCURRENCY_MULTIPLIER,
   WATERFALL_TIER_PRESETS,
-  defaultDimensions,
-  filterImageModelOptionsForGroup,
-  isWithinForceWebPixelRange,
-  shouldBypassImageOptimization,
 } from "./create-page-options";
+import { CreatePageRecentPanel } from "./create-page-recent-panel";
+import { CreatePageTextPanel } from "./create-page-text-panel";
+import { CreatePageTextSettingsPanel } from "./create-page-text-settings-panel";
 import type {
   ActiveMode,
   AgentRunEvent,
@@ -147,7 +151,9 @@ import {
   insertMentionToken,
   isImageFile,
   isReadableChatFile,
+  mergeChatVariant,
   parseCreateModeParam,
+  persistChatConversationSnapshot,
   readFileAsDataUrl,
   readImageApiJsonResponse,
   readStoredCreateActiveMode,
@@ -159,13 +165,7 @@ import {
   toChatHistory,
   urlToEditImageFile,
   yieldToBrowser,
-  mergeChatVariant,
-  persistChatConversationSnapshot,
 } from "./create-page-utils";
-import { CreatePageImagePanel } from "./create-page-image-panel";
-import { CreatePageRecentPanel } from "./create-page-recent-panel";
-import { CreatePageTextPanel } from "./create-page-text-panel";
-import { CreatePageTextSettingsPanel } from "./create-page-text-settings-panel";
 import { CreatePageVisualOutputPanel } from "./create-page-visual-output-panel";
 import { CreatePageWaterfallGrid } from "./create-page-waterfall-grid";
 import type { EditImageFile, MaskPoint } from "./image-edit-types";
@@ -184,7 +184,6 @@ export function CreatePageClient({
   moderationEnabled,
   imageBasePricing,
   forceWebPixelRange,
-  timeZone,
   videoPricing,
   operationFlags,
 }: CreatePageClientProps) {
@@ -5835,7 +5834,6 @@ export function CreatePageClient({
         editImages={editImages}
         selectedRecent={selectedRecent}
         selectedRecentId={selectedRecentId}
-        timeZone={timeZone}
         copy={copy}
         isConversationMode={isConversationMode}
         onRecentClick={handleRecentClick}

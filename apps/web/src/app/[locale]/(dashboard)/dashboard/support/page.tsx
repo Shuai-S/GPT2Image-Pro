@@ -3,8 +3,6 @@ import { ticket, user } from "@repo/database/schema";
 import { getUserRoleById } from "@repo/shared/auth/role-server";
 import { isAdminRole } from "@repo/shared/auth/roles";
 import { getServerSession } from "@repo/shared/auth/server";
-import { formatDateInTimeZone } from "@repo/shared/time-zone";
-import { getAppTimeZone } from "@repo/shared/time-zone/server";
 import { Badge } from "@repo/ui/components/badge";
 import { Button } from "@repo/ui/components/button";
 import {
@@ -18,6 +16,7 @@ import { Plus, Ticket } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
+import { LocalDateTime } from "@/components/local-date-time";
 
 const userUnreadTicketSql =
   sql<boolean>`${ticket.lastAdminActivityAt} > ${ticket.userLastSeenAt}`.mapWith(
@@ -41,10 +40,9 @@ export default async function SupportPage() {
     redirect(`/${locale}/sign-in`);
   }
 
-  const [t, role, timeZone] = await Promise.all([
+  const [t, role] = await Promise.all([
     getTranslations("Support"),
     getUserRoleById(session.user.id),
-    getAppTimeZone(),
   ]);
   const isAdmin = isAdminRole(role);
   const unreadSql = isAdmin ? adminUnreadTicketSql : userUnreadTicketSql;
@@ -198,16 +196,14 @@ export default async function SupportPage() {
                       </CardTitle>
                       <p className="text-sm text-muted-foreground">
                         {getCategoryLabel(tkt.category)} ·{" "}
-                        {formatDateInTimeZone(
-                          tkt.createdAt,
-                          locale,
-                          {
+                        <LocalDateTime
+                          value={tkt.createdAt}
+                          options={{
                             year: "numeric",
                             month: "2-digit",
                             day: "2-digit",
-                          },
-                          timeZone
-                        )}
+                          }}
+                        />
                         {isAdmin && tkt.user?.email
                           ? ` · ${tkt.user.name || t("unknownUser")} (${tkt.user.email})`
                           : ""}

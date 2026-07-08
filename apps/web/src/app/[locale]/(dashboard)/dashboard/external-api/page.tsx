@@ -1,7 +1,6 @@
 import { getServerSession } from "@repo/shared/auth/server";
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
 import { isOperationFeatureEnabled } from "@repo/shared/system-settings";
-import { getAppTimeZone } from "@repo/shared/time-zone/server";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
@@ -33,9 +32,8 @@ export default async function ExternalApiPage() {
     redirect(`/${locale}/dashboard`);
   }
 
-  const [t, timeZone, branding] = await Promise.all([
+  const [t, branding] = await Promise.all([
     getTranslations("Settings.externalApi"),
-    getAppTimeZone(),
     getRuntimeBrandingConfig(),
   ]);
 
@@ -47,7 +45,7 @@ export default async function ExternalApiPage() {
           {t("description", { brandName: branding.name })}
         </p>
       </div>
-      <ExternalApiKeySection timeZone={timeZone} brandName={branding.name} />
+      <ExternalApiKeySection brandName={branding.name} />
     </div>
   );
 }

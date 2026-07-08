@@ -5,7 +5,7 @@
  * 并按用户、模型、状态、提示词和创建日期筛选。
  *
  * 使用方：Dashboard 侧边栏的 Usage Records 入口。
- * 关键依赖：generation/user 表、Better Auth 当前用户、应用时区、HistoryClient。
+ * 关键依赖：generation/user 表、Better Auth 当前用户、客户端时区、HistoryClient。
  */
 import { db } from "@repo/database";
 import { generation, user as userTable } from "@repo/database/schema";
@@ -14,7 +14,6 @@ import { isSuperAdminRole } from "@repo/shared/auth/roles";
 import { getCurrentUser } from "@repo/shared/auth/server";
 import { formatCredits } from "@repo/shared/credits/format";
 import { buildSignedStorageImageUrl } from "@repo/shared/storage/signed-url";
-import { getAppTimeZone } from "@repo/shared/time-zone/server";
 import { Button } from "@repo/ui/components/button";
 import { Input } from "@repo/ui/components/input";
 import { Label } from "@repo/ui/components/label";
@@ -27,13 +26,14 @@ import {
   ilike,
   lte,
   or,
-  sql,
   type SQL,
+  sql,
 } from "drizzle-orm";
 import { RotateCcw, Search } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getLocale } from "next-intl/server";
+import { DateRangeTimestampFields } from "@/components/date-range-timestamp-fields";
 import { HistoryClient } from "@/features/image-generation/components/history-client";
 import { extractGenerationCreditDetails } from "@/features/image-generation/credit-calculation-details";
 import {
@@ -98,23 +98,18 @@ function parseStatus(value: string | undefined): StatusFilter {
 }
 
 /**
- * 解析日期筛选边界。
+ * 解析毫秒时间戳筛选边界。
  *
- * @param value YYYY-MM-DD 格式日期。
- * @param boundary 开始或结束边界。
- * @returns 对应自然日的 Date；非法时返回 null。
+ * @param value query 中的毫秒时间戳。
+ * @returns 对应 Date；非法时返回 null。
  * @sideEffects 无。
- * @failureMode 非法日期不参与过滤。
+ * @failureMode 非法时间戳不参与过滤，服务端不推断时区。
  */
-function parseDateBoundary(
-  value: string | undefined,
-  boundary: "start" | "end"
-) {
-  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const date =
-    boundary === "start"
-      ? new Date(`${value}T00:00:00`)
-      : new Date(`${value}T23:59:59.999`);
+function parseTimestampBoundary(value: string | undefined) {
+  if (!value) return null;
+  const timestamp = Number(value);
+  if (!Number.isFinite(timestamp)) return null;
+  const date = new Date(timestamp);
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
@@ -227,8 +222,8 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
   const where = buildUsageRecordsWhere(
     {
       ...filters,
-      startDate: parseDateBoundary(filters.start, "start"),
-      endDate: parseDateBoundary(filters.end, "end"),
+      startDate: parseTimestampBoundary(filters.start),
+      endDate: parseTimestampBoundary(filters.end),
     },
     { userId: currentUser.id, canViewAll }
   );
@@ -238,8 +233,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
   const hasActiveFilters = filterQuery.length > 0;
   const resetHref = `/${locale}/dashboard/history`;
 
-  const [generations, totalResult, creditsResult, timeZone] =
-    await Promise.all([
+  const [generations, totalResult, creditsResult] = await Promise.all([
     db
       .select({
         id: generation.id,
@@ -271,14 +265,14 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
       .where(where),
     db
       .select({
-        total: sql<number>`coalesce(sum(${generation.creditsConsumed}), 0)`.mapWith(
-          Number
-        ),
+        total:
+          sql<number>`coalesce(sum(${generation.creditsConsumed}), 0)`.mapWith(
+            Number
+          ),
       })
       .from(generation)
       .leftJoin(userTable, eq(userTable.id, generation.userId))
       .where(where),
-    getAppTimeZone(),
   ]);
 
   const withUrls = generations.map((g) => ({
@@ -373,34 +367,26 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
               placeholder={copy("Prompt contains", "提示词包含")}
             />
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="usage-start">{copy("From", "开始日期")}</Label>
-            <Input
-              id="usage-start"
-              name="start"
-              type="date"
-              defaultValue={filters.start}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="usage-end">{copy("To", "结束日期")}</Label>
-            <Input
-              id="usage-end"
-              name="end"
-              type="date"
-              defaultValue={filters.end}
-            />
-          </div>
+          <DateRangeTimestampFields
+            fromName="start"
+            toName="end"
+            fromInputId="usage-start"
+            toInputId="usage-end"
+            fromLabel={copy("From", "开始日期")}
+            toLabel={copy("To", "结束日期")}
+            fromValue={filters.start}
+            toValue={filters.end}
+          />
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <div className="mr-auto text-sm text-muted-foreground">
             {copy(
-              `${totalResult[0]?.count ?? 0} records · ${
-                formatCredits(creditsResult[0]?.total)
-              } credits`,
-              `共 ${totalResult[0]?.count ?? 0} 条 · ${
-                formatCredits(creditsResult[0]?.total)
-              } 积分`
+              `${totalResult[0]?.count ?? 0} records · ${formatCredits(
+                creditsResult[0]?.total
+              )} credits`,
+              `共 ${totalResult[0]?.count ?? 0} 条 · ${formatCredits(
+                creditsResult[0]?.total
+              )} 积分`
             )}
           </div>
           <Button
@@ -426,7 +412,6 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
         totalCount={totalResult[0]?.count ?? 0}
         page={page}
         pageSize={PAGE_SIZE}
-        timeZone={timeZone}
         canViewAll={canViewAll}
         currentUserId={currentUser.id}
         filterQuery={filterQuery}

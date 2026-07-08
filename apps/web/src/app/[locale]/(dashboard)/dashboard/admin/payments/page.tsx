@@ -13,11 +13,6 @@ import type {
   EpayBusinessType,
   EpayOrderStatus,
 } from "@repo/shared/payment/epay";
-import {
-  formatDateInTimeZone,
-  parseDateInputInTimeZone,
-} from "@repo/shared/time-zone";
-import { getAppTimeZone } from "@repo/shared/time-zone/server";
 import { invokeOperation } from "@repo/shared/uol";
 import "@repo/shared/uol/operations";
 import { Badge } from "@repo/ui/components/badge";
@@ -44,12 +39,21 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getLocale } from "next-intl/server";
 import type * as React from "react";
+import { DateRangeTimestampFields } from "@/components/date-range-timestamp-fields";
+import { LocalDateTime } from "@/components/local-date-time";
 
 export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 25;
 const LEDGER_LIMIT = 40;
 const SUBSCRIPTION_LIMIT = 30;
+const DATE_TIME_OPTIONS = {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+} as const satisfies Intl.DateTimeFormatOptions;
 const LOCAL_ORDER_STATUSES = [
   "pending",
   "processing",
@@ -197,10 +201,9 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function AdminPaymentsPage({
   searchParams,
 }: AdminPaymentsPageProps) {
-  const [session, locale, timeZone, rawSearchParams] = await Promise.all([
+  const [session, locale, rawSearchParams] = await Promise.all([
     getServerSession(),
     getLocale(),
-    getAppTimeZone(),
     searchParams,
   ]);
 
@@ -213,7 +216,7 @@ export default async function AdminPaymentsPage({
     redirect(`/${locale}/dashboard`);
   }
 
-  const filters = normalizeFilters(rawSearchParams, timeZone);
+  const filters = normalizeFilters(rawSearchParams);
   const principal = { type: "user" as const, userId: session.user.id, role };
   const dashboard = await invokeOperation<AdminPaymentsDashboardResult>(
     "admin.payments.getDashboard",
@@ -267,22 +270,13 @@ export default async function AdminPaymentsPage({
         filters={filters}
         locale={locale}
         orders={localResult.orders}
-        timeZone={timeZone}
         total={localResult.total}
         totalPages={totalPages}
       />
 
-      <BillingLedgerTable
-        ledgerRows={ledgerRows}
-        locale={locale}
-        timeZone={timeZone}
-      />
+      <BillingLedgerTable ledgerRows={ledgerRows} locale={locale} />
 
-      <SubscriptionsTable
-        locale={locale}
-        subscriptionRows={subscriptionRows}
-        timeZone={timeZone}
-      />
+      <SubscriptionsTable locale={locale} subscriptionRows={subscriptionRows} />
     </div>
   );
 }
@@ -453,28 +447,17 @@ function PaymentFiltersForm({
               <option value="alipay">{copy(locale, "Alipay", "支付宝")}</option>
             </select>
           </label>
-          <label className="grid gap-1 text-sm">
-            <span className="text-xs font-medium text-muted-foreground">
-              {copy(locale, "From", "开始日期")}
-            </span>
-            <input
-              type="date"
-              name="from"
-              defaultValue={filters.fromInput}
-              className="h-9 rounded-md border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
-            />
-          </label>
-          <label className="grid gap-1 text-sm">
-            <span className="text-xs font-medium text-muted-foreground">
-              {copy(locale, "To", "结束日期")}
-            </span>
-            <input
-              type="date"
-              name="to"
-              defaultValue={filters.toInput}
-              className="h-9 rounded-md border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
-            />
-          </label>
+          <DateRangeTimestampFields
+            fromInputId="payment-from-date"
+            fromLabel={copy(locale, "From", "开始日期")}
+            fromName="from"
+            fromValue={filters.fromInput}
+            labelClassName="text-xs font-medium text-muted-foreground"
+            toInputId="payment-to-date"
+            toLabel={copy(locale, "To", "结束日期")}
+            toName="to"
+            toValue={filters.toInput}
+          />
           <Button type="submit" className="md:w-fit">
             {copy(locale, "Filter", "筛选")}
           </Button>
@@ -497,7 +480,6 @@ function LocalOrdersTable({
   totalPages,
   filters,
   locale,
-  timeZone,
 }: {
   orders: LocalOrderView[];
   total: number;
@@ -505,7 +487,6 @@ function LocalOrdersTable({
   totalPages: number;
   filters: PaymentFilters;
   locale: string;
-  timeZone: string;
 }) {
   return (
     <Card className="rounded-lg">
@@ -573,11 +554,11 @@ function LocalOrdersTable({
                   <tr key={order.outTradeNo} className="align-top">
                     <td className="px-3 py-3 text-muted-foreground">
                       <div>
-                        {formatDateTime(order.createdAt, locale, timeZone)}
+                        <FormatDateTime value={order.createdAt} />
                       </div>
                       <div className="mt-1 text-xs">
                         {copy(locale, "Updated", "更新")}{" "}
-                        {formatDateTime(order.updatedAt, locale, timeZone)}
+                        <FormatDateTime value={order.updatedAt} />
                       </div>
                     </td>
                     <td className="px-3 py-3">
@@ -663,11 +644,9 @@ function LocalOrdersTable({
 function BillingLedgerTable({
   ledgerRows,
   locale,
-  timeZone,
 }: {
   ledgerRows: BillingLedgerRow[];
   locale: string;
-  timeZone: string;
 }) {
   return (
     <Card className="rounded-lg">
@@ -720,7 +699,7 @@ function BillingLedgerTable({
                 {ledgerRows.map((row) => (
                   <tr key={row.id} className="align-top">
                     <td className="px-3 py-3 text-muted-foreground">
-                      {formatDateTime(row.createdAt, locale, timeZone)}
+                      <FormatDateTime value={row.createdAt} />
                     </td>
                     <td className="px-3 py-3">
                       <Badge variant="outline">
@@ -774,11 +753,9 @@ function BillingLedgerTable({
 function SubscriptionsTable({
   subscriptionRows,
   locale,
-  timeZone,
 }: {
   subscriptionRows: SubscriptionRow[];
   locale: string;
-  timeZone: string;
 }) {
   return (
     <Card className="rounded-lg">
@@ -830,7 +807,7 @@ function SubscriptionsTable({
                 {subscriptionRows.map((row) => (
                   <tr key={row.id} className="align-top">
                     <td className="px-3 py-3 text-muted-foreground">
-                      {formatDateTime(row.updatedAt, locale, timeZone)}
+                      <FormatDateTime value={row.updatedAt} />
                     </td>
                     <td className="px-3 py-3">
                       <div className="font-medium">
@@ -867,18 +844,10 @@ function SubscriptionsTable({
                     </td>
                     <td className="px-3 py-3 text-muted-foreground">
                       <div>
-                        {formatDateTime(
-                          row.currentPeriodStart,
-                          locale,
-                          timeZone
-                        ) || "-"}
+                        <FormatDateTime value={row.currentPeriodStart} />
                       </div>
                       <div className="mt-1">
-                        {formatDateTime(
-                          row.currentPeriodEnd,
-                          locale,
-                          timeZone
-                        ) || "-"}
+                        <FormatDateTime value={row.currentPeriodEnd} />
                       </div>
                     </td>
                   </tr>
@@ -1086,13 +1055,9 @@ function SubscriptionStatusBadge({
  * 归一化查询参数。
  *
  * @param params - URL searchParams。
- * @param timeZone - 应用时区，用于把日期输入转换为准确的 UTC 边界。
  * @returns 类型安全的筛选条件。
  */
-function normalizeFilters(
-  params: PaymentSearchParams,
-  timeZone: string
-): PaymentFilters {
+function normalizeFilters(params: PaymentSearchParams): PaymentFilters {
   const q = params.q?.trim() ?? "";
   const fromInput = params.from?.trim() ?? "";
   const toInput = params.to?.trim() ?? "";
@@ -1101,8 +1066,8 @@ function normalizeFilters(
     status: normalizeStatus(params.status),
     type: normalizeBusinessTypeFilter(params.type),
     provider: normalizeProvider(params.provider),
-    from: parseDateInput(fromInput, false, timeZone),
-    to: parseDateInput(toInput, true, timeZone),
+    from: parseTimestampInput(fromInput),
+    to: parseTimestampInput(toInput),
     fromInput,
     toInput,
     page: parsePositiveInteger(params.page, 1),
@@ -1159,15 +1124,17 @@ function parsePositiveInteger(value: string | undefined, fallback: number) {
 }
 
 /**
- * 解析日期输入。
+ * 解析毫秒时间戳筛选边界。
  *
- * @param value - yyyy-mm-dd 日期。
- * @param endOfDay - 是否取当天末尾。
- * @param timeZone - 应用时区。
+ * @param value - 客户端提交的毫秒时间戳。
  * @returns Date 或 null。
  */
-function parseDateInput(value: string, endOfDay: boolean, timeZone: string) {
-  return parseDateInputInTimeZone(value, { endOfDay, timeZone });
+function parseTimestampInput(value: string) {
+  if (!value) return null;
+  const timestamp = Number(value);
+  if (!Number.isFinite(timestamp)) return null;
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 /**
@@ -1261,29 +1228,19 @@ function buildPageHref(filters: PaymentFilters, page: number) {
 }
 
 /**
- * 格式化日期时间。
+ * 渲染浏览器本地时区日期时间。
  *
- * @param value - 日期值。
- * @param locale - 当前语言。
- * @param timeZone - 应用时区。
- * @returns 本地化日期时间字符串。
+ * @param props.value - 服务端查询得到的时间点。
+ * @returns 本地化日期时间节点。
  */
-function formatDateTime(
-  value: Date | string | number | null | undefined,
-  locale: string,
-  timeZone: string
-) {
-  return formatDateInTimeZone(
-    value,
-    locale,
-    {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    },
-    timeZone
+function FormatDateTime({
+  value,
+}: {
+  value: Date | string | number | null | undefined;
+}) {
+  const timestamp = value instanceof Date ? value.getTime() : value;
+  return (
+    <LocalDateTime fallback="-" options={DATE_TIME_OPTIONS} value={timestamp} />
   );
 }
 

@@ -10,7 +10,6 @@ import {
   getRuntimeOperationFeatureFlags,
   getRuntimeSettingNumber,
 } from "@repo/shared/system-settings";
-import { getAppTimeZone } from "@repo/shared/time-zone/server";
 import { redirect } from "next/navigation";
 import { getLocale } from "next-intl/server";
 import {
@@ -32,13 +31,12 @@ export default async function CreatePage() {
   const locale = await getLocale();
   if (!user) redirect(`/${locale}/sign-in`);
 
-  const [creditsData, recentGenerations, plan, userApiConfig, timeZone] =
+  const [creditsData, recentGenerations, plan, userApiConfig] =
     await Promise.all([
       getCreditsBalance(user.id),
       getUserRecentGenerations(user.id, 6),
       getUserPlan(user.id),
       getUserApiConfig(user.id),
-      getAppTimeZone(),
     ]);
   const [
     uploadLimits,
@@ -115,7 +113,6 @@ export default async function CreatePage() {
       moderationEnabled={moderationEnabled}
       imageBasePricing={imageBasePricing}
       forceWebPixelRange={forceWebPixelRange}
-      timeZone={timeZone}
       videoPricing={videoPricing}
       operationFlags={operationFlags}
     />

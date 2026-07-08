@@ -62,7 +62,6 @@ export interface GalleryClientProps {
   videoCount: number;
   activeTab: "final" | "agent-drafts" | "uploads" | "videos";
   page: number;
-  timeZone: string;
 }
 
 export function GalleryClient({
@@ -74,7 +73,6 @@ export function GalleryClient({
   videoCount,
   activeTab,
   page,
-  timeZone,
 }: GalleryClientProps) {
   const locale = useLocale();
   const isZh = locale === "zh";
@@ -395,7 +393,6 @@ export function GalleryClient({
                 creditsConsumed={item.creditsConsumed}
                 createdAt={item.createdAt}
                 status={item.status}
-                timeZone={timeZone}
                 selectable={selectMode}
                 selected={selectedIds.has(item.id)}
                 onSelect={selectMode ? handleSelect : undefined}
@@ -466,7 +463,6 @@ export function GalleryClient({
           generation={selected as LightboxGeneration}
           imageUrl={selected.imageUrl}
           open={selectedId !== null}
-          timeZone={timeZone}
           onClose={() => setSelectedId(null)}
           onDelete={
             selected.outputRole === "agent_draft" ||

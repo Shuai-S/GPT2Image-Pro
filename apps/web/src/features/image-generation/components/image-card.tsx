@@ -18,7 +18,6 @@ export interface ImageCardProps {
   createdAt: string;
   status: "pending" | "completed" | "failed";
   badge?: string;
-  timeZone?: string;
   onClick?: () => void;
   /** 是否处于多选模式 */
   selectable?: boolean;
@@ -28,22 +27,13 @@ export interface ImageCardProps {
   onSelect?: (id: string, event: React.MouseEvent) => void;
 }
 
-function formatCreatedDate(
-  iso: string,
-  locale: string,
-  timeZone?: string
-): string {
+function formatCreatedDate(iso: string, locale: string): string {
   try {
-    return formatDateInTimeZone(
-      iso,
-      locale,
-      {
-        month: "short",
-        day: "2-digit",
-        year: "numeric",
-      },
-      timeZone
-    );
+    return formatDateInTimeZone(iso, locale, {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    });
   } catch {
     return iso;
   }
@@ -57,7 +47,6 @@ export function ImageCard({
   status,
   createdAt,
   badge,
-  timeZone,
   onClick,
   selectable,
   selected,
@@ -150,7 +139,7 @@ export function ImageCard({
           </Badge>
           <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
             <Clock className="h-3 w-3" />
-            {formatCreatedDate(createdAt, locale, timeZone)}
+            {formatCreatedDate(createdAt, locale)}
           </span>
         </div>
       </div>

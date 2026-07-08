@@ -66,17 +66,12 @@ function formatCurrency(amount: number | string | undefined) {
   }).format(numericAmount);
 }
 
-function formatDate(date: Date | string, locale: string, timeZone: string) {
-  return formatDateInTimeZone(
-    date,
-    locale,
-    {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    },
-    timeZone
-  );
+function formatDate(date: Date | string, locale: string) {
+  return formatDateInTimeZone(date, locale, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 function getBillingAmount(tx: BillingTransaction) {
@@ -154,7 +149,7 @@ function getReceiptReference(tx: BillingTransaction) {
 /**
  * 账单设置组件
  */
-export function BillingSection({ timeZone }: { timeZone: string }) {
+export function BillingSection() {
   const t = useTranslations("Settings.billing");
   const locale = useLocale();
 
@@ -184,16 +179,11 @@ export function BillingSection({ timeZone }: { timeZone: string }) {
   }, [planResult.data?.currentPeriodEnd]);
 
   const formattedRenewalDate = renewalDate
-    ? formatDateInTimeZone(
-        renewalDate,
-        locale,
-        {
-          year: "numeric",
-          month: "short",
-          day: "numeric",
-        },
-        timeZone
-      )
+    ? formatDateInTimeZone(renewalDate, locale, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      })
     : null;
 
   const [priceDisplay, setPriceDisplay] = useState("-");
@@ -438,7 +428,7 @@ export function BillingSection({ timeZone }: { timeZone: string }) {
                   className="grid grid-cols-12 gap-4 px-4 py-3 text-sm transition-colors hover:bg-muted/30"
                 >
                   <div className="col-span-3 text-muted-foreground">
-                    {formatDate(tx.createdAt, locale, timeZone)}
+                    {formatDate(tx.createdAt, locale)}
                   </div>
                   <div className="col-span-4 min-w-0">
                     <div

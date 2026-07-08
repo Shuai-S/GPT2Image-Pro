@@ -78,19 +78,13 @@ type ExternalApiKeySummary = {
 function formatDate(
   value: Date | string | null,
   emptyLabel: string,
-  locale: string,
-  timeZone?: string
+  locale: string
 ) {
   if (!value) return emptyLabel;
-  return formatDateInTimeZone(
-    value,
-    locale,
-    {
-      dateStyle: "medium",
-      timeStyle: "short",
-    },
-    timeZone
-  );
+  return formatDateInTimeZone(value, locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 }
 
 function formatBillingMultiplier(value: number | null | undefined) {
@@ -118,14 +112,11 @@ function groupOptionLabel(group: ImageBackendGroupOption) {
 }
 
 interface ExternalApiKeySectionProps {
-  /** 用户偏好的显示时区。 */
-  timeZone?: string;
   /** 管理员在系统设置中配置的品牌名称。 */
   brandName: string;
 }
 
 export function ExternalApiKeySection({
-  timeZone,
   brandName,
 }: ExternalApiKeySectionProps) {
   const locale = useLocale();
@@ -562,7 +553,7 @@ export function ExternalApiKeySection({
                   </div>
                   <p className="mt-1 font-mono text-xs text-muted-foreground">
                     {key.keyPrefix}...{key.lastFour} · {t("lastUsed")}{" "}
-                    {formatDate(key.lastUsedAt, t("never"), locale, timeZone)}
+                    {formatDate(key.lastUsedAt, t("never"), locale)}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {t("quota.used")}: {formatCredits(key.creditsUsed)} ·{" "}

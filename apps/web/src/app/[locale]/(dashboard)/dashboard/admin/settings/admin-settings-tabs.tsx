@@ -21,7 +21,6 @@ import { useState } from "react";
 import { ImageBackendPoolAdminPanel } from "@/features/image-backend-pool";
 
 type AdminSettingsTabsProps = {
-  timeZone: string;
   // 是否允许管理系统设置（含 BETTER_AUTH_SECRET 等密钥）。仅超管为 true；
   // 普通 admin 仅能管理生图后端池，不应看到/进入系统设置 tab（见审计 S-C1）。
   canManageSystemSettings: boolean;
@@ -30,7 +29,6 @@ type AdminSettingsTabsProps = {
 type AdminSettingsTab = "system" | "pricing" | "image-backends";
 
 export function AdminSettingsTabs({
-  timeZone,
   canManageSystemSettings,
 }: AdminSettingsTabsProps) {
   const defaultTab: AdminSettingsTab = canManageSystemSettings
@@ -103,7 +101,7 @@ export function AdminSettingsTabs({
       ) : null}
       <TabsContent value="image-backends" className="mt-6">
         {mountedTabs.has("image-backends") ? (
-          <ImageBackendPoolAdminPanel timeZone={timeZone} />
+          <ImageBackendPoolAdminPanel />
         ) : null}
       </TabsContent>
     </Tabs>

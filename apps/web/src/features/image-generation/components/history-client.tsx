@@ -4,7 +4,7 @@
  * 职责：渲染图像生成使用记录表格、分页与大图详情入口。
  *
  * 使用方：dashboard/history 页面服务端组件。
- * 关键依赖：ImageLightbox、存储缩略图 URL、应用时区格式化。
+ * 关键依赖：ImageLightbox、存储缩略图 URL、客户端时区格式化。
  */
 "use client";
 
@@ -70,7 +70,6 @@ export interface HistoryClientProps {
   totalCount: number;
   page: number;
   pageSize: number;
-  timeZone: string;
   canViewAll?: boolean;
   currentUserId: string;
   filterQuery?: string;
@@ -103,30 +102,24 @@ const STATUS_LABELS_ZH: Record<string, string> = {
 };
 
 /**
- * 按应用时区格式化记录创建时间。
+ * 按客户端时区格式化记录创建时间。
  *
  * @param iso ISO 时间字符串。
  * @param locale 当前语言。
- * @param timeZone 应用时区。
  * @returns 本地化日期时间；失败时回退原始字符串。
  * @sideEffects 无。
  * @failureMode 日期非法或 Intl 抛错时直接返回原值，避免列表崩溃。
  */
-function formatDate(iso: string, locale: string, timeZone: string): string {
+function formatDate(iso: string, locale: string): string {
   try {
-    return formatDateInTimeZone(
-      iso,
-      locale,
-      {
-        month: "short",
-        day: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZoneName: "short",
-      },
-      timeZone
-    );
+    return formatDateInTimeZone(iso, locale, {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZoneName: "short",
+    });
   } catch {
     return iso;
   }
@@ -175,7 +168,6 @@ function creditSummary(
  * @param props.totalCount 当前过滤条件下的总记录数。
  * @param props.page 当前页码。
  * @param props.pageSize 每页记录数。
- * @param props.timeZone 应用时区。
  * @param props.canViewAll 是否展示全站用户列。
  * @param props.currentUserId 当前登录用户 ID，仅用于保持调用契约；使用记录页不暴露删除入口。
  * @param props.filterQuery 分页链接需要保留的筛选 query。
@@ -189,7 +181,6 @@ export function HistoryClient({
   totalCount,
   page,
   pageSize,
-  timeZone,
   canViewAll = false,
   currentUserId: _currentUserId,
   filterQuery = "",
@@ -398,7 +389,7 @@ export function HistoryClient({
                   <div className="hidden items-center gap-1 text-xs text-muted-foreground md:flex">
                     <Clock className="h-3 w-3" />
                     <span className="truncate">
-                      {formatDate(item.createdAt, locale, timeZone)}
+                      {formatDate(item.createdAt, locale)}
                     </span>
                   </div>
                 </button>
@@ -479,7 +470,6 @@ export function HistoryClient({
           generation={selected as LightboxGeneration}
           imageUrl={selected.imageUrl}
           open={selectedId !== null}
-          timeZone={timeZone}
           onClose={() => setSelectedId(null)}
         />
       )}

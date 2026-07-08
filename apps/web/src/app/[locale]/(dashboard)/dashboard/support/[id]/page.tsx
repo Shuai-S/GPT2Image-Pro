@@ -11,8 +11,6 @@ import {
   ticketPriorities,
   ticketStatuses,
 } from "@repo/shared/support/schemas";
-import { formatDateInTimeZone } from "@repo/shared/time-zone";
-import { getAppTimeZone } from "@repo/shared/time-zone/server";
 import {
   Avatar,
   AvatarFallback,
@@ -31,6 +29,7 @@ import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getLocale } from "next-intl/server";
+import { LocalDateTime } from "@/components/local-date-time";
 
 interface TicketDetailPageProps {
   params: Promise<{
@@ -54,10 +53,7 @@ export default async function TicketDetailPage({
   if (!session?.user) {
     redirect(`/${locale}/sign-in`);
   }
-  const [role, timeZone] = await Promise.all([
-    getUserRoleById(session.user.id),
-    getAppTimeZone(),
-  ]);
+  const role = await getUserRoleById(session.user.id);
   const isAdmin = isAdminRole(role);
 
   // 获取工单信息
@@ -213,16 +209,14 @@ export default async function TicketDetailPage({
           </h2>
           <p className="text-muted-foreground">
             {getCategoryLabel(ticketData.category)} · 创建于{" "}
-            {formatDateInTimeZone(
-              ticketData.createdAt,
-              locale,
-              {
+            <LocalDateTime
+              value={ticketData.createdAt}
+              options={{
                 year: "numeric",
                 month: "2-digit",
                 day: "2-digit",
-              },
-              timeZone
-            )}
+              }}
+            />
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -315,18 +309,16 @@ export default async function TicketDetailPage({
                     </Badge>
                   )}
                   <span className="text-xs text-muted-foreground">
-                    {formatDateInTimeZone(
-                      msg.createdAt,
-                      locale,
-                      {
+                    <LocalDateTime
+                      value={msg.createdAt}
+                      options={{
                         year: "numeric",
                         month: "2-digit",
                         day: "2-digit",
                         hour: "2-digit",
                         minute: "2-digit",
-                      },
-                      timeZone
-                    )}
+                      }}
+                    />
                   </span>
                 </div>
                 <p className="text-sm whitespace-pre-wrap">{msg.content}</p>

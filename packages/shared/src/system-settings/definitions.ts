@@ -485,9 +485,9 @@ export const SYSTEM_SETTING_DEFINITIONS = [
   },
   {
     key: "APP_TIME_ZONE",
-    label: "显示时区",
+    label: "备用时区",
     description:
-      "后台和用户界面的时间展示、运营状态页日期筛选使用的 IANA 时区。数据库仍按 UTC 存储。",
+      "兼容旧入口的 IANA 时区配置。系统页面时间展示以客户端所在时区为准，本项不再固定页面展示。",
     category: "general",
     valueType: "select",
     options: [

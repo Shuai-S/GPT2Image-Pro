@@ -1373,10 +1373,7 @@ function ModelPricingRulesInput({
       </div>
 
       {config.rules.map((rule, index) => (
-        <section
-          key={`model-pricing-rule-${index}`}
-          className="space-y-4 rounded-md border p-3"
-        >
+        <section key={rule.id} className="space-y-4 rounded-md border p-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h4 className="text-sm font-semibold">
@@ -2211,9 +2208,6 @@ export function SystemSettingsPanel({
     () => getCategoryMap(settings, PRICING_CATEGORY_IDS),
     [settings]
   );
-  const configuredTimeZone =
-    settings.find((setting) => setting.key === "APP_TIME_ZONE")?.value || "UTC";
-
   const handleSave = () => {
     const payload: SettingUpdate[] = [];
     try {
@@ -2346,18 +2340,13 @@ export function SystemSettingsPanel({
               <span>
                 更新时间：
                 {modelPricingSetting.updatedAt
-                  ? formatDateInTimeZone(
-                      modelPricingSetting.updatedAt,
-                      "zh",
-                      {
-                        year: "numeric",
-                        month: "2-digit",
-                        day: "2-digit",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      },
-                      configuredTimeZone
-                    )
+                  ? formatDateInTimeZone(modelPricingSetting.updatedAt, "zh", {
+                      year: "numeric",
+                      month: "2-digit",
+                      day: "2-digit",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
                   : "未保存"}
               </span>
               <Button
@@ -2625,18 +2614,13 @@ export function SystemSettingsPanel({
                         {setting.updatedAt && (
                           <p className="text-xs text-muted-foreground">
                             最近更新:{" "}
-                            {formatDateInTimeZone(
-                              setting.updatedAt,
-                              "zh",
-                              {
-                                year: "numeric",
-                                month: "2-digit",
-                                day: "2-digit",
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              },
-                              configuredTimeZone
-                            )}
+                            {formatDateInTimeZone(setting.updatedAt, "zh", {
+                              year: "numeric",
+                              month: "2-digit",
+                              day: "2-digit",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
                           </p>
                         )}
                       </CardContent>

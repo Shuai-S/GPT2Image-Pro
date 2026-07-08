@@ -16,12 +16,6 @@ import { getUserRoleById } from "@repo/shared/auth/role-server";
 import { canViewImageBackendPool } from "@repo/shared/auth/roles";
 import { getServerSession } from "@repo/shared/auth/server";
 import { formatCredits } from "@repo/shared/credits/format";
-import {
-  formatDateInputInTimeZone,
-  formatDateInTimeZone,
-  parseDateInputInTimeZone,
-} from "@repo/shared/time-zone";
-import { getAppTimeZone } from "@repo/shared/time-zone/server";
 import { Badge } from "@repo/ui/components/badge";
 import { Button } from "@repo/ui/components/button";
 import {
@@ -54,6 +48,8 @@ import {
 import { unstable_cache } from "next/cache";
 import { redirect } from "next/navigation";
 import { getLocale } from "next-intl/server";
+import { DateRangeTimestampFields } from "@/components/date-range-timestamp-fields";
+import { LocalDateTime } from "@/components/local-date-time";
 import {
   AUTO_IMAGE_SIZE,
   IMAGE_1K_BASE_EDGE,
@@ -66,6 +62,10 @@ import { RefreshStatusButton } from "./refresh-status-button";
 export const dynamic = "force-dynamic";
 
 const ERROR_PAGE_SIZE = 50;
+const DATE_TIME_OPTIONS = {
+  dateStyle: "medium",
+  timeStyle: "medium",
+} as const satisfies Intl.DateTimeFormatOptions;
 
 type ErrorRange = "24h" | "7d" | "30d" | "90d" | "all" | "custom";
 
@@ -254,29 +254,24 @@ function parsePositiveInteger(value: string | undefined, fallback: number) {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 }
 
-function parseDateInput(
-  value: string | undefined,
-  timeZone: string,
-  endOfDay = false
-) {
-  return parseDateInputInTimeZone(value, { timeZone, endOfDay });
-}
-
-function formatDateInput(date: Date, timeZone: string) {
-  return formatDateInputInTimeZone(date, timeZone);
+function parseTimestampInput(value: string | undefined) {
+  if (!value) return null;
+  const timestamp = Number(value);
+  if (!Number.isFinite(timestamp)) return null;
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function parseHistoricalErrorFilters(
   searchParams: GlobalStatusPageProps["searchParams"] extends Promise<infer T>
     ? T
-    : never,
-  timeZone: string
+    : never
 ): HistoricalErrorFilters {
   const range = normalizeErrorRange(searchParams.errorRange);
   const now = new Date();
   const page = parsePositiveInteger(searchParams.errorPage, 1);
-  const customFrom = parseDateInput(searchParams.errorFrom, timeZone);
-  const customTo = parseDateInput(searchParams.errorTo, timeZone, true);
+  const customFrom = parseTimestampInput(searchParams.errorFrom);
+  const customTo = parseTimestampInput(searchParams.errorTo);
 
   if (range === "all") {
     return {
@@ -312,8 +307,8 @@ function parseHistoricalErrorFilters(
 
   return {
     range,
-    fromInput: formatDateInput(fromDate, timeZone),
-    toInput: formatDateInput(now, timeZone),
+    fromInput: String(fromDate.getTime()),
+    toInput: String(now.getTime()),
     fromDate,
     toDate: null,
     page,
@@ -329,16 +324,20 @@ function buildHistoricalErrorWhere(filters: HistoricalErrorFilters) {
   return and(...conditions);
 }
 
-function formatDateTime(value: Date | null, locale: string, timeZone: string) {
-  if (!value) return copy(locale, "Not recorded", "未记录");
-  return formatDateInTimeZone(
-    value,
-    locale,
-    {
-      dateStyle: "medium",
-      timeStyle: "medium",
-    },
-    timeZone
+function FormatDateTime({
+  fallback = "",
+  value,
+}: {
+  fallback?: string;
+  value: Date | string | number | null;
+}) {
+  const timestamp = value instanceof Date ? value.getTime() : value;
+  return (
+    <LocalDateTime
+      fallback={fallback}
+      options={DATE_TIME_OPTIONS}
+      value={timestamp}
+    />
   );
 }
 
@@ -1230,20 +1229,26 @@ function errorCategoryLabel(
   return copy(locale, "Platform", "平台");
 }
 
-function describeErrorFilter(
-  filters: HistoricalErrorFilters,
-  locale: string,
-  timeZone: string
-) {
+function describeErrorFilter(filters: HistoricalErrorFilters, locale: string) {
   if (filters.range === "all") return copy(locale, "All history", "全部历史");
   if (filters.range === "custom") {
-    const from = filters.fromDate
-      ? formatDateInput(filters.fromDate, timeZone)
-      : copy(locale, "Unbounded", "不限");
-    const to = filters.toDate
-      ? formatDateInput(filters.toDate, timeZone)
-      : copy(locale, "Unbounded", "不限");
-    return `${copy(locale, "Custom", "自定义")}：${from} - ${to}`;
+    const fallback = copy(locale, "Unbounded", "不限");
+    return (
+      <>
+        {copy(locale, "Custom", "自定义")}：
+        {filters.fromDate ? (
+          <FormatDateTime fallback={fallback} value={filters.fromDate} />
+        ) : (
+          fallback
+        )}{" "}
+        -{" "}
+        {filters.toDate ? (
+          <FormatDateTime fallback={fallback} value={filters.toDate} />
+        ) : (
+          fallback
+        )}
+      </>
+    );
   }
   if (filters.range === "24h")
     return copy(locale, "Last 24 hours", "最近24小时");
@@ -1256,12 +1261,10 @@ function HistoricalErrorsCard({
   errors,
   filters,
   locale,
-  timeZone,
 }: {
   errors: Awaited<ReturnType<typeof loadHistoricalGenerationErrors>>;
   filters: HistoricalErrorFilters;
   locale: string;
-  timeZone: string;
 }) {
   const totalPages = Math.max(1, Math.ceil(errors.total / errors.pageSize));
   const page = Math.min(errors.page, totalPages);
@@ -1312,28 +1315,18 @@ function HistoricalErrorsCard({
               <option value="custom">{copy(locale, "Custom", "自定义")}</option>
             </select>
           </label>
-          <label className="grid gap-1 text-sm">
-            <span className="text-xs font-medium text-muted-foreground">
-              {copy(locale, "From", "开始日期")}
-            </span>
-            <input
-              type="date"
-              name="errorFrom"
-              defaultValue={filters.fromInput}
-              className="h-9 rounded-md border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
-            />
-          </label>
-          <label className="grid gap-1 text-sm">
-            <span className="text-xs font-medium text-muted-foreground">
-              {copy(locale, "To", "结束日期")}
-            </span>
-            <input
-              type="date"
-              name="errorTo"
-              defaultValue={filters.toInput}
-              className="h-9 rounded-md border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
-            />
-          </label>
+          <DateRangeTimestampFields
+            fromInputId="historical-error-from-date"
+            fromLabel={copy(locale, "From", "开始日期")}
+            fromName="errorFrom"
+            fromValue={filters.fromInput}
+            inputClassName="h-9 rounded-md border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+            labelClassName="text-xs font-medium text-muted-foreground"
+            toInputId="historical-error-to-date"
+            toLabel={copy(locale, "To", "结束日期")}
+            toName="errorTo"
+            toValue={filters.toInput}
+          />
           <Button type="submit" className="md:w-fit">
             {copy(locale, "Filter", "筛选")}
           </Button>
@@ -1348,7 +1341,7 @@ function HistoricalErrorsCard({
 
         <div className="flex flex-col gap-2 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
           <div>
-            {describeErrorFilter(filters, locale, timeZone)} ·{" "}
+            {describeErrorFilter(filters, locale)} ·{" "}
             {copy(locale, "Total", "共")} {formatNumber(errors.total, locale)}{" "}
             {copy(locale, "records", "条")}
           </div>
@@ -1399,12 +1392,18 @@ function HistoricalErrorsCard({
                     <tr key={item.id} className="align-top">
                       <td className="px-3 py-3">
                         <div className="font-medium">
-                          {formatDateTime(item.createdAt, locale, timeZone)}
+                          <FormatDateTime
+                            fallback={copy(locale, "Not recorded", "未记录")}
+                            value={item.createdAt}
+                          />
                         </div>
                         {item.completedAt && (
                           <div className="mt-1 text-xs text-muted-foreground">
                             {copy(locale, "Completed", "结束")}{" "}
-                            {formatDateTime(item.completedAt, locale, timeZone)}
+                            <FormatDateTime
+                              fallback={copy(locale, "Not recorded", "未记录")}
+                              value={item.completedAt}
+                            />
                           </div>
                         )}
                         <div className="mt-1 break-all text-xs text-muted-foreground">
@@ -1908,11 +1907,8 @@ export default async function GlobalStatusPage({
     redirect(`/${locale}/dashboard`);
   }
 
-  const [params, timeZone] = await Promise.all([
-    searchParams,
-    getAppTimeZone(),
-  ]);
-  const errorFilters = parseHistoricalErrorFilters(params, timeZone);
+  const params = await searchParams;
+  const errorFilters = parseHistoricalErrorFilters(params);
   const [data, historicalErrors] = await Promise.all([
     getCachedStatusData(),
     loadHistoricalGenerationErrors(errorFilters),
@@ -1948,7 +1944,7 @@ export default async function GlobalStatusPage({
           />
           <Badge variant="outline" className="w-fit">
             {copy(locale, "Updated", "更新时间")}{" "}
-            {formatDateTime(new Date(data.now), locale, timeZone)}
+            <FormatDateTime value={new Date(data.now)} />
           </Badge>
         </div>
       </div>
@@ -2340,7 +2336,6 @@ export default async function GlobalStatusPage({
         errors={historicalErrors}
         filters={errorFilters}
         locale={locale}
-        timeZone={timeZone}
       />
     </div>
   );

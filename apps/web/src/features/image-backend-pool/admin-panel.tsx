@@ -105,8 +105,8 @@ import { ChatgptRegisterTab } from "./chatgpt-register-tab";
 import type { ImageApiHealthResult } from "./health-check";
 import { parseImportTokensText } from "./import-token-parser";
 import type {
-  ImageBackendApiProtocol,
   ImageBackendApiInterfaceMode,
+  ImageBackendApiProtocol,
   ImageBackendGroupBackendType,
   ImagesUpstreamMode,
 } from "./types";
@@ -670,35 +670,30 @@ function childGroupNames(groups: Group[], childGroupIds: string[]) {
     .join("、");
 }
 
-function formatDate(value: Date | string | null, timeZone?: string) {
+function formatDate(value: Date | string | null) {
   if (!value) return "从未使用";
-  return formatDateInTimeZone(
-    value,
-    "zh",
-    {
-      dateStyle: "medium",
-      timeStyle: "short",
-    },
-    timeZone
-  );
+  return formatDateInTimeZone(value, "zh", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 }
 
-function formatOptionalDate(value: Date | string | null, timeZone?: string) {
+function formatOptionalDate(value: Date | string | null) {
   if (!value) return "无";
-  return formatDate(value, timeZone);
+  return formatDate(value);
 }
 
 function isCoolingDown(value: Date | string | null) {
   return value ? new Date(value).getTime() > Date.now() : false;
 }
 
-function formatCooldown(value: Date | string | null, timeZone?: string) {
+function formatCooldown(value: Date | string | null) {
   if (!value) return "无";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "无";
 
   const remainingMs = date.getTime() - Date.now();
-  if (remainingMs <= 0) return `${formatDate(value, timeZone)} · 已到期`;
+  if (remainingMs <= 0) return `${formatDate(value)} · 已到期`;
 
   const totalMinutes = Math.max(1, Math.ceil(remainingMs / 60_000));
   const days = Math.floor(totalMinutes / (24 * 60));
@@ -709,7 +704,7 @@ function formatCooldown(value: Date | string | null, timeZone?: string) {
   if (hours) parts.push(`${hours}小时`);
   if (minutes || !parts.length) parts.push(`${minutes}分钟`);
 
-  return `${formatDate(value, timeZone)} · 剩余 ${parts.slice(0, 2).join("")}`;
+  return `${formatDate(value)} · 剩余 ${parts.slice(0, 2).join("")}`;
 }
 
 function formatCompactNumber(value: number) {
@@ -884,10 +879,8 @@ function sub2ApiPlanFilterLabel(value: Sub2ApiPlanFilter) {
 
 export function ImageBackendPoolAdminPanel({
   readOnly = false,
-  timeZone,
 }: {
   readOnly?: boolean;
-  timeZone?: string;
 }) {
   const [activeTab, setActiveTab] = useState<BackendPoolTab>(
     readOnly ? "accounts" : "groups"
@@ -3718,7 +3711,7 @@ export function ImageBackendPoolAdminPanel({
                         "无邮箱"}{" "}
                       · {groupNames(groups, accountGroupIds(account))} · 优先级{" "}
                       {account.priority} · 最大并发数 {account.concurrency} ·{" "}
-                      {formatDate(account.lastUsedAt, timeZone)}
+                      {formatDate(account.lastUsedAt)}
                     </p>
                     {account.metadata?.sourceAccountId && (
                       <p className="mt-1 text-xs text-muted-foreground">
@@ -3728,26 +3721,24 @@ export function ImageBackendPoolAdminPanel({
                     )}
                     <p className="mt-1 text-xs text-muted-foreground">
                       成功 {account.successCount} · 失败 {account.failCount} ·
-                      冷却至 {formatCooldown(account.cooldownUntil, timeZone)}
+                      冷却至 {formatCooldown(account.cooldownUntil)}
                     </p>
                     {account.implementationMode === "web" && (
                       <p className="mt-1 text-xs text-muted-foreground">
                         Web 套餐 {getWebAccountInfo(account)?.type || "未刷新"}{" "}
                         · 图片额度 {formatWebQuota(account)} · 恢复{" "}
                         {formatOptionalDate(
-                          getWebAccountInfo(account)?.restoreAt || null,
-                          timeZone
+                          getWebAccountInfo(account)?.restoreAt || null
                         )}{" "}
                         · 刷新{" "}
                         {formatOptionalDate(
-                          getWebAccountInfo(account)?.refreshedAt || null,
-                          timeZone
+                          getWebAccountInfo(account)?.refreshedAt || null
                         )}
                       </p>
                     )}
                     {account.lastError && (
                       <p className="mt-1 line-clamp-2 text-xs text-destructive">
-                        {formatOptionalDate(account.lastErrorAt, timeZone)} ·{" "}
+                        {formatOptionalDate(account.lastErrorAt)} ·{" "}
                         {account.lastError}
                       </p>
                     )}
@@ -4361,7 +4352,7 @@ export function ImageBackendPoolAdminPanel({
                       <p className="mt-1 text-sm text-muted-foreground">
                         {api.baseUrl} · {groupNames(groups, apiGroupIds(api))} ·{" "}
                         优先级 {api.priority} · 最大并发数 {api.concurrency} ·{" "}
-                        {formatDate(api.lastUsedAt, timeZone)}
+                        {formatDate(api.lastUsedAt)}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         可用模型：{formatModelList(api.enabledModels)}
@@ -4377,11 +4368,11 @@ export function ImageBackendPoolAdminPanel({
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         成功 {api.successCount} · 失败 {api.failCount} · 冷却至{" "}
-                        {formatCooldown(api.cooldownUntil, timeZone)}
+                        {formatCooldown(api.cooldownUntil)}
                       </p>
                       {api.lastError && (
                         <p className="mt-1 line-clamp-2 text-xs text-destructive">
-                          {formatOptionalDate(api.lastErrorAt, timeZone)} ·{" "}
+                          {formatOptionalDate(api.lastErrorAt)} ·{" "}
                           {api.lastError}
                         </p>
                       )}
@@ -4404,10 +4395,7 @@ export function ImageBackendPoolAdminPanel({
                               {apiHealthStatusLabel(healthCheck.result.status)}
                             </Badge>
                             <span className="text-muted-foreground">
-                              {formatOptionalDate(
-                                healthCheck.checkedAt,
-                                timeZone
-                              )}
+                              {formatOptionalDate(healthCheck.checkedAt)}
                             </span>
                             <span className="text-muted-foreground">
                               {healthCheck.result.latencyMs}ms
@@ -5601,10 +5589,7 @@ export function ImageBackendPoolAdminPanel({
                                   : "关闭"}{" "}
                                 · 间隔 {task.intervalMinutes || 720} 分钟 ·
                                 上次运行{" "}
-                                {formatOptionalDate(
-                                  task.lastRunAt || null,
-                                  timeZone
-                                )}
+                                {formatOptionalDate(task.lastRunAt || null)}
                               </p>
                               {task.lastResult && (
                                 <p className="text-xs text-muted-foreground">

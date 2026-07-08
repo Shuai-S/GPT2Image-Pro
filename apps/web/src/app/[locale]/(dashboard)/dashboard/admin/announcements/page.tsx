@@ -2,7 +2,6 @@ import { listAnnouncementsForAdmin } from "@repo/shared/announcements";
 import { getUserRoleById } from "@repo/shared/auth/role-server";
 import { canAccessAdminArea } from "@repo/shared/auth/roles";
 import { getServerSession } from "@repo/shared/auth/server";
-import { getAppTimeZone } from "@repo/shared/time-zone/server";
 import { redirect } from "next/navigation";
 import { getLocale } from "next-intl/server";
 import { AdminAnnouncementsManagement } from "@/features/announcements/admin-announcements-management";
@@ -21,10 +20,7 @@ export default async function DashboardAdminAnnouncementsPage() {
     redirect(`/${locale}/dashboard`);
   }
 
-  const [announcements, timeZone] = await Promise.all([
-    listAnnouncementsForAdmin(),
-    getAppTimeZone(),
-  ]);
+  const [announcements] = await Promise.all([listAnnouncementsForAdmin()]);
 
   return (
     <AdminAnnouncementsManagement
@@ -43,7 +39,6 @@ export default async function DashboardAdminAnnouncementsPage() {
         createdAt: item.createdAt.toISOString(),
         updatedAt: item.updatedAt.toISOString(),
       }))}
-      timeZone={timeZone}
     />
   );
 }

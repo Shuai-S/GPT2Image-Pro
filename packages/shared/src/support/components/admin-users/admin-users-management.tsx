@@ -1,48 +1,18 @@
 "use client";
 
 import {
-  Ban,
-  Coins,
-  CreditCard,
-  Eye,
-  KeyRound,
-  Loader2,
-  Lock,
-  MoreHorizontal,
-  RefreshCw,
-  Search,
-  Shield,
-  Unlock,
-  UserCheck,
-  UserPlus,
-  Users,
-  XCircle,
-} from "lucide-react";
-import Image from "next/image";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
-
-import { formatCredits } from "../../../credits/format";
-import { buildStorageThumbnailUrl } from "../../../storage/signed-url";
-import { formatDateInTimeZone } from "../../../time-zone";
-import {
-  adminAdjustCreditsAction,
-  adminGrantCreditsAction,
-  banUserAction,
-  createUserAction,
-  getAllUsersAction,
-  getUserDetailAction,
-  setExternalApiKeyStatusAction,
-  setUserCreditsStatusAction,
-  setUserPasswordAction,
-  setUserPlanAction,
-  updateUserProfileAction,
-  updateUserRoleAction,
-} from "../../actions/admin-users";
-import { Avatar, AvatarFallback, AvatarImage } from "@repo/ui/components/avatar";
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+} from "@repo/ui/components/avatar";
 import { Badge } from "@repo/ui/components/badge";
 import { Button } from "@repo/ui/components/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@repo/ui/components/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@repo/ui/components/card";
 import {
   Dialog,
   DialogContent,
@@ -82,10 +52,48 @@ import {
 } from "@repo/ui/components/tabs";
 import { Textarea } from "@repo/ui/components/textarea";
 import {
+  Ban,
+  Coins,
+  CreditCard,
+  Eye,
+  KeyRound,
+  Loader2,
+  Lock,
+  MoreHorizontal,
+  RefreshCw,
+  Search,
+  Shield,
+  Unlock,
+  UserCheck,
+  UserPlus,
+  Users,
+  XCircle,
+} from "lucide-react";
+import Image from "next/image";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
+import {
   APP_USER_ROLES,
-  getUserRoleLabel,
   type AppUserRole,
+  getUserRoleLabel,
 } from "../../../auth/roles";
+import { formatCredits } from "../../../credits/format";
+import { buildStorageThumbnailUrl } from "../../../storage/signed-url";
+import { formatDateInTimeZone } from "../../../time-zone";
+import {
+  adminAdjustCreditsAction,
+  adminGrantCreditsAction,
+  banUserAction,
+  createUserAction,
+  getAllUsersAction,
+  getUserDetailAction,
+  setExternalApiKeyStatusAction,
+  setUserCreditsStatusAction,
+  setUserPasswordAction,
+  setUserPlanAction,
+  updateUserProfileAction,
+  updateUserRoleAction,
+} from "../../actions/admin-users";
 
 type UserStatusFilter = "all" | "active" | "banned" | "unverified";
 type SubscriptionStatusFilter =
@@ -216,14 +224,17 @@ const PLAN_OPTIONS: Array<{ value: PlanFilter; label: string }> = [
 ];
 
 const ROLE_OPTIONS: Array<{ value: AppUserRole; label: string }> =
-  APP_USER_ROLES.map((role) => ({ value: role, label: getUserRoleLabel(role) }));
+  APP_USER_ROLES.map((role) => ({
+    value: role,
+    label: getUserRoleLabel(role),
+  }));
 
 const EDITABLE_PLAN_OPTIONS = PLAN_OPTIONS.filter(
   (item): item is { value: Exclude<PlanFilter, "all">; label: string } =>
     item.value !== "all"
 );
 
-function formatDateTime(value?: Date | string | null, timeZone?: string) {
+function formatDateTime(value?: Date | string | null) {
   if (!value) {
     return "-";
   }
@@ -237,7 +248,7 @@ function formatDateTime(value?: Date | string | null, timeZone?: string) {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-  }, timeZone);
+  });
 }
 
 function getInitials(name: string) {
@@ -318,10 +329,8 @@ function userRoleBadge(role: AppUserRole) {
 
 export function AdminUsersManagement({
   canManageRoles = false,
-  timeZone,
 }: {
   canManageRoles?: boolean;
-  timeZone?: string;
 }) {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [stats, setStats] = useState({
@@ -377,8 +386,9 @@ export function AdminUsersManagement({
   const [isSettingCreditsStatus, setIsSettingCreditsStatus] = useState(false);
 
   const [keyDialogOpen, setKeyDialogOpen] = useState(false);
-  const [selectedKey, setSelectedKey] =
-    useState<UserDetail["apiKeys"][number] | null>(null);
+  const [selectedKey, setSelectedKey] = useState<
+    UserDetail["apiKeys"][number] | null
+  >(null);
   const [targetKeyStatus, setTargetKeyStatus] = useState(false);
   const [keyReason, setKeyReason] = useState("");
   const [isSettingKeyStatus, setIsSettingKeyStatus] = useState(false);
@@ -410,7 +420,10 @@ export function AdminUsersManagement({
   const [passwordReason, setPasswordReason] = useState("");
   const [isSettingPassword, setIsSettingPassword] = useState(false);
 
-  const totalPages = Math.max(1, Math.ceil(pagination.total / pagination.pageSize));
+  const totalPages = Math.max(
+    1,
+    Math.ceil(pagination.total / pagination.pageSize)
+  );
   const startIndex =
     pagination.total === 0
       ? 0
@@ -420,31 +433,43 @@ export function AdminUsersManagement({
     pagination.total
   );
 
-  const loadUsers = useCallback(async (nextPage: number) => {
-    setIsLoading(true);
-    try {
-      const result = await getAllUsersAction({
-        query,
-        page: nextPage,
-        pageSize: pagination.pageSize,
-        status,
-        subscriptionStatus,
-        creditsStatus,
-        plan,
-      });
-      if (result?.data) {
-        setUsers(result.data.users as UserRow[]);
-        setStats(result.data.stats);
-        setPagination(result.data.pagination);
-      } else if (result?.serverError) {
-        toast.error(result.serverError);
+  const loadUsers = useCallback(
+    async (nextPage: number) => {
+      setIsLoading(true);
+      try {
+        const result = await getAllUsersAction({
+          query,
+          page: nextPage,
+          pageSize: pagination.pageSize,
+          status,
+          subscriptionStatus,
+          creditsStatus,
+          plan,
+        });
+        if (result?.data) {
+          setUsers(result.data.users as UserRow[]);
+          setStats(result.data.stats);
+          setPagination(result.data.pagination);
+        } else if (result?.serverError) {
+          toast.error(result.serverError);
+        }
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : "加载用户列表失败"
+        );
+      } finally {
+        setIsLoading(false);
       }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "加载用户列表失败");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [creditsStatus, pagination.pageSize, plan, query, status, subscriptionStatus]);
+    },
+    [
+      creditsStatus,
+      pagination.pageSize,
+      plan,
+      query,
+      status,
+      subscriptionStatus,
+    ]
+  );
 
   useEffect(() => {
     void loadUsers(1);
@@ -509,7 +534,10 @@ export function AdminUsersManagement({
     setBanOpen(true);
   };
 
-  const openCreditsDialog = (userRow: UserRow, nextStatus: "active" | "frozen") => {
+  const openCreditsDialog = (
+    userRow: UserRow,
+    nextStatus: "active" | "frozen"
+  ) => {
     setSelectedUser(userRow);
     setTargetCreditsStatus(nextStatus);
     setCreditsReason("");
@@ -983,7 +1011,9 @@ export function AdminUsersManagement({
             <CreditCard className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.activeSubscriptions}</div>
+            <div className="text-2xl font-bold">
+              {stats.activeSubscriptions}
+            </div>
           </CardContent>
         </Card>
         <Card>
@@ -999,7 +1029,10 @@ export function AdminUsersManagement({
 
       <Card>
         <CardContent className="space-y-4 pt-6">
-          <form onSubmit={handleSearch} className="flex flex-col gap-3 lg:flex-row">
+          <form
+            onSubmit={handleSearch}
+            className="flex flex-col gap-3 lg:flex-row"
+          >
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -1230,7 +1263,7 @@ export function AdminUsersManagement({
                           </div>
                         </td>
                         <td className="whitespace-nowrap px-4 py-3">
-                          {formatDateTime(item.createdAt, timeZone)}
+                          {formatDateTime(item.createdAt)}
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex justify-end gap-2">
@@ -1407,7 +1440,9 @@ export function AdminUsersManagement({
                   </Card>
                   <Card>
                     <CardContent className="p-4">
-                      <div className="text-xs text-muted-foreground">生成成功率</div>
+                      <div className="text-xs text-muted-foreground">
+                        生成成功率
+                      </div>
                       <div className="mt-1 text-lg font-semibold">
                         {detailGenerationRate}
                       </div>
@@ -1415,7 +1450,9 @@ export function AdminUsersManagement({
                   </Card>
                   <Card>
                     <CardContent className="p-4">
-                      <div className="text-xs text-muted-foreground">API Key</div>
+                      <div className="text-xs text-muted-foreground">
+                        API Key
+                      </div>
                       <div className="mt-1 text-lg font-semibold">
                         {detail.apiKeys.filter((item) => item.isActive).length}/
                         {detail.apiKeys.length}
@@ -1472,16 +1509,13 @@ export function AdminUsersManagement({
                         rows={[
                           ["用户 ID", detail.user.id],
                           ["邮箱", detail.user.email],
-                          ["邮箱验证", detail.user.emailVerified ? "已验证" : "未验证"],
+                          [
+                            "邮箱验证",
+                            detail.user.emailVerified ? "已验证" : "未验证",
+                          ],
                           ["角色", getUserRoleLabel(detail.user.role)],
-                          [
-                            "注册时间",
-                            formatDateTime(detail.user.createdAt, timeZone),
-                          ],
-                          [
-                            "更新时间",
-                            formatDateTime(detail.user.updatedAt, timeZone),
-                          ],
+                          ["注册时间", formatDateTime(detail.user.createdAt)],
+                          ["更新时间", formatDateTime(detail.user.updatedAt)],
                         ]}
                       />
                       <InfoBlock
@@ -1492,20 +1526,20 @@ export function AdminUsersManagement({
                           [
                             "周期开始",
                             formatDateTime(
-                              detail.subscription?.currentPeriodStart,
-                              timeZone
+                              detail.subscription?.currentPeriodStart
                             ),
                           ],
                           [
                             "周期结束",
                             formatDateTime(
-                              detail.subscription?.currentPeriodEnd,
-                              timeZone
+                              detail.subscription?.currentPeriodEnd
                             ),
                           ],
                           [
                             "到期取消",
-                            detail.subscription?.cancelAtPeriodEnd ? "是" : "否",
+                            detail.subscription?.cancelAtPeriodEnd
+                              ? "是"
+                              : "否",
                           ],
                         ]}
                       />
@@ -1513,239 +1547,266 @@ export function AdminUsersManagement({
                   </TabsContent>
 
                   <TabsContent value="credits" className="space-y-4">
-                  <InfoBlock
-                    title="积分账户"
-                    rows={[
-                      ["状态", detailBalance?.status ?? "未创建"],
-                      ["余额", formatCredits(detailBalance?.balance ?? 0)],
-                      ["累计获得", formatCredits(detailBalance?.totalEarned ?? 0)],
-                      ["累计消费", formatCredits(detailBalance?.totalSpent ?? 0)],
-                    ]}
-                  />
-                  <Panel title="有效积分批次">
-                    {detail.activeBatches.length === 0 ? (
-                      <EmptyText>暂无有效批次</EmptyText>
-                    ) : (
-                      <div className="space-y-2">
-                        {detail.activeBatches.map((batch) => (
-                          <div
-                            key={batch.id}
-                            className="rounded-md border p-3 text-sm"
-                          >
-                            <div className="flex items-center justify-between gap-3">
-                              <span className="font-medium">
-                                {formatCredits(batch.remaining)} /{" "}
-                                {formatCredits(batch.amount)}
-                              </span>
-                              <Badge variant="secondary">{batch.sourceType}</Badge>
-                            </div>
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              发放 {formatDateTime(batch.issuedAt, timeZone)} · 过期{" "}
-                              {formatDateTime(batch.expiresAt, timeZone)}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </Panel>
-                  <Panel title="最近积分流水">
-                    {detail.transactions.length === 0 ? (
-                      <EmptyText>暂无流水</EmptyText>
-                    ) : (
-                      <div className="space-y-2">
-                        {detail.transactions.map((tx) => (
-                          <div
-                            key={tx.id}
-                            className="flex items-start justify-between gap-3 rounded-md border p-3 text-sm"
-                          >
-                            <div>
-                              <div className="font-medium">{tx.type}</div>
-                              <div className="text-xs text-muted-foreground">
-                                {tx.description || "-"} ·{" "}
-                                {formatDateTime(tx.createdAt, timeZone)}
+                    <InfoBlock
+                      title="积分账户"
+                      rows={[
+                        ["状态", detailBalance?.status ?? "未创建"],
+                        ["余额", formatCredits(detailBalance?.balance ?? 0)],
+                        [
+                          "累计获得",
+                          formatCredits(detailBalance?.totalEarned ?? 0),
+                        ],
+                        [
+                          "累计消费",
+                          formatCredits(detailBalance?.totalSpent ?? 0),
+                        ],
+                      ]}
+                    />
+                    <Panel title="有效积分批次">
+                      {detail.activeBatches.length === 0 ? (
+                        <EmptyText>暂无有效批次</EmptyText>
+                      ) : (
+                        <div className="space-y-2">
+                          {detail.activeBatches.map((batch) => (
+                            <div
+                              key={batch.id}
+                              className="rounded-md border p-3 text-sm"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="font-medium">
+                                  {formatCredits(batch.remaining)} /{" "}
+                                  {formatCredits(batch.amount)}
+                                </span>
+                                <Badge variant="secondary">
+                                  {batch.sourceType}
+                                </Badge>
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                发放 {formatDateTime(batch.issuedAt)} · 过期{" "}
+                                {formatDateTime(batch.expiresAt)}
                               </div>
                             </div>
-                            <span className="font-medium">
-                              {formatCredits(tx.amount)}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </Panel>
-                </TabsContent>
+                          ))}
+                        </div>
+                      )}
+                    </Panel>
+                    <Panel title="最近积分流水">
+                      {detail.transactions.length === 0 ? (
+                        <EmptyText>暂无流水</EmptyText>
+                      ) : (
+                        <div className="space-y-2">
+                          {detail.transactions.map((tx) => (
+                            <div
+                              key={tx.id}
+                              className="flex items-start justify-between gap-3 rounded-md border p-3 text-sm"
+                            >
+                              <div>
+                                <div className="font-medium">{tx.type}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {tx.description || "-"} ·{" "}
+                                  {formatDateTime(tx.createdAt)}
+                                </div>
+                              </div>
+                              <span className="font-medium">
+                                {formatCredits(tx.amount)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </Panel>
+                  </TabsContent>
 
                   <TabsContent value="generations" className="space-y-4">
                     <div className="grid gap-3 md:grid-cols-4">
-                      <Metric label="总生成" value={detail.generationSummary.total} />
                       <Metric
-                      label="成功"
-                      value={detail.generationSummary.completed}
-                    />
-                    <Metric label="失败" value={detail.generationSummary.failed} />
-                    <Metric
-                      label="消耗积分"
-                      value={formatCredits(detail.generationSummary.creditsConsumed)}
-                    />
-                  </div>
-                  <Panel title="最近生图记录">
-                    {detail.generations.length === 0 ? (
-                      <EmptyText>暂无生图记录</EmptyText>
-                    ) : (
-                      <div className="scrollbar-ui max-h-[55vh] space-y-3 overflow-y-scroll pr-2">
-                        {detail.generations.map((item) => (
-                          <div
-                            key={item.id}
-                            className="grid gap-3 rounded-md border bg-background p-3 text-sm md:grid-cols-[84px_minmax(0,1fr)]"
-                          >
-                            <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-md bg-muted">
-                              {item.imageUrl ? (
-                                <Image
-                                  // 走 /w/ 路径段缩略图 + unoptimized 直连。
-                                  // 不能用 Next 图片优化器:它对带 ?sig= 的本地图会
-                                  // 返回 400("url parameter is not allowed",需配
-                                  // images.localPatterns);且优化器会拉 5~7MB 原图来
-                                  // 生成 80px 缩略图。改直连 /w160/ 小 webp。
-                                  src={
-                                    buildStorageThumbnailUrl(item.imageUrl, 160) ??
-                                    item.imageUrl
-                                  }
-                                  alt={item.prompt}
-                                  width={80}
-                                  height={80}
-                                  sizes="80px"
-                                  className="h-full w-full object-cover"
-                                  unoptimized
-                                />
-                              ) : item.status === "failed" ? (
-                                <XCircle className="h-5 w-5 text-destructive" />
-                              ) : (
-                                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                              )}
-                            </div>
-                            <div className="min-w-0 space-y-1">
-                              <div className="flex flex-wrap items-center gap-2 text-xs">
-                                {generationStatusBadge(item.status)}
-                                <Badge
-                                  variant="secondary"
-                                  className="max-w-[180px] truncate font-mono font-normal"
-                                  title={item.model}
-                                >
-                                  {item.model}
-                                </Badge>
-                                <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-muted-foreground">
-                                  {item.size}
-                                </span>
-                                <span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
-                                  {formatCredits(item.creditsConsumed)}
-                                </span>
+                        label="总生成"
+                        value={detail.generationSummary.total}
+                      />
+                      <Metric
+                        label="成功"
+                        value={detail.generationSummary.completed}
+                      />
+                      <Metric
+                        label="失败"
+                        value={detail.generationSummary.failed}
+                      />
+                      <Metric
+                        label="消耗积分"
+                        value={formatCredits(
+                          detail.generationSummary.creditsConsumed
+                        )}
+                      />
+                    </div>
+                    <Panel title="最近生图记录">
+                      {detail.generations.length === 0 ? (
+                        <EmptyText>暂无生图记录</EmptyText>
+                      ) : (
+                        <div className="scrollbar-ui max-h-[55vh] space-y-3 overflow-y-scroll pr-2">
+                          {detail.generations.map((item) => (
+                            <div
+                              key={item.id}
+                              className="grid gap-3 rounded-md border bg-background p-3 text-sm md:grid-cols-[84px_minmax(0,1fr)]"
+                            >
+                              <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-md bg-muted">
+                                {item.imageUrl ? (
+                                  <Image
+                                    // 走 /w/ 路径段缩略图 + unoptimized 直连。
+                                    // 不能用 Next 图片优化器:它对带 ?sig= 的本地图会
+                                    // 返回 400("url parameter is not allowed",需配
+                                    // images.localPatterns);且优化器会拉 5~7MB 原图来
+                                    // 生成 80px 缩略图。改直连 /w160/ 小 webp。
+                                    src={
+                                      buildStorageThumbnailUrl(
+                                        item.imageUrl,
+                                        160
+                                      ) ?? item.imageUrl
+                                    }
+                                    alt={item.prompt}
+                                    width={80}
+                                    height={80}
+                                    sizes="80px"
+                                    className="h-full w-full object-cover"
+                                    unoptimized
+                                  />
+                                ) : item.status === "failed" ? (
+                                  <XCircle className="h-5 w-5 text-destructive" />
+                                ) : (
+                                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                                )}
                               </div>
-                              <p
-                                className="line-clamp-2 break-words leading-snug"
-                                title={item.prompt}
-                              >
-                                {item.prompt}
-                              </p>
-                              {item.error ? (
+                              <div className="min-w-0 space-y-1">
+                                <div className="flex flex-wrap items-center gap-2 text-xs">
+                                  {generationStatusBadge(item.status)}
+                                  <Badge
+                                    variant="secondary"
+                                    className="max-w-[180px] truncate font-mono font-normal"
+                                    title={item.model}
+                                  >
+                                    {item.model}
+                                  </Badge>
+                                  <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-muted-foreground">
+                                    {item.size}
+                                  </span>
+                                  <span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
+                                    {formatCredits(item.creditsConsumed)}
+                                  </span>
+                                </div>
                                 <p
-                                  className="line-clamp-2 break-words text-xs leading-snug text-destructive"
-                                  title={item.error}
+                                  className="line-clamp-2 break-words leading-snug"
+                                  title={item.prompt}
                                 >
-                                  {item.error}
+                                  {item.prompt}
                                 </p>
-                              ) : null}
-                              <p className="text-xs text-muted-foreground">
-                                {formatDateTime(item.createdAt, timeZone)}
-                              </p>
+                                {item.error ? (
+                                  <p
+                                    className="line-clamp-2 break-words text-xs leading-snug text-destructive"
+                                    title={item.error}
+                                  >
+                                    {item.error}
+                                  </p>
+                                ) : null}
+                                <p className="text-xs text-muted-foreground">
+                                  {formatDateTime(item.createdAt)}
+                                </p>
+                              </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </Panel>
-                </TabsContent>
+                          ))}
+                        </div>
+                      )}
+                    </Panel>
+                  </TabsContent>
 
                   <TabsContent value="api" className="space-y-4">
-                  <Panel title="外接 API Key">
-                    {detail.apiKeys.length === 0 ? (
-                      <EmptyText>暂无 API Key</EmptyText>
-                    ) : (
-                      <div className="space-y-2">
-                        {detail.apiKeys.map((key) => (
-                          <div
-                            key={key.id}
-                            className="flex flex-col gap-3 rounded-md border p-3 text-sm md:flex-row md:items-center md:justify-between"
-                          >
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2">
-                                <KeyRound className="h-4 w-4 text-muted-foreground" />
-                                <span className="font-medium">{key.name}</span>
-                                <Badge
-                                  variant="secondary"
-                                  className={
-                                    key.isActive
-                                      ? "bg-emerald-100 text-emerald-700"
-                                      : ""
-                                  }
-                                >
-                                  {key.isActive ? "启用" : "禁用"}
-                                </Badge>
-                              </div>
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                {key.keyPrefix}...{key.lastFour} · 最近使用{" "}
-                                {formatDateTime(key.lastUsedAt, timeZone)} · 创建{" "}
-                                {formatDateTime(key.createdAt, timeZone)}
-                              </div>
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                已用 {formatCredits(key.creditsUsed)} ·{" "}
-                                {key.creditLimit === null
-                                  ? "不限额"
-                                  : `剩余 ${formatCredits(
-                                      Math.max(
-                                        0,
-                                        key.creditLimit - key.creditsUsed
-                                      )
-                                    )} / ${formatCredits(key.creditLimit)}`}
-                              </div>
-                            </div>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => openKeyDialog(key, !key.isActive)}
+                    <Panel title="外接 API Key">
+                      {detail.apiKeys.length === 0 ? (
+                        <EmptyText>暂无 API Key</EmptyText>
+                      ) : (
+                        <div className="space-y-2">
+                          {detail.apiKeys.map((key) => (
+                            <div
+                              key={key.id}
+                              className="flex flex-col gap-3 rounded-md border p-3 text-sm md:flex-row md:items-center md:justify-between"
                             >
-                              {key.isActive ? "禁用" : "启用"}
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </Panel>
-                </TabsContent>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <KeyRound className="h-4 w-4 text-muted-foreground" />
+                                  <span className="font-medium">
+                                    {key.name}
+                                  </span>
+                                  <Badge
+                                    variant="secondary"
+                                    className={
+                                      key.isActive
+                                        ? "bg-emerald-100 text-emerald-700"
+                                        : ""
+                                    }
+                                  >
+                                    {key.isActive ? "启用" : "禁用"}
+                                  </Badge>
+                                </div>
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  {key.keyPrefix}...{key.lastFour} · 最近使用{" "}
+                                  {formatDateTime(key.lastUsedAt)} · 创建{" "}
+                                  {formatDateTime(key.createdAt)}
+                                </div>
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  已用 {formatCredits(key.creditsUsed)} ·{" "}
+                                  {key.creditLimit === null
+                                    ? "不限额"
+                                    : `剩余 ${formatCredits(
+                                        Math.max(
+                                          0,
+                                          key.creditLimit - key.creditsUsed
+                                        )
+                                      )} / ${formatCredits(key.creditLimit)}`}
+                                </div>
+                              </div>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  openKeyDialog(key, !key.isActive)
+                                }
+                              >
+                                {key.isActive ? "禁用" : "启用"}
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </Panel>
+                  </TabsContent>
 
                   <TabsContent value="audit" className="space-y-4">
-                  <Panel title="最近管理员操作">
-                    {detail.auditLogs.length === 0 ? (
-                      <EmptyText>暂无审计记录</EmptyText>
-                    ) : (
-                      <div className="space-y-2">
-                        {detail.auditLogs.map((log) => (
-                          <div key={log.id} className="rounded-md border p-3 text-sm">
-                            <div className="flex items-center justify-between gap-3">
-                              <span className="font-medium">{log.action}</span>
-                              <span className="text-xs text-muted-foreground">
-                                {formatDateTime(log.createdAt, timeZone)}
-                              </span>
+                    <Panel title="最近管理员操作">
+                      {detail.auditLogs.length === 0 ? (
+                        <EmptyText>暂无审计记录</EmptyText>
+                      ) : (
+                        <div className="space-y-2">
+                          {detail.auditLogs.map((log) => (
+                            <div
+                              key={log.id}
+                              className="rounded-md border p-3 text-sm"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="font-medium">
+                                  {log.action}
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                  {formatDateTime(log.createdAt)}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {log.reason || "未填写原因"} · 管理员{" "}
+                                {log.adminUserId || "-"}
+                              </p>
                             </div>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {log.reason || "未填写原因"} · 管理员{" "}
-                              {log.adminUserId || "-"}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </Panel>
-                </TabsContent>
+                          ))}
+                        </div>
+                      )}
+                    </Panel>
+                  </TabsContent>
                 </Tabs>
               </div>
             )}
@@ -1790,7 +1851,9 @@ export function AdminUsersManagement({
               取消
             </Button>
             <Button onClick={handleGrant} disabled={isGranting}>
-              {isGranting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {isGranting ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
               确认充值
             </Button>
           </DialogFooter>
@@ -1835,7 +1898,10 @@ export function AdminUsersManagement({
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setCreditAdjustOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setCreditAdjustOpen(false)}
+            >
               取消
             </Button>
             <Button onClick={handleCreditAdjust} disabled={isAdjustingCredits}>
@@ -1853,7 +1919,8 @@ export function AdminUsersManagement({
           <DialogHeader>
             <DialogTitle>修改用户套餐</DialogTitle>
             <DialogDescription>
-              目标用户：{selectedUser?.email ?? "-"}。只修改套餐权限，不发放套餐积分。
+              目标用户：{selectedUser?.email ?? "-"}
+              。只修改套餐权限，不发放套餐积分。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -1933,7 +2000,9 @@ export function AdminUsersManagement({
               取消
             </Button>
             <Button onClick={handleBan} disabled={isBanning}>
-              {isBanning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {isBanning ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
               {selectedUser?.banned ? "解除封禁" : "确认封禁"}
             </Button>
           </DialogFooter>
@@ -1944,10 +2013,13 @@ export function AdminUsersManagement({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {targetCreditsStatus === "frozen" ? "冻结积分账户" : "解冻积分账户"}
+              {targetCreditsStatus === "frozen"
+                ? "冻结积分账户"
+                : "解冻积分账户"}
             </DialogTitle>
             <DialogDescription>
-              目标用户：{selectedUser?.email ?? "-"}。冻结后用户不能继续消费或获得积分。
+              目标用户：{selectedUser?.email ?? "-"}
+              。冻结后用户不能继续消费或获得积分。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
@@ -1961,7 +2033,10 @@ export function AdminUsersManagement({
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setCreditsDialogOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setCreditsDialogOpen(false)}
+            >
               取消
             </Button>
             <Button
@@ -1980,7 +2055,9 @@ export function AdminUsersManagement({
       <Dialog open={keyDialogOpen} onOpenChange={setKeyDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{targetKeyStatus ? "启用 API Key" : "禁用 API Key"}</DialogTitle>
+            <DialogTitle>
+              {targetKeyStatus ? "启用 API Key" : "禁用 API Key"}
+            </DialogTitle>
             <DialogDescription>
               目标 Key：{selectedKey?.name ?? "-"}。不会展示或记录完整密钥。
             </DialogDescription>
@@ -2144,7 +2221,8 @@ export function AdminUsersManagement({
           <DialogHeader>
             <DialogTitle>编辑用户资料</DialogTitle>
             <DialogDescription>
-              修改 {selectedUser?.email ?? "用户"} 的用户名或绑定邮箱，会写入审计日志。
+              修改 {selectedUser?.email ?? "用户"}{" "}
+              的用户名或绑定邮箱，会写入审计日志。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -2196,7 +2274,8 @@ export function AdminUsersManagement({
           <DialogHeader>
             <DialogTitle>重设密码</DialogTitle>
             <DialogDescription>
-              为 {selectedUser?.email ?? "用户"} 设置新登录密码，会写入审计日志。
+              为 {selectedUser?.email ?? "用户"}{" "}
+              设置新登录密码，会写入审计日志。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -2284,5 +2363,9 @@ function Metric({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 function EmptyText({ children }: { children: React.ReactNode }) {
-  return <div className="py-6 text-center text-sm text-muted-foreground">{children}</div>;
+  return (
+    <div className="py-6 text-center text-sm text-muted-foreground">
+      {children}
+    </div>
+  );
 }

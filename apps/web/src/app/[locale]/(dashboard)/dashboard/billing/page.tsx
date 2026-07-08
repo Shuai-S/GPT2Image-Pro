@@ -1,7 +1,6 @@
 import { getServerSession } from "@repo/shared/auth/server";
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
 import { CreditUsageSection } from "@repo/shared/credits/components";
-import { getAppTimeZone } from "@repo/shared/time-zone/server";
 import {
   Tabs,
   TabsContent,
@@ -36,10 +35,9 @@ export default async function BillingPage() {
     redirect(`/${locale}/sign-in`);
   }
 
-  const [t, tTabs, timeZone] = await Promise.all([
+  const [t, tTabs] = await Promise.all([
     getTranslations("Settings.billing"),
     getTranslations("Settings.billing.tabs"),
-    getAppTimeZone(),
   ]);
 
   return (
@@ -59,10 +57,10 @@ export default async function BillingPage() {
           </TabsTrigger>
         </TabsList>
         <TabsContent value="billing" className="mt-0">
-          <BillingSection timeZone={timeZone} />
+          <BillingSection />
         </TabsContent>
         <TabsContent value="usage" className="mt-0">
-          <CreditUsageSection timeZone={timeZone} />
+          <CreditUsageSection />
         </TabsContent>
       </Tabs>
     </div>

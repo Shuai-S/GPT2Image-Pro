@@ -63,18 +63,14 @@ const TRANSACTION_TYPE_VARIANTS: Record<
 /**
  * 格式化日期时间
  */
-function formatDateTime(
-  date: Date | string,
-  locale: string,
-  timeZone: string
-): string {
+function formatDateTime(date: Date | string, locale: string): string {
   return formatDateInTimeZone(date, locale, {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-  }, timeZone);
+  });
 }
 
 /**
@@ -108,7 +104,7 @@ function getMonthlyCreditsFromMetadata(
 /**
  * 交易历史组件
  */
-export function TransactionHistory({ timeZone }: { timeZone: string }) {
+export function TransactionHistory() {
   const t = useTranslations("Settings.usage.transactions");
   const locale = useLocale();
   const [page, setPage] = useState(1);
@@ -261,7 +257,7 @@ export function TransactionHistory({ timeZone }: { timeZone: string }) {
                 >
                   {/* 日期 */}
                   <div className="col-span-3 text-muted-foreground">
-                    {formatDateTime(tx.createdAt, locale, timeZone)}
+                    {formatDateTime(tx.createdAt, locale)}
                   </div>
 
                   {/* 类型 */}

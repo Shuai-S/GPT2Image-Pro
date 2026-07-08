@@ -92,7 +92,7 @@ function toIsoDateTime(value: string) {
   return value ? new Date(value).toISOString() : null;
 }
 
-function formatDateTime(value?: string | null, timeZone?: string) {
+function formatDateTime(value?: string | null) {
   if (!value) {
     return "-";
   }
@@ -101,7 +101,6 @@ function formatDateTime(value?: string | null, timeZone?: string) {
     return "-";
   }
   return new Intl.DateTimeFormat("zh-CN", {
-    timeZone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -172,10 +171,8 @@ function formFromAnnouncement(
 
 export function AdminAnnouncementsManagement({
   initialAnnouncements,
-  timeZone,
 }: {
   initialAnnouncements: AdminAnnouncementItem[];
-  timeZone?: string;
 }) {
   const [announcements, setAnnouncements] = useState(initialAnnouncements);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -375,14 +372,10 @@ export function AdminAnnouncementsManagement({
                       </div>
                       <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
                         <span>
-                          发布时间：{formatDateTime(item.publishedAt, timeZone)}
+                          发布时间：{formatDateTime(item.publishedAt)}
                         </span>
-                        <span>
-                          过期时间：{formatDateTime(item.expiresAt, timeZone)}
-                        </span>
-                        <span>
-                          更新于：{formatDateTime(item.updatedAt, timeZone)}
-                        </span>
+                        <span>过期时间：{formatDateTime(item.expiresAt)}</span>
+                        <span>更新于：{formatDateTime(item.updatedAt)}</span>
                         <span>ID：{item.id.slice(0, 8)}</span>
                       </div>
                     </div>

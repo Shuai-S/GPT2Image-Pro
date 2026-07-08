@@ -5,7 +5,6 @@ import { getUserRoleById } from "@repo/shared/auth/role-server";
 import { formatCredits } from "@repo/shared/credits/format";
 import { logError } from "@repo/shared/logger";
 import { buildSignedStorageImageUrl } from "@repo/shared/storage/signed-url";
-import { getAppTimeZone } from "@repo/shared/time-zone/server";
 import { invokeOperation } from "@repo/shared/uol";
 import "@repo/shared/uol/operations/referral";
 import { getPlanCapabilitySnapshot } from "@repo/shared/subscription/services/plan-capabilities";
@@ -95,7 +94,6 @@ export default async function DashboardPage({
     balanceData,
     recentGenerations,
     totalGenerationsResult,
-    timeZone,
     imageBasePricing,
     userPlanInfo,
   ] = await Promise.all([
@@ -114,7 +112,6 @@ export default async function DashboardPage({
       .select({ count: count() })
       .from(generation)
       .where(eq(generation.userId, userId)),
-    getAppTimeZone(),
     getRuntimeImageBaseCreditPricing(),
     getUserPlan(userId),
   ]);
@@ -249,10 +246,7 @@ export default async function DashboardPage({
                 </Link>
               </Button>
             </div>
-            <RecentCreationsClient
-              initialGenerations={generationsWithUrls}
-              timeZone={timeZone}
-            />
+            <RecentCreationsClient initialGenerations={generationsWithUrls} />
           </div>
         )}
       </div>

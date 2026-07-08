@@ -2,7 +2,6 @@ import { db } from "@repo/database";
 import { generation, videoGeneration } from "@repo/database/schema";
 import { getCurrentUser } from "@repo/shared/auth/server";
 import { buildSignedStorageImageUrl } from "@repo/shared/storage/signed-url";
-import { getAppTimeZone } from "@repo/shared/time-zone/server";
 import { and, count, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { getLocale } from "next-intl/server";
@@ -198,7 +197,6 @@ export default async function GalleryPage({ searchParams }: GalleryPageProps) {
     uploadCountResult,
     videoRows,
     videoCountResult,
-    timeZone,
   ] = await Promise.all([
     isFinalTab
       ? db
@@ -239,7 +237,6 @@ export default async function GalleryPage({ searchParams }: GalleryPageProps) {
           .limit(limit)
       : Promise.resolve([] as Array<typeof videoGeneration.$inferSelect>),
     db.select({ count: count() }).from(videoGeneration).where(videoCondition),
-    getAppTimeZone(),
   ]);
 
   const allDraftItems = extractAgentDraftGenerations(draftParentRows);
@@ -330,7 +327,6 @@ export default async function GalleryPage({ searchParams }: GalleryPageProps) {
         videoCount={videoCount}
         activeTab={activeTab}
         page={page}
-        timeZone={timeZone}
       />
     </div>
   );
