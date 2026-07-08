@@ -101,18 +101,34 @@ const STATUS_LABELS_ZH: Record<string, string> = {
   pending: "处理中",
 };
 
+interface FormattedHistoryDate {
+  date: string;
+  time: string;
+  title: string;
+}
+
 /**
- * 按客户端时区格式化记录创建时间。
+ * 按客户端时区格式化记录创建时间，并拆分为日期与时间两行。
  *
  * @param iso ISO 时间字符串。
  * @param locale 当前语言。
- * @returns 本地化日期时间；失败时回退原始字符串。
+ * @returns 日期、时间和完整 title；失败时日期行回退原始字符串。
  * @sideEffects 无。
  * @failureMode 日期非法或 Intl 抛错时直接返回原值，避免列表崩溃。
  */
-function formatDate(iso: string, locale: string): string {
+function formatHistoryDate(iso: string, locale: string): FormattedHistoryDate {
   try {
-    return formatDateInTimeZone(iso, locale, {
+    const date = formatDateInTimeZone(iso, locale, {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    });
+    const time = formatDateInTimeZone(iso, locale, {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZoneName: "short",
+    });
+    const title = formatDateInTimeZone(iso, locale, {
       month: "short",
       day: "2-digit",
       year: "numeric",
@@ -120,8 +136,9 @@ function formatDate(iso: string, locale: string): string {
       minute: "2-digit",
       timeZoneName: "short",
     });
+    return { date, time, title };
   } catch {
-    return iso;
+    return { date: iso, time: "", title: iso };
   }
 }
 
@@ -285,6 +302,7 @@ export function HistoryClient({
         <ul className="divide-y divide-border">
           {items.map((item) => {
             const summary = creditSummary(item, copy);
+            const createdAt = formatHistoryDate(item.createdAt, locale);
             return (
               <li key={item.id}>
                 <button
@@ -386,10 +404,18 @@ export function HistoryClient({
                       {statusLabel(item.status)}
                     </Badge>
                   </div>
-                  <div className="hidden items-center gap-1 text-xs text-muted-foreground md:flex">
-                    <Clock className="h-3 w-3" />
-                    <span className="truncate">
-                      {formatDate(item.createdAt, locale)}
+                  <div
+                    className="hidden min-w-0 items-center gap-1.5 text-xs text-muted-foreground md:flex"
+                    title={createdAt.title}
+                  >
+                    <Clock className="h-3 w-3 shrink-0" />
+                    <span className="min-w-0 leading-tight">
+                      <span className="block truncate">{createdAt.date}</span>
+                      {createdAt.time && (
+                        <span className="block truncate text-[11px]">
+                          {createdAt.time}
+                        </span>
+                      )}
                     </span>
                   </div>
                 </button>
