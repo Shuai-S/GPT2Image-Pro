@@ -81,7 +81,11 @@ RUN groupadd --system --gid 1001 nodejs && \
 COPY --from=builder /app/apps/web/.next/standalone ./
 COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder /app/apps/web/public ./apps/web/public
+COPY scripts/docker-native-runtime-smoke.cjs ./docker-native-runtime-smoke.cjs
 COPY scripts/docker-web-entrypoint.cjs /usr/local/bin/gpt2image-web-entrypoint.cjs
+
+# 在目标架构的最终文件系统中实际加载原生 binding 与动态库；缺 trace 时构建立刻失败。
+RUN node ./docker-native-runtime-smoke.cjs && rm ./docker-native-runtime-smoke.cjs
 
 RUN mkdir -p /app/storage /app/.gpt2image /app/apps/web/.next/cache && \
     chown -R nextjs:nodejs /app/storage /app/.gpt2image /app/apps/web/.next

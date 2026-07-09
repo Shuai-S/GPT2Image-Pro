@@ -23,27 +23,31 @@ const nextConfig = {
   },
   // Enable standalone output for Docker deployment
   output: "standalone",
-  // Next 只 trace onnxruntime-node 的 .node 绑定,不 trace 它运行时 dlopen 的
+  // Next 只 trace onnxruntime-node 的部分 .node 绑定,不 trace 它运行时 dlopen 的
   // libonnxruntime.so.1(37MB)。standalone 缺它时不只 ISNet 抠图坏:凡 action
   // chunk 引到抠图模块的路由(dashboard/创作页),模块求值即抛错,该路由全部
   // server action 500(2026-06-11 事故:前端积分/套餐被静默回退成 0/免费版)。
   // 此处显式 trace 进 standalone,Docker 与裸机部署都不再需要手工补拷;
   // ISNet 模型同理显式声明,不依赖隐式 trace。版本号用通配,升级 onnxruntime
   // 后无需改这里。
-  // sharp 同理:Next 只 trace 它的 .node 绑定,不 trace @img/sharp-libvips-linux-x64
+  // sharp 同理:Next 只 trace 它的 .node 绑定,不稳定 trace @img/sharp-libvips-linux-*
   // 运行时 dlopen 的 libvips-cpp.so.*(约 18MB)。standalone 缺它时 sharp 加载即
   // 抛「Could not load the sharp module」,而存储路由 /api/storage 顶层 import sharp
   // → 整路由 500 → 所有图片下载/缩略图全挂(2026-06-22 事故:dependabot 升 sharp
   // 0.34→0.35 后,新版 libvips 1.3.1 的 .so 未被 trace,客户 image_url 下载 500、
-  // 拿不到图)。版本号用通配,升级 sharp 后无需改这里;同时显式带 .node 绑定。
+  // 拿不到图)。版本号与 CPU 架构分别用通配/显式项,同时覆盖发布的 amd64、arm64
+  // 及对应 .node 绑定；升级 sharp 后无需改版本号。
   outputFileTracingIncludes: {
     "/*": [
       "../../node_modules/.pnpm/onnxruntime-node@*/node_modules/onnxruntime-node/bin/napi-v6/linux/x64/**",
+      "../../node_modules/.pnpm/onnxruntime-node@*/node_modules/onnxruntime-node/bin/napi-v6/linux/arm64/**",
       "./models/isnet.onnx",
       "./models/realesr-general-x4v3.onnx",
       "./models/scunet-color-real-gan.onnx",
       "../../node_modules/.pnpm/@img+sharp-libvips-linux-x64@*/node_modules/@img/sharp-libvips-linux-x64/**",
       "../../node_modules/.pnpm/@img+sharp-linux-x64@*/node_modules/@img/sharp-linux-x64/**",
+      "../../node_modules/.pnpm/@img+sharp-libvips-linux-arm64@*/node_modules/@img/sharp-libvips-linux-arm64/**",
+      "../../node_modules/.pnpm/@img+sharp-linux-arm64@*/node_modules/@img/sharp-linux-arm64/**",
     ],
   },
   experimental: {
