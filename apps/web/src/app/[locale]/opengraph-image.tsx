@@ -7,7 +7,6 @@ import { siteConfig } from "@repo/shared/config";
 /**
  * Open Graph 图片配置
  */
-export const runtime = "edge";
 export const alt = siteConfig.name;
 export const size = OG_IMAGE_SIZE;
 export const contentType = "image/png";

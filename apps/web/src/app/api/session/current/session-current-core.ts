@@ -58,7 +58,7 @@ export function toCurrentSessionUser(
 /**
  * 会话失效时需要清除的 better-auth cookie 基础名集合。
  *
- * 同名集合在 middleware.ts 中也有重复（session_token 部分），库升级改名会静默失效；
+ * 同名集合在 proxy.ts 中也有重复（session_token 部分），库升级改名会静默失效；
  * 集中到常量便于审计与同步。带分片后缀的 session_data cookie 通过 isAuthCookieName 的
  * 前缀匹配覆盖。
  */

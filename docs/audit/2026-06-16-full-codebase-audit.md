@@ -70,7 +70,7 @@
 | 验证后严重程度 | 标题 | 文件 | 描述 | 建议 |
 |---------------|------|------|------|------|
 | Medium | 全局 disableCSRFCheck 移除所有 Better Auth 会话端点的 CSRF 保护 | `packages/shared/src/auth/index.ts` L185-204 | Better Auth 配置设置 `advanced: { disableCSRFCheck: true }` 全局禁用 Origin 校验。经验证，SameSite=Lax 显式设置会阻止跨站 POST Cookie 发送，且 Better Auth 要求 Content-Type:application/json，标准 HTML 表单无法发送此类型。实际可利用窗口有限。 | 仅对密码重置端点单独禁用 Origin 校验，而非全局禁用。或设置 `cookieOptions: { sameSite: 'strict' }`。 |
-| Medium | 注册验证 OTP 端点在中间件层无 per-IP 限流 | `apps/web/src/rate-limit-routing.ts` L13 | middleware.ts 中 `/api/auth/*` 早期返回绕过了限流检查块。攻击者可从单一 IP 对大量不同邮箱触发 OTP 邮件发送。 | 将 `/api/auth/*` 早期返回移至限流检查之后，或在注册验证路由内部应用限流。 |
+| Medium | 注册验证 OTP 端点在中间件层无 per-IP 限流 | `apps/web/src/rate-limit-routing.ts` L13 | proxy.ts 中 `/api/auth/*` 早期返回绕过了限流检查块。攻击者可从单一 IP 对大量不同邮箱触发 OTP 邮件发送。 | 将 `/api/auth/*` 早期返回移至限流检查之后，或在注册验证路由内部应用限流。 |
 | Low | CSRF 防护依赖的 SameSite=Lax 未在 Better Auth 配置中显式声明 | `packages/shared/src/auth/index.ts` L185-204 | 未来依赖升级可能改变默认 SameSite 属性，导致唯一剩余的 CSRF 防御静默消失。 | 在 Better Auth 配置中添加显式 `cookieOptions: { sameSite: 'lax' }`。 |
 | Info | JSON-LD dangerouslySetInnerHTML 仅使用服务端静态数据 | `apps/web/src/components/seo/json-ld.tsx` L20-23 | 当前实现安全，标记仅供后续维护注意。 | 无需操作，添加代码注释确保未来调用者仅传入静态数据。 |
 

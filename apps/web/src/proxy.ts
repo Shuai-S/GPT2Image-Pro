@@ -36,7 +36,7 @@ function setPrivateNoStore(response: NextResponse) {
  *    - /dashboard/* 需要登录才能访问
  *    - 未登录用户将被重定向到 /sign-in
  */
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // WHY: 品牌图标和 manifest 是运行时配置路由，不能被 next-intl 当成页面路由改写。

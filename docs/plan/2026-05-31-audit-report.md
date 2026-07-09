@@ -112,7 +112,7 @@
 
 #### S-M1. getClientIp 首选可伪造的 cf-connecting-ip / x-real-ip，默认 Docker 部署下可绕过所有 per-IP 限流
 - Severity: medium
-- 位置：`packages/shared/src/rate-limit/index.ts:274-294`（getClientIp）；配合 `apps/web/src/middleware.ts:118-119,147-148`
+- 位置：`packages/shared/src/rate-limit/index.ts:274-294`（getClientIp）；配合 `apps/web/src/proxy.ts:118-119,147-148`
 - WHY：getClientIp 按 cf-connecting-ip → x-real-ip → x-forwarded-for 取限流标识，注释称前两者"较难伪造"——仅在前置有可信反代覆盖写这些头时成立。但 docker-compose.yml 直接暴露 web 容器端口，无反代服务，仓库无 nginx/.conf 或 strip 头逻辑。默认部署中三者均客户端可控。攻击者每次带随机 `cf-connecting-ip: <uuid>` 即获全新限流桶，彻底绕过 per-IP 限流（含 auth/strict 暴力破解防护）。
 - 修复建议：引入"可信代理跳数/可信头"配置：仅当存在已知可信前置代理时才信任 cf-connecting-ip/x-real-ip，否则回退平台对端 socket 地址；x-forwarded-for 按可信跳数从右往左取第一个非可信 IP。文档强制要求前置反代覆盖写并显式清空 cf-connecting-ip（`proxy_set_header CF-Connecting-IP "";`）。修正第275行注释。
 - 复核结论：维持 medium。仅影响 per-IP 限流/节流，不直接 RCE/数据泄露/资金损失；可被运维缓解，但常规 Nginx 配置（只 set X-Real-IP）仍被 cf-connecting-ip 绕过。
@@ -567,7 +567,7 @@
 - Severity: low
 - 位置：`apps/web/src/app/api/session/current/route.ts:63-94, 25-53`
 - WHY/修复：路由在 getSession 之上自查一次 user 表并返回 `{...session,user:currentUser}`，复制了用户字段投影（与 layout.tsx 投影、better-auth additionalFields 三处不一致，此处不返回 banned/bannedReason）；clearAuthCookies 硬编码 6 个 cookie 名 + 两前缀，库升级改名即静默失效。抽 toCurrentSessionUser(row) 共享投影（显式纳入 banned）；cookie 名集中到常量或改用 better-auth 登出 API。
-- 复核结论：维持 low（latent drift，无现存功能 Bug）。修正：同一硬编码 cookie 名也在 middleware.ts:171-172 重复。
+- 复核结论：维持 low（latent drift，无现存功能 Bug）。修正：同一硬编码 cookie 名也在 proxy.ts:171-172 重复。
 
 #### M-L11. adminAction/superAdminAction/imageBackendPoolViewerAction 重复"取角色+判定+塞 ctx"三段式，且各自硬抛 string Error
 - Severity: low
@@ -1214,7 +1214,7 @@
 - 位置：`packages/shared/src/rate-limit/index.ts:361-384`
 - WHY/修复：withRateLimit 在 result.success=false 时返回 429 不执行 handler，成功时执行并写 X-RateLimit-* 头。短路条件写反或被限流时仍调用 handler 则限流失效。可经 mock checkRateLimit + handler spy 测。
 - 建议测试：`'returns 429 and skips handler when rate limited'`（status 429 且 handlerSpy 0 次）；`'runs handler and sets rate-limit headers when allowed'`。
-- 复核结论：降 medium→low。修正：真正限流执行点是 middleware.ts（内联实现），withRateLimit 在活跃应用中零调用（辅助函数未接入请求强制路径），补测保护价值有限；更高价值是 middleware.ts 的限流分支（无 middleware 测试）。
+- 复核结论：降 medium→low。修正：真正限流执行点是 proxy.ts（内联实现），withRateLimit 在活跃应用中零调用（辅助函数未接入请求强制路径），补测保护价值有限；更高价值是 proxy.ts 的限流分支（无 middleware 测试）。
 
 #### C-L24. setSystemSettings 写入主入口（见 C-H13，high）
 

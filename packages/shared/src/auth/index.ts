@@ -15,6 +15,23 @@ function settingValue(name: string, fallback = "") {
   return process.env[name] || fallback;
 }
 
+/**
+ * 读取 Better Auth 签名密钥。
+ *
+ * WHY: better-auth 未显式传 secret 时会回退默认密钥，并在 Next build 的页面
+ * 数据收集阶段为每个导入 auth 的路由打印告警。这里统一注入测试/构建专用兜底，
+ * 消除噪声；生产仍必须由部署环境提供真实 BETTER_AUTH_SECRET。
+ */
+function getAuthSecret() {
+  return settingValue(
+    "BETTER_AUTH_SECRET",
+    process.env.NEXT_PHASE === "phase-production-build" ||
+      process.env.NODE_ENV !== "production"
+      ? "gpt2image-build-local-fallback-secret-20260710-only-no-prod"
+      : ""
+  );
+}
+
 function configuredSocialProviders() {
   const githubClientId = settingValue("GITHUB_CLIENT_ID");
   const githubClientSecret = settingValue("GITHUB_CLIENT_SECRET");
@@ -51,6 +68,14 @@ function configuredSocialProviders() {
  * - 用户自定义字段
  */
 export const auth = betterAuth({
+  /**
+   * 会话签名密钥。
+   *
+   * @sideEffects 生产环境若未配置 BETTER_AUTH_SECRET，会继续让 better-auth 抛出
+   * 配置错误；开发/测试使用固定兜底只为降低本地构建噪声，不能用于生产部署。
+   */
+  secret: getAuthSecret(),
+
   /**
    * 注册扩展插件
    */
