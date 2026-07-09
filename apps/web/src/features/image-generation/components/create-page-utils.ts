@@ -1058,6 +1058,81 @@ export function resolveConversationSwitchTarget(params: {
 }
 
 /**
+ * 根据套餐上限钳制批量计数相关状态。
+ *
+ * @param current 当前值。
+ * @param max 套餐允许的最大值。
+ * @returns 不超过 max 的值(不会低于 1,调用方保证 max >= 1)。
+ * @sideEffects 无。
+ * @failureMode 已在合法范围内的值原样返回。
+ */
+export function clampBatchCount(current: number, max: number) {
+  return Math.min(current, max);
+}
+
+/**
+ * 根据套餐上限钳制瀑布流 tier。
+ *
+ * @param current 当前 tier。
+ * @param max 套餐允许的最大 tier。
+ * @returns 不低于 1 且不超过 max 的 tier。
+ * @sideEffects 无。
+ * @failureMode max < 1 时返回 1,避免负值。
+ */
+export function clampWaterfallTier(current: number, max: number) {
+  return Math.max(1, Math.min(current, max));
+}
+
+/**
+ * 解析 URL 模式守卫的切换目标。
+ *
+ * 把"URL 请求了某模式但套餐不允许""当前模式已失效""URL 无请求""URL 请求与当前一致"
+ * 四种分支统一收敛为一条决策,供 effect 调用 switchActiveMode。
+ *
+ * @param params.requestedMode URL 解析出的模式(null 表示无请求)。
+ * @param params.activeMode 当前激活模式。
+ * @param params.isActiveModeAllowed 判断某模式是否被允许的纯函数。
+ * @param params.fallbackMode 兜底模式(null 表示无兜底)。
+ * @returns 切换决策:目标模式 + 是否需要弹出"模式不可用"提示。
+ * @sideEffects 无。
+ * @failureMode requestedMode 失效且 activeMode 也失效时回退 fallbackMode(null 表示不切换)。
+ */
+export function resolveModeGuardTarget(params: {
+  requestedMode: ActiveMode | null;
+  activeMode: ActiveMode;
+  isActiveModeAllowed: (mode: ActiveMode) => boolean;
+  fallbackMode: ActiveMode | null;
+}):
+  | {
+      target: ActiveMode | null;
+      shouldToast: false;
+    }
+  | {
+      target: ActiveMode | null;
+      shouldToast: true;
+    } {
+  const { requestedMode, activeMode, isActiveModeAllowed, fallbackMode } =
+    params;
+
+  if (requestedMode && !isActiveModeAllowed(requestedMode)) {
+    return {
+      target: isActiveModeAllowed(activeMode) ? activeMode : fallbackMode,
+      shouldToast: true,
+    };
+  }
+
+  if (!isActiveModeAllowed(activeMode)) {
+    return { target: fallbackMode, shouldToast: false };
+  }
+
+  if (!requestedMode) {
+    return { target: activeMode, shouldToast: false };
+  }
+
+  return { target: requestedMode, shouldToast: false };
+}
+
+/**
  * 解析跨页面参考图的目标模式字符串。
  *
  * @param value URL 或 sessionStorage 中的 mode 值。

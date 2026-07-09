@@ -130,6 +130,8 @@ import type {
 import {
   activeModeToConversationMode,
   chatActiveConversationStorageKey,
+  clampBatchCount,
+  clampWaterfallTier,
   cloneFile,
   compactChatConversations,
   createGenerationId,
@@ -156,6 +158,7 @@ import {
   readStoredCreateActiveMode,
   replaceChatVariantByGenerationId,
   resolveConversationSwitchTarget,
+  resolveModeGuardTarget,
   resolveReferenceTarget,
   buildReferenceKey,
   stripReferenceUrlParams,
@@ -618,13 +621,13 @@ export function CreatePageClient({
   }, [resetKeys]);
 
   useEffect(() => {
-    setBatchCount((value) => Math.min(value, textImageCountMax));
-    setLineBatchRepeatCount((value) => Math.min(value, textImageCountMax));
-    setEditBatchCount((value) => Math.min(value, batchCountMax));
-    // 瀑布流 tier 也钳制到当前套餐允许上限(套餐切换/管理员调整并发时收紧)
-    setWaterfallTier((value) =>
-      Math.max(1, Math.min(value, waterfallTierLimit))
+    setBatchCount((value) => clampBatchCount(value, textImageCountMax));
+    setLineBatchRepeatCount((value) =>
+      clampBatchCount(value, textImageCountMax)
     );
+    setEditBatchCount((value) => clampBatchCount(value, batchCountMax));
+    // 瀑布流 tier 也钳制到当前套餐允许上限(套餐切换/管理员调整并发时收紧)
+    setWaterfallTier((value) => clampWaterfallTier(value, waterfallTierLimit));
   }, [
     batchCountMax,
     setBatchCount,
@@ -1281,36 +1284,23 @@ export function CreatePageClient({
 
   useEffect(() => {
     const requestedMode = parseCreateModeParam(searchParams.get("mode"));
-
-    if (requestedMode && !isActiveModeAllowed(requestedMode)) {
+    const decision = resolveModeGuardTarget({
+      requestedMode,
+      activeMode,
+      isActiveModeAllowed,
+      fallbackMode,
+    });
+    if (decision.shouldToast) {
       toast.error(
         copy(
           "This mode is not enabled for your plan or has been disabled by the operator.",
           "当前套餐未开启该模式，或运营端已关闭该模式。"
         )
       );
-      if (fallbackMode) {
-        switchActiveMode(
-          isActiveModeAllowed(activeMode) ? activeMode : fallbackMode
-        );
-      }
-      return;
     }
-
-    if (!isActiveModeAllowed(activeMode)) {
-      if (fallbackMode) {
-        switchActiveMode(fallbackMode);
-      }
-      return;
+    if (decision.target) {
+      switchActiveMode(decision.target);
     }
-
-    if (!requestedMode) {
-      switchActiveMode(activeMode);
-      return;
-    }
-    if (requestedMode === activeMode) return;
-
-    switchActiveMode(requestedMode);
   }, [
     activeMode,
     copy,
