@@ -17,7 +17,7 @@ import {
 
 const DEFAULT_IMAGE_SIZE = "1024x1024";
 const GENERATION_STATUS_POLL_INTERVAL_MS = 1500;
-const GENERATION_STATUS_TIMEOUT_MS = 180_000;
+const GENERATION_STATUS_TIMEOUT_MS = 900_000;
 const GENERATION_STATUS_MISSING_GRACE_MS = 15_000;
 
 export {
@@ -65,12 +65,14 @@ export async function runCanvasGenerationPlan(params: {
         requestError instanceof Error
           ? requestError.message
           : copy("Generation failed", "生成失败");
-      return await Promise.all(
+      return await settleGenerationResults(
         generationIds.map((generationId) =>
           pollGenerationResult(generationId, initialError, copy, {
             waitForMissing: true,
           })
-        )
+        ),
+        generationIds,
+        initialError
       );
     }
   }
@@ -78,15 +80,27 @@ export async function runCanvasGenerationPlan(params: {
   const results: GenerationResult[] = [];
   for (const [index, prompt] of prompts.entries()) {
     const generationId = generationIds[index] || createCanvasGenerationId();
-    results.push(
-      await runSingleCanvasGeneration({
-        prompt,
-        node,
-        imageNodes,
-        generationId,
-        copy,
-      })
-    );
+    try {
+      results.push(
+        await runSingleCanvasGeneration({
+          prompt,
+          node,
+          imageNodes,
+          generationId,
+          copy,
+        })
+      );
+    } catch (error) {
+      results.push(
+        createFailedGenerationResult(
+          generationId,
+          getGenerationErrorMessage(
+            error,
+            copy("Generation failed", "生成失败")
+          )
+        )
+      );
+    }
   }
   return results;
 }
@@ -146,7 +160,6 @@ export function createCanvasOutputNodes(params: {
   const { sourceNode, prompts, results, copy, createNode } = params;
   const columns = Math.min(3, Math.max(1, results.length));
   return results.flatMap((result, index) => {
-    if (result.error) throw new Error(result.error);
     const imageUrl = firstImageUrl(result);
     if (!imageUrl) return [];
     const column = index % columns;
@@ -169,6 +182,94 @@ export function createCanvasOutputNodes(params: {
       ),
     ];
   });
+}
+
+/**
+ * 统计没有可显示图片的生成结果数量。
+ *
+ * @param results 生成结果列表。
+ * @returns 失败、超时或未返回图片的数量。
+ * @sideEffects 无。
+ */
+export function countFailedGenerationResults(results: GenerationResult[]) {
+  return results.filter((result) => !firstImageUrl(result)).length;
+}
+
+/**
+ * 提取批量生成中的第一条错误信息。
+ *
+ * @param results 生成结果列表。
+ * @returns 错误文本或 undefined。
+ * @sideEffects 无。
+ */
+export function firstGenerationResultError(results: GenerationResult[]) {
+  return results.find((result) => result.error)?.error;
+}
+
+/**
+ * 创建完整形状的失败生成结果。
+ *
+ * @param generationId 本次请求预分配的生成记录 ID。
+ * @param error 可展示给用户的错误文本。
+ * @returns 与 GENERATION_RESULT_SCHEMA 推导类型一致的失败结果。
+ * @sideEffects 无。
+ */
+export function createFailedGenerationResult(
+  generationId: string | undefined,
+  error: string
+): GenerationResult {
+  return {
+    error,
+    generationId,
+    generation_id: generationId,
+    status: "failed",
+    imageUrl: undefined,
+    imageBase64: undefined,
+    imageOutputs: undefined,
+    revisedPrompt: undefined,
+    model: undefined,
+    size: undefined,
+    creditsConsumed: undefined,
+  };
+}
+
+/**
+ * 将多个生成 Promise 容错收集为结果数组。
+ *
+ * WHY：后端批量生成可能部分成功、部分仍在重试。画布必须先展示已经
+ * 落库成功的图片，不能因为某一张超时而丢掉整批可见结果。
+ *
+ * @param promises 每个 generationId 对应的状态回查 Promise。
+ * @param generationIds 请求预分配 ID，用于失败项保留可定位信息。
+ * @param fallbackError 缺省错误文本。
+ * @returns 可直接用于创建输出节点的结果数组。
+ * @sideEffects 等待所有 Promise 完成。
+ */
+async function settleGenerationResults(
+  promises: Promise<GenerationResult>[],
+  generationIds: string[],
+  fallbackError: string
+) {
+  const settled = await Promise.allSettled(promises);
+  return settled.map((item, index): GenerationResult => {
+    if (item.status === "fulfilled") return item.value;
+    return createFailedGenerationResult(
+      generationIds[index],
+      getGenerationErrorMessage(item.reason, fallbackError)
+    );
+  });
+}
+
+/**
+ * 从未知异常中提取可展示的错误文本。
+ *
+ * @param error 捕获到的未知异常。
+ * @param fallback 无法识别时使用的文本。
+ * @returns 用户可读错误文本。
+ * @sideEffects 无。
+ */
+function getGenerationErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
 }
 
 /**
@@ -416,11 +517,13 @@ export async function pollGenerationResult(
   generationId: string,
   initialError: string | undefined,
   copy: (en: string, zh: string) => string,
-  options: { waitForMissing?: boolean } = {}
+  options: { timeoutMs?: number; waitForMissing?: boolean } = {}
 ): Promise<GenerationResult> {
-  const deadline = Date.now() + GENERATION_STATUS_TIMEOUT_MS;
+  const deadline =
+    Date.now() + (options.timeoutMs || GENERATION_STATUS_TIMEOUT_MS);
   const missingGraceDeadline = Date.now() + GENERATION_STATUS_MISSING_GRACE_MS;
   let lastError = initialError;
+  let foundStatusRecord = false;
 
   while (Date.now() < deadline) {
     await delay(GENERATION_STATUS_POLL_INTERVAL_MS);
@@ -440,6 +543,7 @@ export async function pollGenerationResult(
       continue;
     }
 
+    foundStatusRecord = true;
     const result = await parseGenerationResponse(response);
     const imageUrl = firstImageUrl(result);
     if (imageUrl) return result;
@@ -451,6 +555,15 @@ export async function pollGenerationResult(
     if (result.error) {
       lastError = result.error;
     }
+  }
+
+  if (foundStatusRecord) {
+    throw new Error(
+      copy(
+        "Generation is still running. Check the gallery later.",
+        "生成仍在进行中，请稍后到图库查看。"
+      )
+    );
   }
 
   throw new Error(
@@ -493,11 +606,13 @@ export async function resolveGenerationResults(
   generationIds: string[],
   copy: (en: string, zh: string) => string
 ) {
-  return await Promise.all(
+  return await settleGenerationResults(
     generationIds.map(async (generationId, index) => {
       const result = results[index];
       if (result) return await resolveGenerationResult(result, copy);
       return await pollGenerationResult(generationId, undefined, copy);
-    })
+    }),
+    generationIds,
+    copy("Generation failed", "生成失败")
   );
 }

@@ -65,6 +65,8 @@ import {
 } from "@/features/infinite-canvas/components/canvas-helpers";
 import {
   createCanvasOutputNodes,
+  countFailedGenerationResults,
+  firstGenerationResultError,
   runCanvasGenerationPlan,
 } from "@/features/infinite-canvas/components/canvas-generators";
 import {
@@ -785,8 +787,12 @@ export function InfiniteCanvasClient() {
         copy,
         createNode: createCanvasNode,
       });
+      const failedCount = countFailedGenerationResults(results);
       if (outputNodes.length === 0) {
-        throw new Error(copy("No image returned", "未返回图片"));
+        throw new Error(
+          firstGenerationResultError(results) ||
+            copy("No image returned", "未返回图片")
+        );
       }
       patchState((current) => {
         let next = current;
@@ -799,16 +805,32 @@ export function InfiniteCanvasClient() {
         }
         return next;
       });
+      const partialMessage =
+        failedCount > 0
+          ? copy(
+              `${outputNodes.length} image(s) generated, ${failedCount} still failed or timed out.`,
+              `已生成 ${outputNodes.length} 张，${failedCount} 张失败或等待超时。`
+            )
+          : undefined;
       patchState((current) =>
-        updateCanvasNode(current, node.id, { status: "idle", error: undefined })
+        updateCanvasNode(current, node.id, {
+          status: "idle",
+          error: partialMessage,
+        })
       );
       setSelectedIds(outputNodes.map((outputNode) => outputNode.id));
       setSelectedEdgeIds([]);
-      toast.success(
-        outputNodes.length > 1
-          ? copy("Images generated", "图片已批量生成")
-          : copy("Image generated", "图片已生成")
-      );
+      if (partialMessage) {
+        toast.warning(copy("Partial results generated", "已生成部分结果"), {
+          description: partialMessage,
+        });
+      } else {
+        toast.success(
+          outputNodes.length > 1
+            ? copy("Images generated", "图片已批量生成")
+            : copy("Image generated", "图片已生成")
+        );
+      }
     } catch (error) {
       const message =
         error instanceof Error
