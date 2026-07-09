@@ -2,6 +2,7 @@ import "server-only";
 
 import { db } from "@repo/database";
 import { generation } from "@repo/database/schema";
+import { logWarn } from "@repo/shared/logger";
 import { desc, inArray } from "drizzle-orm";
 import { revalidateTag, unstable_cache } from "next/cache";
 
@@ -24,6 +25,24 @@ export type GenerationSlaStats = {
 
 /** unstable_cache 的 tag,用于生成完成后 revalidateTag 失效首页 SLA 缓存。 */
 export const SLA_STATS_CACHE_TAG = "sla-stats";
+
+/**
+ * 构造无可用样本时的 SLA 快照。
+ *
+ * @returns 样本与错误计数均为零的独立对象。
+ * @sideEffects 无。
+ */
+function createEmptyGenerationSlaStats(): GenerationSlaStats {
+  return {
+    sampleSize: 0,
+    completed: 0,
+    failed: 0,
+    successRate: 1,
+    platformErrors: 0,
+    moderationErrors: 0,
+    userRequestErrors: 0,
+  };
+}
 
 /**
  * 实际扫描最近生成记录并聚合 SLA 指标的查询(无缓存)。
@@ -102,8 +121,21 @@ async function queryRecentGenerationSlaStats(
  * @sideEffects 命中缓存时不查 DB;未命中时执行全表扫描聚合查询。
  */
 export const getRecentGenerationSlaStats = unstable_cache(
-  async (limit = 1000): Promise<GenerationSlaStats> =>
-    queryRecentGenerationSlaStats(limit),
+  async (limit = 1000): Promise<GenerationSlaStats> => {
+    if (process.env.GPT2IMAGE_SKIP_RUNTIME_SETTINGS_DB === "1") {
+      return createEmptyGenerationSlaStats();
+    }
+
+    try {
+      return await queryRecentGenerationSlaStats(limit);
+    } catch (error) {
+      logWarn("SLA stats query unavailable; using an empty snapshot", {
+        source: "sla-stats",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return createEmptyGenerationSlaStats();
+    }
+  },
   ["sla-recent-stats"],
   { revalidate: 60, tags: [SLA_STATS_CACHE_TAG] }
 );

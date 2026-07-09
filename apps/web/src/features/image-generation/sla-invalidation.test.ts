@@ -21,9 +21,12 @@ const revalidateTagSpy = vi.hoisted(() =>
 );
 
 vi.mock("next/cache", () => ({
-  unstable_cache: <TArgs extends unknown[], TResult>(
-    fn: (...args: TArgs) => Promise<TResult>
-  ) => async (...args: TArgs): Promise<TResult> => fn(...args),
+  unstable_cache:
+    <TArgs extends unknown[], TResult>(
+      fn: (...args: TArgs) => Promise<TResult>
+    ) =>
+    async (...args: TArgs): Promise<TResult> =>
+      fn(...args),
   revalidateTag: revalidateTagSpy,
 }));
 
@@ -44,5 +47,29 @@ describe("invalidateSlaStatsCache (C-P0-1)", () => {
     });
     const { invalidateSlaStatsCache } = await import("./sla");
     expect(() => invalidateSlaStatsCache()).not.toThrow();
+  });
+
+  it("skips the SLA database query during database-free builds", async () => {
+    const previousSkipValue = process.env.GPT2IMAGE_SKIP_RUNTIME_SETTINGS_DB;
+    process.env.GPT2IMAGE_SKIP_RUNTIME_SETTINGS_DB = "1";
+
+    try {
+      const { getRecentGenerationSlaStats } = await import("./sla");
+      await expect(getRecentGenerationSlaStats(1000)).resolves.toEqual({
+        sampleSize: 0,
+        completed: 0,
+        failed: 0,
+        successRate: 1,
+        platformErrors: 0,
+        moderationErrors: 0,
+        userRequestErrors: 0,
+      });
+    } finally {
+      if (previousSkipValue === undefined) {
+        delete process.env.GPT2IMAGE_SKIP_RUNTIME_SETTINGS_DB;
+      } else {
+        process.env.GPT2IMAGE_SKIP_RUNTIME_SETTINGS_DB = previousSkipValue;
+      }
+    }
   });
 });
