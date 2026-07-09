@@ -11,6 +11,7 @@ import { db } from "@repo/database";
 import { epayOrder } from "@repo/database/schema";
 import { and, eq, lt, or } from "drizzle-orm";
 import { getBaseUrl } from "../config/payment";
+import { invalidateAdminPaymentsCache } from "./admin-payments-cache";
 import {
   getRuntimeSettingSelect,
   getRuntimeSettingString,
@@ -319,6 +320,9 @@ export async function saveEpayOrder(
   if (inserted.length === 0) {
     throw new Error("Payment order already exists");
   }
+
+  // 新订单会改变 admin/payments 聚合统计,失效对应缓存(内部已降级不抛错)。
+  invalidateAdminPaymentsCache();
 }
 
 export async function getEpayOrderMetadata(
@@ -351,6 +355,9 @@ export async function updateEpayOrderStatus(
       updatedAt: new Date(),
     })
     .where(eq(epayOrder.outTradeNo, outTradeNo));
+
+  // 状态变化会改变 admin/payments 聚合统计,失效对应缓存(内部已降级不抛错)。
+  invalidateAdminPaymentsCache();
 }
 
 export async function getEpayOrderStatus(
@@ -401,6 +408,10 @@ export async function claimEpayOrderForFulfillment(
     )
     .returning({ outTradeNo: epayOrder.outTradeNo });
 
+  // processing 领取同样改变状态分组统计,失效聚合缓存(内部已降级不抛错)。
+  if (claimed.length > 0) {
+    invalidateAdminPaymentsCache();
+  }
   return claimed.length > 0;
 }
 

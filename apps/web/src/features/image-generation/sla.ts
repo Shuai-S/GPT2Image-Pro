@@ -123,7 +123,8 @@ export const getRecentGenerationSlaStats = unstable_cache(
  */
 export function invalidateSlaStatsCache() {
   try {
-    revalidateTag(SLA_STATS_CACHE_TAG);
+    // Next 16 要求显式 profile:"max" 表示立即彻底失效(等价旧单参语义)。
+    revalidateTag(SLA_STATS_CACHE_TAG, "max");
   } catch (error) {
     // 缓存失效失败不阻断主路径;60s TTL 仍会自然刷新。
     console.warn("[sla] invalidateSlaStatsCache failed", error);

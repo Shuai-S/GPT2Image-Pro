@@ -17,7 +17,7 @@ vi.mock("drizzle-orm", () => ({
 }));
 
 const revalidateTagSpy = vi.hoisted(() =>
-  vi.fn<(tag: string) => void>()
+  vi.fn<(tag: string, profile?: string) => void>()
 );
 
 vi.mock("next/cache", () => ({
@@ -34,7 +34,8 @@ describe("invalidateSlaStatsCache (C-P0-1)", () => {
     revalidateTagSpy.mockClear();
     const { invalidateSlaStatsCache } = await import("./sla");
     invalidateSlaStatsCache();
-    expect(revalidateTagSpy).toHaveBeenCalledWith(SLA_STATS_CACHE_TAG);
+    // Next 16 的 revalidateTag 需要显式 profile:"max" 立即彻底失效。
+    expect(revalidateTagSpy).toHaveBeenCalledWith(SLA_STATS_CACHE_TAG, "max");
   });
 
   it("does not throw when revalidateTag raises", async () => {

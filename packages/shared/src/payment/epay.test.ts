@@ -27,6 +27,20 @@ vi.mock("@repo/database", () => ({
 }));
 vi.mock("@repo/database/schema", () => ({ epayOrder: {} }));
 
+// next/cache mock:epay 写入点在订单状态变化后失效 admin/payments 聚合缓存,
+// 单测锁定该失效被调用(带 Next 16 的 "max" profile)。unstable_cache 直通
+// (epay.ts 经 system-settings 依赖链在模块顶层调用它)。
+const revalidateTagSpy = vi.hoisted(() =>
+  vi.fn<(tag: string, profile?: string) => void>()
+);
+vi.mock("next/cache", () => ({
+  revalidateTag: revalidateTagSpy,
+  updateTag: vi.fn(),
+  unstable_cache: <TArgs extends unknown[], TResult>(
+    fn: (...args: TArgs) => Promise<TResult>
+  ) => async (...args: TArgs): Promise<TResult> => fn(...args),
+}));
+
 import {
   claimEpayOrderForFulfillment,
   decodeEpayMetadata,
@@ -156,6 +170,7 @@ describe("claimEpayOrderForFulfillment", () => {
     dbMock.set.mockClear();
     dbMock.where.mockClear();
     dbMock.returning.mockClear();
+    revalidateTagSpy.mockClear();
     dbMock.returning.mockResolvedValueOnce([{ outTradeNo: "T1" }]);
 
     await expect(claimEpayOrderForFulfillment("T1")).resolves.toBe(true);
@@ -166,6 +181,21 @@ describe("claimEpayOrderForFulfillment", () => {
     expect(dbMock.set).not.toHaveBeenCalledWith(
       expect.objectContaining({ status: "success" })
     );
+    // 领取成功改变状态分组统计,必须失效 admin/payments 聚合缓存。
+    expect(revalidateTagSpy).toHaveBeenCalledWith(
+      "admin-payments-aggregate",
+      "max"
+    );
+  });
+
+  it("does not invalidate the aggregate cache when nothing is claimed", async () => {
+    dbMock.returning.mockClear();
+    revalidateTagSpy.mockClear();
+    dbMock.returning.mockResolvedValueOnce([]);
+
+    await expect(claimEpayOrderForFulfillment("T404")).resolves.toBe(false);
+
+    expect(revalidateTagSpy).not.toHaveBeenCalled();
   });
 });
 

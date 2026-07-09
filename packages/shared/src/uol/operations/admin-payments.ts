@@ -24,8 +24,10 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm";
+import { unstable_cache } from "next/cache";
 import { z } from "zod";
 
+import { ADMIN_PAYMENTS_CACHE_TAG } from "../../payment/admin-payments-cache";
 import { OperationError } from "../errors";
 import type { Principal } from "../principal";
 import { defineOperation } from "../registry";
@@ -225,55 +227,153 @@ function assertPaymentAdmin(principal: Principal) {
 }
 
 /**
+ * 状态分组聚合行(与 DB groupBy 输出同构,可被 Next data cache 序列化)。
+ */
+type LocalOrderStatusRow = {
+  status: string;
+  total: number;
+  amount: number;
+};
+
+/**
+ * 实际扫描 epay_order 做状态分组聚合的查询(无缓存)。
+ *
+ * @param type - 业务类型过滤("all" 不过滤)。
+ * @param provider - 支付通道过滤("all" 不过滤)。
+ * @returns 按状态分组的笔数与金额汇总。
+ * @sideEffects 全表分组扫描 epay_order;调用方应经缓存包装器访问。
+ */
+async function queryLocalOrderStatusRows(
+  type: AdminPaymentsDashboardInput["type"],
+  provider: AdminPaymentsDashboardInput["provider"]
+): Promise<LocalOrderStatusRow[]> {
+  const where = buildLocalOrderWhere(
+    {
+      q: "",
+      status: "all",
+      type,
+      provider,
+      from: null,
+      to: null,
+      page: 1,
+      pageSize: 1,
+      ledgerLimit: 1,
+      subscriptionLimit: 1,
+    },
+    false
+  );
+  return await db
+    .select({
+      status: epayOrder.status,
+      total: count(),
+      amount: sql<number>`coalesce(sum(${epayOrder.amount}), 0)`.mapWith(
+        Number
+      ),
+    })
+    .from(epayOrder)
+    .where(where)
+    .groupBy(epayOrder.status);
+}
+
+/**
+ * 带缓存的状态分组聚合(C-P1-3)。
+ *
+ * WHY: 顶部统计卡每次进页都全表 groupBy epay_order,聚合结果与个人明细无关、
+ * 全体 admin 共享同一视图,适合走 Next data cache。缓存键只含 type/provider
+ * 两个低基数枚举——q 是自由文本、from/to 是精确时间戳,进键会造成键基数爆炸
+ * 且几乎不可命中,带这些过滤的请求直接穿透查 DB(见 loadLocalOrders)。
+ * 订单状态变化时经 ADMIN_PAYMENTS_CACHE_TAG 失效;300s TTL 兜底防失效遗漏。
+ */
+const getCachedLocalOrderStatusRows = unstable_cache(
+  async (
+    type: AdminPaymentsDashboardInput["type"],
+    provider: AdminPaymentsDashboardInput["provider"]
+  ): Promise<LocalOrderStatusRow[]> =>
+    queryLocalOrderStatusRows(type, provider),
+  ["admin-payments-status-rows"],
+  { revalidate: 300, tags: [ADMIN_PAYMENTS_CACHE_TAG] }
+);
+
+/**
  * 加载本地订单及到账匹配结果。
  *
  * @param filters - UOL 输入筛选条件。
  * @returns 本地订单列表、总数与状态统计。
- * @sideEffects 读取 epay_order、credits_batch 与 credits_transaction。
+ * @sideEffects 读取 epay_order、credits_batch 与 credits_transaction;
+ *              无 q/日期过滤时聚合统计走缓存,明细列表始终实时查询。
  */
 async function loadLocalOrders(filters: AdminPaymentsDashboardInput) {
   const statusNeutralWhere = buildLocalOrderWhere(filters, false);
   const where = buildLocalOrderWhere(filters, true);
   const offset = (filters.page - 1) * filters.pageSize;
 
-  const [orderRows, countRows, statusRows] = await Promise.all([
-    db
-      .select({
-        outTradeNo: epayOrder.outTradeNo,
-        userId: epayOrder.userId,
-        businessType: epayOrder.businessType,
-        amount: epayOrder.amount,
-        status: epayOrder.status,
-        metadata: epayOrder.metadata,
-        createdAt: epayOrder.createdAt,
-        updatedAt: epayOrder.updatedAt,
-        userEmail: user.email,
-        userName: user.name,
-      })
-      .from(epayOrder)
-      .leftJoin(user, eq(user.id, epayOrder.userId))
-      .where(where)
-      .orderBy(desc(epayOrder.createdAt))
-      .limit(filters.pageSize)
-      .offset(offset),
-    db
-      .select({ total: count() })
-      .from(epayOrder)
-      .leftJoin(user, eq(user.id, epayOrder.userId))
-      .where(where),
-    db
-      .select({
-        status: epayOrder.status,
-        total: count(),
-        amount: sql<number>`coalesce(sum(${epayOrder.amount}), 0)`.mapWith(
-          Number
-        ),
-      })
-      .from(epayOrder)
-      .leftJoin(user, eq(user.id, epayOrder.userId))
-      .where(statusNeutralWhere)
-      .groupBy(epayOrder.status),
-  ]);
+  // 缓存资格:q 是自由文本、from/to 是精确时间戳,含它们的聚合几乎不可复用,
+  // 直接穿透;仅"无搜索、无自定义日期"的常规视图命中缓存(admin 默认打开姿势)。
+  const aggregateCacheable = !filters.q && !filters.from && !filters.to;
+
+  const orderRowsQuery = db
+    .select({
+      outTradeNo: epayOrder.outTradeNo,
+      userId: epayOrder.userId,
+      businessType: epayOrder.businessType,
+      amount: epayOrder.amount,
+      status: epayOrder.status,
+      metadata: epayOrder.metadata,
+      createdAt: epayOrder.createdAt,
+      updatedAt: epayOrder.updatedAt,
+      userEmail: user.email,
+      userName: user.name,
+    })
+    .from(epayOrder)
+    .leftJoin(user, eq(user.id, epayOrder.userId))
+    .where(where)
+    .orderBy(desc(epayOrder.createdAt))
+    .limit(filters.pageSize)
+    .offset(offset);
+
+  let orderRows: Awaited<typeof orderRowsQuery>;
+  let totalCount: number;
+  let statusRows: LocalOrderStatusRow[];
+
+  if (aggregateCacheable) {
+    // 聚合走缓存;总数从状态分组派生(status="all" 时求和,否则取对应分组),
+    // 避免为 count 单独再建一个缓存条目。明细分页始终实时。
+    const [rows, cachedStatusRows] = await Promise.all([
+      orderRowsQuery,
+      getCachedLocalOrderStatusRows(filters.type, filters.provider),
+    ]);
+    orderRows = rows;
+    statusRows = cachedStatusRows;
+    totalCount =
+      filters.status === "all"
+        ? cachedStatusRows.reduce((sum, row) => sum + row.total, 0)
+        : (cachedStatusRows.find((row) => row.status === filters.status)
+            ?.total ?? 0);
+  } else {
+    const [rows, countRows, freshStatusRows] = await Promise.all([
+      orderRowsQuery,
+      db
+        .select({ total: count() })
+        .from(epayOrder)
+        .leftJoin(user, eq(user.id, epayOrder.userId))
+        .where(where),
+      db
+        .select({
+          status: epayOrder.status,
+          total: count(),
+          amount: sql<number>`coalesce(sum(${epayOrder.amount}), 0)`.mapWith(
+            Number
+          ),
+        })
+        .from(epayOrder)
+        .leftJoin(user, eq(user.id, epayOrder.userId))
+        .where(statusNeutralWhere)
+        .groupBy(epayOrder.status),
+    ]);
+    orderRows = rows;
+    totalCount = countRows[0]?.total ?? 0;
+    statusRows = freshStatusRows;
+  }
 
   const orders = orderRows.map((row) => ({
     ...row,
@@ -369,7 +469,7 @@ async function loadLocalOrders(filters: AdminPaymentsDashboardInput) {
         ),
       };
     }),
-    total: countRows[0]?.total ?? 0,
+    total: totalCount,
     summary: buildLocalStatusSummary(statusRows),
   };
 }
