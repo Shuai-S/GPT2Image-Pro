@@ -3,7 +3,7 @@ name: Docker Image CI
 on:
   push:
     branches:
-      - my-main
+      - main
     tags:
       - "v*"
   workflow_dispatch:
@@ -20,9 +20,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  quality-gate:
+    name: Verify release source
+    runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NEXT_PUBLIC_APP_NAME: GPT2IMAGE
+      NEXT_PUBLIC_PAYMENT_PROVIDER: none
+      NEXT_PUBLIC_GENERATIONS_BUCKET_NAME: generations
+      NEXT_PUBLIC_AVATARS_BUCKET_NAME: avatars
+      DATABASE_URL: postgresql://gpt2image:gpt2image@localhost:5432/gpt2image
+      BETTER_AUTH_SECRET: build-time-placeholder-secret-not-for-runtime
+      BETTER_AUTH_URL: http://localhost:3000
+      GPT2IMAGE_SKIP_RUNTIME_SETTINGS_DB: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5（钉 SHA；dependabot 维护）
+
+      - uses: ./.github/actions/setup
+
+      - name: Generate Fumadocs source
+        run: pnpm --filter @repo/web exec fumadocs-mdx
+
+      - name: Lint
+        run: pnpm turbo lint --force
+
+      - name: Typecheck
+        run: pnpm turbo typecheck --force
+
+      - name: Unit tests
+        run: pnpm turbo test --force
+
+      - name: Build web
+        run: pnpm turbo build --filter=@repo/web --force
+
   prepare-version:
     name: Prepare image version
     runs-on: ubuntu-latest
+    needs: quality-gate
     outputs:
       image_timestamp: ${{ steps.timestamp.outputs.image_timestamp }}
     steps:
@@ -35,7 +71,7 @@ jobs:
   build-and-push:
     name: Build and push ${{ matrix.name }}
     runs-on: ubuntu-latest
-    needs: prepare-version
+    needs: [quality-gate, prepare-version]
     permissions:
       contents: read
       packages: write
