@@ -26,7 +26,8 @@ export type SettingCategory =
   | "credits"
   | "moderationPricing"
   | "referral"
-  | "analytics";
+  | "analytics"
+  | "performance";
 
 export type SettingValueType =
   | "string"
@@ -243,7 +244,11 @@ export type SettingKey =
   | "CHATGPT_REGISTER_POOL_MAINTAIN_GROUP_ID"
   | "CHATGPT_REGISTER_POOL_MAINTAIN_TARGET"
   | "CHATGPT_REGISTER_POOL_MAINTAIN_MAX_PER_RUN"
-  | "CHATGPT_REGISTER_POOL_MAINTAIN_CONCURRENCY";
+  | "CHATGPT_REGISTER_POOL_MAINTAIN_CONCURRENCY"
+  | "IMAGE_PER_ATTEMPT_TIMEOUT_MS"
+  | "IMAGE_TOTAL_TIMEOUT_MS"
+  | "IMAGE_CONCURRENT_CHANNELS"
+  | "IMAGE_HEALTH_CHECK_TIMEOUT_MS";
 
 export interface SettingDefinition {
   key: SettingKey;
@@ -2124,6 +2129,50 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     defaultValue: 5,
   },
   {
+    key: "IMAGE_PER_ATTEMPT_TIMEOUT_MS",
+    label: "单次请求超时(毫秒)",
+    description:
+      "单次上游生图请求的超时上限。超时即切换账号池其它成员重试，避免慢上游长时间挂起。建议 30000-180000。",
+    category: "performance",
+    valueType: "number",
+    defaultValue: 120000,
+    min: 5000,
+    max: 1800000,
+  },
+  {
+    key: "IMAGE_TOTAL_TIMEOUT_MS",
+    label: "生图总超时(毫秒)",
+    description:
+      "一次生图任务(含所有重试与渠道并发)的硬性总时长上限。超时即彻底失败并退款差额。默认 1200000(20 分钟)。",
+    category: "performance",
+    valueType: "number",
+    defaultValue: 1200000,
+    min: 30000,
+    max: 3600000,
+  },
+  {
+    key: "IMAGE_CONCURRENT_CHANNELS",
+    label: "渠道并发数",
+    description:
+      "单次生图同时转发的渠道数量。值为 1 即串行；>1 时先成功的渠道胜出并中止其他渠道，只扣一次费。Agent 模式始终串行。建议 1-3。",
+    category: "performance",
+    valueType: "number",
+    defaultValue: 1,
+    min: 1,
+    max: 5,
+  },
+  {
+    key: "IMAGE_HEALTH_CHECK_TIMEOUT_MS",
+    label: "测活超时(毫秒)",
+    description:
+      "后台测活单次出图探测的超时上限，超时即标记为不可连接。建议 15000-180000。",
+    category: "performance",
+    valueType: "number",
+    defaultValue: 90000,
+    min: 5000,
+    max: 180000,
+  },
+  {
     key: "INTERNAL_JOB_WEB_ACCOUNTS_REPLENISH_INTERVAL_MINUTES",
     label: "号池维持任务间隔（分钟）",
     description: "号池自动维持（补号）任务的内置执行间隔。",
@@ -2206,6 +2255,11 @@ export const SETTING_CATEGORIES: Array<{
     id: "analytics",
     label: "监控",
     description: "统计与错误监控配置。",
+  },
+  {
+    id: "performance",
+    label: "性能",
+    description: "生图请求超时、渠道并发与测活超时。",
   },
 ];
 
