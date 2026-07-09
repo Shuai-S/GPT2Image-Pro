@@ -6,6 +6,7 @@ import { Badge } from "@repo/ui/components/badge";
 import { Card } from "@repo/ui/components/card";
 import { Check, Clock, ImageIcon } from "lucide-react";
 import { useLocale } from "next-intl";
+import { memo } from "react";
 import { CachedImage as Image } from "@/features/shared/components/cached-image";
 
 export interface ImageCardProps {
@@ -39,7 +40,7 @@ function formatCreatedDate(iso: string, locale: string): string {
   }
 }
 
-export function ImageCard({
+export const ImageCard = memo(function ImageCard({
   id,
   prompt,
   imageUrl,
@@ -145,4 +146,4 @@ export function ImageCard({
       </div>
     </Card>
   );
-}
+});

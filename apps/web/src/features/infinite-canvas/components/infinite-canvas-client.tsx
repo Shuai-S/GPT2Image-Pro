@@ -75,6 +75,7 @@ import { CachedImage as Image } from "@/features/shared/components/cached-image"
  */
 
 const STORAGE_KEY = "gpt2image.infinite-canvas.v1";
+const STORAGE_WRITE_DEBOUNCE_MS = 300;
 const DEFAULT_NODE_POSITION = { x: 80, y: 80 };
 const DEFAULT_CANVAS_IMAGE_DIMENSIONS = { width: 1024, height: 1024 };
 const GENERATION_STATUS_POLL_INTERVAL_MS = 1500;
@@ -158,6 +159,11 @@ export function InfiniteCanvasClient() {
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
+  // 高频指针/滚轮事件节流:仅保留最近一帧待处理事件,由 rAF 合并写入一次 state。
+  const pendingPointerEventRef = useRef<ReactPointerEvent<HTMLDivElement> | null>(
+    null
+  );
+  const pointerRafIdRef = useRef<number | null>(null);
   const [state, setState] = useState<CanvasState>(() =>
     createEmptyCanvasState(isZh ? "无限画布" : "Infinite Canvas")
   );
@@ -211,6 +217,12 @@ export function InfiniteCanvasClient() {
     }
   };
 
+  /**
+   * 挂载时一次性从 localStorage 读取已持久化的画布草稿。
+   *
+   * WHY：把读取收敛到挂载单次执行,避免在后续 effect 链里反复读取本地存储。
+   * copy 经 useCallback 稳定,语言切换不会触发重复加载。
+   */
   useEffect(() => {
     try {
       const stored = window.localStorage.getItem(STORAGE_KEY);
@@ -230,15 +242,36 @@ export function InfiniteCanvasClient() {
     } finally {
       setBooted(true);
     }
+    // copy 经 useCallback 稳定,语言变化不会重复触发草稿加载;依赖数组保持 [copy] 即可。
   }, [copy]);
 
+  /**
+   * 持久化画布状态到 localStorage。
+   *
+   * WHY：拖拽/缩放会高频更新 state,直接同步写盘会阻塞主线程。
+   * 这里用 300ms 节流延时:连续变化只在最后一次变更后写一次。
+   */
   useEffect(() => {
     if (!isBooted) return;
     const timer = window.setTimeout(() => {
       window.localStorage.setItem(STORAGE_KEY, serializeCanvasState(state));
-    }, 350);
+    }, STORAGE_WRITE_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [isBooted, state]);
+
+  // 组件卸载时取消未执行的指针/滚轮节流帧,避免 setState 作用在已卸载组件。
+  useEffect(() => {
+    return () => {
+      if (pointerRafIdRef.current !== null) {
+        window.cancelAnimationFrame(pointerRafIdRef.current);
+        pointerRafIdRef.current = null;
+      }
+      if (wheelRafIdRef.current !== null) {
+        window.cancelAnimationFrame(wheelRafIdRef.current);
+        wheelRafIdRef.current = null;
+      }
+    };
+  }, []);
 
   /**
    * 以函数式更新画布状态，避免拖拽期间读到旧闭包。
@@ -347,13 +380,36 @@ export function InfiniteCanvasClient() {
     };
   };
 
-  /**
-   * 响应画布指针移动。
+/**
+   * 处理画布指针移动。
+   *
+   * WHY：指针移动事件高频触发,直接 setState 会导致每像素一次渲染。
+   * 这里把事件暂存到 ref,在下一帧 rAF 里合并执行一次状态更新,
+   * 中间事件被丢弃但位移通过 lastWorld 累积保持等价(见 flushPointerFrame)。
    *
    * @param event 指针事件。
-   * @sideEffects 更新视口或节点位置。
+   * @sideEffects 调度 rAF,在一帧内合并多次移动为一次写入。
    */
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    pendingPointerEventRef.current = event;
+    if (pointerRafIdRef.current !== null) return;
+    pointerRafIdRef.current = window.requestAnimationFrame(() => {
+      pointerRafIdRef.current = null;
+      const pending = pendingPointerEventRef.current;
+      pendingPointerEventRef.current = null;
+      if (!pending) return;
+      flushPointerMove(pending);
+    });
+  };
+
+  /**
+   * 在 rAF 帧内消费一次累积的指针移动事件,真正写入状态。
+   *
+   * @param event 最近一帧的指针事件。
+   * @sideEffects 更新视口或节点位置。
+   */
+  const flushPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
     if (!drag) return;
     if (drag.type === "pan") {
@@ -384,26 +440,62 @@ export function InfiniteCanvasClient() {
   };
 
   /**
-   * 结束画布拖拽。
+   * 结束画布拖拽,并取消未执行的节流帧。
    *
-   * @sideEffects 清理拖拽状态。
+   * @sideEffects 清理拖拽状态与待 rAF。
    */
   const handlePointerUp = () => {
     dragRef.current = null;
+    pendingPointerEventRef.current = null;
+    if (pointerRafIdRef.current !== null) {
+      window.cancelAnimationFrame(pointerRafIdRef.current);
+      pointerRafIdRef.current = null;
+    }
   };
 
+  // 滚轮事件节流:仅保留最近一次缩放意图,按帧合并写入。
+  const pendingWheelEventRef = useRef<ReactWheelEvent<HTMLDivElement> | null>(
+    null
+  );
+  const wheelRafIdRef = useRef<number | null>(null);
+
   /**
-   * 处理滚轮缩放，缩放中心保持在鼠标位置。
+   * 处理滚轮缩放,缩放中心保持在鼠标位置。
+   *
+   * WHY：滚轮事件高频触发,直接 setState 会导致每滚动一格一次渲染。
+   * 这里把事件暂存到 ref,在下一帧 rAF 里合并执行一次状态更新,
+   * 并在事件序列中累积 deltaY 以保持最终缩放比例等价。
    *
    * @param event 滚轮事件。
-   * @sideEffects 更新视口。
+   * @sideEffects 调度 rAF,在一帧内合并多次缩放为一次写入。
    */
   const handleWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
     event.preventDefault();
+    pendingWheelEventRef.current = event;
+    if (wheelRafIdRef.current !== null) return;
+    wheelRafIdRef.current = window.requestAnimationFrame(() => {
+      wheelRafIdRef.current = null;
+      const pending = pendingWheelEventRef.current;
+      pendingWheelEventRef.current = null;
+      if (!pending) return;
+      flushWheel(pending);
+    });
+  };
+
+  /**
+   * 在 rAF 帧内消费一次累积的滚轮事件,真正写入视口。
+   *
+   * @param event 最近一帧的滚轮事件。
+   * @sideEffects 更新视口。
+   */
+  const flushWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
     const board = boardRef.current;
     if (!board) return;
     const rect = board.getBoundingClientRect();
-    const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    const point = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
     const before = screenPointToWorld(point, state.viewport);
     const nextZoom = clampCanvasZoom(
       state.viewport.zoom * (event.deltaY > 0 ? 0.9 : 1.1)

@@ -1,8 +1,10 @@
 "use client";
 
+import { buildStorageThumbnailUrl } from "@repo/shared/storage/image-url";
 import { Badge } from "@repo/ui/components/badge";
 import { Button } from "@repo/ui/components/button";
 import { Tabs, TabsList, TabsTrigger } from "@repo/ui/components/tabs";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import {
   Download,
   ImagePlus,
@@ -13,7 +15,15 @@ import {
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useLocale } from "next-intl";
-import { useCallback, useRef, useState } from "react";
+import {
+  type MouseEvent,
+  memo,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 import { batchDeleteGenerationAction } from "@/features/image-generation/actions";
 import { ImageCard } from "@/features/image-generation/components/image-card";
@@ -21,6 +31,7 @@ import type {
   LightboxGeneration,
   LightboxReferenceImage,
 } from "@/features/image-generation/components/image-lightbox";
+import { prefetchLocalImageCache } from "@/features/shared/components/local-image-cache";
 import { generateDownloadFilename } from "@/lib/download-filename";
 
 // 懒加载:lightbox 仅在点开某张图时才需要,改 next/dynamic 后从图库首屏 bundle 移出。
@@ -82,6 +93,25 @@ export function GalleryClient({
   );
   const [items, setItems] = useState<GenerationWithUrl[]>(initialGenerations);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // -- 虚拟化:响应式列数。WHY 画廊是 CSS grid 多列(grid-cols-2 md:3 lg:4),
+  // 直接虚拟化每个格子会与多列 grid 难以对齐;改为"虚拟行"(每行 N 个卡片,
+  // 行本身仍是 grid),只渲染可视区+overscan 的行,DOM 节点数随视口而非数据量增长。
+  // 列数通过 matchMedia 跟踪 Tailwind 断点(md=768,lg=1024),保证与 CSS grid 一致。
+  const gridContainerRef = useRef<HTMLDivElement>(null);
+  const [columns, setColumns] = useState(2);
+  useEffect(() => {
+    const mqlMd = window.matchMedia("(min-width: 768px)");
+    const mqlLg = window.matchMedia("(min-width: 1024px)");
+    const update = () => setColumns(mqlLg.matches ? 4 : mqlMd.matches ? 3 : 2);
+    update();
+    mqlMd.addEventListener("change", update);
+    mqlLg.addEventListener("change", update);
+    return () => {
+      mqlMd.removeEventListener("change", update);
+      mqlLg.removeEventListener("change", update);
+    };
+  }, []);
 
   // -- 多选模式状态 --
   const [selectMode, setSelectMode] = useState(false);
@@ -350,65 +380,16 @@ export function GalleryClient({
   return (
     <>
       <div className="mb-5">{tabs}</div>
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-        {items.map((item) =>
-          item.outputRole === "video" ? (
-            // 视频项:直接内联 <video>(preload=metadata 显示首帧,点 controls 播放),
-            // 不参与多选/批量下载(那套是图片专用)。
-            <div
-              key={item.id}
-              className="overflow-hidden rounded-lg border border-border bg-card"
-            >
-              {item.videoUrl ? (
-                <video
-                  src={item.videoUrl}
-                  controls
-                  preload="metadata"
-                  className="aspect-square w-full bg-black object-contain"
-                >
-                  <track kind="captions" />
-                </video>
-              ) : (
-                <div className="flex aspect-square items-center justify-center bg-muted text-xs text-muted-foreground">
-                  {copy("Video unavailable", "视频不可用")}
-                </div>
-              )}
-              <div className="space-y-1 p-2">
-                <p className="line-clamp-2 text-xs text-muted-foreground">
-                  {item.prompt}
-                </p>
-                <p className="text-[10px] text-muted-foreground">
-                  {item.model} · {item.size}
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div key={item.id}>
-              <ImageCard
-                id={item.id}
-                prompt={item.prompt}
-                imageUrl={item.imageUrl}
-                model={item.model}
-                size={item.size}
-                creditsConsumed={item.creditsConsumed}
-                createdAt={item.createdAt}
-                status={item.status}
-                selectable={selectMode}
-                selected={selectedIds.has(item.id)}
-                onSelect={selectMode ? handleSelect : undefined}
-                onClick={selectMode ? undefined : () => setSelectedId(item.id)}
-                badge={
-                  item.outputRole === "agent_draft"
-                    ? copy("Draft", "中间图")
-                    : item.outputRole === "upload"
-                      ? copy("Upload", "上传")
-                      : undefined
-                }
-              />
-            </div>
-          )
-        )}
-      </div>
+      <GalleryVirtualGrid
+        gridRef={gridContainerRef}
+        items={items}
+        columns={columns}
+        selectMode={selectMode}
+        selectedIds={selectedIds}
+        handleSelect={handleSelect}
+        setSelectedId={setSelectedId}
+        copy={copy}
+      />
 
       {hasMore && (
         <div className="flex justify-center pt-4">
@@ -475,3 +456,187 @@ export function GalleryClient({
     </>
   );
 }
+
+/**
+ * 渲染单个画廊卡片(图片或视频),提取为子组件以便父级 memo 比对 props。
+ *
+ * WHY:CachedImage 与 ImageCard 各自的 effect/handler 较重,提升为独立组件并
+ * 经 React.memo 包裹后,列表重渲(如选中态切换、父级 items 增删)时未改动的
+ * 卡片不再重新执行渲染与子 effect;selectMode 切换才整列重渲。
+ */
+const GalleryCard = memo(function GalleryCard({
+  item,
+  selectMode,
+  selected,
+  handleSelect,
+  setSelectedId,
+  copy,
+}: {
+  item: GenerationWithUrl;
+  selectMode: boolean;
+  selected: boolean;
+  handleSelect: (id: string, event: MouseEvent) => void;
+  setSelectedId: (id: string) => void;
+  copy: (en: string, zh: string) => string;
+}) {
+  return item.outputRole === "video" ? (
+    // 视频项:直接内联 <video>(preload=metadata 显示首帧,点 controls 播放),
+    // 不参与多选/批量下载(那套是图片专用)。
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
+      {item.videoUrl ? (
+        <video
+          src={item.videoUrl}
+          controls
+          preload="metadata"
+          className="aspect-square w-full bg-black object-contain"
+        >
+          <track kind="captions" />
+        </video>
+      ) : (
+        <div className="flex aspect-square items-center justify-center bg-muted text-xs text-muted-foreground">
+          {copy("Video unavailable", "视频不可用")}
+        </div>
+      )}
+      <div className="space-y-1 p-2">
+        <p className="line-clamp-2 text-xs text-muted-foreground">
+          {item.prompt}
+        </p>
+        <p className="text-[10px] text-muted-foreground">
+          {item.model} · {item.size}
+        </p>
+      </div>
+    </div>
+  ) : (
+    <ImageCard
+      id={item.id}
+      prompt={item.prompt}
+      imageUrl={item.imageUrl}
+      model={item.model}
+      size={item.size}
+      creditsConsumed={item.creditsConsumed}
+      createdAt={item.createdAt}
+      status={item.status}
+      selectable={selectMode}
+      selected={selected}
+      onSelect={selectMode ? handleSelect : undefined}
+      onClick={selectMode ? undefined : () => setSelectedId(item.id)}
+      badge={
+        item.outputRole === "agent_draft"
+          ? copy("Draft", "中间图")
+          : item.outputRole === "upload"
+            ? copy("Upload", "上传")
+            : undefined
+      }
+    />
+  );
+});
+
+/**
+ * 画廊虚拟滚动网格。
+ *
+ * WHY:画廊是服务端累积分页(page * 20),一次拿到数组可能上百项。原实现全量
+ * items.map 渲染会一次性创建上百个 CachedImage/ImageCard,首屏解码/IndexedDB
+ * 并发读取高、滚动卡顿。这里以"行"为单位用 useWindowVirtualizer 虚拟化:
+ * 行数 = ceil(items.length / columns),仅渲染可视区 + overscan 的行。
+ *
+ * 视觉等价说明:每行是一个 grid 子容器(limit 到当前列数),内部按列摆卡片,
+ * 行之间用 top:virtualRow.start 做绝对定位,外层容器 height = totalSize 作为
+ * 占位,使页面整体可滚动;滚动事件由 window 拦截(virtualizer 默认行为),与原
+ * CSS grid 整页滚动表现一致。scrollMargin 动态测量网格容器顶到文档顶的距离,
+ * 兼容标题/Tab 等上方占位,避免可视区偏移导致首行漏渲染。
+ *
+ * @param props.items 全部画廊项(来自累积分页)。
+ * @param props.columns 当前响应式列数(与 CSS grid 断点一致)。
+ * @returns 占位容器 + 可视区绝对行。
+ * @sideEffects 注册 window 滚动监听(由 virtualizer 完成);ResizeObserver 测行高。
+ * @failureMode 列数变化时重算行数与并重建;items 为空时上层不进入本组件。
+ */
+const GalleryVirtualGrid = function GalleryVirtualGrid({
+  items,
+  columns,
+  selectMode,
+  selectedIds,
+  handleSelect,
+  setSelectedId,
+  copy,
+  gridRef,
+}: {
+  items: GenerationWithUrl[];
+  columns: number;
+  selectMode: boolean;
+  selectedIds: Set<string>;
+  handleSelect: (id: string, event: MouseEvent) => void;
+  setSelectedId: (id: string) => void;
+  copy: (en: string, zh: string) => string;
+  gridRef: RefObject<HTMLDivElement | null>;
+}) {
+  const rowCount = Math.ceil(items.length / columns);
+
+  // 列表挂载/数据变化时批量预热 IndexedDB 连接:预热只提前打开数据库连接(命中即走),
+  // 不抓网络;配合虚拟化后可视区 CachedImage effect 共享同一已就绪连接。
+  useEffect(() => {
+    const srcs = items
+      .map((item) => buildStorageThumbnailUrl(item.imageUrl, 640))
+      .filter((src): src is string => Boolean(src));
+    prefetchLocalImageCache(srcs);
+  }, [items]);
+
+  // scrollMargin:offsetTop 是相对 offsetParent 的距离,但 window 虚拟化器需要相对
+  // 文档顶的距离。直接用 getBoundingClientRect().top + window.scrollY 实时取值,
+  // 在每次 window 滚动 / resize 时由 virtualizer 重新读取 options,故用 getter 让
+  // scrollMargin 永远反映当前位置(标题/Tab 区高度变化时自动跟上)。
+  const computeScrollMargin = () => {
+    const grid = gridRef.current;
+    if (!grid) return 0;
+    const rect = grid.getBoundingClientRect();
+    return Math.max(0, rect.top + window.scrollY);
+  };
+
+  const rowVirtualizer = useWindowVirtualizer({
+    count: rowCount,
+    estimateSize: () => 360,
+    overscan: 4,
+    scrollMargin: computeScrollMargin(),
+    getItemKey: (index) => {
+      // 行内取首卡片 id 作为行 key,跨行稳定;列数变化导致重排时仍能复用 DOM。
+      const item = items[index * columns];
+      return item ? `row-${item.id}` : `row-${index}`;
+    },
+  });
+
+  return (
+    <div
+      ref={gridRef}
+      className="relative w-full"
+      style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+    >
+      {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+        const startIndex = virtualRow.index * columns;
+        const rowItems = items.slice(startIndex, startIndex + columns);
+        return (
+          <div
+            key={virtualRow.key}
+            data-index={virtualRow.index}
+            ref={rowVirtualizer.measureElement}
+            className="absolute left-0 top-0 grid w-full grid-cols-2 gap-4 pb-4 md:grid-cols-3 lg:grid-cols-4"
+            style={{
+              transform: `translateY(${virtualRow.start}px)`,
+            }}
+          >
+            {rowItems.map((item) => (
+              <GalleryCard
+                key={item.id}
+                item={item}
+                selectMode={selectMode}
+                selected={selectMode && selectedIds.has(item.id)}
+                handleSelect={handleSelect}
+                setSelectedId={setSelectedId}
+                copy={copy}
+              />
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+};

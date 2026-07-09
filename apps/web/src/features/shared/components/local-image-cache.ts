@@ -62,6 +62,33 @@ interface CachedImageBlob {
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
+// 同一 cacheKey 的并发解析去重表。WHY:列表项可能引用同一张图(如多卡片复用同一参考图),
+// N 个 CachedImage effect 同时对同一 key 调 resolveLocalCachedImage 会触发 N 个独立
+// IndexedDB transaction 与 N 次 lastAccessedAt+localStorage 写入。这里把同一 key 的
+// 并发请求合并为单个 Promise,既省事务又避免重复 Blob URL$objPHPExcel。
+const inflightResolve = new Map<string, Promise<CachedImageBlob | null>>();
+
+/**
+ * 预热本地图片缓存:提前打开 IndexedDB 连接,使后续各 CachedImage 的 effect 共享
+ * 同一个已就绪连接而非各自排队打开。fire-and-forget,失败不影响展示。
+ *
+ * @param srcs - 列表中的图片原始 URL 集合(会自动过滤跨源/blob/data 等不可缓存项)。
+ * @returns void。
+ * @sideEffects 可能创建/打开 IndexedDB 连接。
+ * @throws 不抛出异常。
+ */
+export function prefetchLocalImageCache(srcs: string[]): void {
+  if (!canUseLocalImageCache()) return;
+  // 仅打开连接,不主动发起网络抓取(与单实例语义保持一致:命中即用,未命中等懒加载)。
+  void openImageCacheDB().catch(() => {
+    // 打开失败只影响本地缓存能力,各 component 仍回退原 URL。
+  });
+  // 预计算 cacheKey 触发 normalize 早期失败剔除,避免 effect 内重复计算。无副作用。
+  for (const src of srcs) {
+    if (typeof src === "string") normalizeImageCacheKey(src);
+  }
+}
+
 /**
  * 判断值是否为可用的元数据条目。
  *
@@ -496,15 +523,33 @@ export async function resolveLocalCachedImage(
   const cacheKey = normalizeImageCacheKey(src);
   if (!cacheKey) return null;
 
+  // 同 key 并发去重:复用正在进行中的解析 Promise,避免重复 IndexedDB 读取与写入。
+  // 仅对无网络回退(fetchOnMiss=false)的列表场景去重,带 fetch 的单实例路径保持原行为。
+  const existing = inflightResolve.get(cacheKey);
+  if (existing && !fetchOnMiss) {
+    return existing;
+  }
+  const run = (async (): Promise<CachedImageBlob | null> => {
+    try {
+      const db = await openImageCacheDB();
+      const meta = readCacheMeta();
+      const cached = await readCachedImage(db, meta, cacheKey);
+      if (cached || signal.aborted) return cached;
+      if (!fetchOnMiss) return null;
+      return await fetchAndCacheImage(db, meta, cacheKey, src, signal);
+    } catch {
+      return null;
+    }
+  })();
+  inflightResolve.set(cacheKey, run);
   try {
-    const db = await openImageCacheDB();
-    const meta = readCacheMeta();
-    const cached = await readCachedImage(db, meta, cacheKey);
-    if (cached || signal.aborted) return cached;
-    if (!fetchOnMiss) return null;
-    return await fetchAndCacheImage(db, meta, cacheKey, src, signal);
-  } catch {
-    return null;
+    const result = await run;
+    return result;
+  } finally {
+    // 仅在当前 Promise 即为表内值时清理,避免被后续重复 key 的 Promise 误删。
+    if (inflightResolve.get(cacheKey) === run) {
+      inflightResolve.delete(cacheKey);
+    }
   }
 }
 

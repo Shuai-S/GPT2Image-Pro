@@ -24,12 +24,13 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale } from "next-intl";
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import type {
   LightboxGeneration,
   LightboxReferenceImage,
 } from "@/features/image-generation/components/image-lightbox";
 import { CachedImage as Image } from "@/features/shared/components/cached-image";
+import { prefetchLocalImageCache } from "@/features/shared/components/local-image-cache";
 
 // 懒加载:lightbox(大图查看模态)仅在点开某张图时才需要,改 next/dynamic 后从列表页首屏
 // bundle 移出,点开时再异步加载。
@@ -262,6 +263,14 @@ export function HistoryClient({
     setPageInput(String(page));
   }, [page]);
 
+  // 列表挂载/翻页时批量预热 IndexedDB 连接(命中即用,未命中仍走懒加载)
+  useEffect(() => {
+    const srcs = items
+      .map((item) => buildStorageThumbnailUrl(item.imageUrl, 128))
+      .filter((src): src is string => Boolean(src));
+    prefetchLocalImageCache(srcs);
+  }, [items]);
+
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const selected = items.find((i) => i.id === selectedId) ?? null;
   const historyHref = (nextPage: number) => {
@@ -347,168 +356,19 @@ export function HistoryClient({
         </div>
 
         <ul className="divide-y divide-border">
-          {items.map((item) => {
-            const summary = creditSummary(item, copy);
-            const createdAt = formatHistoryDate(item.createdAt, locale);
-            const generationDuration = formatGenerationDuration(
-              item.generationDurationMs,
-              copy
-            );
-            return (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  onClick={() => setSelectedId(item.id)}
-                  className={`grid w-full grid-cols-[56px_minmax(0,1fr)] items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40 ${desktopGridClass} ${desktopMinWidthClass} md:items-center md:gap-3`}
-                >
-                  <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded border border-border bg-muted md:h-14 md:w-14">
-                    {item.imageUrl && item.status === "completed" ? (
-                      <Image
-                        // 列表缩略图(56–64px):请求 w=128 的小图,避免下整图(平均 2.4MB)。
-                        // 宽度走"路径段"(非 ?w= 查询参数),绕过 Cloudflare 忽略 query 的边缘
-                        // 缓存键(否则命中并下回整张原图、挤占连接、饿死导航)。
-                        src={
-                          buildStorageThumbnailUrl(item.imageUrl, 128) ??
-                          item.imageUrl
-                        }
-                        alt={item.prompt}
-                        fill
-                        sizes="64px"
-                        className="object-contain"
-                        unoptimized
-                        // 低优先级:把 HTTP/2 连接带宽优先让给导航请求(见 ImageCard 注释)。
-                        fetchPriority="low"
-                      />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-                        <ImageIcon className="h-5 w-5" strokeWidth={1.2} />
-                      </div>
-                    )}
-                  </div>
-
-                  {canViewAll && (
-                    <div className="hidden min-w-0 md:block">
-                      <p className="truncate text-xs font-medium text-foreground">
-                        {item.userEmail || item.userName || item.userId}
-                      </p>
-                      <p className="truncate font-mono text-[10px] text-muted-foreground">
-                        {item.userId}
-                      </p>
-                    </div>
-                  )}
-
-                  {canViewAll && (
-                    <div
-                      className="hidden min-w-0 text-xs md:block"
-                      title={item.backendChannel?.title || undefined}
-                    >
-                      <p className="truncate font-medium text-foreground">
-                        {item.backendChannel?.provider || "-"}
-                      </p>
-                      {item.backendChannel?.detail && (
-                        <p className="truncate font-mono text-[10px] text-muted-foreground">
-                          {item.backendChannel.detail}
-                        </p>
-                      )}
-                      {item.backendChannel?.group && (
-                        <p className="truncate text-[10px] text-muted-foreground">
-                          {copy("Group", "分组")} {item.backendChannel.group}
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="min-w-0">
-                    <p className="line-clamp-2 break-words text-sm leading-snug text-foreground">
-                      {item.prompt}
-                    </p>
-                    {item.error ? (
-                      <p className="mt-1 line-clamp-2 break-words text-xs leading-snug text-destructive">
-                        {item.error}
-                      </p>
-                    ) : null}
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground md:hidden">
-                      <span className="font-mono">{item.model}</span>
-                      <span>·</span>
-                      <span>{item.size}</span>
-                      <span>·</span>
-                      <Badge
-                        variant="outline"
-                        className={`rounded-full border-transparent px-2 py-0 font-normal text-[10px] uppercase ${statusClasses(item.status)}`}
-                      >
-                        {statusLabel(item.status)}
-                      </Badge>
-                    </div>
-                    {canViewAll && (
-                      <p className="mt-1 truncate text-[11px] text-muted-foreground md:hidden">
-                        {item.userEmail || item.userName || item.userId}
-                      </p>
-                    )}
-                    {canViewAll && item.backendChannel && (
-                      <p className="mt-1 truncate text-[11px] text-muted-foreground md:hidden">
-                        {item.backendChannel.provider}
-                      </p>
-                    )}
-                    {canViewAll && (
-                      <p className="mt-1 truncate text-[11px] text-muted-foreground md:hidden">
-                        {copy("Duration", "耗时")} {generationDuration}
-                      </p>
-                    )}
-                    {summary && (
-                      <p className="mt-1 text-[11px] leading-tight text-muted-foreground md:hidden">
-                        {summary}
-                      </p>
-                    )}
-                  </div>
-
-                  <div
-                    className="hidden min-w-0 truncate font-mono text-xs text-foreground md:block"
-                    title={item.model}
-                  >
-                    {item.model}
-                  </div>
-                  <div className="hidden font-mono text-xs text-foreground md:block">
-                    {item.size}
-                  </div>
-                  <div className="hidden text-xs text-foreground md:block">
-                    {formatCredits(item.creditsConsumed)}
-                    {summary && (
-                      <span className="mt-0.5 block text-[10px] leading-tight text-muted-foreground">
-                        {summary}
-                      </span>
-                    )}
-                  </div>
-                  <div className="hidden md:block">
-                    <Badge
-                      variant="outline"
-                      className={`rounded-full border-transparent font-normal text-[10px] uppercase tracking-wide ${statusClasses(item.status)}`}
-                    >
-                      {statusLabel(item.status)}
-                    </Badge>
-                  </div>
-                  {canViewAll && (
-                    <div className="hidden font-mono text-xs text-muted-foreground md:block">
-                      {generationDuration}
-                    </div>
-                  )}
-                  <div
-                    className="hidden min-w-0 items-center gap-1.5 text-xs text-muted-foreground md:flex"
-                    title={createdAt.title}
-                  >
-                    <Clock className="h-3 w-3 shrink-0" />
-                    <span className="min-w-0 leading-tight">
-                      <span className="block truncate">{createdAt.date}</span>
-                      {createdAt.time && (
-                        <span className="block truncate text-[11px]">
-                          {createdAt.time}
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                </button>
-              </li>
-            );
-          })}
+          {items.map((item) => (
+            <HistoryRow
+              key={item.id}
+              item={item}
+              canViewAll={canViewAll}
+              isZh={isZh}
+              locale={locale}
+              statusLabel={statusLabel}
+              setSelectedId={setSelectedId}
+              desktopGridClass={desktopGridClass}
+              desktopMinWidthClass={desktopMinWidthClass}
+            />
+          ))}
         </ul>
       </div>
 
@@ -591,3 +451,203 @@ export function HistoryClient({
     </>
   );
 }
+
+/**
+ * 单条使用记录行,提取并 memo 化。
+ *
+ * WHY:使用记录每页固定 20 条,虚拟化收益有限而风险偏高(列宽与表头对齐),故此处
+ * 仅将行 JSX 提取为独立组件并经 React.memo 包裹。父级因选中态/分页输入等局部
+ * 重渲时,未变更的行不再重新渲染与重新触发 CachedImage effect,减少缩略图重读。
+ *
+ * @param props.item 单条记录。
+ * @param props.canViewAll 是否全站视图。
+ * @param props.isZh 是否中文。
+ * @param props.locale 当前语言。
+ * @param props.statusLabel 状态文案函数。
+ * @param props.setSelectedId 选中记录 setter。
+ * @param props.desktopGridClass 桌面端网格列定义。
+ * @param props.desktopMinWidthClass 桌面端最小宽度。
+ * @returns 表格行。
+ * @sideEffects 点击触发选中。
+ * @failureMode 无。
+ */
+const HistoryRow = memo(function HistoryRow({
+  item,
+  canViewAll,
+  isZh,
+  locale,
+  statusLabel,
+  setSelectedId,
+  desktopGridClass,
+  desktopMinWidthClass,
+}: {
+  item: HistoryGeneration;
+  canViewAll: boolean;
+  isZh: boolean;
+  locale: string;
+  statusLabel: (status: string) => string;
+  setSelectedId: (id: string) => void;
+  desktopGridClass: string;
+  desktopMinWidthClass: string;
+}) {
+  const copy = (en: string, zh: string) => (isZh ? zh : en);
+  const summary = creditSummary(item, copy);
+  const createdAt = formatHistoryDate(item.createdAt, locale);
+  const generationDuration = formatGenerationDuration(
+    item.generationDurationMs,
+    copy
+  );
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => setSelectedId(item.id)}
+        className={`grid w-full grid-cols-[56px_minmax(0,1fr)] items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40 ${desktopGridClass} ${desktopMinWidthClass} md:items-center md:gap-3`}
+      >
+        <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded border border-border bg-muted md:h-14 md:w-14">
+          {item.imageUrl && item.status === "completed" ? (
+            <Image
+              // 列表缩略图(56-64px):请求 w=128 的小图,避免下整图(平均 2.4MB)。
+              // 宽度走"路径段"(非 ?w= 查询参数),绕过 Cloudflare 忽略 query 的边缘
+              // 缓存键(否则命中并下回整张原图、挤占连接、饿死导航)。
+              src={
+                buildStorageThumbnailUrl(item.imageUrl, 128) ?? item.imageUrl
+              }
+              alt={item.prompt}
+              fill
+              sizes="64px"
+              className="object-contain"
+              unoptimized
+              // 低优先级:把 HTTP/2 连接带宽优先让给导航请求(见 ImageCard 注释)。
+              fetchPriority="low"
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+              <ImageIcon className="h-5 w-5" strokeWidth={1.2} />
+            </div>
+          )}
+        </div>
+
+        {canViewAll && (
+          <div className="hidden min-w-0 md:block">
+            <p className="truncate text-xs font-medium text-foreground">
+              {item.userEmail || item.userName || item.userId}
+            </p>
+            <p className="truncate font-mono text-[10px] text-muted-foreground">
+              {item.userId}
+            </p>
+          </div>
+        )}
+
+        {canViewAll && (
+          <div
+            className="hidden min-w-0 text-xs md:block"
+            title={item.backendChannel?.title || undefined}
+          >
+            <p className="truncate font-medium text-foreground">
+              {item.backendChannel?.provider || "-"}
+            </p>
+            {item.backendChannel?.detail && (
+              <p className="truncate font-mono text-[10px] text-muted-foreground">
+                {item.backendChannel.detail}
+              </p>
+            )}
+            {item.backendChannel?.group && (
+              <p className="truncate text-[10px] text-muted-foreground">
+                {copy("Group", "分组")} {item.backendChannel.group}
+              </p>
+            )}
+          </div>
+        )}
+
+        <div className="min-w-0">
+          <p className="line-clamp-2 break-words text-sm leading-snug text-foreground">
+            {item.prompt}
+          </p>
+          {item.error ? (
+            <p className="mt-1 line-clamp-2 break-words text-xs leading-snug text-destructive">
+              {item.error}
+            </p>
+          ) : null}
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground md:hidden">
+            <span className="font-mono">{item.model}</span>
+            <span>·</span>
+            <span>{item.size}</span>
+            <span>·</span>
+            <Badge
+              variant="outline"
+              className={`rounded-full border-transparent px-2 py-0 font-normal text-[10px] uppercase ${statusClasses(item.status)}`}
+            >
+              {statusLabel(item.status)}
+            </Badge>
+          </div>
+          {canViewAll && (
+            <p className="mt-1 truncate text-[11px] text-muted-foreground md:hidden">
+              {item.userEmail || item.userName || item.userId}
+            </p>
+          )}
+          {canViewAll && item.backendChannel && (
+            <p className="mt-1 truncate text-[11px] text-muted-foreground md:hidden">
+              {item.backendChannel.provider}
+            </p>
+          )}
+          {canViewAll && (
+            <p className="mt-1 truncate text-[11px] text-muted-foreground md:hidden">
+              {copy("Duration", "耗时")} {generationDuration}
+            </p>
+          )}
+          {summary && (
+            <p className="mt-1 text-[11px] leading-tight text-muted-foreground md:hidden">
+              {summary}
+            </p>
+          )}
+        </div>
+
+        <div
+          className="hidden min-w-0 truncate font-mono text-xs text-foreground md:block"
+          title={item.model}
+        >
+          {item.model}
+        </div>
+        <div className="hidden font-mono text-xs text-foreground md:block">
+          {item.size}
+        </div>
+        <div className="hidden text-xs text-foreground md:block">
+          {formatCredits(item.creditsConsumed)}
+          {summary && (
+            <span className="mt-0.5 block text-[10px] leading-tight text-muted-foreground">
+              {summary}
+            </span>
+          )}
+        </div>
+        <div className="hidden md:block">
+          <Badge
+            variant="outline"
+            className={`rounded-full border-transparent font-normal text-[10px] uppercase tracking-wide ${statusClasses(item.status)}`}
+          >
+            {statusLabel(item.status)}
+          </Badge>
+        </div>
+        {canViewAll && (
+          <div className="hidden font-mono text-xs text-muted-foreground md:block">
+            {generationDuration}
+          </div>
+        )}
+        <div
+          className="hidden min-w-0 items-center gap-1.5 text-xs text-muted-foreground md:flex"
+          title={createdAt.title}
+        >
+          <Clock className="h-3 w-3 shrink-0" />
+          <span className="min-w-0 leading-tight">
+            <span className="block truncate">{createdAt.date}</span>
+            {createdAt.time && (
+              <span className="block truncate text-[11px]">
+                {createdAt.time}
+              </span>
+            )}
+          </span>
+        </div>
+      </button>
+    </li>
+  );
+});

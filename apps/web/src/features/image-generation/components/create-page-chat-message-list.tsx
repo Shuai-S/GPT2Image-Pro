@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@repo/ui/components/button";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   Check,
   ChevronLeft,
@@ -14,6 +15,7 @@ import {
   Wand2,
 } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
+import { memo } from "react";
 import { CachedImage as Image } from "@/features/shared/components/cached-image";
 import { parseImageSize } from "../resolution";
 import {
@@ -95,6 +97,20 @@ export function CreatePageChatMessageList({
   onVariantSelect: (messageId: string, nextIndex: number) => void;
   onRetry: (assistantId: string) => void;
 }) {
+  // 长会话虚拟化:scrollRef = chatMessagesRef(overflow-y-auto 容器)。WHY 选用 useVirtualizer
+  // 而非 window 版:chat 是面板内独立滚动区,scroll element 为该 div 而非 window。
+  // 流式追加时消息数与单条高度都会变,virtualizer 内部动态 measure 维持滚动条正确;
+  // getItemKey 用 message.id 保证流式追加/重排时 DOM 复用稳定,避免列表跳变。父组件
+  // scrollChatToBottom 用 element.scrollTop = element.scrollHeight 仍有效,因虚拟占位
+  // 容器 height = totalSize 保持文档盒模型真实高度。
+  const rowVirtualizer = useVirtualizer({
+    count: messages.length,
+    getScrollElement: () => chatMessagesRef.current,
+    estimateSize: () => 160,
+    overscan: 6,
+    getItemKey: (index) => messages[index]?.id ?? index,
+  });
+
   return (
     <div
       ref={chatMessagesRef}
@@ -103,23 +119,39 @@ export function CreatePageChatMessageList({
       {messages.length === 0 ? (
         <ChatEmptyState activeMode={activeMode} copy={copy} />
       ) : (
-        messages.map((message) => (
-          <ChatMessageBubble
-            key={message.id}
-            message={message}
-            chatStream={chatStream}
-            isChatGenerating={isChatGenerating}
-            copy={copy}
-            renderChatStreamBubble={renderChatStreamBubble}
-            renderThinkingBlock={renderThinkingBlock}
-            renderAgentRoundCards={renderAgentRoundCards}
-            onOpenPreview={onOpenPreview}
-            onAttachResultToChat={onAttachResultToChat}
-            onVariantChange={onVariantChange}
-            onVariantSelect={onVariantSelect}
-            onRetry={onRetry}
-          />
-        ))
+        <div
+          className="relative w-full"
+          style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+        >
+          {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+            const message = messages[virtualRow.index];
+            if (!message) return null;
+            return (
+              <div
+                key={virtualRow.key}
+                data-index={virtualRow.index}
+                ref={rowVirtualizer.measureElement}
+                className="absolute left-0 top-0 w-full pb-5"
+                style={{ transform: `translateY(${virtualRow.start}px)` }}
+              >
+                <ChatMessageBubble
+                  message={message}
+                  chatStream={chatStream}
+                  isChatGenerating={isChatGenerating}
+                  copy={copy}
+                  renderChatStreamBubble={renderChatStreamBubble}
+                  renderThinkingBlock={renderThinkingBlock}
+                  renderAgentRoundCards={renderAgentRoundCards}
+                  onOpenPreview={onOpenPreview}
+                  onAttachResultToChat={onAttachResultToChat}
+                  onVariantChange={onVariantChange}
+                  onVariantSelect={onVariantSelect}
+                  onRetry={onRetry}
+                />
+              </div>
+            );
+          })}
+        </div>
       )}
 
       {chatStream &&
@@ -190,7 +222,7 @@ function ChatEmptyState({
  * @sideEffects 用户操作通过回调通知父组件。
  * @failureMode assistant 无活动变体时展示生成中占位。
  */
-function ChatMessageBubble({
+const ChatMessageBubble = memo(function ChatMessageBubble({
   message,
   chatStream,
   isChatGenerating,
@@ -289,7 +321,7 @@ function ChatMessageBubble({
       </div>
     </div>
   );
-}
+});
 
 /**
  * 渲染用户消息内容。
@@ -299,7 +331,11 @@ function ChatMessageBubble({
  * @sideEffects 无。
  * @failureMode 无附件时仅展示文本。
  */
-function UserMessageContent({ message }: { message: ChatMessage }) {
+const UserMessageContent = memo(function UserMessageContent({
+  message,
+}: {
+  message: ChatMessage;
+}) {
   return (
     <div className="flex flex-col gap-3">
       {message.attachments?.length ? (
@@ -330,7 +366,7 @@ function UserMessageContent({ message }: { message: ChatMessage }) {
       <p className="whitespace-pre-wrap break-words">{message.text}</p>
     </div>
   );
-}
+});
 
 /**
  * 渲染 assistant 当前变体内容。
@@ -343,7 +379,7 @@ function UserMessageContent({ message }: { message: ChatMessage }) {
  * @sideEffects 用户点击图片或继续编辑时触发回调。
  * @failureMode 无文本无图且非 pending 时展示通用完成文案。
  */
-function AssistantVariantContent({
+const AssistantVariantContent = memo(function AssistantVariantContent({
   message,
   activeVariant,
   activeVariantPending,
@@ -414,7 +450,7 @@ function AssistantVariantContent({
         )}
     </div>
   );
-}
+});
 
 /**
  * 渲染 assistant 图片结果。
@@ -425,7 +461,7 @@ function AssistantVariantContent({
  * @sideEffects 用户点击触发预览或继续编辑回调。
  * @failureMode generationId 缺失时预览按钮不触发。
  */
-function AssistantImageResult({
+const AssistantImageResult = memo(function AssistantImageResult({
   activeVariant,
   copy,
   onOpenPreview,
@@ -491,7 +527,7 @@ function AssistantImageResult({
       </div>
     </div>
   );
-}
+});
 
 /**
  * 渲染 assistant 变体控制区。
@@ -506,7 +542,7 @@ function AssistantImageResult({
  * @sideEffects 用户点击时触发父组件回调。
  * @failureMode 无多变体时仅展示重试按钮。
  */
-function AssistantVariantControls({
+const AssistantVariantControls = memo(function AssistantVariantControls({
   message,
   variants,
   activeIndex,
@@ -619,4 +655,4 @@ function AssistantVariantControls({
       </Button>
     </div>
   );
-}
+});

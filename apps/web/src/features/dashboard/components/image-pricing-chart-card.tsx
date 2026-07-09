@@ -128,6 +128,17 @@ function getExampleFormula(
   };
 }
 
+/**
+ * 测量图表容器宽度。
+ *
+ * WHY：ResizeObserver 回调在容器尺寸变化时高频触发,
+ * 直接每帧 setState 会让 recharts 随 dashboard 滚动/缩放反复重绘。
+ * 这里用 rAF 合并多次回调为一帧,且只有宽度变化超过 1px 才写入 state,
+ * 让测量层与重绘解耦,显著降低 recharts 重绘次数。
+ *
+ * @returns 容器 ref 与最新宽度。
+ * @sideEffects 注册 ResizeObserver 与 rAF,卸载时清理。
+ */
 function useElementWidth() {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -136,20 +147,34 @@ function useElementWidth() {
     const element = ref.current;
     if (!element) return;
 
-    const updateWidth = (nextWidth: number) => {
+    const writeWidth = (nextWidth: number) => {
       const roundedWidth = Math.floor(nextWidth);
-      setWidth(roundedWidth > 0 ? roundedWidth : 0);
+      const safeWidth = roundedWidth > 0 ? roundedWidth : 0;
+      // 仅当宽度真正变化时 setState,避免等值更新触发 recharts 重绘。
+      setWidth((current) => (current === safeWidth ? current : safeWidth));
     };
 
-    updateWidth(element.getBoundingClientRect().width);
+    let rafId: number | null = null;
+    const scheduleWrite = (nextWidth: number) => {
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        writeWidth(nextWidth);
+      });
+    };
+
+    writeWidth(element.getBoundingClientRect().width);
     const resizeObserver = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry) return;
-      updateWidth(entry.contentRect.width);
+      scheduleWrite(entry.contentRect.width);
     });
     resizeObserver.observe(element);
 
-    return () => resizeObserver.disconnect();
+    return () => {
+      if (rafId !== null) window.cancelAnimationFrame(rafId);
+      resizeObserver.disconnect();
+    };
   }, []);
 
   return { ref, width };

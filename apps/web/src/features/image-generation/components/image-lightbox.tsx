@@ -18,7 +18,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useLocale } from "next-intl";
 import { useAction } from "next-safe-action/hooks";
-import { type PointerEvent, useEffect, useRef, useState } from "react";
+import { type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { deleteGenerationAction } from "@/features/image-generation/actions";
 import type { GenerationCreditDetails } from "@/features/image-generation/credit-calculation-details";
@@ -197,10 +197,15 @@ export function ImageLightbox({
     : [];
   const [confirmDelete, setConfirmDelete] = useState(false);
   const referenceImages = generation.referenceImages ?? EMPTY_REFERENCE_IMAGES;
-  const visibleReferenceImages = referenceImages.filter(
-    (item) => !imageUrl || item.imageUrl !== imageUrl
+  const visibleReferenceImages = useMemo(
+    () =>
+      referenceImages.filter((item) => !imageUrl || item.imageUrl !== imageUrl),
+    [referenceImages, imageUrl]
   );
-  const firstReferenceId = visibleReferenceImages[0]?.id;
+  const firstReferenceId = useMemo(
+    () => visibleReferenceImages[0]?.id,
+    [visibleReferenceImages]
+  );
   const [activePreviewId, setActivePreviewId] = useState<string>("output");
   const activeReference =
     activePreviewId === "output"
