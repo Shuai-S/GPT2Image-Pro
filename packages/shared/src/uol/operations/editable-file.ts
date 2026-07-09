@@ -34,7 +34,6 @@ defineOperation({
     "对话式驱动 ChatGPT 代码解释器生成可编辑 .pptx(+素材 zip),存储并返回签名下载链接。" +
     "仅调付费级 web 账号(Plus/Pro,代码解释器),按任务固定价扣费。参考图可选。",
   input: z.object({
-    userId: z.string(),
     clientRequestId: z.string().min(1),
     prompt: z.string().min(1).max(8000),
     base64Images: z.array(z.string()).optional(),
@@ -68,7 +67,6 @@ defineOperation({
     "下载链接。仅调付费级 web 账号,按任务固定价扣费。base64Images 必须非空。" +
     "与 image.exportPsd(把分层生成产物组装成 PSD)是并列的两条 PSD 路径,互不替代。",
   input: z.object({
-    userId: z.string(),
     clientRequestId: z.string().min(1),
     prompt: z.string().min(1).max(8000),
     base64Images: z.array(z.string()).min(1, "base64Images is empty"),

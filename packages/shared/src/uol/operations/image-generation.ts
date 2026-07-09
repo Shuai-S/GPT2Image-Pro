@@ -30,7 +30,6 @@ defineOperation({
     "存储结果、审核。所有传输层（v1 API / Server Action / Web 路由）" +
     "最终汇入此操作。",
   input: z.object({
-    userId: z.string(),
     prompt: z.string(),
     negativePrompt: z.string().optional(),
     model: z.string().optional(),
@@ -52,7 +51,7 @@ defineOperation({
       z.object({
         url: z.string(),
         revisedPrompt: z.string().optional(),
-      }),
+      })
     ),
     creditsUsed: z.number().optional(),
     model: z.string().optional(),
@@ -191,9 +190,7 @@ defineOperation({
     userId: z.string(),
     page: z.number().int().positive().optional(),
     pageSize: z.number().int().positive().optional(),
-    status: z
-      .enum(["pending", "processing", "completed", "failed"])
-      .optional(),
+    status: z.enum(["pending", "processing", "completed", "failed"]).optional(),
   }),
   output: z.object({
     generations: z.array(
@@ -204,7 +201,7 @@ defineOperation({
         model: z.string().optional(),
         imageUrl: z.string().optional(),
         createdAt: z.string(),
-      }),
+      })
     ),
     total: z.number(),
     page: z.number(),
@@ -273,7 +270,7 @@ defineOperation({
         model: z.string().optional(),
         imageUrl: z.string().optional(),
         createdAt: z.string(),
-      }),
+      })
     ),
   }),
   access: { kind: "protected" },
@@ -354,7 +351,7 @@ defineOperation({
           date: z.string(),
           count: z.number(),
           creditsUsed: z.number(),
-        }),
+        })
       )
       .optional(),
   }),

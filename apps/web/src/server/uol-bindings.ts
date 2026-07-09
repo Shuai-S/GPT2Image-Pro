@@ -19,13 +19,13 @@
 // 系统维护操作没有 apps/web 侧绑定需求，避免把 env-file 写入逻辑追进用户端。
 import "@repo/shared/uol/operations/admin";
 
+import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import type { OperationContext, Principal } from "@repo/shared/uol";
 import {
   bindExecute,
   getPrincipalUserId,
   OperationError,
 } from "@repo/shared/uol";
-import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import {
   getUserImageBackendPreference,
   listAdminImageBackendPool,
@@ -41,6 +41,21 @@ import type { ImageQuality } from "@/features/image-generation/types";
 // ---------------------------------------------------------------------------
 
 /**
+ * 从已鉴权 Principal 获取用户 ID。
+ *
+ * @param principal UOL 网关传入的调用身份。
+ * @returns 会话用户或 API Key 所属用户 ID。
+ * @throws OperationError 非用户身份不得执行用户计费操作。
+ */
+function requirePrincipalUserId(principal: Principal): string {
+  const userId = getPrincipalUserId(principal);
+  if (!userId) {
+    throw new OperationError("unauthenticated", "需要用户身份");
+  }
+  return userId;
+}
+
+/**
  * image.generate - 统一管线核心
  * 源: apps/web/src/features/image-generation/operations.ts
  */
@@ -48,7 +63,6 @@ bindExecute(
   "image.generate",
   async (
     input: {
-      userId: string;
       prompt: string;
       negativePrompt?: string;
       model?: string;
@@ -61,19 +75,23 @@ bindExecute(
       relayOnly?: boolean;
       extra?: Record<string, unknown>;
     },
-    _principal: Principal,
+    principal: Principal,
     _ctx: OperationContext
   ) => {
+    const userId = requirePrincipalUserId(principal);
     const result = await runImageGenerationForUser({
       mode: "generate",
-      userId: input.userId,
+      userId,
       prompt: input.prompt,
       model: input.model,
       size: input.size,
       quality: input.quality as ImageQuality | undefined,
       n: input.count,
       generationId: input.generationId,
-      relayOnly: input.relayOnly,
+      apiKeyId: principal.type === "apiKey" ? principal.apiKeyId : undefined,
+      requestGroupId: input.backendGroupId,
+      relayOnly:
+        principal.type === "apiKey" ? principal.relayOnly : input.relayOnly,
     });
 
     if (result.error) {
@@ -118,16 +136,16 @@ function bindEditableFile(name: "file.generatePpt" | "file.generatePsd") {
     name,
     async (
       input: {
-        userId: string;
         clientRequestId: string;
         prompt: string;
         base64Images?: string[];
       },
-      _principal: Principal,
+      principal: Principal,
       _ctx: OperationContext
     ) => {
+      const userId = requirePrincipalUserId(principal);
       const result = await runEditableFileForUser({
-        userId: input.userId,
+        userId,
         kind,
         prompt: input.prompt,
         base64Images: input.base64Images ?? [],
@@ -190,10 +208,7 @@ bindExecute(
     principal: Principal,
     _ctx: OperationContext
   ) => {
-    const userId = getPrincipalUserId(principal);
-    if (!userId) {
-      throw new OperationError("unauthenticated", "需要用户身份");
-    }
+    const userId = requirePrincipalUserId(principal);
     const plan = await getUserPlan(userId);
     const [groups, selectedGroupId] = await Promise.all([
       listSelectableImageBackendGroups(plan.plan),
@@ -227,10 +242,7 @@ bindExecute(
     principal: Principal,
     _ctx: OperationContext
   ) => {
-    const userId = getPrincipalUserId(principal);
-    if (!userId) {
-      throw new OperationError("unauthenticated", "需要用户身份");
-    }
+    const userId = requirePrincipalUserId(principal);
     const plan = await getUserPlan(userId);
     try {
       await setUserImageBackendPreference(userId, input.groupId, plan.plan);
