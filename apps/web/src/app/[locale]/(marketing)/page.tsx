@@ -7,16 +7,14 @@ import { getRuntimeSettingBoolean } from "@repo/shared/system-settings";
 import type { Metadata } from "next";
 import { SiteJsonLd, SoftwareAppJsonLd } from "@/components/seo/json-ld";
 import { getRecentGenerationSlaStats } from "@/features/image-generation/sla";
-import {
-  CTASection,
-  FAQSection,
-  FeatureGrid,
-  HeroSection,
-  HowItWorks,
-  SlaStatusSection,
-  Testimonials,
-  UseCasesSection,
-} from "@/features/marketing/components";
+import { CTASection } from "@/features/marketing/components/cta-section";
+import { FAQSection } from "@/features/marketing/components/faq-section";
+import { FeatureGrid } from "@/features/marketing/components/feature-grid";
+import { HeroSection } from "@/features/marketing/components/hero-section";
+import { HowItWorks } from "@/features/marketing/components/how-it-works";
+import { SlaStatusSection } from "@/features/marketing/components/sla-status-section";
+import { Testimonials } from "@/features/marketing/components/testimonials";
+import { UseCasesSection } from "@/features/marketing/components/use-cases-section";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;

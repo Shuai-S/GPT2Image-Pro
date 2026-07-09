@@ -17,7 +17,7 @@ import {
   getRuntimeModerationCreditPricing,
   getRuntimePublicModelPricingRules,
 } from "@/features/image-generation/pricing-settings";
-import { PricingSection } from "@/features/marketing/components";
+import { PricingSection } from "@/features/marketing/components/pricing-section";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;

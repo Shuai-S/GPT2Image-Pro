@@ -4,7 +4,8 @@ import { DocsLayout } from "fumadocs-ui/layouts/docs";
 import { RootProvider } from "fumadocs-ui/provider/next";
 import { NextIntlClientProvider } from "next-intl";
 import type { ReactNode } from "react";
-import { Header } from "@/features/marketing/components";
+import { CurrentSessionProvider } from "@/features/auth/hooks/use-current-session";
+import { Header } from "@/features/marketing/components/header";
 import { loadMessageGroups } from "@/i18n/message-loader";
 import { docsSource } from "@/lib/source";
 
@@ -36,23 +37,25 @@ export default async function Layout({
     // 搜索/page-tree 等上下文;fumadocs 样式在根布局先于应用样式加载,避免路由切换后
     // 第二套 Tailwind utilities 覆盖本站响应式类。
     <NextIntlClientProvider messages={messages}>
-      <RootProvider>
-        {/* 网站顶部导航栏 - 放在 DocsLayout 外部确保显示 */}
-        <Header branding={branding} operationFlags={operationFlags} />
+      <CurrentSessionProvider>
+        <RootProvider>
+          {/* 网站顶部导航栏 - 放在 DocsLayout 外部确保显示 */}
+          <Header branding={branding} operationFlags={operationFlags} />
 
-        {/* Fumadocs 文档布局 */}
-        <DocsLayout
-          tree={tree}
-          nav={{
-            enabled: false, // 禁用 Fumadocs 自带的顶部导航
-          }}
-          sidebar={{
-            defaultOpenLevel: 1,
-          }}
-        >
-          {children}
-        </DocsLayout>
-      </RootProvider>
+          {/* Fumadocs 文档布局 */}
+          <DocsLayout
+            tree={tree}
+            nav={{
+              enabled: false, // 禁用 Fumadocs 自带的顶部导航
+            }}
+            sidebar={{
+              defaultOpenLevel: 1,
+            }}
+          >
+            {children}
+          </DocsLayout>
+        </RootProvider>
+      </CurrentSessionProvider>
     </NextIntlClientProvider>
   );
 }

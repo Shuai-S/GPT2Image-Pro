@@ -1,6 +1,6 @@
 "use client";
 
-import { CookieSettingsDialog } from "@repo/shared/components";
+import { CookieSettingsDialog } from "@repo/shared/components/cookie-settings-dialog";
 import type { BrandingConfig } from "@repo/shared/config/branding";
 import Link from "next/link";
 import { useTranslations } from "next-intl";

@@ -16,10 +16,7 @@ import { cn } from "@repo/ui/utils";
 import Image from "next/image";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
-import {
-  type CurrentSession,
-  useCurrentSession,
-} from "@/features/auth/hooks/use-current-session";
+import { useCurrentSession } from "@/features/auth/hooks/use-current-session";
 import { NavLinkItem } from "@/features/dashboard/components/nav-link-item";
 import { UserMenu } from "@/features/dashboard/components/user-menu";
 import { useSidebar } from "@/features/dashboard/context";
@@ -37,19 +34,16 @@ import { useUnreadBadges } from "@/features/dashboard/hooks/use-unread-badges";
  * - 登出功能
  * - 支持折叠/展开
  *
- * @param initialSession - 服务端预取的当前会话，用于避免首屏闪烁。
  * @param branding - 管理员配置的应用名称与 Logo。
  * @returns Dashboard 侧边栏。
  * @sideEffects 读取会话、套餐、未读消息并执行登出/路由跳转。
  */
 type DashboardSidebarProps = {
-  initialSession?: CurrentSession;
   branding: BrandingConfig;
   operationFlags: OperationFeatureFlags;
 };
 
 export function DashboardSidebar({
-  initialSession,
   branding,
   operationFlags,
 }: DashboardSidebarProps) {
@@ -59,7 +53,7 @@ export function DashboardSidebar({
   const t = useTranslations("Dashboard");
 
   // 获取当前用户会话
-  const { data: session } = useCurrentSession(initialSession);
+  const { data: session } = useCurrentSession();
   const user = session?.user;
   const { sidebarNav, localizedHref, isNavItemActive } = useDashboardNav({
     locale,

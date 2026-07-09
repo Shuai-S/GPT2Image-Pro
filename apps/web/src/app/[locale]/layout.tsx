@@ -1,4 +1,4 @@
-import { Providers } from "@repo/shared/components";
+import { Providers } from "@repo/shared/components/providers";
 import { siteConfig } from "@repo/shared/config";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";

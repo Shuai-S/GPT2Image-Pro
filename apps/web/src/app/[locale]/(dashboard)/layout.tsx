@@ -6,7 +6,10 @@ import { getServerSession } from "@repo/shared/auth/server";
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
 import { getRuntimeOperationFeatureFlags } from "@repo/shared/system-settings";
 import { NextIntlClientProvider } from "next-intl";
-import type { CurrentSession } from "@/features/auth/hooks/use-current-session";
+import {
+  CurrentSessionProvider,
+  type CurrentSession,
+} from "@/features/auth/hooks/use-current-session";
 import { DashboardMainWrapper } from "@/features/dashboard/components/main-wrapper";
 import { DashboardSidebar } from "@/features/dashboard/components/sidebar";
 import { SidebarProvider } from "@/features/dashboard/context";
@@ -53,18 +56,19 @@ export default async function DashboardLayout({
 
   return (
     <NextIntlClientProvider messages={messages}>
-      <SidebarProvider>
-        <CreateRuntimeProvider>
-          <div className="min-h-screen bg-muted">
-            <DashboardSidebar
-              initialSession={initialSession}
-              branding={branding}
-              operationFlags={operationFlags}
-            />
-            <DashboardMainWrapper>{children}</DashboardMainWrapper>
-          </div>
-        </CreateRuntimeProvider>
-      </SidebarProvider>
+      <CurrentSessionProvider initialData={initialSession}>
+        <SidebarProvider>
+          <CreateRuntimeProvider>
+            <div className="min-h-screen bg-muted">
+              <DashboardSidebar
+                branding={branding}
+                operationFlags={operationFlags}
+              />
+              <DashboardMainWrapper>{children}</DashboardMainWrapper>
+            </div>
+          </CreateRuntimeProvider>
+        </SidebarProvider>
+      </CurrentSessionProvider>
     </NextIntlClientProvider>
   );
 }

@@ -9,7 +9,7 @@
 "use client";
 
 import { signOut } from "@repo/shared/auth/client";
-import { ModeToggle } from "@repo/shared/components";
+import { ModeToggle } from "@repo/shared/components/mode-toggle";
 import { CreditBalanceBadge } from "@repo/shared/credits/components";
 import { getMyPlanAction } from "@repo/shared/subscription/actions/get-user-plan";
 import {

@@ -6,8 +6,12 @@ import { getServerSession } from "@repo/shared/auth/server";
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
 import { getRuntimeOperationFeatureFlags } from "@repo/shared/system-settings";
 import { NextIntlClientProvider } from "next-intl";
-import type { CurrentSession } from "@/features/auth/hooks/use-current-session";
-import { Footer, Header } from "@/features/marketing/components";
+import {
+  CurrentSessionProvider,
+  type CurrentSession,
+} from "@/features/auth/hooks/use-current-session";
+import { Footer } from "@/features/marketing/components/footer";
+import { Header } from "@/features/marketing/components/header";
 import { loadMessageGroups } from "@/i18n/message-loader";
 
 export const dynamic = "force-dynamic";
@@ -46,15 +50,13 @@ export default async function MarketingLayout({
 
   return (
     <NextIntlClientProvider messages={messages}>
-      <div className="flex min-h-screen flex-col">
-        <Header
-          branding={branding}
-          operationFlags={operationFlags}
-          initialSession={initialSession}
-        />
-        <main className="flex-1">{children}</main>
-        <Footer branding={branding} />
-      </div>
+      <CurrentSessionProvider initialData={initialSession}>
+        <div className="flex min-h-screen flex-col">
+          <Header branding={branding} operationFlags={operationFlags} />
+          <main className="flex-1">{children}</main>
+          <Footer branding={branding} />
+        </div>
+      </CurrentSessionProvider>
     </NextIntlClientProvider>
   );
 }
