@@ -24,6 +24,7 @@ import {
 import { cn } from "@repo/ui/utils";
 import { Check, Coins, ImageIcon, Loader2, ShoppingCart } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { useCurrentSession } from "@/features/auth/hooks/use-current-session";
@@ -45,7 +46,15 @@ import { AlipayQrDialog } from "@/features/payment/alipay-qr-dialog";
 import { PlanInterval } from "@/features/payment/types";
 import { useRouter } from "@/i18n/routing";
 
-import { AnimatedPrice } from "./animated-price";
+// 懒加载:AnimatedPrice 依赖整个 framer-motion 包,改 next/dynamic 后把 framer-motion
+// 从营销 pricing 首屏 critical chunk 移出为独立 chunk;loading 返回静态数字避免价格闪现。
+const AnimatedPrice = dynamic(
+  () => import("./animated-price").then((m) => m.AnimatedPrice),
+  {
+    ssr: false,
+    loading: () => null,
+  }
+);
 
 function submitPaymentForm(url: string, params: Record<string, string>) {
   const form = document.createElement("form");
