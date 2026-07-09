@@ -50,6 +50,7 @@ import {
   UserRound,
 } from "lucide-react";
 import Image from "next/image";
+import dynamic from "next/dynamic";
 import { useAction } from "next-safe-action/hooks";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -91,20 +92,18 @@ import {
   setSub2ApiAutoSyncTaskOverwriteLocalUnavailableStateAction,
   updateSub2ApiAutoSyncTaskOptionsAction,
 } from "./actions";
-import { ChatgptRegisterTab } from "./chatgpt-register-tab";
 import type { ImageApiHealthResult } from "./health-check";
 import { parseImportTokensText } from "./import-token-parser";
-import {
-  Sub2ApiImportSection,
-  type ImportFormState,
-  type ManualImportFormState,
-  type Sub2ApiAutoSyncTaskView,
-  type Sub2ApiPlanFilter,
-  type Sub2ApiSourceGroupOption,
-  type SyncProgressState,
-  type SyncTaskFormState,
-  type TokenSyncMode,
-  type WebAtImportFormState,
+import type {
+  ImportFormState,
+  ManualImportFormState,
+  Sub2ApiAutoSyncTaskView,
+  Sub2ApiPlanFilter,
+  Sub2ApiSourceGroupOption,
+  SyncProgressState,
+  SyncTaskFormState,
+  TokenSyncMode,
+  WebAtImportFormState,
 } from "./sub2api-import-section";
 import type {
   ImageBackendApiInterfaceMode,
@@ -112,6 +111,20 @@ import type {
   ImageBackendGroupBackendType,
   ImagesUpstreamMode,
 } from "./types";
+
+// 懒加载:注册机 Tab 与 Sub2API 同步区块是非默认 active 的大子树,改 next/dynamic
+// 后从 admin 首屏 client bundle 移出为独立 chunk。loading 返回 null 占位,避免
+// 切到对应 Tab 瞬间闪烁。
+const ChatgptRegisterTab = dynamic(
+  () =>
+    import("./chatgpt-register-tab").then((m) => m.ChatgptRegisterTab),
+  { ssr: false, loading: () => null }
+);
+const Sub2ApiImportSection = dynamic(
+  () =>
+    import("./sub2api-import-section").then((m) => m.Sub2ApiImportSection),
+  { ssr: false, loading: () => null }
+);
 
 type Group = {
   id: string;
