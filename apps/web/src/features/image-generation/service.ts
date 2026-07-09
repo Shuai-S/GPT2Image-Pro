@@ -1464,6 +1464,17 @@ async function retryPoolBackendResult(
         currentBackend.inflightLease = false;
       }
     }
+    // 多数协议适配器会把 fetch AbortError 吞成 result.error 返回，而不是继续 throw。
+    // 若本轮单次超时信号已经触发、总超时尚未触发，统一翻成可分类的固定错误，确保
+    // 它稳定执行换号，而不是落入未知错误兜底或因不同运行时的 abort 文案停止重试。
+    if (
+      result.error &&
+      attemptSignal?.aborted &&
+      !parentSignal?.aborted &&
+      /abort|timeout/i.test(result.error)
+    ) {
+      result = { ...result, error: PER_ATTEMPT_TIMEOUT_ERROR };
+    }
     const shouldRetry = await reportPoolBackendResult(
       candidate,
       result,
@@ -1491,7 +1502,17 @@ async function retryPoolBackendResult(
 
     const memberKey = poolBackendMemberKey(candidate);
     if (memberKey) excluded.add(memberKey);
-    if (!requestKind || !config.backend.userId) break;
+    if (!requestKind || !config.backend.userId) {
+      logWarn("生图后端停止切换：缺少调度上下文", {
+        attempt,
+        requestKind,
+        backendType: candidate.backend?.type,
+        backendId: candidate.backend?.id,
+        hasUserId: Boolean(config.backend.userId),
+        lastError: result.error,
+      });
+      break;
+    }
     if (
       initialApiRetrySwitchLimit !== null &&
       backendSwitchCount >= initialApiRetrySwitchLimit
@@ -1507,8 +1528,17 @@ async function retryPoolBackendResult(
     const backend = candidate.backend;
     if (
       !backend ||
-      (backend.type !== "pool-api" && backend.type !== "pool-account")
+      (backend.type !== "pool-api" &&
+        backend.type !== "pool-account" &&
+        backend.type !== "pool-adobe")
     ) {
+      logWarn("生图后端停止切换：当前后端不支持池内换号", {
+        attempt,
+        requestKind,
+        backendType: backend?.type,
+        backendId: backend?.id,
+        lastError: result.error,
+      });
       break;
     }
 
@@ -1559,7 +1589,15 @@ async function retryPoolBackendResult(
     if (!next?.config?.backend && shouldFallbackFromWebPreference()) {
       next = await resolveResponsesFallback(result.error);
     }
-    if (!next?.config?.backend) break;
+    if (!next?.config?.backend) {
+      logWarn("生图后端没有可切换的账号池成员", {
+        attempt,
+        requestKind,
+        excludedCount: excluded.size,
+        lastError: result.error,
+      });
+      break;
+    }
     // 不变量兜底:firefly 请求的换号目标必须仍是 Adobe 路由(pool-adobe 或 adobe_sourced
     // api)。正常已由上面的 forceFirefly 约束保证;此处 fail-closed 拦截任何未来回归,宁可
     // 不换号失败,也不让按 Adobe 计费的请求落到非 Adobe 后端。

@@ -37,6 +37,10 @@ const backendPoolMock = vi.hoisted(() => {
   };
 });
 
+const systemSettingsMock = vi.mocked(
+  await import("@repo/shared/system-settings")
+);
+
 vi.mock("@/features/image-backend-pool/service", () => backendPoolMock);
 
 vi.mock("./chatgpt-web", () => ({
@@ -49,6 +53,9 @@ describe("image service Web-first fallback", () => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
     vi.clearAllMocks();
+    systemSettingsMock.getRuntimeSettingNumber.mockImplementation(
+      async (_key: string, fallback: number) => fallback
+    );
   });
 
   it("serializes concurrent member resolution and excludes all reserved members", async () => {
@@ -433,6 +440,157 @@ describe("image service Web-first fallback", () => {
       expect.objectContaining({
         excludedMemberKeys: ["api:api-1"],
       })
+    );
+  });
+
+  it("switches Adobe backend after a recoverable failure", async () => {
+    process.env.DATABASE_URL =
+      process.env.DATABASE_URL || "postgresql://test:test@127.0.0.1:5432/test";
+    const { generateImage } = await import("./service");
+    const imageBase64 = Buffer.from("adobe-retry-image").toString("base64");
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("adobe-1.example.test")) {
+        return new Response("temporary failure", { status: 503 });
+      }
+      if (url.endsWith("/generated/result.png")) {
+        return new Response(Buffer.from("adobe-retry-image"), { status: 200 });
+      }
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: "![Generated](/generated/result.png)",
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    backendPoolMock.resolveImageBackendPoolConfig.mockResolvedValueOnce({
+      config: {
+        baseUrl: "https://adobe-2.example.test",
+        apiKey: "adobe-key-2",
+        backend: {
+          type: "pool-adobe",
+          id: "adobe-2",
+          groupId: "group-adobe",
+          userId: "user-1",
+          requestKind: "image_generation",
+          fireflyOnly: true,
+          adobeMode: "gateway",
+          reportResult: true,
+        },
+      },
+    });
+
+    const result = await generateImage(
+      {
+        baseUrl: "https://adobe-1.example.test",
+        apiKey: "adobe-key-1",
+        backend: {
+          type: "pool-adobe",
+          id: "adobe-1",
+          groupId: "group-adobe",
+          userId: "user-1",
+          requestKind: "image_generation",
+          fireflyOnly: true,
+          adobeMode: "gateway",
+          reportResult: true,
+        },
+      },
+      {
+        prompt: "make an icon",
+        model: "firefly-image-4",
+        size: "1024x1024",
+      }
+    );
+
+    expect(result.imageBase64).toBe(imageBase64);
+    expect(backendPoolMock.resolveImageBackendPoolConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        excludedMemberKeys: ["adobe:adobe-1"],
+        forceFirefly: true,
+      })
+    );
+  });
+
+  it("switches backend when a single attempt times out", async () => {
+    process.env.DATABASE_URL =
+      process.env.DATABASE_URL || "postgresql://test:test@127.0.0.1:5432/test";
+    systemSettingsMock.getRuntimeSettingNumber.mockImplementation(
+      async (key: string, fallback: number) =>
+        key === "IMAGE_PER_ATTEMPT_TIMEOUT_MS" ? 10 : fallback
+    );
+    const { generateImage } = await import("./service");
+    const imageBase64 = Buffer.from("timeout-retry-image").toString("base64");
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, init?: RequestInit) => {
+        if (fetchMock.mock.calls.length === 1) {
+          return await new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("aborted", "AbortError")),
+              { once: true }
+            );
+          });
+        }
+        return new Response(
+          JSON.stringify({ data: [{ b64_json: imageBase64 }] }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    backendPoolMock.resolveImageBackendPoolConfig.mockResolvedValueOnce({
+      config: {
+        baseUrl: "https://api-2.example.test/v1",
+        apiKey: "api-key-2",
+        model: "gpt-image-2",
+        backend: {
+          type: "pool-api",
+          id: "api-2",
+          groupId: "group-1",
+          userId: "user-1",
+          requestKind: "image_generation",
+          reportResult: true,
+        },
+      },
+    });
+
+    const result = await generateImage(
+      {
+        baseUrl: "https://api-1.example.test/v1",
+        apiKey: "api-key-1",
+        model: "gpt-image-2",
+        backend: {
+          type: "pool-api",
+          id: "api-1",
+          groupId: "group-1",
+          userId: "user-1",
+          requestKind: "image_generation",
+          reportResult: true,
+        },
+      },
+      {
+        prompt: "make an icon",
+        model: "gpt-image-2",
+        size: "1024x1024",
+      }
+    );
+
+    expect(result.imageBase64).toBe(imageBase64);
+    expect(backendPoolMock.reportImageBackendResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memberId: "api-1",
+        error: "upstream per-attempt timed out",
+      })
+    );
+    expect(backendPoolMock.resolveImageBackendPoolConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ excludedMemberKeys: ["api:api-1"] })
     );
   });
 
