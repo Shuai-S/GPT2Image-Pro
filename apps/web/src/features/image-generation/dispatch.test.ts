@@ -17,6 +17,10 @@ describe("dispatchConcurrentChannels", () => {
     });
 
     expect(attemptOne).toHaveBeenCalledTimes(1);
+    expect(attemptOne).toHaveBeenCalledWith({
+      channelIndex: 0,
+      signal: abortController.signal,
+    });
     expect(result).toEqual({ imageBase64: "abc", error: undefined });
   });
 

@@ -1040,12 +1040,72 @@ async function reportPoolBackendResult(
 function poolBackendMemberKey(config: ApiConfig) {
   if (
     config.backend?.type !== "pool-api" &&
-    config.backend?.type !== "pool-account"
+    config.backend?.type !== "pool-account" &&
+    config.backend?.type !== "pool-adobe"
   ) {
     return null;
   }
   if (!config.backend.id) return null;
   return `${poolBackendMemberType(config.backend.type)}:${config.backend.id}`;
+}
+
+type PoolConfigResolveOptions = Parameters<
+  typeof resolveImageBackendPoolConfig
+>[0];
+
+/**
+ * 同一次生成任务内的池成员协调器。
+ *
+ * @remarks 串行化候选解析并永久排除本任务已经分配或尝试过的成员，避免并发渠道
+ * 共享初始租约，或在后续换号时再次汇合到同一成员。
+ */
+export interface ImageBackendRetryCoordinator {
+  reserve(config: ApiConfig): void;
+  resolve(
+    options: PoolConfigResolveOptions
+  ): ReturnType<typeof resolveImageBackendPoolConfig>;
+}
+
+/** 创建请求级池成员协调器；初始配置会立即登记为已占用成员。 */
+export function createImageBackendRetryCoordinator(
+  initialConfigs: ApiConfig[] = []
+): ImageBackendRetryCoordinator {
+  const reservedMemberKeys = new Set<string>();
+  let resolveQueue: Promise<void> = Promise.resolve();
+
+  const reserve = (config: ApiConfig) => {
+    const memberKey = poolBackendMemberKey(config);
+    if (memberKey) reservedMemberKeys.add(memberKey);
+  };
+  for (const config of initialConfigs) reserve(config);
+
+  return {
+    reserve,
+    resolve(options) {
+      const execute = async () => {
+        const excludedMemberKeys = new Set([
+          ...reservedMemberKeys,
+          ...(options.excludedMemberKeys || []),
+        ]);
+        const resolved = await resolveImageBackendPoolConfig({
+          ...options,
+          excludedMemberKeys: Array.from(excludedMemberKeys),
+        });
+        if (resolved) reserve(resolved.config);
+        return resolved;
+      };
+      const result = resolveQueue.then(execute, execute);
+      resolveQueue = result.then(
+        () => undefined,
+        () => undefined
+      );
+      return result;
+    },
+  };
+}
+
+export interface ImageGenerationBackendRetryOptions {
+  retryCoordinator?: ImageBackendRetryCoordinator;
 }
 
 function getStickyBackendMember(config: ApiConfig) {
@@ -1270,6 +1330,8 @@ async function retryPoolBackendResult(
     parentSignal?: AbortSignal;
     /** 单次 attempt 超时毫秒；undefined 时回退到 parentSignal 兜底。 */
     perAttemptTimeoutMs?: number;
+    /** 同一 generation 的并发渠道共享，用于跨渠道排除已尝试成员。 */
+    retryCoordinator?: ImageBackendRetryCoordinator;
   }
 ) {
   // 仅"不需要上报"的后端直接跑一次返回。pool-adobe 等带 reportResult 的池后端必须进入
@@ -1312,7 +1374,9 @@ async function retryPoolBackendResult(
     });
     accountBackendPreference = "responses";
     try {
-      return await resolveImageBackendPoolConfig({
+      return await (
+        options?.retryCoordinator?.resolve ?? resolveImageBackendPoolConfig
+      )({
         userId: config.backend?.userId || "",
         apiKeyId: config.backend?.apiKeyId,
         requestGroupId: config.backend?.requestGroupId,
@@ -1461,7 +1525,9 @@ async function retryPoolBackendResult(
 
     let next: Awaited<ReturnType<typeof resolveImageBackendPoolConfig>>;
     try {
-      next = await resolveImageBackendPoolConfig({
+      next = await (
+        options?.retryCoordinator?.resolve ?? resolveImageBackendPoolConfig
+      )({
         userId: config.backend.userId,
         apiKeyId: config.backend.apiKeyId,
         requestGroupId: config.backend.requestGroupId,
@@ -4532,7 +4598,8 @@ async function runAdobeImageRequest(
 export async function generateImage(
   config: ApiConfig,
   params: GenerateImageParams,
-  callbacks?: ImageGenerationCallbacks
+  callbacks?: ImageGenerationCallbacks,
+  retryOptions?: ImageGenerationBackendRetryOptions
 ): Promise<GenerateImageResult> {
   if (config.backend?.reportResult) {
     return retryPoolBackendResult(
@@ -4541,7 +4608,8 @@ export async function generateImage(
         generateImage(
           candidate,
           signalOverride ? { ...params, signal: signalOverride } : params,
-          callbacks
+          callbacks,
+          retryOptions
         ),
       {
         mixWebFirst: params.mixWebFirst,
@@ -4555,6 +4623,7 @@ export async function generateImage(
           : undefined,
         parentSignal: params.signal,
         perAttemptTimeoutMs: await readPerAttemptTimeoutMs(),
+        retryCoordinator: retryOptions?.retryCoordinator,
       }
     );
   }
@@ -4766,7 +4835,8 @@ export async function generateImage(
 export async function editImage(
   config: ApiConfig,
   params: EditImageParams,
-  callbacks?: ImageGenerationCallbacks
+  callbacks?: ImageGenerationCallbacks,
+  retryOptions?: ImageGenerationBackendRetryOptions
 ): Promise<GenerateImageResult> {
   if (config.backend?.reportResult) {
     return retryPoolBackendResult(
@@ -4775,7 +4845,8 @@ export async function editImage(
         editImage(
           candidate,
           signalOverride ? { ...params, signal: signalOverride } : params,
-          callbacks
+          callbacks,
+          retryOptions
         ),
       {
         mixWebFirst: params.mixWebFirst,
@@ -4789,6 +4860,7 @@ export async function editImage(
           : undefined,
         parentSignal: params.signal,
         perAttemptTimeoutMs: await readPerAttemptTimeoutMs(),
+        retryCoordinator: retryOptions?.retryCoordinator,
       }
     );
   }
@@ -5097,7 +5169,8 @@ export async function editImage(
 export async function generateChatImage(
   config: ApiConfig,
   params: ChatImageParams,
-  callbacks?: ImageGenerationCallbacks
+  callbacks?: ImageGenerationCallbacks,
+  retryOptions?: ImageGenerationBackendRetryOptions
 ): Promise<GenerateImageResult> {
   if (config.backend?.reportResult) {
     return retryPoolBackendResult(
@@ -5106,7 +5179,8 @@ export async function generateChatImage(
         generateChatImage(
           candidate,
           signalOverride ? { ...params, signal: signalOverride } : params,
-          callbacks
+          callbacks,
+          retryOptions
         ),
       {
         mixWebFirst: params.mixWebFirst,
@@ -5115,6 +5189,7 @@ export async function generateChatImage(
           : undefined,
         parentSignal: params.signal,
         perAttemptTimeoutMs: await readPerAttemptTimeoutMs(),
+        retryCoordinator: retryOptions?.retryCoordinator,
       }
     );
   }

@@ -15,8 +15,8 @@
  * - lease 清理：失败方 abort 抛错后由 attemptOne catch 翻成 fake-result 走
  *   reportPoolBackendResult，保证池调度器正确统计。
  * - 流式事件：屏蔽迟到渠道的 partial_images 等事件，仅胜出渠道事件被透传。
- * - 池成员互斥：N 个 channel 并发若尝试同一池成员，后取的会因
- *   acquireImageBackendInflight 已占用而跳到下一个候选；无需显式 excludedSet。
+ * - 池成员互斥：调用方在进入本调度器前为每条 channel 预租不同成员，并通过稳定
+ *   channelIndex 绑定配置；后续换号由请求级协调器统一排除已尝试成员。
  *
  * 不适用：Agent 多轮流式（事件乱序风险高），由调用方直接走串行路径。
  */
@@ -25,6 +25,8 @@ import { logWarn } from "@repo/shared/logger";
 
 /** 单条渠道的执行闭包，由 operations 传入；返回与 generateImage 同义的结果。 */
 export type AttemptChannelFn<TResult> = (options: {
+  /** 稳定的渠道序号，供调用方绑定预先租用的独立后端配置。 */
+  channelIndex: number;
   /** 本渠道单独的 AbortSignal：胜出方触发其它渠道 abort 即用本信号。 */
   signal: AbortSignal;
 }) => Promise<TResult>;
@@ -83,7 +85,7 @@ export async function dispatchConcurrentChannels<TResult>({
   context,
 }: DispatchOptions<TResult>): Promise<TResult> {
   if (channels <= 1) {
-    return attemptOne({ signal: parentSignal });
+    return attemptOne({ channelIndex: 0, signal: parentSignal });
   }
 
   const channelAbortControllers: AbortController[] = [];
@@ -113,7 +115,7 @@ export async function dispatchConcurrentChannels<TResult>({
     const signal = getChannelSignal();
     const p = (async () => {
       try {
-        return await attemptOne({ signal });
+        return await attemptOne({ channelIndex: i, signal });
       } catch (error) {
         // catch 后转译为 undefined 由调用方的 buildAllFailed 收集；上游 fetch
         // abort 已被 attemptOne 内部 retryPoolBackendResult 处理（见 P0 注入

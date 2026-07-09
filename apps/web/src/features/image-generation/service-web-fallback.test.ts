@@ -51,6 +51,67 @@ describe("image service Web-first fallback", () => {
     vi.clearAllMocks();
   });
 
+  it("serializes concurrent member resolution and excludes all reserved members", async () => {
+    process.env.DATABASE_URL =
+      process.env.DATABASE_URL || "postgresql://test:test@127.0.0.1:5432/test";
+    const { createImageBackendRetryCoordinator } = await import("./service");
+    const resolvedConfigs = ["api-2", "api-3"].map((id) => ({
+      config: {
+        baseUrl: `https://${id}.example.test/v1`,
+        apiKey: `${id}-key`,
+        backend: {
+          type: "pool-api" as const,
+          id,
+          groupId: "group-1",
+          userId: "user-1",
+          requestKind: "image_generation" as const,
+          reportResult: true,
+        },
+      },
+    }));
+    backendPoolMock.resolveImageBackendPoolConfig
+      .mockResolvedValueOnce(resolvedConfigs[0])
+      .mockResolvedValueOnce(resolvedConfigs[1]);
+    const coordinator = createImageBackendRetryCoordinator([
+      {
+        baseUrl: "https://api-1.example.test/v1",
+        apiKey: "api-1-key",
+        backend: {
+          type: "pool-api",
+          id: "api-1",
+          groupId: "group-1",
+          userId: "user-1",
+          requestKind: "image_generation",
+          reportResult: true,
+        },
+      },
+    ]);
+    const options = {
+      userId: "user-1",
+      requestKind: "image_generation" as const,
+    };
+
+    await Promise.all([
+      coordinator.resolve(options),
+      coordinator.resolve(options),
+    ]);
+
+    expect(
+      backendPoolMock.resolveImageBackendPoolConfig
+    ).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ excludedMemberKeys: ["api:api-1"] })
+    );
+    expect(
+      backendPoolMock.resolveImageBackendPoolConfig
+    ).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        excludedMemberKeys: ["api:api-1", "api:api-2"],
+      })
+    );
+  });
+
   it("falls back to Responses when force Web exhausts Web candidates", async () => {
     process.env.DATABASE_URL =
       process.env.DATABASE_URL || "postgresql://test:test@127.0.0.1:5432/test";
@@ -298,7 +359,9 @@ describe("image service Web-first fallback", () => {
 
     expect(result.error).toContain("429");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(backendPoolMock.resolveImageBackendPoolConfig).not.toHaveBeenCalled();
+    expect(
+      backendPoolMock.resolveImageBackendPoolConfig
+    ).not.toHaveBeenCalled();
   });
 
   it("switches API backend up to configured retry switch limit", async () => {
@@ -427,7 +490,9 @@ describe("image service Web-first fallback", () => {
         leasePersisted: true,
       })
     );
-    expect(backendPoolMock.releaseImageBackendInflightLease).toHaveBeenCalledWith(
+    expect(
+      backendPoolMock.releaseImageBackendInflightLease
+    ).toHaveBeenCalledWith(
       expect.objectContaining({
         memberType: "api",
         memberId: "api-lease",

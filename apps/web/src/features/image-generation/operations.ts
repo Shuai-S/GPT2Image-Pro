@@ -50,6 +50,7 @@ import {
 } from "./billing-policy";
 import { dispatchConcurrentChannels } from "./dispatch";
 import { toClientErrorMessage } from "./error-sanitize";
+import { invalidateGalleryCountsCache } from "./gallery-cache";
 import { buildInputImagesMetadata } from "./generation-metadata";
 import { generativeRepairImage } from "./generative-repair";
 import { restoreImage } from "./image-restoration";
@@ -71,7 +72,6 @@ import {
   getRuntimeModelPricingRules,
   getRuntimeModerationCreditPricing,
 } from "./pricing-settings";
-import { invalidateGalleryCountsCache } from "./gallery-cache";
 import { withImageGenerationQueue } from "./queue";
 import {
   DEFAULT_IMAGE_MODEL,
@@ -90,6 +90,7 @@ import {
 } from "./resolution";
 import { calibrateImageResolution } from "./resolution-calibration";
 import {
+  createImageBackendRetryCoordinator,
   editImage,
   generateChatImage,
   generateImage,
@@ -99,8 +100,8 @@ import {
   poolBackendMemberType,
   repairModerationBlockedPromptWithResponses,
 } from "./service";
-import { isContentSafetyRejection } from "./sla-classification";
 import { invalidateSlaStatsCache } from "./sla";
+import { isContentSafetyRejection } from "./sla-classification";
 import { superResolve } from "./super-resolution";
 import {
   applyTransparentMatte,
@@ -1915,6 +1916,7 @@ async function runQueuedImageGenerationForUser({
     callbacks,
   });
   const generationCallbacks = streamTelemetry.callbacks;
+  const retryCoordinator = createImageBackendRetryCoordinator([config]);
   const buildStreamTelemetryMetadata = () => ({
     upstreamStream: streamTelemetry.snapshot(),
   });
@@ -2319,6 +2321,7 @@ async function runQueuedImageGenerationForUser({
   };
 
   const attemptGeneration = async (
+    channelConfig: ApiConfig,
     background: typeof input.background,
     channelSignal?: AbortSignal
   ) => {
@@ -2327,7 +2330,7 @@ async function runQueuedImageGenerationForUser({
     const commonSignal = channelSignal ?? AbortSignal.timeout(totalTimeoutMs);
     return input.mode === "edit"
       ? await editImage(
-          config,
+          channelConfig,
           {
             prompt: currentPrompt,
             apiPrompt: currentApiPrompt,
@@ -2349,11 +2352,12 @@ async function runQueuedImageGenerationForUser({
             forceWebBackend,
             requiresResponsesBackend: input.requiresResponsesBackend,
           },
-          generationCallbacks
+          generationCallbacks,
+          { retryCoordinator }
         )
       : input.mode === "chat"
         ? await generateChatImage(
-            config,
+            channelConfig,
             {
               prompt: currentPrompt,
               apiPrompt: currentApiPrompt,
@@ -2383,10 +2387,11 @@ async function runQueuedImageGenerationForUser({
               requiresResponsesBackend: input.requiresResponsesBackend,
               webChat: input.webChat,
             },
-            generationCallbacks
+            generationCallbacks,
+            { retryCoordinator }
           )
         : await generateImage(
-            config,
+            channelConfig,
             {
               prompt: currentPrompt,
               apiPrompt: currentApiPrompt,
@@ -2406,7 +2411,8 @@ async function runQueuedImageGenerationForUser({
               forceWebBackend,
               requiresResponsesBackend: input.requiresResponsesBackend,
             },
-            generationCallbacks
+            generationCallbacks,
+            { retryCoordinator }
           );
   };
 
@@ -2419,32 +2425,40 @@ async function runQueuedImageGenerationForUser({
     input.transparentMatte === true &&
     !(input.mode === "chat" && input.agentMode === true);
   // 不透明重生成 + 服务端 ISNet 抠图。opaque 自身失败则原样返回其错误,不去 matte。
-  const fallbackToOpaqueMatte = async (signal?: AbortSignal) => {
-    const opaque = await attemptGeneration(undefined, signal);
+  const fallbackToOpaqueMatte = async (
+    channelConfig: ApiConfig,
+    signal?: AbortSignal
+  ) => {
+    const opaque = await attemptGeneration(channelConfig, undefined, signal);
     if (opaque.error) {
       return opaque;
     }
     return applyTransparentMatte(opaque);
   };
   const runGenerationAttempt = async (
+    channelConfig: ApiConfig,
     signalOverride?: AbortSignal
   ): Promise<GenerateImageResult> => {
     if (!transparentMatteEnabled) {
-      return attemptGeneration(input.background, signalOverride);
+      return attemptGeneration(channelConfig, input.background, signalOverride);
     }
     // 后端不支持透明有两条出口:generateImage/editImage 吞错后以 result.error 返回(主路径),
     // 少数路径会 throw。两条都要触发回退,否则用户仍只看到 400。
     try {
-      const first = await attemptGeneration(input.background, signalOverride);
+      const first = await attemptGeneration(
+        channelConfig,
+        input.background,
+        signalOverride
+      );
       if (first.error && isTransparentUnsupportedError(first.error)) {
-        return fallbackToOpaqueMatte(signalOverride);
+        return fallbackToOpaqueMatte(channelConfig, signalOverride);
       }
       return first;
     } catch (error) {
       if (!isTransparentUnsupportedError(error)) {
         throw error;
       }
-      return fallbackToOpaqueMatte(signalOverride);
+      return fallbackToOpaqueMatte(channelConfig, signalOverride);
     }
   };
 
@@ -2539,12 +2553,75 @@ async function runQueuedImageGenerationForUser({
       );
       const commonSignal = AbortSignal.timeout(totalTimeoutMs);
       const isChatAgent = input.mode === "chat" && input.agentMode === true;
-      const effectiveChannels =
-        concurrentChannels > 1 && !isChatAgent ? concurrentChannels : 1;
+      const poolBackend = config.backend;
+      const canUseConcurrentPool = Boolean(
+        poolBackend?.reportResult &&
+          poolBackend.id &&
+          poolBackend.userId &&
+          poolBackend.requestKind &&
+          (poolBackend.type === "pool-api" ||
+            poolBackend.type === "pool-account" ||
+            poolBackend.type === "pool-adobe")
+      );
+      const requestedChannels =
+        concurrentChannels > 1 && !isChatAgent && canUseConcurrentPool
+          ? concurrentChannels
+          : 1;
+      const channelConfigs: ApiConfig[] = [config];
+      if (
+        requestedChannels > 1 &&
+        poolBackend?.userId &&
+        poolBackend.requestKind
+      ) {
+        try {
+          for (
+            let channelIndex = 1;
+            channelIndex < requestedChannels;
+            channelIndex += 1
+          ) {
+            const resolved = await retryCoordinator.resolve({
+              userId: poolBackend.userId,
+              apiKeyId: poolBackend.apiKeyId,
+              requestGroupId: poolBackend.requestGroupId,
+              requestKind: poolBackend.requestKind,
+              requestedModel: input.model,
+              accountBackendPreference: input.requiresResponsesBackend
+                ? "responses"
+                : forceWebBackend
+                  ? "web"
+                  : undefined,
+              accountBackendPreferenceMode: forceWebBackend
+                ? "mixed-only"
+                : undefined,
+              forceFirefly: input.forceFirefly,
+            });
+            if (!resolved) break;
+            channelConfigs.push(resolved.config);
+          }
+        } catch (error) {
+          await Promise.all(
+            channelConfigs
+              .slice(1)
+              .map((channelConfig) =>
+                releasePoolBackendConfigLease(channelConfig)
+              )
+          );
+          throw error;
+        }
+      }
+      const effectiveChannels = channelConfigs.length;
       if (effectiveChannels > 1) {
         result = await dispatchConcurrentChannels<GenerateImageResult>({
           channels: effectiveChannels,
-          attemptOne: ({ signal }) => runGenerationAttempt(signal),
+          attemptOne: ({ channelIndex, signal }) => {
+            const channelConfig = channelConfigs[channelIndex];
+            if (!channelConfig) {
+              return Promise.resolve({
+                error: "Concurrent image channel config is missing",
+              });
+            }
+            return runGenerationAttempt(channelConfig, signal);
+          },
           isSuccess: (r) => Boolean(r) && !r.error,
           buildAllFailed: (errors) => {
             // 全失败：取最后一条有意义的结果（含 error 文案）回传给上层失败分支。
@@ -2557,7 +2634,7 @@ async function runQueuedImageGenerationForUser({
           context: { generationId, mode: input.mode },
         });
       } else {
-        result = await runGenerationAttempt(commonSignal);
+        result = await runGenerationAttempt(config, commonSignal);
       }
     } catch (error) {
       // 同上:生成尝试阶段的 DB/内部异常也脱敏,避免裸 SQL 漏到前端。
