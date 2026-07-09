@@ -43,6 +43,8 @@ import {
   Coins,
   CreditCard,
   Eye,
+  KeyRound,
+  Loader2,
   Lock,
   MoreHorizontal,
   RefreshCw,

@@ -290,21 +290,25 @@ flush(): Promise<void> {
    *
    * WHY: pipeline 在 finish 前会留下半成品 .gz.登记 Promise 让 flush() 等待其
    * 完成,既保证优雅停机时归档完整,又让 await flush() 后读取归档文件不会读到
-   * 截断的 gzip 流.catch 里从集合移除自身,避免 leaked resolved Promise 累积.
+   * 截断的 gzip 流.finally 里从集合移除自身,避免 leaked resolved Promise 累积.
    *
    * @param plainPath 待压缩的轮转日志文件。
    * @param gzipPath 压缩目标路径。
    * @sideEffects 后台读 plainPath 写 gzipPath 并删除原文件;失败调 onError.
    */
   private startArchive(plainPath: string, gzipPath: string): void {
-    const archive = (async () => {
+    let archive: Promise<void> | undefined;
+    archive = (async () => {
       try {
         await gzipAndRemovePlainLog(plainPath, gzipPath);
       } catch (error) {
         this.onError(error);
       } finally {
-        const index = this.pendingArchives.indexOf(archive);
-        if (index !== -1) this.pendingArchives.splice(index, 1);
+        const pendingArchive = archive;
+        if (pendingArchive !== undefined) {
+          const index = this.pendingArchives.indexOf(pendingArchive);
+          if (index !== -1) this.pendingArchives.splice(index, 1);
+        }
       }
     })();
     this.pendingArchives.push(archive);
