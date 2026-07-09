@@ -147,6 +147,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "typescript": "^5",
+    "vite": "7.3.5",
     "vitest": "4.1.9"
   },
   "license": "AGPL-3.0-only"
