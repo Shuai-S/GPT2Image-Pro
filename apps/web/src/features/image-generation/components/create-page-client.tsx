@@ -31,7 +31,6 @@ import {
   useCreateRuntimeState,
   useResetCreateRuntimeKeys,
 } from "@/features/image-generation/create-runtime-store";
-import { consumePendingReferenceHandoff } from "@/features/image-generation/reference-handoff";
 import { CachedImage as Image } from "@/features/shared/components/cached-image";
 import {
   agentEventToImageUrl,
@@ -123,7 +122,6 @@ import type {
   ImageStreamEvent,
   MentionState,
   RecentGeneration,
-  ReferenceTargetMode,
   ResultState,
   TextGenerationMode,
   VisualOutputMode,
@@ -158,6 +156,9 @@ import {
   readStoredCreateActiveMode,
   replaceChatVariantByGenerationId,
   resolveConversationSwitchTarget,
+  resolveReferenceTarget,
+  buildReferenceKey,
+  stripReferenceUrlParams,
   restoreChatConversationsFromStorage,
   revokePreview,
   sanitizePersistedChatMessages,
@@ -636,66 +637,18 @@ export function CreatePageClient({
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: 处理跨页面参考图只依赖 URL 和权限输入,状态 setter 由运行期 store 保持稳定。
   useEffect(() => {
-    const parseReferenceMode = (
-      value: string | null | undefined
-    ): ReferenceTargetMode =>
-      value === "agent" || value === "waterfall" || value === "chat"
-        ? value
-        : "image";
     const clearReferenceParams = (mode: ActiveMode) => {
-      const nextParams = new URLSearchParams(searchParams.toString());
-      for (const key of [
-        "mode",
-        "ref",
-        "sourceId",
-        "sourceName",
-        "intent",
-        "sendRef",
-      ]) {
-        nextParams.delete(key);
-      }
-      nextParams.set("mode", mode);
+      const nextParams = stripReferenceUrlParams(searchParams, mode);
       const nextQuery = nextParams.toString();
       router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, {
         scroll: false,
       });
     };
 
-    const referenceUrl = searchParams.get("ref");
-    const sendRef = searchParams.get("sendRef");
-    if (referenceUrl && sendRef) {
-      consumePendingReferenceHandoff(sendRef);
-    }
-    const pendingReference = referenceUrl
-      ? null
-      : consumePendingReferenceHandoff(sendRef);
-    const reference = referenceUrl
-      ? {
-          mode: parseReferenceMode(searchParams.get("mode")),
-          imageUrl: referenceUrl,
-          sourceId: searchParams.get("sourceId") || referenceUrl,
-          sourceName: searchParams.get("sourceName") || "reference",
-          intentId: searchParams.get("intent") || sendRef || "",
-          fromUrl: true,
-        }
-      : pendingReference
-        ? {
-            mode: parseReferenceMode(pendingReference.mode),
-            imageUrl: pendingReference.imageUrl,
-            sourceId: pendingReference.sourceId || pendingReference.imageUrl,
-            sourceName: pendingReference.sourceName || "reference",
-            intentId: pendingReference.id,
-            fromUrl: false,
-          }
-        : null;
+    const reference = resolveReferenceTarget(searchParams);
     if (!reference) return;
 
-    const referenceKey = [
-      reference.mode,
-      reference.sourceId,
-      reference.imageUrl,
-      reference.intentId,
-    ].join("|");
+    const referenceKey = buildReferenceKey(reference);
     if (appliedReferenceParamKeyRef.current === referenceKey) return;
     appliedReferenceParamKeyRef.current = referenceKey;
     let cancelled = false;

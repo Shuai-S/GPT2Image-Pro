@@ -1,7 +1,10 @@
 import { DEFAULT_IMAGE_MODEL, DEFAULT_IMAGE_SIZE } from "../resolution";
 import { normalizeAgentEvent } from "../agent-round-cards";
 import { createOptimisticAgentRoundEvents } from "../agent-round-cards";
-import { normalizeReferenceFetchUrl } from "../reference-handoff";
+import {
+  consumePendingReferenceHandoff,
+  normalizeReferenceFetchUrl,
+} from "../reference-handoff";
 import { nanoid } from "nanoid";
 import {
   CHAT_ACTIVE_AGENT_CONVERSATION_STORAGE_KEY,
@@ -24,6 +27,7 @@ import type {
   ImageReferenceMentionOption,
   ImageStreamEvent,
   MentionState,
+  ReferenceTargetMode,
 } from "./create-page-types";
 import type { EditImageFile } from "./image-edit-types";
 
@@ -1051,6 +1055,127 @@ export function resolveConversationSwitchTarget(params: {
     return { kind: "stale-id" as const, storedId };
   }
   return { kind: "new" as const };
+}
+
+/**
+ * 解析跨页面参考图的目标模式字符串。
+ *
+ * @param value URL 或 sessionStorage 中的 mode 值。
+ * @returns 合法的参考图目标模式，未知值统一回退 image。
+ * @sideEffects 无。
+ * @failureMode 非合法模式回退 image。
+ */
+export function parseReferenceTargetMode(
+  value: string | null | undefined
+): ReferenceTargetMode {
+  return value === "agent" || value === "waterfall" || value === "chat"
+    ? value
+    : "image";
+}
+
+/**
+ * 跨页面参考图统一目标。
+ *
+ * 来自 URL query 时 fromUrl=true,来自 sessionStorage 时 fromUrl=false。
+ */
+export type ResolvedReferenceTarget = {
+  mode: ReferenceTargetMode;
+  imageUrl: string;
+  sourceId: string;
+  sourceName: string;
+  intentId: string;
+  fromUrl: boolean;
+};
+
+/**
+ * 从 URL query 或 sessionStorage 解析跨页面参考图目标。
+ *
+ * URL 优先:query 携带 ref + sendRef 时直接消费对应 handoff(标记为已消费),
+ * 避免后续再次命中。否则尝试消费 sessionStorage 中的 pending handoff。
+ * 两者都没有时返回 null,表示无需挂载任何参考图。
+ *
+ * @param searchParams 当前路由的查询参数。
+ * @returns 解析出的参考图目标,无目标时为 null。
+ * @sideEffects 可能消费 sessionStorage 中的 pending handoff。
+ * @failureMode URL 或 handoff 校验失败时返回 null。
+ */
+export function resolveReferenceTarget(searchParams: URLSearchParams) {
+  const referenceUrl = searchParams.get("ref");
+  const sendRef = searchParams.get("sendRef");
+  if (referenceUrl && sendRef) {
+    consumePendingReferenceHandoff(sendRef);
+  }
+  const pendingReference = referenceUrl
+    ? null
+    : consumePendingReferenceHandoff(sendRef);
+
+  const fromUrl = Boolean(referenceUrl);
+  const target: ResolvedReferenceTarget | null = referenceUrl
+    ? {
+        mode: parseReferenceTargetMode(searchParams.get("mode")),
+        imageUrl: referenceUrl,
+        sourceId: searchParams.get("sourceId") || referenceUrl,
+        sourceName: searchParams.get("sourceName") || "reference",
+        intentId: searchParams.get("intent") || sendRef || "",
+        fromUrl,
+      }
+    : pendingReference
+      ? {
+          mode: parseReferenceTargetMode(pendingReference.mode),
+          imageUrl: pendingReference.imageUrl,
+          sourceId: pendingReference.sourceId || pendingReference.imageUrl,
+          sourceName: pendingReference.sourceName || "reference",
+          intentId: pendingReference.id,
+          fromUrl,
+        }
+      : null;
+
+  return target;
+}
+
+/**
+ * 构造跨页面参考图的幂等键。
+ *
+ * @param target 已解析的参考图目标。
+ * @returns 用于去重的稳定字符串。
+ * @sideEffects 无。
+ * @failureMode target 为 null 返回空串。
+ */
+export function buildReferenceKey(target: ResolvedReferenceTarget) {
+  return [target.mode, target.sourceId, target.imageUrl, target.intentId].join(
+    "|"
+  );
+}
+
+/**
+ * 从 URL 查询参数中清理参考图相关键。
+ *
+ * 用于挂载完成后把 URL 收敛回干净状态,避免刷新或分享时重复触发挂载。
+ * 返回新的 URLSearchParams,不直接修改入参。
+ *
+ * @param searchParams 当前路由的查询参数。
+ * @param mode 清理后保留的模式值。
+ * @returns 移除参考图键后、仅保留 mode 的新 URLSearchParams。
+ * @sideEffects 无(返回新对象)。
+ * @failureMode 无。
+ */
+export function stripReferenceUrlParams(
+  searchParams: URLSearchParams,
+  mode: ActiveMode
+) {
+  const nextParams = new URLSearchParams(searchParams.toString());
+  for (const key of [
+    "mode",
+    "ref",
+    "sourceId",
+    "sourceName",
+    "intent",
+    "sendRef",
+  ]) {
+    nextParams.delete(key);
+  }
+  nextParams.set("mode", mode);
+  return nextParams;
 }
 
 /**
