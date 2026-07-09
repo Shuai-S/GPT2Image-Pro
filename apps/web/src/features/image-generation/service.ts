@@ -27,6 +27,7 @@ import {
   acquireImageBackendInflight,
   bindImageBackendStickyMember,
   ImageBackendPoolUnavailableError,
+  isBackendProtocolCompatibilityError,
   isImageBackendSwitchableError,
   isUnclassifiedBackendError,
   recordImageBackendSchedulerSwitch,
@@ -1359,6 +1360,7 @@ async function retryPoolBackendResult(
   let attempt = 0;
   let backendSwitchCount = 0;
   let unclassifiedErrorSwitches = 0;
+  let protocolCompatibilitySwitches = 0;
   const shouldFallbackFromWebPreference = () =>
     accountBackendPreference === "web" &&
     (options?.mixWebFirst || options?.accountBackendPreference === "web") &&
@@ -1487,18 +1489,20 @@ async function retryPoolBackendResult(
     const unclassifiedRetry =
       unclassifiedErrorSwitches < MAX_UNCLASSIFIED_ERROR_SWITCHES &&
       isUnclassifiedBackendError(result.error);
+    const protocolCompatibilityError = isBackendProtocolCompatibilityError(
+      result.error
+    );
+    const protocolCompatibilityRetry =
+      protocolCompatibilityError && protocolCompatibilitySwitches < 1;
+    const classifiedRetry = protocolCompatibilityError
+      ? protocolCompatibilityRetry
+      : shouldRetry || isImageBackendSwitchableError(result.error);
 
-    if (
-      !result.error ||
-      !(
-        shouldRetry ||
-        isImageBackendSwitchableError(result.error) ||
-        unclassifiedRetry
-      )
-    ) {
+    if (!result.error || !(classifiedRetry || unclassifiedRetry)) {
       return attachStickyBackendMember(candidate, result);
     }
     if (unclassifiedRetry) unclassifiedErrorSwitches += 1;
+    if (protocolCompatibilityRetry) protocolCompatibilitySwitches += 1;
 
     const memberKey = poolBackendMemberKey(candidate);
     if (memberKey) excluded.add(memberKey);
@@ -1551,6 +1555,8 @@ async function retryPoolBackendResult(
       error: result.error,
       unclassifiedRetry,
       unclassifiedErrorSwitches,
+      protocolCompatibilityRetry,
+      protocolCompatibilitySwitches,
     });
 
     let next: Awaited<ReturnType<typeof resolveImageBackendPoolConfig>>;
@@ -1583,6 +1589,14 @@ async function retryPoolBackendResult(
           break;
         }
       } else {
+        logError(error, {
+          source: "image-backend-pool",
+          operation: "resolve-retry-backend",
+          attempt,
+          requestKind,
+          previousMemberKey: memberKey,
+          excludedCount: excluded.size,
+        });
         throw error;
       }
     }

@@ -298,6 +298,19 @@ describe("image backend error classification", () => {
     ).toBe(false);
   });
 
+  it("classifies upstream field-type incompatibility as a switchable backend compatibility error", async () => {
+    const svc = await loadService();
+    const error =
+      "Upstream Images API returned HTTP 400: Invalid request: json: cannot unmarshal string into Go struct field Alias.n of type uint | new_api_error";
+
+    expect(svc.isBackendProtocolCompatibilityError(error)).toBe(true);
+    expect(svc.isImageBackendSwitchableError(error)).toBe(true);
+    expect(svc.isUnclassifiedBackendError(error)).toBe(false);
+    const failure = await svc.classifyFailure(error);
+    expect(failure.status).toBe("active");
+    expect(failure.cooldownUntil).toBeInstanceOf(Date);
+  });
+
   it("把 ChatGPT 画图工具限流当作可切换错误(换号重试)", async () => {
     const isImageBackendSwitchableError = await loadClassifier();
 

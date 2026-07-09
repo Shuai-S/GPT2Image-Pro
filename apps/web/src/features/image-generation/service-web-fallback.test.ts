@@ -23,6 +23,9 @@ const backendPoolMock = vi.hoisted(() => {
     releaseImageBackendInflightLease: vi.fn(async () => undefined),
     renewImageBackendInflightLease: vi.fn(async () => undefined),
     recordImageBackendSchedulerSwitch: vi.fn(async () => undefined),
+    isBackendProtocolCompatibilityError: vi.fn((error?: string | null) =>
+      (error || "").includes("cannot unmarshal")
+    ),
     isImageBackendSwitchableError: vi.fn((error?: string | null) =>
       (error || "").includes("terminated")
     ),
@@ -440,6 +443,63 @@ describe("image service Web-first fallback", () => {
       expect.objectContaining({
         excludedMemberKeys: ["api:api-1"],
       })
+    );
+  });
+
+  it("switches only once for the same protocol compatibility error", async () => {
+    process.env.DATABASE_URL =
+      process.env.DATABASE_URL || "postgresql://test:test@127.0.0.1:5432/test";
+    const { generateImage } = await import("./service");
+    const compatibilityError =
+      "Invalid request: json: cannot unmarshal string into Go struct field Alias.n of type uint";
+    const fetchMock = vi.fn(async () => {
+      return new Response(JSON.stringify({ error: compatibilityError }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    backendPoolMock.resolveImageBackendPoolConfig.mockResolvedValueOnce({
+      config: {
+        baseUrl: "https://api-2.example.test/v1",
+        apiKey: "api-key-2",
+        model: "gpt-image-2",
+        backend: {
+          type: "pool-api",
+          id: "api-2",
+          groupId: "group-1",
+          userId: "user-1",
+          requestKind: "image_generation",
+          reportResult: true,
+        },
+      },
+    });
+
+    const result = await generateImage(
+      {
+        baseUrl: "https://api-1.example.test/v1",
+        apiKey: "api-key-1",
+        model: "gpt-image-2",
+        backend: {
+          type: "pool-api",
+          id: "api-1",
+          groupId: "group-1",
+          userId: "user-1",
+          requestKind: "image_generation",
+          reportResult: true,
+        },
+      },
+      {
+        prompt: "make an icon",
+        model: "gpt-image-2",
+        size: "1024x1024",
+      }
+    );
+
+    expect(result.error).toContain("cannot unmarshal");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(backendPoolMock.resolveImageBackendPoolConfig).toHaveBeenCalledTimes(
+      1
     );
   });
 

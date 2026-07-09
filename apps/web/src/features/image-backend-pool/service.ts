@@ -1788,6 +1788,7 @@ export function isImageBackendSwitchableError(error?: string | null) {
       !isUserRequestBackendError(error) &&
       !isLocalAbortTimeoutError(error) &&
       (isRecoverableBackendError(error) ||
+        isBackendProtocolCompatibilityError(error) ||
         isInvalidBackendCredentialError(error) ||
         isImageGenDisabledBackendError(error) ||
         isGroupDisabledBackendError(error))
@@ -1955,6 +1956,24 @@ function isUnsupportedModelBackendError(error?: string | null) {
     normalized.includes("账户不支持此模型") ||
     normalized.includes("不支持此模型") ||
     normalized.includes("不支持该模型")
+  );
+}
+
+/**
+ * 识别上游 OpenAI 兼容层的请求编码或字段类型不兼容。
+ *
+ * @remarks 这类 400 通常只影响某个中转实现，切换到另一成员可能成功，但不应
+ * 继续走“未知错误最多三次”的放大兜底。
+ */
+export function isBackendProtocolCompatibilityError(error?: string | null) {
+  const normalized = (error || "").toLowerCase();
+  return Boolean(
+    normalized &&
+      (normalized.includes("cannot unmarshal") ||
+        normalized.includes("json: cannot decode") ||
+        normalized.includes("unsupported parameter") ||
+        normalized.includes("unknown parameter") ||
+        normalized.includes("unexpected field"))
   );
 }
 
@@ -2181,6 +2200,19 @@ export async function classifyFailure(
     };
   }
   if (isUnsupportedModelBackendError(error)) {
+    const minutes = await getBackendCooldownMinutes(
+      "IMAGE_BACKEND_UNSUPPORTED_MODEL_COOLDOWN_MINUTES"
+    );
+    return {
+      status: "active",
+      cooldownUntil: resolveCooldownDate(
+        error || null,
+        cooldownFromMinutes(minutes),
+        input
+      ),
+    };
+  }
+  if (isBackendProtocolCompatibilityError(error)) {
     const minutes = await getBackendCooldownMinutes(
       "IMAGE_BACKEND_UNSUPPORTED_MODEL_COOLDOWN_MINUTES"
     );
