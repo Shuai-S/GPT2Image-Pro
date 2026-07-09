@@ -2,6 +2,7 @@
 
 # Turbo cache
 .turbo/
+.zcode/
 
 # fumadocs auto-generated
 .source/

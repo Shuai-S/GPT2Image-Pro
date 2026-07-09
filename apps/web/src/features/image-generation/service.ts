@@ -75,6 +75,11 @@ import {
   buildPromptCacheSalt,
 } from "./openai-prompt-cache";
 import {
+  isAbortLikeError,
+  mergeAbortSignals,
+  PER_ATTEMPT_TIMEOUT_ERROR,
+} from "./abort-signal-utils";
+import {
   normalizeImageBackground,
   normalizeOutputCompression,
   normalizeOutputFormat,
@@ -1152,6 +1157,18 @@ function normalizePoolApiRetrySwitchLimit(value: unknown): number | null {
   return Math.max(0, Math.min(1000, Math.floor(value)));
 }
 
+// 单次 attempt 超时：每次最多等一轮上游响应的时间。调用时读系统设置项
+// IMAGE_PER_ATTEMPT_TIMEOUT_MS，未配置或非法时回退到 120 秒，留足慢上游的余量
+// 又不至于像总超时那样把整个请求压满。运营可在管理后台「性能」分组调。
+const DEFAULT_PER_ATTEMPT_TIMEOUT_MS = 120_000;
+async function readPerAttemptTimeoutMs(): Promise<number> {
+  return await getRuntimeSettingNumber(
+    "IMAGE_PER_ATTEMPT_TIMEOUT_MS",
+    DEFAULT_PER_ATTEMPT_TIMEOUT_MS,
+    { positive: true }
+  );
+}
+
 // firefly-* / force_firefly 请求只允许落 Adobe：pool-adobe 直连,或上游即 Adobe 的
 // adobe_sourced pool-api。换号重试时据此约束目标,防止按 Adobe 计费的请求漂到非 Adobe。
 function isAdobeRoutedBackend(backend: ApiConfig["backend"]): boolean {
@@ -1201,12 +1218,19 @@ function startPoolBackendLeaseRenewal(backend: ApiConfig["backend"]) {
 
 async function retryPoolBackendResult(
   config: ApiConfig,
-  run: (candidate: ApiConfig) => Promise<GenerateImageResult>,
+  run: (
+    candidate: ApiConfig,
+    signalOverride?: AbortSignal
+  ) => Promise<GenerateImageResult>,
   options?: {
     mixWebFirst?: boolean;
     accountBackendPreference?: ImageBackendAccountBackend;
     accountBackendPreferenceMode?: ImageBackendPreferenceMode;
     allowAnyResponsesBackend?: boolean;
+    /** 外层总超时信号；单次尝试超时在内部由 perAttemptTimeoutMs 控制。 */
+    parentSignal?: AbortSignal;
+    /** 单次 attempt 超时毫秒；undefined 时回退到 parentSignal 兜底。 */
+    perAttemptTimeoutMs?: number;
   }
 ) {
   // 仅"不需要上报"的后端直接跑一次返回。pool-adobe 等带 reportResult 的池后端必须进入
@@ -1294,8 +1318,33 @@ async function retryPoolBackendResult(
     const stopLeaseRenewal = hasPoolBackend
       ? startPoolBackendLeaseRenewal(currentBackend)
       : () => undefined;
+    // 单次尝试超时：每轮 attempt 用 AbortSignal.any 合并 parentSignal 与
+    // AbortSignal.timeout(perAttemptTimeoutMs)。任一 abort 即中断本次上游
+    // 请求；由下方 catch 翻译为特定的 per-attempt 超时错误以驱动"可重试、可
+    // 切换"，避免单次慢上游耗满总超时。
+    const parentSignal = options?.parentSignal;
+    const attemptSignal =
+      options?.perAttemptTimeoutMs && options.perAttemptTimeoutMs > 0
+        ? mergeAbortSignals(
+            parentSignal,
+            AbortSignal.timeout(options.perAttemptTimeoutMs)
+          )
+        : parentSignal;
     try {
-      result = await run(withoutPoolBackendReport(candidate));
+      if (attemptSignal) {
+        result = await run(withoutPoolBackendReport(candidate), attemptSignal);
+      } else {
+        result = await run(withoutPoolBackendReport(candidate));
+      }
+    } catch (error) {
+      // 只在 per-attempt 信号触发时翻成可重试错误；若 parentSignal 已 abort
+      // （外层总超时），仍让原错误冒泡到调用方以彻底终止全链；避免把全局
+      // 总超时误判为"可重试"导致持续尝试已经过期的请求。
+      if (attemptSignal?.aborted && !parentSignal?.aborted && isAbortLikeError(error)) {
+        result = { error: PER_ATTEMPT_TIMEOUT_ERROR };
+      } else {
+        throw error;
+      }
     } finally {
       stopLeaseRenewal();
       if (hasPoolBackend) {
@@ -4429,7 +4478,12 @@ export async function generateImage(
   if (config.backend?.reportResult) {
     return retryPoolBackendResult(
       config,
-      (candidate) => generateImage(candidate, params, callbacks),
+      (candidate, signalOverride) =>
+        generateImage(
+          candidate,
+          signalOverride ? { ...params, signal: signalOverride } : params,
+          callbacks
+        ),
       {
         mixWebFirst: params.mixWebFirst,
         accountBackendPreference: params.requiresResponsesBackend
@@ -4440,6 +4494,8 @@ export async function generateImage(
         accountBackendPreferenceMode: params.forceWebBackend
           ? "mixed-only"
           : undefined,
+        parentSignal: params.signal,
+        perAttemptTimeoutMs: await readPerAttemptTimeoutMs(),
       }
     );
   }
@@ -4656,7 +4712,12 @@ export async function editImage(
   if (config.backend?.reportResult) {
     return retryPoolBackendResult(
       config,
-      (candidate) => editImage(candidate, params, callbacks),
+      (candidate, signalOverride) =>
+        editImage(
+          candidate,
+          signalOverride ? { ...params, signal: signalOverride } : params,
+          callbacks
+        ),
       {
         mixWebFirst: params.mixWebFirst,
         accountBackendPreference: params.requiresResponsesBackend
@@ -4667,6 +4728,8 @@ export async function editImage(
         accountBackendPreferenceMode: params.forceWebBackend
           ? "mixed-only"
           : undefined,
+        parentSignal: params.signal,
+        perAttemptTimeoutMs: await readPerAttemptTimeoutMs(),
       }
     );
   }
@@ -4980,12 +5043,19 @@ export async function generateChatImage(
   if (config.backend?.reportResult) {
     return retryPoolBackendResult(
       config,
-      (candidate) => generateChatImage(candidate, params, callbacks),
+      (candidate, signalOverride) =>
+        generateChatImage(
+          candidate,
+          signalOverride ? { ...params, signal: signalOverride } : params,
+          callbacks
+        ),
       {
         mixWebFirst: params.mixWebFirst,
         accountBackendPreference: params.requiresResponsesBackend
           ? "responses"
           : undefined,
+        parentSignal: params.signal,
+        perAttemptTimeoutMs: await readPerAttemptTimeoutMs(),
       }
     );
   }

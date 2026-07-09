@@ -1861,6 +1861,13 @@ async function runQueuedImageGenerationForUser({
   forceWebBackend: boolean;
 }): Promise<ImageGenerationOperationResult> {
   const startedAt = Date.now();
+  // 读取运营在"性能"分组配置的生图总超时(默认 20 分钟)。后续 isTimedOut 与
+  // commonSignal 用同一窗口，避免漂移。
+  const totalTimeoutMs = await getRuntimeSettingNumber(
+    "IMAGE_TOTAL_TIMEOUT_MS",
+    IMAGE_GENERATION_PENDING_TIMEOUT_MS,
+    { positive: true }
+  );
   // 纯中转模式只影响历史与对象存储；计费按实际使用的本站资源和审核独立判断。
   // generationId 仍生成，用作扣费/退款的幂等 sourceRef 前缀。
   const relayOnly = input.relayOnly === true;
@@ -2127,8 +2134,7 @@ async function runQueuedImageGenerationForUser({
   }
 
   const repairAttempts: ModerationPromptRepairAttempt[] = [];
-  const isTimedOut = () =>
-    Date.now() - startedAt > IMAGE_GENERATION_PENDING_TIMEOUT_MS;
+  const isTimedOut = () => Date.now() - startedAt > totalTimeoutMs;
   const failTimedOutGeneration =
     async (): Promise<ImageGenerationOperationResult> => {
       const targetCredits = getFailedGenerationTargetCredits({
@@ -2152,7 +2158,7 @@ async function runQueuedImageGenerationForUser({
                 ...buildStreamTelemetryMetadata(),
                 timeout: {
                   reason: "runtime_timeout",
-                  timeoutMs: IMAGE_GENERATION_PENDING_TIMEOUT_MS,
+                  timeoutMs: totalTimeoutMs,
                   elapsedMs: Date.now() - startedAt,
                   targetCredits,
                   refundCredits: creditsToRefund,
@@ -2264,7 +2270,7 @@ async function runQueuedImageGenerationForUser({
           failureReason: reason,
           mode: input.mode,
           size,
-          signal: AbortSignal.timeout(IMAGE_GENERATION_PENDING_TIMEOUT_MS),
+          signal: AbortSignal.timeout(totalTimeoutMs),
         }
       );
       if (repaired.error || !repaired.prompt?.trim()) {
@@ -2300,9 +2306,7 @@ async function runQueuedImageGenerationForUser({
   };
 
   const attemptGeneration = async (background: typeof input.background) => {
-    const commonSignal = AbortSignal.timeout(
-      IMAGE_GENERATION_PENDING_TIMEOUT_MS
-    );
+    const commonSignal = AbortSignal.timeout(totalTimeoutMs);
     return input.mode === "edit"
       ? await editImage(
           config,
