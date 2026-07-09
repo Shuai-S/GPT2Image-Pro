@@ -89,6 +89,7 @@ export function AdminGroupsTab({
   editGroup,
   saveGroup,
   isSavingGroup,
+  deleteGroup,
   isDeletingGroup,
 }: AdminGroupsTabProps) {
   return (

@@ -79,6 +79,18 @@ const OPERATION_FEATURE_SETTING_KEYS = {
 // 时不会更新本变量,因此它只在稳定请求成功后于一处写入,作为短暂的 stale 数据。
 let lastGoodMap: Map<string, unknown> | undefined;
 
+/**
+ * 判断异常是否来自 Next data cache 上下文缺失。
+ *
+ * @param error - unstable_cache 抛出的未知异常。
+ * @returns true 表示当前调用点不在 Next 请求/渲染缓存上下文内。
+ * @sideEffects 无。
+ */
+function isNextDataCacheContextMissing(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("incrementalCache missing");
+}
+
 function normalizeStoredValue(value: unknown) {
   if (typeof value === "string") {
     const trimmed = value.trim();
@@ -152,6 +164,31 @@ async function loadSystemSettingsMap(): Promise<Map<string, unknown>> {
     lastGoodMap = values;
     return values;
   } catch (error) {
+    if (isNextDataCacheContextMissing(error)) {
+      try {
+        // WHY: instrumentation/register 与部分启动期后台任务运行在 Next 请求
+        // 上下文之外，此时 unstable_cache 没有 incrementalCache 可用。这里直读
+        // DB，保留启动期配置能力；页面/Server Action 路径仍走上方缓存入口。
+        const values = await querySystemSettingsMap();
+        lastGoodMap = values;
+        return values;
+      } catch (directError) {
+        if (lastGoodMap) {
+          logWarn(
+            "System settings direct query unavailable; reusing stale snapshot",
+            {
+              error:
+                directError instanceof Error
+                  ? directError.message
+                  : String(directError),
+            }
+          );
+          return lastGoodMap;
+        }
+        throw directError;
+      }
+    }
+
     if (lastGoodMap) {
       logWarn("System settings cache unavailable; reusing stale snapshot", {
         error: error instanceof Error ? error.message : String(error),

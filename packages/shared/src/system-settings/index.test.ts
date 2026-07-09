@@ -139,13 +139,18 @@ vi.mock("drizzle-orm", () => ({
   })),
 }));
 
-// next/cache mock：unstable_cache 直通执行回调（单测里不去验证缓存命中/未命中分层，
-// 只验证读路径语义正确）；updateTag 记录调用以便断言 mutation 是否触发失效。
+// next/cache mock：默认直通执行回调（单测里不去验证缓存命中/未命中分层，只验证
+// 读路径语义正确）；需要模拟 Next 启动期缓存上下文缺失时，可让 spy 抛错。
 const updateTagSpy = vi.hoisted(() => vi.fn());
+const unstableCacheSpy = vi.hoisted(() => vi.fn());
 vi.mock("next/cache", () => ({
   unstable_cache: <TArgs extends unknown[], TResult>(
     fn: (...args: TArgs) => Promise<TResult>
-  ) => async (...args: TArgs): Promise<TResult> => fn(...args),
+  ) =>
+    async (...args: TArgs): Promise<TResult> => {
+      unstableCacheSpy();
+      return fn(...args);
+    },
   updateTag: updateTagSpy,
 }));
 
@@ -157,6 +162,7 @@ describe("setSystemSettings", () => {
     // 在 clearSystemSettingsCache 之后清空 spy，使 beforeEach 触发的
     // updateTag 不计入后续 mutation 断言。
     updateTagSpy.mockClear();
+    unstableCacheSpy.mockReset();
   });
 
   afterEach(() => {
@@ -506,6 +512,7 @@ describe("importSystemSettingsFromEnv", () => {
     deletedKeys.value = [];
     clearSystemSettingsCache();
     updateTagSpy.mockClear();
+    unstableCacheSpy.mockReset();
   });
 
   afterEach(() => {
@@ -561,6 +568,7 @@ describe("getAdminSystemSettingsSnapshot", () => {
     deletedKeys.value = [];
     clearSystemSettingsCache();
     updateTagSpy.mockClear();
+    unstableCacheSpy.mockReset();
   });
 
   afterEach(() => {
@@ -629,6 +637,7 @@ describe("runtime setting getters stored/env fallback (C-L29)", () => {
     deletedKeys.value = [];
     clearSystemSettingsCache();
     updateTagSpy.mockClear();
+    unstableCacheSpy.mockReset();
   });
 
   afterEach(() => {
@@ -688,6 +697,21 @@ describe("runtime setting getters stored/env fallback (C-L29)", () => {
     process.env.GPT2IMAGE_SKIP_RUNTIME_SETTINGS_DB = "1";
 
     await expect(getRuntimeSettingString("APP_TIME_ZONE")).resolves.toBe("UTC");
+  });
+
+  it("falls back to direct DB query when Next data cache context is missing", async () => {
+    store.set("APP_TIME_ZONE", {
+      key: "APP_TIME_ZONE",
+      value: "Asia/Shanghai",
+    });
+    unstableCacheSpy.mockImplementation(() => {
+      throw new Error("Invariant: incrementalCache missing in unstable_cache");
+    });
+
+    await expect(getRuntimeSettingString("APP_TIME_ZONE")).resolves.toBe(
+      "Asia/Shanghai"
+    );
+    expect(dbMock.select).toHaveBeenCalled();
   });
 
   it("getRuntimeSettingSelect returns fallback when value not in allowed list", async () => {
