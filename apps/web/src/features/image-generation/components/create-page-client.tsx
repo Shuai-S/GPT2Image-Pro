@@ -2845,6 +2845,14 @@ export function CreatePageClient({
       const conversationMode = inferChatConversationMode(persistedMessages);
       chatMessagesConversationIdRef.current = chatConversationId;
       chatMessagesModeRef.current = conversationMode;
+      const previousConversations = chatConversationsRef.current;
+      persistChatConversationSnapshot({
+        conversations: previousConversations,
+        conversationId: chatConversationId,
+        mode: conversationMode,
+        messages: persistedMessages,
+        titleFallback: isZh ? "未命名对话" : "Untitled chat",
+      });
       const title = getChatConversationTitle(
         persistedMessages.filter((message) =>
           isMessageInConversationMode(message, conversationMode)
@@ -2852,7 +2860,6 @@ export function CreatePageClient({
         isZh ? "未命名对话" : "Untitled chat"
       );
       const now = new Date().toISOString();
-      const previousConversations = chatConversationsRef.current;
       const existing = previousConversations.find(
         (conversation) => conversation.id === chatConversationId
       );
@@ -2872,15 +2879,6 @@ export function CreatePageClient({
       ]).slice(0, CHAT_CONVERSATION_LIMIT);
       chatConversationsRef.current = nextConversations;
       setChatConversations(nextConversations);
-      window.localStorage.setItem(
-        CHAT_CONVERSATIONS_STORAGE_KEY,
-        JSON.stringify(nextConversations)
-      );
-      window.localStorage.setItem(
-        chatActiveConversationStorageKey(current.mode),
-        chatConversationId
-      );
-      window.localStorage.removeItem(CHAT_STORAGE_KEY);
     } catch {
       /* ignore local storage quota errors */
     }
