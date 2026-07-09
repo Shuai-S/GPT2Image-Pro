@@ -134,7 +134,6 @@ import {
   chatActiveConversationStorageKey,
   cloneFile,
   compactChatConversations,
-  createChatConversation,
   createGenerationId,
   createInitialChatStreamState,
   createLocalId,
@@ -158,9 +157,9 @@ import {
   readImageApiJsonResponse,
   readStoredCreateActiveMode,
   replaceChatVariantByGenerationId,
+  resolveConversationSwitchTarget,
+  restoreChatConversationsFromStorage,
   revokePreview,
-  sanitizeChatConversations,
-  sanitizeChatMessages,
   sanitizePersistedChatMessages,
   toChatHistory,
   urlToEditImageFile,
@@ -2009,9 +2008,15 @@ export function CreatePageClient({
     });
   };
 
-  const clearStreamingPreview = () => {
+  const clearStreamingPreview = useCallback(() => {
     setStreamingPreviewUrl(null);
-  };
+  }, [setStreamingPreviewUrl]);
+
+  const resetChatTransientState = useCallback(() => {
+    setChatStream(null);
+    setRetryingChatMessageId(null);
+    clearStreamingPreview();
+  }, [setChatStream, setRetryingChatMessageId, clearStreamingPreview]);
 
   const activateChatConversation = (
     conversation: ChatConversation | null | undefined,
@@ -2044,9 +2049,7 @@ export function CreatePageClient({
     chatMessagesConversationIdRef.current = chatConversationId;
     chatMessagesModeRef.current = activeConversationMode;
     setChatMessages([]);
-    setChatStream(null);
-    setRetryingChatMessageId(null);
-    clearStreamingPreview();
+    resetChatTransientState();
     window.localStorage.removeItem(CHAT_STORAGE_KEY);
   };
 
@@ -2093,9 +2096,7 @@ export function CreatePageClient({
   const handleOpenChatConversation = (conversation: ChatConversation) => {
     if (isChatGenerating) return;
     activateChatConversation(conversation, conversation.mode);
-    setChatStream(null);
-    setRetryingChatMessageId(null);
-    clearStreamingPreview();
+    resetChatTransientState();
     setChatPrompt("");
     clearChatAttachments();
     scrollChatToBottom();
@@ -2118,41 +2119,34 @@ export function CreatePageClient({
       return;
     }
 
-    const storedId = window.localStorage.getItem(
-      chatActiveConversationStorageKey(activeConversationMode)
-    );
-    const conversation = currentModeConversations.find(
-      (item) => item.id === storedId
-    );
-    if (conversation) {
-      activateChatConversation(conversation, activeConversationMode);
-    } else if (storedId) {
-      chatMessagesConversationIdRef.current = storedId;
-      chatMessagesModeRef.current = activeConversationMode;
-      setChatConversationId(storedId);
-      setChatMessages([]);
-    } else {
-      const fallbackConversation = currentModeConversations[0];
-      if (fallbackConversation) {
-        activateChatConversation(fallbackConversation, activeConversationMode);
-        setChatStream(null);
-        setRetryingChatMessageId(null);
-        clearStreamingPreview();
-        return;
-      }
-      const nextId = createLocalId();
-      chatMessagesConversationIdRef.current = nextId;
-      chatMessagesModeRef.current = activeConversationMode;
-      setChatConversationId(nextId);
-      setChatMessages([]);
-      window.localStorage.setItem(
-        chatActiveConversationStorageKey(activeConversationMode),
-        nextId
-      );
+    const target = resolveConversationSwitchTarget({
+      mode: activeConversationMode,
+      conversations: currentModeConversations,
+    });
+    if (target.kind === "conversation") {
+      activateChatConversation(target.conversation, activeConversationMode);
+      resetChatTransientState();
+      return;
     }
-    setChatStream(null);
-    setRetryingChatMessageId(null);
-    clearStreamingPreview();
+    if (target.kind === "stale-id") {
+      chatMessagesConversationIdRef.current = target.storedId;
+      chatMessagesModeRef.current = activeConversationMode;
+      setChatConversationId(target.storedId);
+      setChatMessages([]);
+      resetChatTransientState();
+      return;
+    }
+
+    const nextId = createLocalId();
+    chatMessagesConversationIdRef.current = nextId;
+    chatMessagesModeRef.current = activeConversationMode;
+    setChatConversationId(nextId);
+    setChatMessages([]);
+    window.localStorage.setItem(
+      chatActiveConversationStorageKey(activeConversationMode),
+      nextId
+    );
+    resetChatTransientState();
   }, [
     activeConversationExists,
     activeConversationMode,
@@ -2160,6 +2154,7 @@ export function CreatePageClient({
     chatStream?.generationId,
     currentModeConversations,
     isChatGenerating,
+    resetChatTransientState,
   ]);
 
   const scrollChatToBottom = () => {
@@ -2730,87 +2725,16 @@ export function CreatePageClient({
         return;
       }
 
-      const conversationRaw = window.localStorage.getItem(
-        CHAT_CONVERSATIONS_STORAGE_KEY
-      );
-      const conversations = compactChatConversations(
-        sanitizeChatConversations(
-          conversationRaw ? JSON.parse(conversationRaw) : []
-        )
-      );
-
-      const legacyRaw = window.localStorage.getItem(CHAT_STORAGE_KEY);
-      const legacyMessages = sanitizeChatMessages(
-        legacyRaw ? JSON.parse(legacyRaw) : []
-      );
-      const hasLegacyConversation =
-        legacyMessages.length > 0 &&
-        !conversations.some(
-          (conversation) =>
-            JSON.stringify(conversation.messages) ===
-            JSON.stringify(legacyMessages)
-        );
-      const nextConversations = compactChatConversations(
-        hasLegacyConversation
-          ? [
-              createChatConversation(
-                legacyMessages,
-                getChatConversationTitle(
-                  legacyMessages,
-                  isZh ? "历史对话" : "Previous chat"
-                )
-              ),
-              ...conversations,
-            ]
-          : conversations
-      );
-
-      if (nextConversations.length > 0) {
-        const sortedConversations = nextConversations
-          .sort(
-            (a, b) =>
-              new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-          )
-          .slice(0, CHAT_CONVERSATION_LIMIT);
-        const storedConversationMode = activeModeToConversationMode(
-          readStoredCreateActiveMode()
-        );
-        const activeConversationId = window.localStorage.getItem(
-          chatActiveConversationStorageKey(storedConversationMode)
-        );
-        const activeConversation =
-          sortedConversations.find(
-            (conversation) =>
-              conversation.mode === storedConversationMode &&
-              conversation.id === activeConversationId
-          ) ||
-          sortedConversations.find(
-            (conversation) => conversation.mode === storedConversationMode
-          ) ||
-          sortedConversations[0];
-        chatConversationsRef.current = sortedConversations;
-        setChatConversations(sortedConversations);
+      const { conversations, activeConversation } =
+        restoreChatConversationsFromStorage({ isZh });
+      if (conversations.length > 0) {
+        chatConversationsRef.current = conversations;
+        setChatConversations(conversations);
         chatMessagesConversationIdRef.current = activeConversation?.id || null;
         chatMessagesModeRef.current = activeConversation?.mode || null;
         setChatConversationId(activeConversation?.id || createLocalId());
         setChatMessages(activeConversation?.messages || []);
-        if (activeConversation) {
-          window.localStorage.setItem(
-            chatActiveConversationStorageKey(activeConversation.mode),
-            activeConversation.id
-          );
-        }
       }
-      window.localStorage.setItem(
-        CHAT_CONVERSATIONS_STORAGE_KEY,
-        JSON.stringify(
-          compactChatConversations(nextConversations).slice(
-            0,
-            CHAT_CONVERSATION_LIMIT
-          )
-        )
-      );
-      window.localStorage.removeItem(CHAT_STORAGE_KEY);
     } catch {
       window.localStorage.removeItem(CHAT_STORAGE_KEY);
       window.localStorage.removeItem(CHAT_CONVERSATIONS_STORAGE_KEY);

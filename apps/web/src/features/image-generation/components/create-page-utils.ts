@@ -589,14 +589,13 @@ export function sanitizeChatMessages(value: unknown): ChatMessage[] {
                   : undefined,
               files: Array.isArray(value.files)
                 ? value.files
-                    .filter(
-                      (file): file is { label: string; url: string } =>
-                        Boolean(
-                          file &&
-                            typeof file === "object" &&
-                            typeof file.label === "string" &&
-                            typeof file.url === "string"
-                        )
+                    .filter((file): file is { label: string; url: string } =>
+                      Boolean(
+                        file &&
+                          typeof file === "object" &&
+                          typeof file.label === "string" &&
+                          typeof file.url === "string"
+                      )
                     )
                     .slice(0, 4)
                 : undefined,
@@ -922,6 +921,136 @@ export function persistChatConversationSnapshot(params: {
   } catch {
     /* ignore local storage quota errors */
   }
+}
+
+/**
+ * 从 localStorage 恢复并迁移对话快照。
+ *
+ * @param params.isZh 是否中文，用于旧单对话迁移时生成标题。
+ * @returns 压缩后的对话列表与当前模式对应的活跃对话。
+ * @sideEffects 读取并修正 localStorage，对旧单对话存储做一次性迁移。
+ * @failureMode 读写异常时抛错，由调用方决定清空损坏的存储。
+ */
+export function restoreChatConversationsFromStorage(params: { isZh: boolean }) {
+  const conversationRaw = window.localStorage.getItem(
+    CHAT_CONVERSATIONS_STORAGE_KEY
+  );
+  const conversations = compactChatConversations(
+    sanitizeChatConversations(
+      conversationRaw ? JSON.parse(conversationRaw) : []
+    )
+  );
+
+  const legacyRaw = window.localStorage.getItem(CHAT_STORAGE_KEY);
+  const legacyMessages = sanitizeChatMessages(
+    legacyRaw ? JSON.parse(legacyRaw) : []
+  );
+  const hasLegacyConversation =
+    legacyMessages.length > 0 &&
+    !conversations.some(
+      (conversation) =>
+        JSON.stringify(conversation.messages) === JSON.stringify(legacyMessages)
+    );
+  const nextConversations = compactChatConversations(
+    hasLegacyConversation
+      ? [
+          createChatConversation(
+            legacyMessages,
+            getChatConversationTitle(
+              legacyMessages,
+              params.isZh ? "历史对话" : "Previous chat"
+            )
+          ),
+          ...conversations,
+        ]
+      : conversations
+  )
+    .sort(
+      (a, b) =>
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    )
+    .slice(0, CHAT_CONVERSATION_LIMIT);
+
+  const storedConversationMode = activeModeToConversationMode(
+    readStoredCreateActiveMode()
+  );
+  const activeConversationId = window.localStorage.getItem(
+    chatActiveConversationStorageKey(storedConversationMode)
+  );
+  const activeConversation =
+    nextConversations.find(
+      (conversation) =>
+        conversation.mode === storedConversationMode &&
+        conversation.id === activeConversationId
+    ) ||
+    nextConversations.find(
+      (conversation) => conversation.mode === storedConversationMode
+    ) ||
+    nextConversations[0] ||
+    null;
+
+  window.localStorage.setItem(
+    CHAT_CONVERSATIONS_STORAGE_KEY,
+    JSON.stringify(nextConversations)
+  );
+  if (activeConversation) {
+    window.localStorage.setItem(
+      chatActiveConversationStorageKey(activeConversation.mode),
+      activeConversation.id
+    );
+  }
+  window.localStorage.removeItem(CHAT_STORAGE_KEY);
+
+  return {
+    conversations: nextConversations,
+    activeConversation,
+  };
+}
+
+/**
+ * 读取某个会话模式下应激活的对话。
+ *
+ * @param params.mode 目标会话模式。
+ * @param params.conversations 当前模式的对话列表（已按 mode 过滤）。
+ * @returns localStorage 中记住的 id 以及实际可激活的对话。
+ * @sideEffects 读取 localStorage。
+ * @failureMode 存储 id 失效时回退到当前模式下的第一个对话。
+ */
+export function resolveStoredConversationForMode(params: {
+  mode: ConversationMode;
+  conversations: ChatConversation[];
+}) {
+  const storedId = window.localStorage.getItem(
+    chatActiveConversationStorageKey(params.mode)
+  );
+  const conversation =
+    params.conversations.find((item) => item.id === storedId) ||
+    params.conversations[0] ||
+    null;
+  return { storedId, conversation };
+}
+
+/**
+ * 解析模式切换时应激活的会话目标。
+ *
+ * @param params.mode 目标会话模式。
+ * @param params.conversations 当前模式下的对话列表。
+ * @returns 已命中的会话、失效的旧 id，或需新建空会话的标记。
+ * @sideEffects 读取 localStorage。
+ * @failureMode 本地未记录任何 id 时返回 new。
+ */
+export function resolveConversationSwitchTarget(params: {
+  mode: ConversationMode;
+  conversations: ChatConversation[];
+}) {
+  const { storedId, conversation } = resolveStoredConversationForMode(params);
+  if (conversation) {
+    return { kind: "conversation" as const, conversation };
+  }
+  if (storedId) {
+    return { kind: "stale-id" as const, storedId };
+  }
+  return { kind: "new" as const };
 }
 
 /**
