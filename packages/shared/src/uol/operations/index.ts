@@ -8,31 +8,9 @@
  * 新增域时在此追加 import 即可。
  */
 
-// 图像生成域
-import "./image-generation";
-// 可编辑文件(PPT/PSD)生成(归 image-generation 域)
-import "./editable-file";
-// 积分域
-import "./credits";
-// 模型定价域
-import "./model-pricing";
-// 订阅域
-import "./subscription";
-// 用户认证域
-import "./user-auth";
-// 图像后端池域
-import "./image-backend-pool";
-// 系统设置域
-import "./system-settings";
-// 存储域
-import "./storage";
-// 内容审核域
-import "./moderation";
-// 外部 API 域
-import "./external-api";
-// 客服支持域
-import "./support";
-// 邀请返佣域
-import "./referral";
-// 管理端支付订单域
-import "./admin-payments";
+// 用户侧基础操作域
+import "./user";
+// 管理侧操作域
+import "./admin";
+// 系统维护操作域
+import "./system";

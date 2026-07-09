@@ -1,11 +1,13 @@
 import { db } from "@repo/database";
 import { generation, videoGeneration } from "@repo/database/schema";
 import { buildSignedStorageImageUrl } from "@repo/shared/storage/signed-url";
+import { unstable_cache } from "next/cache";
 import { and, count, desc, eq, isNotNull, lt, or, sql } from "drizzle-orm";
 import {
   extractGenerationReferenceImages,
   extractPromptRepairNotice,
 } from "@/features/image-generation/generation-metadata";
+import { galleryCountsCacheTag } from "@/features/image-generation/gallery-cache";
 import { hasLayeredMeta } from "@/features/psd-export/layered-meta";
 
 export const GALLERY_PAGE_SIZE = 20;
@@ -55,6 +57,13 @@ export interface GalleryPageData {
   uploadCount: number;
   videoCount: number;
   nextCursor: string | null;
+}
+
+interface GalleryCounts {
+  finalCount: number;
+  draftCount: number;
+  uploadCount: number;
+  videoCount: number;
 }
 
 interface GalleryQueryOptions {
@@ -135,6 +144,95 @@ function withVideoCursor(
       )
     )
   );
+}
+
+function buildGalleryConditions(userId: string) {
+  const completedStorageCondition = and(
+    eq(generation.userId, userId),
+    eq(generation.status, "completed"),
+    isNotNull(generation.storageKey)
+  );
+  const finalCondition = and(
+    completedStorageCondition,
+    sql`NOT EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(COALESCE(${generation.metadata}::jsonb->'outputImage'->'imageOutputs', '[]'::jsonb)) AS output
+      WHERE output->>'role' = 'agent_draft' AND output->>'primary' = 'true'
+    )`
+  );
+  const draftPrimaryCondition = and(
+    completedStorageCondition,
+    sql`(${generation.metadata}::jsonb) @? '$.outputImage.imageOutputs[*] ? (@.role == "agent_draft" && @.primary == true)'`
+  );
+  const draftCondition = and(
+    eq(generation.userId, userId),
+    eq(generation.status, "completed"),
+    isNotNull(generation.storageKey),
+    isNotNull(generation.metadata),
+    sql`(${generation.metadata}::jsonb) @? '$.outputImage.imageOutputs[*] ? (@.role == "agent_draft" || @.primary == false)'`
+  );
+  const uploadCondition = and(
+    eq(generation.userId, userId),
+    isNotNull(generation.metadata),
+    sql`(${generation.metadata}::jsonb) @? '$.inputImages.images[0]'`
+  );
+  const videoCondition = and(
+    eq(videoGeneration.userId, userId),
+    eq(videoGeneration.status, "completed"),
+    isNotNull(videoGeneration.storageKey)
+  );
+
+  return {
+    completedStorageCondition,
+    finalCondition,
+    draftPrimaryCondition,
+    draftCondition,
+    uploadCondition,
+    videoCondition,
+  };
+}
+
+async function queryGalleryCounts(userId: string): Promise<GalleryCounts> {
+  const {
+    completedStorageCondition,
+    draftPrimaryCondition,
+    draftCondition,
+    uploadCondition,
+    videoCondition,
+  } = buildGalleryConditions(userId);
+  const [
+    completedStorageCountResult,
+    draftPrimaryCountResult,
+    draftCountResult,
+    uploadCountResult,
+    videoCountResult,
+  ] = await Promise.all([
+    db
+      .select({ count: count() })
+      .from(generation)
+      .where(completedStorageCondition),
+    db.select({ count: count() }).from(generation).where(draftPrimaryCondition),
+    db.select({ count: count() }).from(generation).where(draftCondition),
+    db.select({ count: count() }).from(generation).where(uploadCondition),
+    db.select({ count: count() }).from(videoGeneration).where(videoCondition),
+  ]);
+
+  return {
+    finalCount:
+      (completedStorageCountResult[0]?.count ?? 0) -
+      (draftPrimaryCountResult[0]?.count ?? 0),
+    draftCount: draftCountResult[0]?.count ?? 0,
+    uploadCount: uploadCountResult[0]?.count ?? 0,
+    videoCount: videoCountResult[0]?.count ?? 0,
+  };
+}
+
+export async function getGalleryCounts(userId: string) {
+  return unstable_cache(
+    () => queryGalleryCounts(userId),
+    ["gallery-counts", userId],
+    { revalidate: 120, tags: [galleryCountsCacheTag(userId)] }
+  )();
 }
 
 function extractAgentDraftGenerations(
@@ -296,57 +394,19 @@ export async function getGalleryPageData({
   const copy = (en: string, zh: string) => (isZh ? zh : en);
   const decodedCursor = decodeCursor(cursor);
   const limit = parseGalleryLimit(legacyPage);
-
-  const finalCondition = and(
-    eq(generation.userId, userId),
-    eq(generation.status, "completed"),
-    isNotNull(generation.storageKey),
-    sql`NOT EXISTS (
-      SELECT 1
-      FROM jsonb_array_elements(COALESCE(${generation.metadata}::jsonb->'outputImage'->'imageOutputs', '[]'::jsonb)) AS output
-      WHERE output->>'role' = 'agent_draft' AND output->>'primary' = 'true'
-    )`
-  );
-  const completedStorageCondition = and(
-    eq(generation.userId, userId),
-    eq(generation.status, "completed"),
-    isNotNull(generation.storageKey)
-  );
-  const draftPrimaryCondition = and(
-    completedStorageCondition,
-    sql`(${generation.metadata}::jsonb) @? '$.outputImage.imageOutputs[*] ? (@.role == "agent_draft" && @.primary == true)'`
-  );
-  const draftCondition = and(
-    eq(generation.userId, userId),
-    eq(generation.status, "completed"),
-    isNotNull(generation.storageKey),
-    isNotNull(generation.metadata),
-    sql`(${generation.metadata}::jsonb) @? '$.outputImage.imageOutputs[*] ? (@.role == "agent_draft" || @.primary == false)'`
-  );
-  const uploadCondition = and(
-    eq(generation.userId, userId),
-    isNotNull(generation.metadata),
-    sql`(${generation.metadata}::jsonb) @? '$.inputImages.images[0]'`
-  );
-  const videoCondition = and(
-    eq(videoGeneration.userId, userId),
-    eq(videoGeneration.status, "completed"),
-    isNotNull(videoGeneration.storageKey)
-  );
+  const { finalCondition, draftCondition, uploadCondition, videoCondition } =
+    buildGalleryConditions(userId);
   const isFinalTab = activeTab === "final";
   const isVideosTab = activeTab === "videos";
 
   const [
+    counts,
     finalRows,
-    completedStorageCountResult,
-    draftPrimaryCountResult,
     draftParentRows,
     uploadParentRows,
-    draftCountResult,
-    uploadCountResult,
     videoRows,
-    videoCountResult,
   ] = await Promise.all([
+    getGalleryCounts(userId),
     isFinalTab
       ? db
           .select()
@@ -355,11 +415,6 @@ export async function getGalleryPageData({
           .orderBy(desc(generation.createdAt), desc(generation.id))
           .limit(limit)
       : Promise.resolve([] as Array<typeof generation.$inferSelect>),
-    db
-      .select({ count: count() })
-      .from(generation)
-      .where(completedStorageCondition),
-    db.select({ count: count() }).from(generation).where(draftPrimaryCondition),
     activeTab === "agent-drafts"
       ? db
           .select()
@@ -376,8 +431,6 @@ export async function getGalleryPageData({
           .orderBy(desc(generation.createdAt), desc(generation.id))
           .limit(limit)
       : Promise.resolve([] as Array<typeof generation.$inferSelect>),
-    db.select({ count: count() }).from(generation).where(draftCondition),
-    db.select({ count: count() }).from(generation).where(uploadCondition),
     isVideosTab
       ? db
           .select()
@@ -386,7 +439,6 @@ export async function getGalleryPageData({
           .orderBy(desc(videoGeneration.createdAt), desc(videoGeneration.id))
           .limit(limit)
       : Promise.resolve([] as Array<typeof videoGeneration.$inferSelect>),
-    db.select({ count: count() }).from(videoGeneration).where(videoCondition),
   ]);
 
   const allDraftItems = extractAgentDraftGenerations(draftParentRows);
@@ -404,20 +456,14 @@ export async function getGalleryPageData({
           ? allUploadItems.slice(0, limit)
           : mapFinalRows(finalRows);
 
-  const finalCount =
-    (completedStorageCountResult[0]?.count ?? 0) -
-    (draftPrimaryCountResult[0]?.count ?? 0);
-  const draftCount = draftCountResult[0]?.count ?? 0;
-  const uploadCount = uploadCountResult[0]?.count ?? 0;
-  const videoCount = videoCountResult[0]?.count ?? 0;
   const totalCount =
     activeTab === "videos"
-      ? videoCount
+      ? counts.videoCount
       : activeTab === "agent-drafts"
-        ? draftCount
+        ? counts.draftCount
         : activeTab === "uploads"
-          ? uploadCount
-          : finalCount;
+          ? counts.uploadCount
+          : counts.finalCount;
 
   const nextCursorSource =
     activeTab === "videos"
@@ -443,10 +489,10 @@ export async function getGalleryPageData({
   return {
     items: displayedItems,
     totalCount,
-    finalCount,
-    draftCount,
-    uploadCount,
-    videoCount,
+    finalCount: counts.finalCount,
+    draftCount: counts.draftCount,
+    uploadCount: counts.uploadCount,
+    videoCount: counts.videoCount,
     nextCursor,
   };
 }

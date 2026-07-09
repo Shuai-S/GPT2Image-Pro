@@ -10,6 +10,7 @@ import { protectedAction } from "@repo/shared/safe-action";
 import { getStorageProvider } from "@repo/shared/storage/providers";
 import { and, eq, inArray, ne, notInArray } from "drizzle-orm";
 import { z } from "zod";
+import { invalidateGalleryCountsCache } from "./gallery-cache";
 import { runImageGenerationForUser } from "./operations";
 import {
   DEFAULT_IMAGE_SIZE,
@@ -110,6 +111,7 @@ export const deleteGenerationAction = protectedAction
     await db
       .delete(generation)
       .where(eq(generation.id, parsedInput.generationId));
+    invalidateGalleryCountsCache(ctx.userId);
     return { success: true };
   });
 
@@ -200,6 +202,7 @@ export const batchDeleteGenerationAction = protectedAction
 
     // 批量删除 DB 记录
     await db.delete(generation).where(inArray(generation.id, idsToDelete));
+    invalidateGalleryCountsCache(ctx.userId);
 
     return { success: true, deletedCount: idsToDelete.length };
   });

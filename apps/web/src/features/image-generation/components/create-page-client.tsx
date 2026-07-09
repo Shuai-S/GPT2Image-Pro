@@ -175,10 +175,58 @@ import {
   sanitizePersistedChatMessages,
   toChatHistory,
   urlToEditImageFile,
-  yieldToBrowser,
 } from "./create-page-utils";
 import { CreatePageVisualOutputPanel } from "./create-page-visual-output-panel";
 import type { EditImageFile, MaskPoint } from "./image-edit-types";
+
+type RafBatcher<T> = {
+  push: (value: T) => void;
+  flush: () => void;
+  cancel: () => void;
+};
+
+/**
+ * 创建 requestAnimationFrame 批处理器。
+ *
+ * @param apply - 将已合并状态提交给 React 的函数。
+ * @returns 可推送、立即刷新和取消的批处理控制器。
+ * @sideEffects 使用 requestAnimationFrame 延迟提交状态。
+ * @failureMode 组件卸载时调用 cancel 会丢弃未提交状态，避免卸载后 setState。
+ */
+function createRafBatcher<T>(apply: (value: T) => void): RafBatcher<T> {
+  let pending: T | null = null;
+  let rafId: number | null = null;
+
+  const flush = () => {
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    if (pending === null) return;
+    const next = pending;
+    pending = null;
+    apply(next);
+  };
+
+  return {
+    push(value) {
+      pending = value;
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        flush();
+      });
+    },
+    flush,
+    cancel() {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      pending = null;
+    },
+  };
+}
 
 // 懒加载:瀑布流与视频创作面板仅在切到对应 activeMode 时才需挂载,改 next/dynamic
 // 后从创作页首屏 client bundle 移出为独立 chunk,降低首屏 JS。loading 返回 null
@@ -408,7 +456,7 @@ export function CreatePageClient({
   const [videoMounted, setVideoMounted] = useState(activeMode === "video");
   useEffect(() => {
     if (activeMode === "video") setVideoMounted(true);
-  }, [activeMode, setVideoMounted]);
+  }, [activeMode]);
   /**
    * 切换创作模式并同步到 URL。
    *
@@ -2434,17 +2482,20 @@ export function CreatePageClient({
         );
       };
 
-      const publishStreamState = async (next?: {
+      const streamStateBatcher = createRafBatcher<
+        Omit<ChatStreamState, "mode">
+      >((state) => {
+        updateChatStream(state);
+        syncAssistantStreamVariant(state);
+      });
+      const publishStreamStateBatched = (next?: {
         text?: string;
         thinking?: string;
         agent?: string;
         agentEvents?: AgentRunEvent[];
         imageUrl?: string;
       }) => {
-        const state = buildStreamState(next);
-        updateChatStream(state);
-        syncAssistantStreamVariant(state);
-        await yieldToBrowser();
+        streamStateBatcher.push(buildStreamState(next));
       };
 
       const contentType = response.headers.get("content-type") || "";
@@ -2500,7 +2551,7 @@ export function CreatePageClient({
 
         if (event.type === "text_delta") {
           text += event.delta;
-          await publishStreamState({
+          publishStreamStateBatched({
             text,
             thinking,
             agent,
@@ -2522,7 +2573,7 @@ export function CreatePageClient({
 
         if (event.type === "thinking_delta") {
           thinking += event.delta;
-          await publishStreamState({
+          publishStreamStateBatched({
             text,
             thinking,
             agent,
@@ -2544,7 +2595,7 @@ export function CreatePageClient({
 
         if (event.type === "agent_delta") {
           agent += event.delta;
-          await publishStreamState({
+          publishStreamStateBatched({
             text,
             thinking,
             agent,
@@ -2571,7 +2622,7 @@ export function CreatePageClient({
             previewUrl = eventImageUrl;
             setStreamingPreviewUrl(eventImageUrl);
           }
-          await publishStreamState({
+          publishStreamStateBatched({
             text,
             thinking,
             agent,
@@ -2604,7 +2655,7 @@ export function CreatePageClient({
             if (layeredGeneration && event.final) {
               layeredCompositePinned = true;
             }
-            await publishStreamState({
+            publishStreamStateBatched({
               text,
               thinking,
               agent,
@@ -2645,7 +2696,11 @@ export function CreatePageClient({
         if (done) break;
       }
 
-      if (buffer.trim()) await processBlock(buffer);
+      streamStateBatcher.flush();
+      if (buffer.trim()) {
+        await processBlock(buffer);
+        streamStateBatcher.flush();
+      }
 
       const failedResult = failed as ImageApiResult | null;
       if (!response.ok || failedResult) {
@@ -2744,6 +2799,7 @@ export function CreatePageClient({
         mode: conversationMode,
         messages: persistedMessages,
         titleFallback: isZh ? "未命名对话" : "Untitled chat",
+        defer: true,
       });
       const title = getChatConversationTitle(
         persistedMessages.filter((message) =>

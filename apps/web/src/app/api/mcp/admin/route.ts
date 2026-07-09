@@ -35,8 +35,9 @@ import {
 } from "@repo/shared/uol";
 import { ensureUolInitialized } from "@/server/uol-init";
 
-// 确保所有操作已注册到 registry
-import "@repo/shared/uol/operations";
+// 确保管理与系统维护操作已注册到 registry。
+import "@repo/shared/uol/operations/admin";
+import "@repo/shared/uol/operations/system";
 
 import { NextResponse } from "next/server";
 

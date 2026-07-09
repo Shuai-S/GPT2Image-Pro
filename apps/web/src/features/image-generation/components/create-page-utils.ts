@@ -881,6 +881,7 @@ export function persistChatConversationSnapshot(params: {
   mode: ConversationMode;
   messages: ChatMessage[];
   titleFallback: string;
+  defer?: boolean;
 }) {
   if (typeof window === "undefined" || params.messages.length === 0) return;
   try {
@@ -913,15 +914,24 @@ export function persistChatConversationSnapshot(params: {
         (conversation) => conversation.id !== params.conversationId
       ),
     ]).slice(0, CHAT_CONVERSATION_LIMIT);
-    window.localStorage.setItem(
-      CHAT_CONVERSATIONS_STORAGE_KEY,
-      JSON.stringify(nextConversations)
-    );
-    window.localStorage.setItem(
-      chatActiveConversationStorageKey(current.mode),
-      params.conversationId
-    );
-    window.localStorage.removeItem(CHAT_STORAGE_KEY);
+    const write = () => {
+      window.localStorage.setItem(
+        CHAT_CONVERSATIONS_STORAGE_KEY,
+        JSON.stringify(nextConversations)
+      );
+      window.localStorage.setItem(
+        chatActiveConversationStorageKey(current.mode),
+        params.conversationId
+      );
+      window.localStorage.removeItem(CHAT_STORAGE_KEY);
+    };
+    if (params.defer && "requestIdleCallback" in window) {
+      window.requestIdleCallback(write, { timeout: 1000 });
+    } else if (params.defer) {
+      window.setTimeout(write, 120);
+    } else {
+      write();
+    }
   } catch {
     /* ignore local storage quota errors */
   }

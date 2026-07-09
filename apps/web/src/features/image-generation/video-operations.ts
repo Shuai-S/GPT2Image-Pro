@@ -35,6 +35,7 @@ import {
   refundExternalApiKeyCredits,
   reserveExternalApiKeyCredits,
 } from "@/features/external-api/quota";
+import { invalidateGalleryCountsCache } from "./gallery-cache";
 import { runAdobeDirectVideoRequest } from "./adobe-direct";
 import { getEffectiveConfig, poolBackendMemberType } from "./service";
 
@@ -426,6 +427,7 @@ export async function runAdobeVideoGenerationForUser(
     })
     .where(eq(videoGeneration.id, videoId));
 
+  invalidateGalleryCountsCache(input.userId);
   await releaseInflightLease();
   return {
     videoGenerationId: videoId,

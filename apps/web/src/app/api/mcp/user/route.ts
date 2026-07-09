@@ -43,8 +43,9 @@ import { and, eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 import { ensureUolInitialized } from "@/server/uol-init";
 
-// 副作用导入：确保所有 UOL 操作已注册到 registry
-import "@repo/shared/uol/operations";
+// 副作用导入：用户 MCP 只注册用户可调用操作，避免把系统设置写 .env 逻辑
+// 追踪进普通用户端 route bundle。
+import "@repo/shared/uol/operations/user";
 
 // ============================================
 // 鉴权绑定（进程启动时执行一次）

@@ -15,8 +15,9 @@
  * - 尚未接线的 operation 用 TODO 注释标记
  */
 
-// 副作用导入：触发所有操作注册到 registry
-import "@repo/shared/uol/operations";
+// 副作用导入：触发所有需要绑定真实 execute 的用户/管理操作注册到 registry。
+// 系统维护操作没有 apps/web 侧绑定需求，避免把 env-file 写入逻辑追进用户端。
+import "@repo/shared/uol/operations/admin";
 
 import type { OperationContext, Principal } from "@repo/shared/uol";
 import {

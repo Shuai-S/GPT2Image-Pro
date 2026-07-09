@@ -3,6 +3,8 @@ import { canViewImageBackendPool } from "@repo/shared/auth/roles";
 import { getServerSession } from "@repo/shared/auth/server";
 import { redirect } from "next/navigation";
 import { getLocale } from "next-intl/server";
+import { NextIntlClientProvider } from "next-intl";
+import { loadMessageGroup } from "@/i18n/message-loader";
 
 /**
  * Admin 段集中式守卫布局（审计 M-H5）。
@@ -31,18 +33,27 @@ export default async function DashboardAdminLayout({
 }) {
   // A-P0-4：session/role 均经 cache() 包装，与各 admin 子页及 dashboard
   // layout 共享同一查询结果，layout 内只查一次、子页复用，不再每页各打 DB。
-  const session = await getServerSession();
-  const locale = await getLocale();
+  const [session, locale] = await Promise.all([
+    getServerSession(),
+    getLocale(),
+  ]);
   if (!session?.user) {
     redirect(`/${locale}/sign-in`);
   }
 
-  const role = await getUserRoleById(session.user.id);
+  const [role, adminMessages] = await Promise.all([
+    getUserRoleById(session.user.id),
+    loadMessageGroup(locale, "admin"),
+  ]);
   if (!canViewImageBackendPool(role)) {
     redirect(`/${locale}/dashboard`);
   }
 
   // 需 UI 实测：普通用户/未登录访问各 admin 路由仍被拦截，
   // observer_admin 仍可进 status/settings，admin/super_admin 正常进入。
-  return <>{children}</>;
+  return (
+    <NextIntlClientProvider messages={adminMessages}>
+      {children}
+    </NextIntlClientProvider>
+  );
 }

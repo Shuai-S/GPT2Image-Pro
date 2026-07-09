@@ -372,6 +372,13 @@
       "when": 1783382400000,
       "tag": "0052_image_backend_api_protocol",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1783641600000,
+      "tag": "0053_gallery_performance_indexes",
+      "breakpoints": true
     }
   ]
 }

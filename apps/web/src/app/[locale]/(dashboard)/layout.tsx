@@ -33,7 +33,7 @@ export default async function DashboardLayout({
       getServerSession(),
       getRuntimeBrandingConfig(),
       getRuntimeOperationFeatureFlags(),
-      loadMessageGroups(locale, ["common", "dashboard", "admin"]),
+      loadMessageGroups(locale, ["common", "dashboard"]),
     ]
   );
   const role = serverSession?.user?.id

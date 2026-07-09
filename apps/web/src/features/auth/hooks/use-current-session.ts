@@ -3,6 +3,8 @@
 import type { AppUserRole } from "@repo/shared/auth/roles";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+const PASSIVE_SESSION_REFRESH_MIN_INTERVAL_MS = 30_000;
+
 export type CurrentSession = {
   user?: {
     id: string;
@@ -25,13 +27,27 @@ export function useCurrentSession(initialData?: CurrentSession) {
   const [isPending, setIsPending] = useState(initialData === undefined);
   const [reloadToken, setReloadToken] = useState(0);
   const lastReloadAtRef = useRef(0);
+  const lastPassiveReloadAtRef = useRef(Date.now());
 
   const reload = useCallback(() => {
     const now = Date.now();
     if (now - lastReloadAtRef.current < 1000) return;
     lastReloadAtRef.current = now;
+    lastPassiveReloadAtRef.current = now;
     setReloadToken((value) => value + 1);
   }, []);
+
+  const reloadPassively = useCallback(() => {
+    const now = Date.now();
+    if (
+      now - lastPassiveReloadAtRef.current <
+      PASSIVE_SESSION_REFRESH_MIN_INTERVAL_MS
+    ) {
+      return;
+    }
+    lastPassiveReloadAtRef.current = now;
+    reload();
+  }, [reload]);
 
   useEffect(() => {
     if (initialData !== undefined && reloadToken === 0) {
@@ -81,19 +97,19 @@ export function useCurrentSession(initialData?: CurrentSession) {
 
   useEffect(() => {
     const refreshOnVisible = () => {
-      if (document.visibilityState === "visible") reload();
+      if (document.visibilityState === "visible") reloadPassively();
     };
 
-    window.addEventListener("focus", reload);
-    window.addEventListener("pageshow", reload);
+    window.addEventListener("focus", reloadPassively);
+    window.addEventListener("pageshow", reloadPassively);
     document.addEventListener("visibilitychange", refreshOnVisible);
 
     return () => {
-      window.removeEventListener("focus", reload);
-      window.removeEventListener("pageshow", reload);
+      window.removeEventListener("focus", reloadPassively);
+      window.removeEventListener("pageshow", reloadPassively);
       document.removeEventListener("visibilitychange", refreshOnVisible);
     };
-  }, [reload]);
+  }, [reloadPassively]);
 
   return { data, isPending, reload };
 }

@@ -592,15 +592,6 @@ const GalleryVirtualGrid = function GalleryVirtualGrid({
 }) {
   const rowCount = Math.ceil(items.length / columns);
 
-  // 列表挂载/数据变化时批量预热 IndexedDB 连接:预热只提前打开数据库连接(命中即走),
-  // 不抓网络;配合虚拟化后可视区 CachedImage effect 共享同一已就绪连接。
-  useEffect(() => {
-    const srcs = items
-      .map((item) => buildStorageThumbnailUrl(item.imageUrl, 640))
-      .filter((src): src is string => Boolean(src));
-    prefetchLocalImageCache(srcs);
-  }, [items]);
-
   // scrollMargin:offsetTop 是相对 offsetParent 的距离,但 window 虚拟化器需要相对
   // 文档顶的距离。直接用 getBoundingClientRect().top + window.scrollY 实时取值,
   // 在每次 window 滚动 / resize 时由 virtualizer 重新读取 options,故用 getter 让
@@ -625,6 +616,28 @@ const GalleryVirtualGrid = function GalleryVirtualGrid({
     },
   });
   const scrollMargin = rowVirtualizer.options.scrollMargin;
+  const virtualRows = rowVirtualizer.getVirtualItems();
+
+  // 仅预热虚拟列表可见行及少量 overscan，且放到 idle 阶段，避免一次性对整页
+  // 图片启动 IndexedDB/网络工作导致滚动抢主线程。
+  useEffect(() => {
+    const srcs = virtualRows
+      .flatMap((virtualRow) => {
+        const startIndex = virtualRow.index * columns;
+        return items.slice(startIndex, startIndex + columns);
+      })
+      .map((item) => buildStorageThumbnailUrl(item.imageUrl, 640))
+      .filter((src): src is string => Boolean(src));
+    if (srcs.length === 0) return;
+
+    const run = () => prefetchLocalImageCache(srcs);
+    if ("requestIdleCallback" in window) {
+      const idleId = window.requestIdleCallback(run, { timeout: 1000 });
+      return () => window.cancelIdleCallback(idleId);
+    }
+    const timeoutId = globalThis.setTimeout(run, 120);
+    return () => globalThis.clearTimeout(timeoutId);
+  }, [columns, items, virtualRows]);
 
   return (
     <div
@@ -632,7 +645,7 @@ const GalleryVirtualGrid = function GalleryVirtualGrid({
       className="relative w-full"
       style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
     >
-      {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+      {virtualRows.map((virtualRow) => {
         const startIndex = virtualRow.index * columns;
         const rowItems = items.slice(startIndex, startIndex + columns);
         return (

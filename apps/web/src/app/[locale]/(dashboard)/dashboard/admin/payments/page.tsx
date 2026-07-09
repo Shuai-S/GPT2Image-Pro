@@ -14,7 +14,7 @@ import type {
   EpayOrderStatus,
 } from "@repo/shared/payment/epay";
 import { invokeOperation } from "@repo/shared/uol";
-import "@repo/shared/uol/operations";
+import "@repo/shared/uol/operations/admin";
 import { Badge } from "@repo/ui/components/badge";
 import { Button } from "@repo/ui/components/button";
 import {

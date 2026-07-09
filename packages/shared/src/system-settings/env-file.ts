@@ -104,17 +104,26 @@ export async function syncSystemSettingsToEnvFiles() {
   for (const filePath of DEFAULT_ENV_FILE_PATHS) {
     if (!shouldWriteEnvFile(filePath)) continue;
     try {
-      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.mkdir(path.dirname(/* turbopackIgnore: true */ filePath), {
+        recursive: true,
+      });
       let current = "";
       try {
-        current = await fs.readFile(filePath, "utf8");
+        current = await fs.readFile(
+          /* turbopackIgnore: true */ filePath,
+          "utf8"
+        );
       } catch {
         current = "";
       }
 
       const next = applyManagedEnvBlock(current, managed);
 
-      await fs.writeFile(filePath, next.trimStart(), { mode: 0o600 });
+      await fs.writeFile(
+        /* turbopackIgnore: true */ filePath,
+        next.trimStart(),
+        { mode: 0o600 }
+      );
       writtenFiles.push(filePath);
     } catch {
       // Best effort. The database remains the source of truth.

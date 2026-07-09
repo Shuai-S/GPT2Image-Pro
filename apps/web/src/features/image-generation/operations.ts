@@ -71,6 +71,7 @@ import {
   getRuntimeModelPricingRules,
   getRuntimeModerationCreditPricing,
 } from "./pricing-settings";
+import { invalidateGalleryCountsCache } from "./gallery-cache";
 import { withImageGenerationQueue } from "./queue";
 import {
   DEFAULT_IMAGE_MODEL,
@@ -1745,7 +1746,7 @@ export async function runImageGenerationForUser(
                 initialCreditCharge,
               })
             : 0;
-          return await runQueuedImageGenerationForUser({
+          const result = await runQueuedImageGenerationForUser({
             input,
             callbacks,
             generationId,
@@ -1778,6 +1779,10 @@ export async function runImageGenerationForUser(
             mixWebFirst,
             forceWebBackend,
           });
+          if (!result.error) {
+            invalidateGalleryCountsCache(input.userId);
+          }
+          return result;
         } finally {
           await releasePoolBackendConfigLease(leasedConfig);
         }
