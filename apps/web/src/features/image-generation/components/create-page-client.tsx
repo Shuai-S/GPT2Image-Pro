@@ -19,7 +19,14 @@ import { CircleHelp, ImagePlus, Loader2, Send } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { useLocale } from "next-intl";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 import { getImageBatchCountLimit } from "@/features/image-generation/batch-limits";
 import {
