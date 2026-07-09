@@ -1,4 +1,5 @@
 import { getRuntimeBrandingConfig } from "../config/branding";
+import { getRuntimeSiteUrl } from "../config/site-runtime";
 import { logError, logger } from "../logger";
 import { SupportTicketNotificationEmail } from "../mail/templates";
 import { sendEmail } from "../mail/utils";
@@ -39,11 +40,8 @@ function optionLabel(
 }
 
 async function getTicketUrl(ticketId: string) {
-  const baseUrl =
-    (await getRuntimeSettingString("NEXT_PUBLIC_APP_URL")) ||
-    process.env.NEXT_PUBLIC_APP_URL ||
-    "http://localhost:3000";
-  return `${baseUrl.replace(/\/$/, "")}/dashboard/support/${ticketId}`;
+  const baseUrl = await getRuntimeSiteUrl();
+  return `${baseUrl}/dashboard/support/${ticketId}`;
 }
 
 export async function sendTicketAdminNotification(

@@ -3,8 +3,9 @@
 import { db } from "@repo/database";
 import { subscription } from "@repo/database/schema";
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
-import { getBaseUrl, paymentConfig } from "@repo/shared/config/payment";
+import { paymentConfig } from "@repo/shared/config/payment";
 import { findRuntimePlanByPriceId } from "@repo/shared/config/payment-runtime";
+import { getRuntimeSiteUrl } from "@repo/shared/config/site-runtime";
 import { logEvent } from "@repo/shared/logger";
 import {
   createRuntimeAlipayPurchase,
@@ -70,7 +71,7 @@ export const createCheckoutSession = protectedAction
       throw new Error("无效的价格 ID");
     }
 
-    const baseUrl = getBaseUrl();
+    const baseUrl = await getRuntimeSiteUrl();
     const hasActiveSub =
       existingSub && isSubscriptionCurrentlyActive(existingSub);
     const upgradeQuote = hasActiveSub

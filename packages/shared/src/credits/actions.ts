@@ -11,7 +11,7 @@ import { creditsTransaction, externalApiKey } from "@repo/database/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { getRuntimeBrandingConfig } from "../config/branding";
-import { getBaseUrl } from "../config/payment";
+import { getRuntimeSiteUrl } from "../config/site-runtime";
 import {
   isPlanAtLeast,
   type SubscriptionPlan,
@@ -415,7 +415,7 @@ export const createCreditsPurchaseCheckout = withProtectedCreditsAction(
     const creditsAmount = pkg.credits * quantity;
     const totalPrice = unitPrice * quantity;
 
-    const baseUrl = getBaseUrl();
+    const baseUrl = await getRuntimeSiteUrl();
 
     const paymentProvider = await getRuntimePaymentProvider();
     const useLocalOrderProvider =

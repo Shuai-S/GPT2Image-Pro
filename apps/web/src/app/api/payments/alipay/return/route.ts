@@ -5,7 +5,7 @@
  * 绝不触发积分/订阅履约。真正履约只由 /api/webhooks/alipay 的异步通知完成。
  */
 
-import { getBaseUrl } from "@repo/shared/config/payment";
+import { getRuntimeSiteUrl } from "@repo/shared/config/site-runtime";
 import { logger } from "@repo/shared/logger";
 import {
   ALIPAY_TRADE_FINISHED,
@@ -29,7 +29,7 @@ export async function POST(req: Request) {
 }
 
 async function handleReturn(req: Request) {
-  const baseUrl = getBaseUrl();
+  const baseUrl = await getRuntimeSiteUrl();
 
   if (!(await isRuntimeAlipayConfigured())) {
     return NextResponse.redirect(`${baseUrl}/dashboard/billing?pay=fail`);

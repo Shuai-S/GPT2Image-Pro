@@ -46,7 +46,12 @@ export function isImageDownloadUpstreamError(error?: string): boolean {
  * 取站内公开基址，与下方 toAbsoluteUrl 一致；用于 parseStorageImageUrl 判定第一方。
  */
 function getPublicBaseUrl() {
-  return process.env.NEXT_PUBLIC_APP_URL || process.env.BETTER_AUTH_URL || "";
+  const runtimeEnvironment = process.env;
+  return (
+    runtimeEnvironment.NEXT_PUBLIC_APP_URL ||
+    runtimeEnvironment.BETTER_AUTH_URL ||
+    ""
+  );
 }
 
 function toAbsoluteUrl(url: string) {

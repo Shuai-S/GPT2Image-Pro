@@ -1,7 +1,8 @@
 // 博客详情页:读取 MDX 文章并渲染正文、SEO metadata 与结构化数据。
 // Fumadocs 样式由根布局先于应用样式加载;本页不要重复引入,避免客户端跳转后
 // 后加载的 Tailwind utilities 覆盖全站响应式类。
-import { siteConfig } from "@repo/shared/config";
+import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
+import { getRuntimeSiteUrl } from "@repo/shared/config/site-runtime";
 import { isOperationFeatureEnabled } from "@repo/shared/system-settings";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
@@ -25,7 +26,12 @@ export async function generateMetadata({
   params: Promise<{ locale: string; slug: string }>;
 }): Promise<Metadata> {
   const { locale, slug } = await params;
-  if (!(await isOperationFeatureEnabled("blog"))) {
+  const [blogEnabled, branding, siteUrl] = await Promise.all([
+    isOperationFeatureEnabled("blog"),
+    getRuntimeBrandingConfig(),
+    getRuntimeSiteUrl(),
+  ]);
+  if (!blogEnabled) {
     return {
       title: "Post Not Found",
     };
@@ -42,7 +48,10 @@ export async function generateMetadata({
   const publishedDate =
     typeof post.date === "string" ? post.date : post.date.toISOString();
 
-  const url = `${siteConfig.url}/${locale}/blog/${slug}`;
+  const url = `${siteUrl}/${locale}/blog/${slug}`;
+  const ogImageUrl = branding.ogImageUrl.startsWith("http")
+    ? branding.ogImageUrl
+    : `${siteUrl}${branding.ogImageUrl}`;
 
   return {
     title: post.title,
@@ -53,13 +62,13 @@ export async function generateMetadata({
       description: post.description,
       type: "article",
       url,
-      siteName: siteConfig.name,
+      siteName: branding.name,
       publishedTime: publishedDate,
       authors: post.author ? [post.author] : undefined,
       tags: post.tags,
       images: [
         {
-          url: `${siteConfig.url}${siteConfig.ogImage}`,
+          url: ogImageUrl,
           width: 1200,
           height: 630,
           alt: post.title,
@@ -74,8 +83,8 @@ export async function generateMetadata({
     alternates: {
       canonical: url,
       languages: {
-        en: `${siteConfig.url}/en/blog/${slug}`,
-        zh: `${siteConfig.url}/zh/blog/${slug}`,
+        en: `${siteUrl}/en/blog/${slug}`,
+        zh: `${siteUrl}/zh/blog/${slug}`,
       },
     },
   };
@@ -90,7 +99,12 @@ export default async function BlogPostPage({
   params: Promise<{ locale: string; slug: string }>;
 }) {
   const { locale, slug } = await params;
-  if (!(await isOperationFeatureEnabled("blog"))) {
+  const [blogEnabled, branding, siteUrl] = await Promise.all([
+    isOperationFeatureEnabled("blog"),
+    getRuntimeBrandingConfig(),
+    getRuntimeSiteUrl(),
+  ]);
+  if (!blogEnabled) {
     notFound();
   }
 
@@ -125,10 +139,13 @@ export default async function BlogPostPage({
         slug={slug}
         locale={locale as "en" | "zh"}
         publishedAt={isoDate}
+        baseUrl={siteUrl}
+        branding={branding}
         {...(post.author && { author: post.author })}
         {...(post.tags && { tags: post.tags })}
       />
       <BreadcrumbJsonLd
+        baseUrl={siteUrl}
         items={[
           { name: "Home", url: `/${locale}` },
           {

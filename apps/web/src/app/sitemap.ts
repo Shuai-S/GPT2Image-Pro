@@ -1,8 +1,11 @@
-import { siteConfig } from "@repo/shared/config";
+import { getRuntimeSiteUrl } from "@repo/shared/config/site-runtime";
 import { isOperationFeatureEnabled } from "@repo/shared/system-settings";
 import type { MetadataRoute } from "next";
 import { getAllPseoParams } from "@/features/pseo/lib/pseo-data";
 import { getAllBlogSlugs, getAllLegalSlugs } from "@/lib/source";
+
+/** 站点地图与运行时域名、运营开关保持最多 60 秒延迟。 */
+export const revalidate = 60;
 
 /** Supported locales */
 const locales = ["en", "zh"] as const;
@@ -24,7 +27,7 @@ const solutionTypes = [
  * 用于搜索引擎索引
  */
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const baseUrl = siteConfig.url;
+  const baseUrl = await getRuntimeSiteUrl();
   const now = new Date();
   const blogEnabled = await isOperationFeatureEnabled("blog");
 

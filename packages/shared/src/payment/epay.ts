@@ -11,11 +11,12 @@ import { db } from "@repo/database";
 import { epayOrder } from "@repo/database/schema";
 import { and, eq, lt, or } from "drizzle-orm";
 import { getBaseUrl } from "../config/payment";
-import { invalidateAdminPaymentsCache } from "./admin-payments-cache";
+import { getRuntimeSiteUrl } from "../config/site-runtime";
 import {
   getRuntimeSettingSelect,
   getRuntimeSettingString,
 } from "../system-settings";
+import { invalidateAdminPaymentsCache } from "./admin-payments-cache";
 
 export const EPAY_TRADE_SUCCESS = "TRADE_SUCCESS";
 
@@ -263,7 +264,7 @@ export async function createRuntimeEpayPurchase(
   input: EpayPurchaseInput
 ): Promise<EpayPurchaseResult> {
   const { pid, apiUrl } = await getRuntimeEpayConfig();
-  const baseUrl = getBaseUrl();
+  const baseUrl = await getRuntimeSiteUrl();
   const notifyUrl =
     input.notifyUrl ??
     (await getRuntimeSettingString("EPAY_NOTIFY_URL")) ??

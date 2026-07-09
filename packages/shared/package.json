@@ -67,6 +67,7 @@
     "./config/nav": "./src/config/nav.ts",
     "./config/payment": "./src/config/payment.ts",
     "./config/payment-runtime": "./src/config/payment-runtime.ts",
+    "./config/site-runtime": "./src/config/site-runtime.ts",
     "./config/subscription-plan": "./src/config/subscription-plan.ts",
     "./payment/creem": "./src/payment/creem.ts",
     "./payment/creem-amount": "./src/payment/creem-amount.ts",

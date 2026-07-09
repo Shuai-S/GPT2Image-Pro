@@ -1,6 +1,7 @@
 import { ImageResponse } from "next/og";
 
 import { siteConfig } from "../../config";
+import type { BrandingConfig } from "../../config/branding";
 
 /**
  * OG 图片尺寸配置
@@ -9,6 +10,11 @@ export const OG_IMAGE_SIZE = {
   width: 1200,
   height: 630,
 };
+
+interface OgImageOptions {
+  branding?: BrandingConfig;
+  siteUrl?: string;
+}
 
 /**
  * 从 URL 提取主机名
@@ -33,8 +39,12 @@ function getHostname(url: string | undefined): string {
  * - 使用品牌配色 (violet 渐变)
  * - 动态显示站点 URL
  */
-export function createOgImageResponse(): ImageResponse {
-  const hostname = getHostname(siteConfig.url);
+export function createOgImageResponse(
+  options: OgImageOptions = {}
+): ImageResponse {
+  const brandName = options.branding?.name || siteConfig.name;
+  const description = options.branding?.description || siteConfig.description;
+  const hostname = getHostname(options.siteUrl || siteConfig.url);
 
   return new ImageResponse(
     <div
@@ -84,7 +94,7 @@ export function createOgImageResponse(): ImageResponse {
             strokeLinecap="round"
             strokeLinejoin="round"
           >
-            <title id="og-image-logo-title">{siteConfig.name}</title>
+            <title id="og-image-logo-title">{brandName}</title>
             <path d="M12 2L2 7l10 5 10-5-10-5z" />
             <path d="M2 17l10 5 10-5" />
             <path d="M2 12l10 5 10-5" />
@@ -99,7 +109,7 @@ export function createOgImageResponse(): ImageResponse {
             color: "transparent",
           }}
         >
-          {siteConfig.name}
+          {brandName}
         </span>
       </div>
 
@@ -114,7 +124,7 @@ export function createOgImageResponse(): ImageResponse {
           padding: "0 40px",
         }}
       >
-        {siteConfig.description}
+        {description}
       </div>
 
       {/* URL Badge */}

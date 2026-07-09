@@ -56,9 +56,10 @@ export const IMAGE_JSON_KEEP_ALIVE_INITIAL_WAIT_MS =
   DEFAULT_JSON_KEEP_ALIVE_INITIAL_WAIT_MS;
 
 function getRequestBaseUrl(request: Request) {
+  const runtimeEnvironment = process.env;
   return (
-    process.env.NEXT_PUBLIC_APP_URL ||
-    process.env.BETTER_AUTH_URL ||
+    runtimeEnvironment.NEXT_PUBLIC_APP_URL ||
+    runtimeEnvironment.BETTER_AUTH_URL ||
     new URL(request.url).origin
   );
 }

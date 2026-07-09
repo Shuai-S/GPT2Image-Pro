@@ -114,16 +114,16 @@ function groupOptionLabel(group: ImageBackendGroupOption) {
 interface ExternalApiKeySectionProps {
   /** 管理员在系统设置中配置的品牌名称。 */
   brandName: string;
+  /** 当前部署的运行时公开地址。 */
+  baseUrl: string;
 }
 
 export function ExternalApiKeySection({
   brandName,
+  baseUrl,
 }: ExternalApiKeySectionProps) {
   const locale = useLocale();
   const t = useTranslations("Settings.externalApi");
-  const baseUrl =
-    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ||
-    "https://your-domain.example";
   const didLoadRef = useRef(false);
   const [keys, setKeys] = useState<ExternalApiKeySummary[]>([]);
   const [newKey, setNewKey] = useState("");

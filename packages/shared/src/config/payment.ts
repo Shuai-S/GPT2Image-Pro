@@ -344,11 +344,16 @@ export function getPlanPrice(
  * 获取应用的基础 URL
  */
 export function getBaseUrl(): string {
-  if (process.env.NEXT_PUBLIC_APP_URL) {
-    return process.env.NEXT_PUBLIC_APP_URL;
+  // 通过对象间接读取，避免 Next.js 把 NEXT_PUBLIC_* 固化进通用镜像。
+  const runtimeEnvironment = process.env;
+  if (runtimeEnvironment.NEXT_PUBLIC_APP_URL) {
+    return runtimeEnvironment.NEXT_PUBLIC_APP_URL.replace(/\/+$/, "");
   }
-  if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}`;
+  if (runtimeEnvironment.BETTER_AUTH_URL) {
+    return runtimeEnvironment.BETTER_AUTH_URL.replace(/\/+$/, "");
+  }
+  if (runtimeEnvironment.VERCEL_URL) {
+    return `https://${runtimeEnvironment.VERCEL_URL}`;
   }
   return "http://localhost:3000";
 }

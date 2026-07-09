@@ -2,10 +2,13 @@ import { siteConfig } from "@repo/shared/config";
 import type { BrandingConfig } from "@repo/shared/config/branding";
 
 type LocaleType = "en" | "zh";
-type JsonLdBranding = Pick<BrandingConfig, "name" | "description" | "logoUrl">;
+export type JsonLdBranding = Pick<
+  BrandingConfig,
+  "name" | "description" | "logoUrl"
+>;
 
-// Base URL helper
-const getBaseUrl = () => siteConfig.url;
+const getBaseUrl = (baseUrl?: string) =>
+  baseUrl?.replace(/\/+$/, "") || siteConfig.url;
 
 function getBranding(branding?: JsonLdBranding): JsonLdBranding {
   return {
@@ -15,12 +18,12 @@ function getBranding(branding?: JsonLdBranding): JsonLdBranding {
   };
 }
 
-function toAbsoluteUrl(url: string) {
+function toAbsoluteUrl(url: string, baseUrl?: string) {
   if (url.startsWith("http://") || url.startsWith("https://")) {
     return url;
   }
 
-  return `${getBaseUrl()}${url.startsWith("/") ? url : `/${url}`}`;
+  return `${getBaseUrl(baseUrl)}${url.startsWith("/") ? url : `/${url}`}`;
 }
 
 /**
@@ -28,20 +31,23 @@ function toAbsoluteUrl(url: string) {
  *
  * @param locale - 当前页面语言。
  * @param branding - 管理员配置的品牌信息；未传入时使用静态兜底配置。
+ * @param baseUrl - 当前部署的运行时公开地址。
  * @returns WebSite 结构化数据。
  * @sideEffects 无。
  */
 export function generateWebSiteSchema(
   locale: LocaleType,
-  branding?: JsonLdBranding
+  branding?: JsonLdBranding,
+  baseUrl?: string
 ) {
   const brand = getBranding(branding);
+  const siteUrl = getBaseUrl(baseUrl);
 
   return {
     "@context": "https://schema.org",
     "@type": "WebSite",
     name: brand.name,
-    url: getBaseUrl(),
+    url: siteUrl,
     description:
       locale === "en"
         ? brand.description
@@ -51,7 +57,7 @@ export function generateWebSiteSchema(
       "@type": "SearchAction",
       target: {
         "@type": "EntryPoint",
-        urlTemplate: `${getBaseUrl()}/{locale}/blog?q={search_term_string}`,
+        urlTemplate: `${siteUrl}/{locale}/blog?q={search_term_string}`,
       },
       "query-input": "required name=search_term_string",
     },
@@ -62,18 +68,23 @@ export function generateWebSiteSchema(
  * Organization Schema - for brand identity
  *
  * @param branding - 管理员配置的品牌信息；未传入时使用静态兜底配置。
+ * @param baseUrl - 当前部署的运行时公开地址。
  * @returns Organization 结构化数据。
  * @sideEffects 无。
  */
-export function generateOrganizationSchema(branding?: JsonLdBranding) {
+export function generateOrganizationSchema(
+  branding?: JsonLdBranding,
+  baseUrl?: string
+) {
   const brand = getBranding(branding);
+  const siteUrl = getBaseUrl(baseUrl);
 
   return {
     "@context": "https://schema.org",
     "@type": "Organization",
     name: brand.name,
-    url: getBaseUrl(),
-    logo: toAbsoluteUrl(brand.logoUrl),
+    url: siteUrl,
+    logo: toAbsoluteUrl(brand.logoUrl, siteUrl),
     sameAs: [siteConfig.links.twitter, siteConfig.links.github].filter(Boolean),
     contactPoint: {
       "@type": "ContactPoint",
@@ -96,13 +107,14 @@ export interface ArticleSchemaInput {
   author?: string;
   image?: string;
   tags?: string[];
+  baseUrl?: string;
+  branding?: JsonLdBranding;
 }
 
 /**
  * Article Schema - for blog posts
  */
 export function generateArticleSchema(input: ArticleSchemaInput) {
-  const brand = getBranding();
   const {
     title,
     description,
@@ -113,14 +125,18 @@ export function generateArticleSchema(input: ArticleSchemaInput) {
     author,
     image,
     tags,
+    baseUrl,
+    branding,
   } = input;
+  const siteUrl = getBaseUrl(baseUrl);
+  const brand = getBranding(branding);
 
   return {
     "@context": "https://schema.org",
     "@type": "Article",
     headline: title,
     description,
-    url: `${getBaseUrl()}/${locale}/blog/${slug}`,
+    url: `${siteUrl}/${locale}/blog/${slug}`,
     inLanguage: locale === "en" ? "en-US" : "zh-CN",
     datePublished: publishedAt,
     dateModified: updatedAt || publishedAt,
@@ -133,13 +149,13 @@ export function generateArticleSchema(input: ArticleSchemaInput) {
       name: brand.name,
       logo: {
         "@type": "ImageObject",
-        url: toAbsoluteUrl(brand.logoUrl),
+        url: toAbsoluteUrl(brand.logoUrl, siteUrl),
       },
     },
     ...(image && {
       image: {
         "@type": "ImageObject",
-        url: image.startsWith("http") ? image : `${getBaseUrl()}${image}`,
+        url: image.startsWith("http") ? image : `${siteUrl}${image}`,
       },
     }),
     ...(tags && tags.length > 0 && { keywords: tags.join(", ") }),
@@ -183,7 +199,12 @@ export interface BreadcrumbItem {
 /**
  * Breadcrumb Schema - for navigation
  */
-export function generateBreadcrumbSchema(items: BreadcrumbItem[]) {
+export function generateBreadcrumbSchema(
+  items: BreadcrumbItem[],
+  baseUrl?: string
+) {
+  const siteUrl = getBaseUrl(baseUrl);
+
   return {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
@@ -191,9 +212,7 @@ export function generateBreadcrumbSchema(items: BreadcrumbItem[]) {
       "@type": "ListItem",
       position: index + 1,
       name: item.name,
-      item: item.url.startsWith("http")
-        ? item.url
-        : `${getBaseUrl()}${item.url}`,
+      item: item.url.startsWith("http") ? item.url : `${siteUrl}${item.url}`,
     })),
   };
 }
@@ -203,14 +222,17 @@ export function generateBreadcrumbSchema(items: BreadcrumbItem[]) {
  *
  * @param locale - 当前页面语言。
  * @param branding - 管理员配置的品牌信息；未传入时使用静态兜底配置。
+ * @param baseUrl - 当前部署的运行时公开地址。
  * @returns SoftwareApplication 结构化数据。
  * @sideEffects 无。
  */
 export function generateSoftwareApplicationSchema(
   locale: LocaleType,
-  branding?: JsonLdBranding
+  branding?: JsonLdBranding,
+  baseUrl?: string
 ) {
   const brand = getBranding(branding);
+  const siteUrl = getBaseUrl(baseUrl);
 
   return {
     "@context": "https://schema.org",
@@ -218,7 +240,7 @@ export function generateSoftwareApplicationSchema(
     name: brand.name,
     applicationCategory: "MultimediaApplication",
     operatingSystem: "Web",
-    url: getBaseUrl(),
+    url: siteUrl,
     description:
       locale === "en"
         ? brand.description

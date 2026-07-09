@@ -1,11 +1,11 @@
 import { getUserRoleById } from "@repo/shared/auth/role-server";
 import { getServerSession } from "@repo/shared/auth/server";
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
+import { getRuntimeSiteUrl } from "@repo/shared/config/site-runtime";
 import type { ReferralOverview } from "@repo/shared/referral";
 import { invokeOperation } from "@repo/shared/uol";
 import "@repo/shared/uol/operations/referral";
 import type { Metadata } from "next";
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getLocale } from "next-intl/server";
 
@@ -26,15 +26,6 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-async function getRequestOrigin() {
-  const headerStore = await headers();
-  const host = headerStore.get("x-forwarded-host") ?? headerStore.get("host");
-  const proto = headerStore.get("x-forwarded-proto") ?? "https";
-
-  if (host) return `${proto}://${host}`;
-  return process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") || "";
-}
-
 /**
  * 邀请返利页面。
  *
@@ -45,7 +36,7 @@ export default async function ReferralPage() {
   const [session, locale, origin] = await Promise.all([
     getServerSession(),
     getLocale(),
-    getRequestOrigin(),
+    getRuntimeSiteUrl(),
   ]);
 
   if (!session?.user) {
@@ -58,11 +49,9 @@ export default async function ReferralPage() {
     {},
     { type: "user", userId: session.user.id, role }
   );
-  const inviteUrl = new URL("/sign-up", origin || "https://local.invalid");
+  const inviteUrl = new URL("/sign-up", origin);
   inviteUrl.searchParams.set("aff", overview.referralCode);
-  const inviteLink = origin
-    ? inviteUrl.toString()
-    : `/sign-up?aff=${encodeURIComponent(overview.referralCode)}`;
+  const inviteLink = inviteUrl.toString();
 
   return (
     <ReferralDashboard

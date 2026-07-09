@@ -1,4 +1,4 @@
-import { getBaseUrl } from "@repo/shared/config/payment";
+import { getRuntimeSiteUrl } from "@repo/shared/config/site-runtime";
 import { logger } from "@repo/shared/logger";
 import {
   decodeEpayMetadata,
@@ -28,7 +28,7 @@ export async function POST(req: Request) {
  * 这里只校验签名用于展示真实状态，并读取本地订单状态反映履约进度。
  */
 async function handleReturn(req: Request) {
-  const baseUrl = getBaseUrl();
+  const baseUrl = await getRuntimeSiteUrl();
 
   if (!(await isRuntimeEpayConfigured())) {
     return NextResponse.redirect(`${baseUrl}/dashboard/billing?pay=fail`);

@@ -9,6 +9,7 @@
 
 import crypto from "node:crypto";
 import { getBaseUrl } from "../config/payment";
+import { getRuntimeSiteUrl } from "../config/site-runtime";
 import {
   getRuntimeSettingSelect,
   getRuntimeSettingString,
@@ -482,7 +483,7 @@ export function createAlipayPurchase(
 export async function createRuntimeAlipayPurchase(
   input: EpayPurchaseInput
 ): Promise<EpayPurchaseResult> {
-  const baseUrl = getBaseUrl();
+  const baseUrl = await getRuntimeSiteUrl();
   const config = await getRuntimeAlipayConfig();
   const mode = await getRuntimeAlipayMode();
   const notifyUrl =

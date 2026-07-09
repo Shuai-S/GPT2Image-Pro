@@ -14,6 +14,7 @@ import "fumadocs-ui/style.css";
 import { siteConfig } from "@repo/shared/config";
 
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
+import { getRuntimeSiteUrl } from "@repo/shared/config/site-runtime";
 import type { Metadata } from "next";
 
 import "@repo/ui/globals.css";
@@ -40,7 +41,10 @@ function hashIconVersion(value: string) {
  * @sideEffects 读取 system_settings 表；异常交由 Next.js metadata 流程处理。
  */
 export async function generateMetadata(): Promise<Metadata> {
-  const branding = await getRuntimeBrandingConfig();
+  const [branding, siteUrl] = await Promise.all([
+    getRuntimeBrandingConfig(),
+    getRuntimeSiteUrl(),
+  ]);
   const iconHref = `/favicon.ico?v=${hashIconVersion(branding.logoUrl)}`;
 
   return {
@@ -52,11 +56,11 @@ export async function generateMetadata(): Promise<Metadata> {
     keywords: [...siteConfig.keywords],
     authors: [{ name: siteConfig.author.name, url: siteConfig.author.url }],
     creator: siteConfig.author.name,
-    metadataBase: new URL(siteConfig.url),
+    metadataBase: new URL(siteUrl),
     openGraph: {
       type: "website",
       locale: "en_US",
-      url: siteConfig.url,
+      url: siteUrl,
       title: branding.name,
       description: branding.description,
       siteName: branding.name,

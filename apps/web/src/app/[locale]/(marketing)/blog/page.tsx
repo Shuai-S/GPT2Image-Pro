@@ -1,5 +1,5 @@
-import { siteConfig } from "@repo/shared/config";
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
+import { getRuntimeSiteUrl } from "@repo/shared/config/site-runtime";
 import { isOperationFeatureEnabled } from "@repo/shared/system-settings";
 import { Separator } from "@repo/ui/components/separator";
 import type { Metadata } from "next";
@@ -19,7 +19,10 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { locale } = await params;
   const isZh = locale === "zh";
-  const branding = await getRuntimeBrandingConfig();
+  const [branding, siteUrl] = await Promise.all([
+    getRuntimeBrandingConfig(),
+    getRuntimeSiteUrl(),
+  ]);
 
   const title = isZh ? "博客文章" : "Blog Posts";
   const description = isZh
@@ -33,14 +36,14 @@ export async function generateMetadata({
       title,
       description,
       type: "website",
-      url: `${siteConfig.url}/${locale}/blog`,
+      url: `${siteUrl}/${locale}/blog`,
       siteName: branding.name,
     },
     alternates: {
-      canonical: `${siteConfig.url}/${locale}/blog`,
+      canonical: `${siteUrl}/${locale}/blog`,
       languages: {
-        en: `${siteConfig.url}/en/blog`,
-        zh: `${siteConfig.url}/zh/blog`,
+        en: `${siteUrl}/en/blog`,
+        zh: `${siteUrl}/zh/blog`,
       },
     },
   };
@@ -61,7 +64,10 @@ export default async function BlogPage({
     notFound();
   }
 
-  const branding = await getRuntimeBrandingConfig();
+  const [branding, siteUrl] = await Promise.all([
+    getRuntimeBrandingConfig(),
+    getRuntimeSiteUrl(),
+  ]);
   const posts = getBlogPosts(locale);
 
   // 按日期排序（最新的在前）
@@ -75,6 +81,7 @@ export default async function BlogPage({
     <div className="container mx-auto max-w-5xl py-20">
       {/* Breadcrumb JSON-LD */}
       <BreadcrumbJsonLd
+        baseUrl={siteUrl}
         items={[
           { name: "Home", url: `/${locale}` },
           {

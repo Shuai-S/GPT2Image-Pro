@@ -37,14 +37,16 @@ function JsonLdScript({ data }: { data: object }) {
 export function SiteJsonLd({
   locale,
   branding,
+  baseUrl,
 }: {
   locale: LocaleType;
   branding?: BrandingConfig;
+  baseUrl?: string;
 }) {
   return (
     <>
-      <JsonLdScript data={generateWebSiteSchema(locale, branding)} />
-      <JsonLdScript data={generateOrganizationSchema(branding)} />
+      <JsonLdScript data={generateWebSiteSchema(locale, branding, baseUrl)} />
+      <JsonLdScript data={generateOrganizationSchema(branding, baseUrl)} />
     </>
   );
 }
@@ -67,9 +69,15 @@ export function FAQJsonLd({ faqs }: { faqs: FAQItem[] }) {
 /**
  * Breadcrumbs
  */
-export function BreadcrumbJsonLd({ items }: { items: BreadcrumbItem[] }) {
+export function BreadcrumbJsonLd({
+  items,
+  baseUrl,
+}: {
+  items: BreadcrumbItem[];
+  baseUrl?: string;
+}) {
   if (!items || items.length === 0) return null;
-  return <JsonLdScript data={generateBreadcrumbSchema(items)} />;
+  return <JsonLdScript data={generateBreadcrumbSchema(items, baseUrl)} />;
 }
 
 /**
@@ -83,12 +91,16 @@ export function BreadcrumbJsonLd({ items }: { items: BreadcrumbItem[] }) {
 export function SoftwareAppJsonLd({
   locale,
   branding,
+  baseUrl,
 }: {
   locale: LocaleType;
   branding?: BrandingConfig;
+  baseUrl?: string;
 }) {
   return (
-    <JsonLdScript data={generateSoftwareApplicationSchema(locale, branding)} />
+    <JsonLdScript
+      data={generateSoftwareApplicationSchema(locale, branding, baseUrl)}
+    />
   );
 }
 
@@ -98,14 +110,16 @@ export function SoftwareAppJsonLd({
 export function HomePageJsonLd({
   locale,
   faqs,
+  baseUrl,
 }: {
   locale: LocaleType;
   faqs?: FAQItem[];
+  baseUrl?: string;
 }) {
   return (
     <>
-      <SiteJsonLd locale={locale} />
-      <SoftwareAppJsonLd locale={locale} />
+      <SiteJsonLd locale={locale} baseUrl={baseUrl} />
+      <SoftwareAppJsonLd locale={locale} baseUrl={baseUrl} />
       {faqs && faqs.length > 0 && <FAQJsonLd faqs={faqs} />}
     </>
   );

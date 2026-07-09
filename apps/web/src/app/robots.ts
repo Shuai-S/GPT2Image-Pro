@@ -1,5 +1,8 @@
-import { siteConfig } from "@repo/shared/config";
+import { getRuntimeSiteUrl } from "@repo/shared/config/site-runtime";
 import type { MetadataRoute } from "next";
+
+/** 公开爬虫规则与运行时域名保持最多 60 秒延迟。 */
+export const revalidate = 60;
 
 /**
  * 动态生成 robots.txt
@@ -7,7 +10,9 @@ import type { MetadataRoute } from "next";
  * 允许所有搜索引擎爬虫访问
  * 指向 sitemap.xml
  */
-export default function robots(): MetadataRoute.Robots {
+export default async function robots(): Promise<MetadataRoute.Robots> {
+  const siteUrl = await getRuntimeSiteUrl();
+
   return {
     rules: [
       {
@@ -23,6 +28,6 @@ export default function robots(): MetadataRoute.Robots {
         ],
       },
     ],
-    sitemap: `${siteConfig.url}/sitemap.xml`,
+    sitemap: `${siteUrl}/sitemap.xml`,
   };
 }

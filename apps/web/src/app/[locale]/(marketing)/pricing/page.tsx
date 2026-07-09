@@ -3,9 +3,9 @@
  * 使用方:Header/Footer 导航、账单入口与 SEO 页面。关键依赖:运行时支付配置、
  * 套餐能力矩阵、积分包配置、图片基础计价与模型公开定价规则。
  */
-import { siteConfig } from "@repo/shared/config";
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
 import { getRuntimePaymentConfig } from "@repo/shared/config/payment-runtime";
+import { getRuntimeSiteUrl } from "@repo/shared/config/site-runtime";
 import { CREDIT_CONFIG_DEFAULTS } from "@repo/shared/credits/config";
 import { getRuntimeCreditPackages } from "@repo/shared/credits/packages";
 import { getPlanCapabilityMatrix } from "@repo/shared/subscription/services/plan-capabilities";
@@ -35,7 +35,10 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { locale } = await params;
   const isZh = locale === "zh";
-  const branding = await getRuntimeBrandingConfig();
+  const [branding, siteUrl] = await Promise.all([
+    getRuntimeBrandingConfig(),
+    getRuntimeSiteUrl(),
+  ]);
   const title = isZh
     ? `${branding.name} 定价 - 订阅、积分包与模型价格`
     : `${branding.name} Pricing - Plans, Credits, and Model Rates`;
@@ -58,7 +61,7 @@ export async function generateMetadata({
       title,
       description,
       type: "website",
-      url: `${siteConfig.url}/${locale}/pricing`,
+      url: `${siteUrl}/${locale}/pricing`,
       siteName: branding.name,
       images: [
         {

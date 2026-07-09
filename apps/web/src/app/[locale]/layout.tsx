@@ -1,5 +1,5 @@
 import { Providers } from "@repo/shared/components/providers";
-import { siteConfig } from "@repo/shared/config";
+import { getRuntimeSiteUrl } from "@repo/shared/config/site-runtime";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { NextIntlClientProvider } from "next-intl";
@@ -34,7 +34,7 @@ export async function generateMetadata({
   params: Promise<{ locale: string }>;
 }): Promise<Metadata> {
   const { locale } = await params;
-  const baseUrl = siteConfig.url;
+  const baseUrl = await getRuntimeSiteUrl();
 
   return {
     alternates: {

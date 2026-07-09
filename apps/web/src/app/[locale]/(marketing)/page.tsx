@@ -1,5 +1,5 @@
-import { siteConfig } from "@repo/shared/config";
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
+import { getRuntimeSiteUrl } from "@repo/shared/config/site-runtime";
 import { getRuntimeSettingBoolean } from "@repo/shared/system-settings";
 import type { Metadata } from "next";
 import { SiteJsonLd, SoftwareAppJsonLd } from "@/components/seo/json-ld";
@@ -25,7 +25,10 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { locale } = await params;
   const isZh = locale === "zh";
-  const branding = await getRuntimeBrandingConfig();
+  const [branding, siteUrl] = await Promise.all([
+    getRuntimeBrandingConfig(),
+    getRuntimeSiteUrl(),
+  ]);
 
   const title = isZh
     ? `${branding.name} - AI 对话生图平台`
@@ -52,7 +55,7 @@ export async function generateMetadata({
       title,
       description,
       type: "website",
-      url: `${siteConfig.url}/${locale}`,
+      url: `${siteUrl}/${locale}`,
       siteName: branding.name,
       images: [
         {
@@ -78,17 +81,26 @@ export default async function HomePage({
   params: Promise<{ locale: string }>;
 }) {
   const { locale } = await params;
-  const [slaEnabled, slaStats, branding] = await Promise.all([
+  const [slaEnabled, slaStats, branding, siteUrl] = await Promise.all([
     getRuntimeSettingBoolean("MARKETING_SLA_STATUS_ENABLED", true),
     getRecentGenerationSlaStats(1000),
     getRuntimeBrandingConfig(),
+    getRuntimeSiteUrl(),
   ]);
 
   return (
     <>
       {/* JSON-LD Structured Data */}
-      <SiteJsonLd locale={locale as "en" | "zh"} branding={branding} />
-      <SoftwareAppJsonLd locale={locale as "en" | "zh"} branding={branding} />
+      <SiteJsonLd
+        locale={locale as "en" | "zh"}
+        branding={branding}
+        baseUrl={siteUrl}
+      />
+      <SoftwareAppJsonLd
+        locale={locale as "en" | "zh"}
+        branding={branding}
+        baseUrl={siteUrl}
+      />
 
       {/* Page Sections */}
       <HeroSection />

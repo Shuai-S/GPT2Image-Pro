@@ -1,5 +1,6 @@
 import { getServerSession } from "@repo/shared/auth/server";
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
+import { getRuntimeSiteUrl } from "@repo/shared/config/site-runtime";
 import { isOperationFeatureEnabled } from "@repo/shared/system-settings";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
@@ -32,9 +33,10 @@ export default async function ExternalApiPage() {
     redirect(`/${locale}/dashboard`);
   }
 
-  const [t, branding] = await Promise.all([
+  const [t, branding, baseUrl] = await Promise.all([
     getTranslations("Settings.externalApi"),
     getRuntimeBrandingConfig(),
+    getRuntimeSiteUrl(),
   ]);
 
   return (
@@ -45,7 +47,7 @@ export default async function ExternalApiPage() {
           {t("description", { brandName: branding.name })}
         </p>
       </div>
-      <ExternalApiKeySection brandName={branding.name} />
+      <ExternalApiKeySection brandName={branding.name} baseUrl={baseUrl} />
     </div>
   );
 }

@@ -788,9 +788,10 @@ function limitChatContext(params: {
 }
 
 function getRequestBaseUrl(request: NextRequest) {
+  const runtimeEnvironment = process.env;
   return (
-    process.env.NEXT_PUBLIC_APP_URL ||
-    process.env.BETTER_AUTH_URL ||
+    runtimeEnvironment.NEXT_PUBLIC_APP_URL ||
+    runtimeEnvironment.BETTER_AUTH_URL ||
     new URL(request.url).origin
   );
 }
