@@ -14,6 +14,23 @@ export const DEFAULT_NODE_WIDTH = 280;
 export const DEFAULT_NODE_HEIGHT = 180;
 export const DEFAULT_VIEWPORT = { x: 0, y: 0, zoom: 1 };
 
+/**
+ * 视口裁剪的可视区外扩裕量(世界坐标单位)。
+ *
+ * WHY: 纯按严格 AABB 相交判定会让刚好滚出可视区边缘的节点立即卸载,
+ * 用户缓慢拖动时会看到节点在边缘反复挂载/卸载引起闪烁。把可视矩形向四边
+ * 扩展该裕量后再做相交判定,使刚离屏的节点仍保留一小段缓冲,减少边缘抖动。
+ */
+export const VIEWPORT_CULL_MARGIN = 200;
+
+/**
+ * 画布渲染容器的像素尺寸,用于把视口偏移反算为可见世界矩形。
+ */
+export type BoardSize = {
+  width: number;
+  height: number;
+};
+
 const canvasNodeKindSchema = z.enum([
   "prompt",
   "image",
@@ -398,6 +415,72 @@ export function fitViewportToNodes(
     x: viewportSize.width / 2 - (bounds.minX + bounds.width / 2) * zoom,
     y: viewportSize.height / 2 - (bounds.minY + bounds.height / 2) * zoom,
   };
+}
+
+/**
+ * 计算当前视口对应的可见世界矩形(已扣除 VIEWPORT_CULL_MARGIN 外扩裕量)。
+ *
+ * @param viewport 当前视口平移与缩放。
+ * @param boardSize 画布渲染容器的像素尺寸。
+ * @returns 可见世界矩形;boardSize 为 0(首帧 ResizeObserver 未回调)时返回 null,
+ *          调用方应回退渲染全部节点以避免首帧空白。
+ * @sideEffects 无。
+ */
+export function computeVisibleWorldRect(
+  viewport: CanvasViewport,
+  boardSize: BoardSize
+) {
+  if (boardSize.width <= 0 || boardSize.height <= 0) return null;
+  const zoom = clampCanvasZoom(viewport.zoom);
+  const minX = (-viewport.x) / zoom - VIEWPORT_CULL_MARGIN;
+  const minY = (-viewport.y) / zoom - VIEWPORT_CULL_MARGIN;
+  const maxX = (-viewport.x + boardSize.width) / zoom + VIEWPORT_CULL_MARGIN;
+  const maxY = (-viewport.y + boardSize.height) / zoom + VIEWPORT_CULL_MARGIN;
+  return { minX, minY, maxX, maxY };
+}
+
+/**
+ * 判定节点的世界 AABB 是否与可见矩形相交。
+ *
+ * @param node 待判定的画布节点。
+ * @param rect 由 computeVisibleWorldRect 计算的可见世界矩形。
+ * @returns 相交返回 true。
+ * @sideEffects 无。
+ */
+export function isNodeVisibleInRect(
+  node: CanvasNode,
+  rect: { minX: number; minY: number; maxX: number; maxY: number }
+) {
+  return (
+    node.x < rect.maxX &&
+    node.x + node.width > rect.minX &&
+    node.y < rect.maxY &&
+    node.y + node.height > rect.minY
+  );
+}
+
+/**
+ * 计算当前视口下需要渲染的可见节点集合。
+ *
+ * WHY: 无限画布原对 state.nodes 全量 map,大型/导入画布在拖动缩放时 DOM 数随
+ * 节点数线性增长,主线程渲染负担重。改为按视口 AABB 裁剪后 DOM 数随可视区
+ * 而非节点总数增长,大场景拖动缩放保持流畅。
+ *
+ * @param nodes 全量节点数组。
+ * @param viewport 当前视口平移与缩放。
+ * @param boardSize 画布渲染容器像素尺寸。
+ * @returns 可见节点数组;boardSize 为 0(首帧尺寸未知)时回退返回全部节点,
+ *          保证首帧不空白,与原全量渲染行为一致。
+ * @sideEffects 无;纯函数,可 DB-free 单测。
+ */
+export function computeVisibleNodes(
+  nodes: readonly CanvasNode[],
+  viewport: CanvasViewport,
+  boardSize: BoardSize
+): CanvasNode[] {
+  const rect = computeVisibleWorldRect(viewport, boardSize);
+  if (!rect) return [...nodes];
+  return nodes.filter((node) => isNodeVisibleInRect(node, rect));
 }
 
 /**

@@ -27,6 +27,7 @@ import {
   type WheelEvent as ReactWheelEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -35,11 +36,13 @@ import { toast } from "sonner";
 import {
   addCanvasEdge,
   addCanvasNode,
+  type BoardSize,
   type CanvasNode,
   type CanvasNodeKind,
   type CanvasState,
   type CanvasViewport,
   clampCanvasZoom,
+  computeVisibleNodes,
   createCanvasNode,
   createEmptyCanvasState,
   fitViewportToNodes,
@@ -133,6 +136,12 @@ export function InfiniteCanvasClient() {
   const [imagePreview, setImagePreview] = useState<ImagePreviewState | null>(
     null
   );
+  // 画布容器像素尺寸,用于视口 AABB 裁剪(F-P2-1)。首帧 ResizeObserver 回调
+  // 前保持 0,visibleNodes 会回退全量渲染,保证首帧不空白。
+  const [boardSize, setBoardSize] = useState<BoardSize>({
+    width: 0,
+    height: 0,
+  });
   const selectedNode = useMemo(
     () => state.nodes.find((node) => node.id === selectedIds[0]),
     [selectedIds, state.nodes]
@@ -141,6 +150,45 @@ export function InfiniteCanvasClient() {
     () => state.edges.filter((edge) => selectedEdgeIds.includes(edge.id)),
     [selectedEdgeIds, state.edges]
   );
+
+  // 视口裁剪:仅渲染落在当前可见世界矩形(含 cull margin)内的节点与连线,
+  // 大型/导入画布拖动缩放时 DOM 数随可视区而非节点总数增长。
+  const visibleNodes = useMemo(
+    () => computeVisibleNodes(state.nodes, state.viewport, boardSize),
+    [state.nodes, state.viewport, boardSize]
+  );
+  const visibleNodeIds = useMemo(
+    () => new Set(visibleNodes.map((node) => node.id)),
+    [visibleNodes]
+  );
+  const visibleEdges = useMemo(
+    // 边任一端可见即渲染,与 CanvasEdgePath 的 null-safe 端点处理保持一致,
+    // 避免裁剪切断仍在屏内的连接关系。
+    () =>
+      state.edges.filter(
+        (edge) => visibleNodeIds.has(edge.from) || visibleNodeIds.has(edge.to)
+      ),
+    [state.edges, visibleNodeIds]
+  );
+
+  // 用 useLayoutEffect + ResizeObserver 测量画布容器尺寸,为视口裁剪提供像素范围。
+  useLayoutEffect(() => {
+    const board = boardRef.current;
+    if (!board) return;
+    const measure = () => {
+      const rect = board.getBoundingClientRect();
+      // 节流:仅尺寸真正变化才 setState,避免无意义的 useMemo 重算。
+      setBoardSize((current) =>
+        current.width === rect.width && current.height === rect.height
+          ? current
+          : { width: rect.width, height: rect.height }
+      );
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(board);
+    return () => observer.disconnect();
+  }, []);
 
   /**
    * 根据当前语言返回短文本。
@@ -1035,7 +1083,7 @@ export function InfiniteCanvasClient() {
           <g
             transform={`translate(${state.viewport.x} ${state.viewport.y}) scale(${state.viewport.zoom})`}
           >
-            {state.edges.map((edge) => (
+            {visibleEdges.map((edge) => (
               <CanvasEdgePath
                 key={edge.id}
                 edge={edge}
@@ -1058,7 +1106,7 @@ export function InfiniteCanvasClient() {
             transformOrigin: "0 0",
           }}
         >
-          {state.nodes.map((node) => (
+          {visibleNodes.map((node) => (
             <CanvasNodeView
               key={node.id}
               node={node}
