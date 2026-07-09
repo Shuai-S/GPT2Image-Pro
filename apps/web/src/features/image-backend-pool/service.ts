@@ -7862,7 +7862,10 @@ function describeImageHealthFailure(result: ImageApiHealthResult): string {
  * @param id 目标 imageBackendApi 行 id。
  * @returns `{ id, name, result }`；成员不存在时抛错。
  */
-export async function probeImageBackendApi(id: string): Promise<{
+export async function probeImageBackendApi(
+  id: string,
+  options?: { signal?: AbortSignal }
+): Promise<{
   id: string;
   name: string;
   result: ImageApiHealthResult;
@@ -7901,6 +7904,7 @@ export async function probeImageBackendApi(id: string): Promise<{
       api.chatCompletionsUpstreamMode
     ),
     backendType: "pool-api",
+    signal: options?.signal,
   });
 
   const now = new Date();
