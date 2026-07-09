@@ -14,8 +14,8 @@ import { db } from "@repo/database";
 import { videoGeneration } from "@repo/database/schema";
 import {
   DEFAULT_VIDEO_BASE_CREDITS_PER_SECOND,
-  resolveVideoModelPricing,
   resolveVideoModelMultiplier,
+  resolveVideoModelPricing,
 } from "@repo/shared/adobe";
 import { resolveFireflyVideoModel } from "@repo/shared/adobe/firefly-direct";
 import { consumeCredits } from "@repo/shared/credits/core";
@@ -30,13 +30,13 @@ import {
 } from "@repo/shared/system-settings";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { releaseImageBackendInflightLease } from "@/features/image-backend-pool/service";
 import {
   refundExternalApiKeyCredits,
   reserveExternalApiKeyCredits,
 } from "@/features/external-api/quota";
-import { invalidateGalleryCountsCache } from "./gallery-cache";
+import { releaseImageBackendInflightLease } from "@/features/image-backend-pool/service";
 import { runAdobeDirectVideoRequest } from "./adobe-direct";
+import { invalidateGalleryCountsCache } from "./gallery-cache";
 import { getEffectiveConfig, poolBackendMemberType } from "./service";
 
 export type VideoGenerationInput = {
@@ -95,6 +95,37 @@ export type VideoPricingInfo = {
 const REPRESENTATIVE_VIDEO_MODEL_ID = "firefly-sora2-8s-16x9";
 
 /**
+ * 释放视频价格预览为读取后端倍率而临时获取的并发租约。
+ *
+ * @param config 已解析的后端配置；非池后端或未持有租约时不执行操作。
+ * @returns 租约释放完成后结束；释放异常只记录日志，价格预览继续使用降级结果。
+ * @sideEffects 递减进程内并发计数，并在需要时删除数据库租约。
+ */
+async function releaseVideoPricingBackendLease(
+  config: Awaited<ReturnType<typeof getEffectiveConfig>>["config"] | null
+): Promise<void> {
+  const backend = config?.backend;
+  if (!backend?.inflightLease) return;
+
+  try {
+    await releaseImageBackendInflightLease({
+      memberType: poolBackendMemberType(backend.type),
+      memberId: backend.id,
+      leaseId: backend.inflightLeaseId,
+      leasePersisted: backend.inflightLeasePersisted,
+    });
+  } catch (error) {
+    logError(error, {
+      context: "release video pricing backend lease",
+      backendId: backend.id,
+      backendType: backend.type,
+    });
+  } finally {
+    backend.inflightLease = false;
+  }
+}
+
+/**
  * 取某用户的视频定价输入（基价 + 模型族倍率 + Adobe 后端倍率），供创作页前端实时预估。
  * 与扣费侧 runAdobeVideoGenerationForUser 共用同一组系统设置与模型定价引擎口径，
  * 保证展示价与实扣价一致。后端倍率解析失败（无 Adobe 后端等）优雅回退 1。
@@ -113,6 +144,9 @@ export async function getVideoPricingForUser(input: {
   const multipliers = parseMultipliers(multipliersJson);
 
   let backendMultiplier = 1;
+  let leasedConfig:
+    | Awaited<ReturnType<typeof getEffectiveConfig>>["config"]
+    | null = null;
   try {
     const effective = await getEffectiveConfig(null, {
       userId: input.userId,
@@ -121,11 +155,14 @@ export async function getVideoPricingForUser(input: {
       requestedModel: REPRESENTATIVE_VIDEO_MODEL_ID,
       ignoreUserConfig: true,
     });
+    leasedConfig = effective.config;
     if (effective.config.backend?.type === "pool-adobe") {
       backendMultiplier = effective.config.backend.billingMultiplier ?? 1;
     }
   } catch {
     backendMultiplier = 1;
+  } finally {
+    await releaseVideoPricingBackendLease(leasedConfig);
   }
 
   return { basePerSecond, multipliers, backendMultiplier };
