@@ -388,8 +388,9 @@
 - [x] **F-P2-2 admin-panel register+import dynamic**（370b4385）：`ChatgptRegisterTab`/`Sub2ApiImportSection` 拆独立 chunk。
 - [x] **C-P0-1 SLA 失效接入生成完成**（ad47ceb9）：`invalidateSlaStatsCache`（`revalidateTag`+try/catch 降级），operations 完成/失败收口调用。
 - [x] **B-P1-2 AnimatedPrice 动态化**（1ee6b363）：framer-motion 移出营销 pricing 首屏 chunk。
-- [ ] **3c admin-users UserDetailSheet 剥离+lazy**（后置）：高耦合父 state，props 注入回归风险大。
-- [ ] **4b admin/payments 聊合 unstable_cache+tag**（后置）：1370 行单文件需逐 query 权限审计。
+- [x] **3c admin-users UserDetailSheet 剥离+dynamic**（后补 commit）：UserDetailSheet(概览/积分/生图/API Key/审计 5 Tab + 超管操作栏)抽到独立文件,经 next/dynamic+detailMounted 门控,detailMounted 惰性挂载;新增 admin-users-shared 解父子依赖环;2371→1746+592+180 三文件。
+- [x] **4b admin/payments 聚合 unstable_cache+tag**（后补 commit）：顶部统计卡的状态分组聚合走 unstable_cache(type/provider 低基数键,300s TTL + admin-payments-aggregate tag);q/日期穿透实时查询;epay 三写入点接 revalidateTag max+降级;明细列表不缓存。
+- [x] **admin-panel groups/apis/adobe Tab 剥离**（后补 commit）：四个非 register/import 的 TabsContent 全剥离为 dynamic chunk(admin-groups-tab/admin-apis-tab/admin-adobe-tab),5331→3728 行;accounts 因多 form 交叉保留内联。
 - [ ] **4c history-client 虚拟化**（确认不做）：每页固定 20 条+memo+prefetch 已合理，原注释明确判定虚拟化收益有限风险偏高。
 
 ---

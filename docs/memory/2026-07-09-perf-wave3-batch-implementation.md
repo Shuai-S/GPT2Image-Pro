@@ -63,3 +63,33 @@
 - F-P1-2（create-page-client effect 级联改 reducer/flushSync，部分完成）
 - F-P2-1（infinite-canvas 可视区节点虚拟化，本轮完成 AABB 裁剪；react-virtual grid 未做）
 - F-P2-2（admin-panel groups/accounts/apis/adobe Tab 剥离，本轮后置）
+
+## 五、perf-wave4 收尾批次（commit 775c59ce..39d2284a）
+
+### logger flush 等待在途 gzip 归档（775c59ce）
+- 根因：`rotateCurrentFile` `void` 启动 gzip 后立即返回，`flush()`/`resolveIdle` 不等待在途归档，导致 `await flush()` 后读取 `.gz` 读到截断流（`unexpected end of file`，测试 flaky）；同一缺陷在生产中让轮转后立即退出的进程留下损坏归档。
+- 修复：新增 `pendingArchives` 集合，`startArchive` 登记在途 Promise（catch 里移除自身）；`scheduleDrain.finally` 队列排空后 `awaitPendingArchives` 再 `resolveIdle`；`flush()` 早退路径也 await pendingArchives。pipeline 写法不变。
+- 效果：测试 5/5 稳定通过；生产优雅停机可靠；`flush()` 契名副实。
+
+### 3c UserDetailSheet 剥离 + dynamic（commit）
+- 把 AdminUsersManagement 的用户详情 Sheet（1399-1815，5 Tab + 超管操作栏）抽到 `admin-user-detail-sheet.tsx`（592 行），经 `next/dynamic({ssr:false})` 懒加载 + `detailMounted` 门控（首次打开置 true 永不复位，保留 Sheet 关闭动画）。
+- 新增 `admin-users-shared.tsx`（180 行）：把 `UserRow`/`UserDetail`/`PlanFilter` 类型与 `formatDateTime`/`planBadge` 共享工具前置，父子均从它 import，避免子组件反向 import 父模块成依赖环。
+- 详情专用 `Panel/InfoBlock/Metric/EmptyText/generationStatusBadge` 随 Sheet 迁移；`detailBalance/detailGenerationRate` 派生下沉为子组件 useMemo；9 个 Dialog 留父组件不动（被主列表与详情共享触发）。
+- 父文件 2371→1746 行。
+
+### 4b admin/payments 聚合 unstable_cache + tag（6d14ebd4）
+- 改造点不是 `admin/payments/page.tsx`（它不直接查 DB），而是 UOL 操作 `admin-payments.ts` 的 `loadLocalOrders`。
+- 把 A1（`count()` 总数）+A2（`groupBy(status)` 状态分组 count+sum）抽为 `getCachedLocalOrderStatusRows`，`unstable_cache` 包装，key 只含 `type`/`provider` 两个低基数枚举（避开 `q` 自由文本与 `from/to` 精确时间戳的键爆炸）；300s TTL + `admin-payments-aggregate` tag。
+- 总数从状态分组派生（status=all 求和，否则取对应分组），不再单独 count。明细分页（orders/ledger/subscriptions，含 userEmail）始终实时不缓存。
+- 失效触点：`payment/epay.ts` 三处（saveEpayOrder/updateEpayOrderStatus/claimEpayOrderForFulfillment）补 `invalidateAdminPaymentsCache`（`revalidateTag` with `max` profile + try/catch 降级，webhook 上下文可用）；claim 未命中时不失效。
+- 权限：`assertPaymentAdmin` 保持在 `execute` 入口（unstable_cache 外），缓存命中不跳过鉴权。
+- 新增 `payment/admin-payments-cache.ts` 单点 tag 定义与失效函数；epay.test.ts 补 next/cache mock 与"领取成功失效/未领取不失效"断言。
+- 顺带把 `sla.ts` 的 `revalidateTag` 补上 Next 16 要求的 `max` profile（消除弃用告警）。
+
+### admin-panel groups/apis/adobe Tab 剥离为 dynamic（2 commits）
+- 沿 ChatgptRegisterTab/Sub2ApiImportSection 范式，把 `<TabsContent value=apis>`（708 行）/`value=adobe`（692 行）/`value=groups`（372 行）三段抽到 `admin-apis-tab.tsx`(840)/`admin-adobe-tab.tsx`(846)/`admin-groups-tab.tsx`(463)，各经 `next/dynamic({ssr:false})` 懒加载；TabsContent 外壳留父文件保持 Radix Tabs 上下文不跨 chunk。
+- 父文件 5331→3728 行（净减 1603 行）；三个新组件零 hook（纯 props 注入），props 量级 apis 20 / adobe 34 / groups 11。
+- 模块级常量/纯函数/类型（OPTIONS 数组/label 函数/Group/Api/Adobe/ApiFormState/AdobeFormState/GroupFormState 等）从父文件 export 由子文件 import，不复制实现。
+- 关键约束：adobe 倍率草稿回填 `loadModelMultipliers` useEffect 留父组件，子组件 lazy mount 后草稿已就绪不会清零倍率。
+- accounts 因多 form 交叉（bulkAccountForm/accountForm/selectedAccountIds 三层 + 6 selected 派生 + 与 import section 跨段 state 契约）保留内联。
+- groups 是非 readOnly 默认 active Tab，dynamic 后首帧 null 占位换主 bundle 变小，取舍可接受。
