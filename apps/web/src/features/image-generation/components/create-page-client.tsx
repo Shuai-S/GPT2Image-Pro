@@ -17,6 +17,7 @@ import {
 import { Textarea } from "@repo/ui/components/textarea";
 import { CircleHelp, ImagePlus, Loader2, Send } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import { useLocale } from "next-intl";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
@@ -170,9 +171,20 @@ import {
   yieldToBrowser,
 } from "./create-page-utils";
 import { CreatePageVisualOutputPanel } from "./create-page-visual-output-panel";
-import { CreatePageWaterfallGrid } from "./create-page-waterfall-grid";
 import type { EditImageFile, MaskPoint } from "./image-edit-types";
-import { VideoCreatePanel } from "./video-create-panel";
+
+// 懒加载:瀑布流与视频创作面板仅在切到对应 activeMode 时才需挂载,改 next/dynamic
+// 后从创作页首屏 client bundle 移出为独立 chunk,降低首屏 JS。loading 返回 null
+// 占位,避免 mode 切换瞬间闪烁。
+const CreatePageWaterfallGrid = dynamic(
+  () =>
+    import("./create-page-waterfall-grid").then((m) => m.CreatePageWaterfallGrid),
+  { ssr: false, loading: () => null }
+);
+const VideoCreatePanel = dynamic(
+  () => import("./video-create-panel").then((m) => m.VideoCreatePanel),
+  { ssr: false, loading: () => null }
+);
 
 // 创作页主组件:页面级状态和请求编排保留在此,共享类型、常量和纯工具已拆分到同目录模块。
 
@@ -384,6 +396,12 @@ export function CreatePageClient({
     "activeMode",
     readStoredCreateActiveMode()
   );
+  // 视频面板惰性挂载标志:首屏不挂 VideoCreatePanel(将其 chunk 移出首屏 bundle),
+  // 首次切到 video mode 后置 true 并永不复位,切走再回来仍保留草稿态。
+  const [videoMounted, setVideoMounted] = useState(activeMode === "video");
+  useEffect(() => {
+    if (activeMode === "video") setVideoMounted(true);
+  }, [activeMode, setVideoMounted]);
   /**
    * 切换创作模式并同步到 URL。
    *
@@ -5729,7 +5747,7 @@ export function CreatePageClient({
           hidden={activeMode !== "video" || !videoAllowed}
           className="mt-0"
         >
-          <VideoCreatePanel recent={recent} pricing={videoPricing} />
+          {videoMounted && <VideoCreatePanel recent={recent} pricing={videoPricing} />}
         </div>
       </div>
 
