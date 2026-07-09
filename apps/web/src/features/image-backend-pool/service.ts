@@ -1641,13 +1641,37 @@ export function isMissingImageToolBackendError(error?: string | null) {
  * 错误被全部踢出，firefly 请求将无后端可解析——此时由 getEffectiveConfig 给出「无可用 Adobe
  * 后端」的明确报错（而非泛化的"默认后端缺失"），便于运维定位是后端被踢空而非模型问题。
  */
+/**
+ * 中转确定性坏掉（dead-relay）判定。
+ *
+ * 仅以「指针型」证据判死：没有可用 token、HTML response body（中了 OpenAI 不
+ * 兼容的 /v1 端点）。单纯的「service temporarily unavailable」文案常见于 502/
+ * 504 上游瞬时抖动、不一定代表中转本身坏掉，已被抽离到 `isOverloadBackendError`
+ * /`isRecoverableBackendError` 走 active + 短期冷却，避免误踢可用后端。
+ *
+ * WHY 拆分：2026-07 排查日志显示「Upstream Images API returned HTTP 502:
+ * Upstream service temporarily unavailable | upstream_error」被原 dead-relay
+ * 规则命中后立即 status='error' 踢出；但这类错误换号重试经常就能拿到图，不该
+ * 当终态处理。
+ */
 function isDeadRelayBackendError(error?: string | null) {
   const normalized = (error || "").toLowerCase();
   return (
     normalized.includes("没有可用token") ||
     normalized.includes("没有可用 token") ||
-    normalized.includes("html response body") ||
-    normalized.includes("service temporarily unavailable")
+    normalized.includes("html response body")
+  );
+}
+
+/** 上游「service temporarily unavailable」类临时不可用文案（502/504 旁路）。
+ * 不再纳入 dead-relay 终态判定，而是放给 isRecoverableBackendError 走 active +
+ * 冷却，由换号重试恢复。 */
+function isServiceTemporarilyUnavailableError(error?: string | null) {
+  const normalized = (error || "").toLowerCase();
+  return (
+    normalized.includes("service temporarily unavailable") ||
+    normalized.includes("temporary unavailable") ||
+    normalized.includes("service unavailable")
   );
 }
 
@@ -2101,7 +2125,12 @@ export async function classifyFailure(
   if (isMissingImageToolBackendError(error)) {
     return { status: "error", cooldownUntil: null };
   }
-  // 中转坏掉（无 token / 返回 HTML）：确定性不可用，按用户判定升级为 error 踢出。
+  // 中转坏掉（无 token / 返回 HTML / service temporarily unavailable 文案）：
+  // 仅当错误同时具备「指针型」证据（html response body / 没有可用 token）时才
+  // 判定为 dead-relay 并升级为 error 踢出。单纯的 502/504「service temporarily
+  // unavailable」文案很常见于上游瞬时网关抖动，不一定代表中转死掉；先把它放给
+  // 下方 isRecoverableBackendError 走「active + 短期冷却」更稳健，避免误踢导致
+  // 可用后端被清空。
   if (isDeadRelayBackendError(error)) {
     return { status: "error", cooldownUntil: null };
   }
@@ -2182,6 +2211,22 @@ export async function classifyFailure(
       ),
     };
   }
+  // 502/504 + 「service temporarily unavailable」：上游网关瞬时抖动，先按 overload 桶
+  // 走 active + 冷却，不踢出；冷却窗口期内换到别的成员，窗口一过该后端可重新参与。
+  // 放在 isRecoverableBackendError 之前以便命中更具体的冷却分钟配置。
+  if (isServiceTemporarilyUnavailableError(error)) {
+    const minutes = await getBackendCooldownMinutes(
+      "IMAGE_BACKEND_OVERLOAD_COOLDOWN_MINUTES"
+    );
+    return {
+      status: "active",
+      cooldownUntil: resolveCooldownDate(
+        error || null,
+        cooldownFromMinutes(minutes),
+        input
+      ),
+    };
+  }
   if (isOverloadBackendError(error)) {
     const minutes = await getBackendCooldownMinutes(
       "IMAGE_BACKEND_OVERLOAD_COOLDOWN_MINUTES"
@@ -2220,10 +2265,19 @@ export async function classifyFailure(
 /**
  * 把分类结果按"该后端是否启用失败冷却"收敛。
  *
- * 账号永远按分类结果走。API 后端由各自的 `failureCooldownEnabled` 决定（取代旧
- * 的全局开关）：关闭时丢弃一切冷却/限流结果，仅保留确定性 `error`（不可恢复/
- * 凭证废/缺图像工具/中转坏）。
+ * 账号永远按分类结果走。API/Adobe 后端由各自的 `failureCooldownEnabled` 决定（取代
+ * 旧的全局开关）。
+ *
+ * 收敛规则：
+ * - 开启冷却时原样返回分类结果（含 status: limited/active 与冷却时间）。
+ * - 关闭冷却（默认）时，仅保留确定性 `error` 终态；其余临时错误丢弃 status/cooldown，
+ *   但对「API 返回空成功」「本次 attempt 超时」「fetch failed/terminated」这类高频瞬时抖动
+ *   保留一个最小缓冲冷却（默认 30 秒），避免坏后端在同一秒内被连续选中、反复白消耗配额。
+ *   最小缓冲使用 IMAGE_BACKEND_TEMPORARY_ERROR_COOLDOWN_MINUTES 配置项但截断到 30 秒上限，
+ *   防止运营把该桶调大时反而把"关闭冷却"的后端长期下线。
  */
+const MIN_FAILURE_COOLDOWN_MS = 30_000;
+
 function resolveEffectiveFailureForMember(
   memberType: "api" | "account" | "adobe",
   failure: {
@@ -2240,11 +2294,21 @@ function resolveEffectiveFailureForMember(
   ) {
     return failure;
   }
-  return {
-    status: failure.status === "error" ? failure.status : undefined,
-    cooldownUntil:
-      failure.status === "error" ? failure.cooldownUntil : undefined,
-  };
+  if (failure.status === "error") {
+    return { status: failure.status, cooldownUntil: failure.cooldownUntil };
+  }
+  // 对"关闭冷却"的后端也加最小缓冲冷却：cooldownUntil 若 > now+30s 则截到 30s；
+  // 若原本就没有冷却时间（dead-relay 例外不会到这里），则不补(buffer=0)。
+  if (failure.cooldownUntil) {
+    const now = Date.now();
+    const original = failure.cooldownUntil.getTime();
+    const buffered = Math.min(original, now + MIN_FAILURE_COOLDOWN_MS);
+    return {
+      status: failure.status,
+      cooldownUntil: buffered > now ? new Date(buffered) : undefined,
+    };
+  }
+  return { status: undefined, cooldownUntil: undefined };
 }
 
 // always_active（遇错常驻）的失败处置：常驻后端遇【任何】失败都不自动下线——返回空对象

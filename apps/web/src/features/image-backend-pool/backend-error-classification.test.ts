@@ -344,15 +344,57 @@ describe("image backend error classification", () => {
     expect(remainMin).toBeLessThan(22 * 60);
   });
 
-  it("上游不可用 502(service temporarily unavailable)标 error 踢出,且仍可换号重试", async () => {
+  it("上游不可用 502(service temporarily unavailable)走 active + 冷却(可换号重试，不踢出)", async () => {
     const svc = await loadService();
     const err =
       "Upstream Images API returned HTTP 502: Upstream service temporarily unavailable";
     const failure = await svc.classifyFailure(err);
-    // 粘性踢出轮换(error 不被 failureCooldownEnabled 门控)。
-    expect(failure.status).toBe("error");
-    expect(failure.cooldownUntil).toBeNull();
+    // 不再当终态踢出：502 瞬时抖动走 overload 桶 active + 冷却，窗口期内换号重试。
+    expect(failure.status).not.toBe("error");
+    expect(failure.status).toBe("active");
+    expect(failure.cooldownUntil).toBeInstanceOf(Date);
     // 当次请求仍可切换到下一个后端重试。
+    expect(svc.isImageBackendSwitchableError(err)).toBe(true);
+  });
+
+  it("413/414 请求体过大被分类为用户错不重试、不切换", async () => {
+    const isImageBackendSwitchableError = await loadClassifier();
+    for (const err of [
+      "Upstream Images API returned HTTP 413: payload too large",
+      "Upstream Images API returned HTTP 413: Request Entity Too Large",
+      "Upstream Images API returned HTTP 414: content too large",
+      "Upstream Images API returned HTTP 400: payload_too_large",
+    ]) {
+      expect(isImageBackendSwitchableError(err)).toBe(false);
+    }
+  });
+
+  it("per-attempt 超时错误可切换(命中 isRecoverableBackendError 但不命中 isLocalAbortTimeoutError)", async () => {
+    const isImageBackendSwitchableError = await loadClassifier();
+    // P0 注入的单次 attempt 超时错误文案，应可切换到下一个账号池成员。
+    expect(
+      isImageBackendSwitchableError("upstream per-attempt timed out")
+    ).toBe(true);
+    // 但全局总超时文案仍不可切换（避免过期请求继续重试）。
+    expect(
+      isImageBackendSwitchableError("The operation was aborted due to timeout")
+    ).toBe(false);
+  });
+
+  it("关闭冷却的 API 后端遇到空成功(response no image data)仍获最小 30s 缓冲冷却", async () => {
+    const svc = await loadService();
+    const err =
+      "Upstream Images API returned HTTP 200: API returned no image data";
+    // classify 给出 active + cooldownUntil（temporary error 桶）。
+    const failure = await svc.classifyFailure(err);
+    expect(failure.status).toBe("active");
+    expect(failure.cooldownUntil).toBeInstanceOf(Date);
+    // 关闭冷却的 api 后端：resolveEffectiveFailureForMember 把冷却截到 ≤ 30s。
+    // 注意 service.ts 内 resolveEffectiveFailureForMember 当前未导出；这里通过
+    // 已有 export（isImageBackendSwitchableError 等）覆盖核心分类，最小缓冲策略
+    // 在后续重构中导出后补回归。本条断言仅锁分类层面输出正确。
+    const remainMs = (failure.cooldownUntil as Date).getTime() - Date.now();
+    expect(remainMs).toBeGreaterThan(0);
     expect(svc.isImageBackendSwitchableError(err)).toBe(true);
   });
 

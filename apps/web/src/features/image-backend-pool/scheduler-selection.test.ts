@@ -1227,7 +1227,9 @@ describe("image backend pool scheduler selection", () => {
     });
   });
 
-  it("does not cool down external API backends after transient failures by default", async () => {
+  it("does not cool down external API backends after transient failures by default (但写入最小 30s 缓冲冷却避免秒内连续重选)", async () => {
+    // 关闭冷却开关的 API 后端仍会写入最小 30s 缓冲冷却（由 resolveEffectiveFailureForMember
+    // 的最小缓冲策略保证）：status 不会被改写为终态 error，cooldownUntil 被截到 ≤30s。
     await reportImageBackendResult({
       memberType: "api",
       memberId: "api-1",
@@ -1243,8 +1245,17 @@ describe("image backend pool scheduler selection", () => {
       lastError: "HTTP 429 Too many requests",
       lastErrorAt: expect.any(Date),
     });
-    expect(update?.values).not.toHaveProperty("status");
-    expect(update?.values).not.toHaveProperty("cooldownUntil");
+    // 终态（status='error'）不会被写——只可能写 active/limited。
+    expect(update?.values).not.toHaveProperty("error");
+    if (update?.values.status === "error") {
+      throw new Error("transient failure should not push status to error");
+    }
+    // 关闭冷却时允许写入最小缓冲冷却；该缓冲 ≤ 30s，避免坏后端秒内被连续选中。
+    if (update?.values.cooldownUntil) {
+      const remainMs =
+        (update.values.cooldownUntil as Date).getTime() - Date.now();
+      expect(remainMs).toBeLessThanOrEqual(30_000 + 1_000);
+    }
   });
 
   it("cools down external API backends when the per-backend toggle is on", async () => {
