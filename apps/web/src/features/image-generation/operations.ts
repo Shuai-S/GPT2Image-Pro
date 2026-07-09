@@ -1,6 +1,9 @@
 import { db } from "@repo/database";
 import { generation, user } from "@repo/database/schema";
-import { GPT55_CHAT_MODEL } from "@repo/shared/config/subscription-plan";
+import {
+  GPT55_CHAT_MODEL,
+  type SubscriptionPlan,
+} from "@repo/shared/config/subscription-plan";
 import { consumeCredits } from "@repo/shared/credits/core";
 import {
   IMAGE_GENERATION_PENDING_TIMEOUT_MS,
@@ -125,6 +128,7 @@ type RunImageGenerationInput =
   | ({
       mode: "generate";
       userId: string;
+      resolvedUserPlan?: SubscriptionPlan;
       generationId?: string;
       apiKeyId?: string;
       // 请求级显式分组(创作页选择器 / 外部 API generation_group)。fail-closed:
@@ -144,6 +148,7 @@ type RunImageGenerationInput =
   | ({
       mode: "edit";
       userId: string;
+      resolvedUserPlan?: SubscriptionPlan;
       generationId?: string;
       apiKeyId?: string;
       requestGroupId?: string;
@@ -161,6 +166,7 @@ type RunImageGenerationInput =
   | ({
       mode: "chat";
       userId: string;
+      resolvedUserPlan?: SubscriptionPlan;
       generationId?: string;
       apiKeyId?: string;
       requestGroupId?: string;
@@ -1361,14 +1367,17 @@ export async function runImageGenerationForUser(
   const bucket =
     (await getRuntimeSettingString("NEXT_PUBLIC_GENERATIONS_BUCKET_NAME")) ||
     "generations";
-  const userPlan = await getUserPlan(input.userId);
+  // HTTP/API 入口已经为限额和能力校验读取过套餐时直接复用，避免统一管线
+  // 在同一请求内再次查询订阅；未提供的 Server Action/UOL 调用仍实时查询。
+  const userPlan =
+    input.resolvedUserPlan ?? (await getUserPlan(input.userId)).plan;
   const [planCapabilities, queueSettings, moderationBlockRiskLevel] =
     await Promise.all([
-      getPlanCapabilitySnapshot(userPlan.plan),
-      getPlanQueueSettings(userPlan.plan),
+      getPlanCapabilitySnapshot(userPlan),
+      getPlanQueueSettings(userPlan),
       getUserModerationBlockRiskLevel(
         input.userId,
-        userPlan.plan,
+        userPlan,
         input.moderationBlockRiskLevel
       ),
     ]);
@@ -1515,10 +1524,7 @@ export async function runImageGenerationForUser(
       async () => {
         let leasedConfig: ApiConfig | null = null;
         try {
-          const userConfig = await getUserApiConfig(
-            input.userId,
-            userPlan.plan
-          );
+          const userConfig = await getUserApiConfig(input.userId, userPlan);
           let effectiveConfig: Awaited<ReturnType<typeof getEffectiveConfig>>;
           try {
             try {
@@ -1847,7 +1853,7 @@ async function runQueuedImageGenerationForUser({
   initialCreditCharge: number;
   chatRoundCredits: number;
   bucket: string;
-  userPlan: Awaited<ReturnType<typeof getUserPlan>>;
+  userPlan: SubscriptionPlan;
   moderationBlockRiskLevel: ModerationBlockRiskLevel;
   moderationFailureCredits: number;
   promptOptimization: boolean;
@@ -2470,7 +2476,7 @@ async function runQueuedImageGenerationForUser({
           images: inputImages,
           mode: inputImages.length > 0 ? "image" : "text",
           userId: input.userId,
-          userPlan: userPlan.plan,
+          userPlan,
           userModerationBlockRiskLevel: moderationBlockRiskLevel,
           generationId,
         });

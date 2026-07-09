@@ -7,7 +7,6 @@ import {
   getPlanLimits,
 } from "@repo/shared/subscription/services/plan-capabilities";
 import { getPlanUploadLimits } from "@repo/shared/subscription/services/upload-limits";
-import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import type { NextRequest } from "next/server";
 
 import {
@@ -550,14 +549,13 @@ export const postExternalImageEdits = withApiLogging(
       );
     }
 
-    const plan = await getUserPlan(auth.userId);
-    const planLimits = await getPlanLimits(plan.plan);
+    const planLimits = await getPlanLimits(auth.plan);
     const batchCountLimit = getImageBatchCountLimit(planLimits);
     const maxEditImages = getEffectiveImageEditMaxReferenceImages(
       planLimits.maxEditImages,
       await getRuntimeImageEditMaxReferenceImages()
     );
-    const uploadLimits = await getPlanUploadLimits(plan.plan);
+    const uploadLimits = await getPlanUploadLimits(auth.plan);
     const maxImageBytes = uploadLimits.maxFileSizeBytes;
     const maxRequestBytes = uploadLimits.maxUploadBytes;
 
@@ -671,7 +669,7 @@ export const postExternalImageEdits = withApiLogging(
     }
     if (
       count > 1 &&
-      !(await canUsePlanCapability(plan.plan, "imageGeneration.batch"))
+      !(await canUsePlanCapability(auth.plan, "imageGeneration.batch"))
     ) {
       return openAIImageError(
         "Batch image editing is not enabled for this plan.",
@@ -724,7 +722,7 @@ export const postExternalImageEdits = withApiLogging(
         request,
         getOptionalBoolean(formData, "stream")
       ) &&
-      !(await canUsePlanCapability(plan.plan, "externalApi.streaming"))
+      !(await canUsePlanCapability(auth.plan, "externalApi.streaming"))
     ) {
       return openAIImageError(
         "External API streaming is not enabled for this plan.",
@@ -796,6 +794,7 @@ export const postExternalImageEdits = withApiLogging(
           {
             mode: "edit",
             userId: auth.userId,
+            resolvedUserPlan: auth.plan,
             generationId,
             apiKeyId: auth.apiKeyId,
             relayOnly: auth.relayOnly,

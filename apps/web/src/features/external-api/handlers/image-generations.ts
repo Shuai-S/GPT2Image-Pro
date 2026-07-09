@@ -5,7 +5,6 @@ import {
   getPlanLimits,
   MAX_PLAN_BATCH_COUNT,
 } from "@repo/shared/subscription/services/plan-capabilities";
-import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 
@@ -204,13 +203,12 @@ export const postExternalImageGenerations = withApiLogging(
       );
     }
 
-    const plan = await getUserPlan(auth.userId);
-    const limits = await getPlanLimits(plan.plan);
+    const limits = await getPlanLimits(auth.plan);
     const batchCountLimit = getImageBatchCountLimit(limits);
     const count = parsed.data.n || 1;
     if (
       count > 1 &&
-      !(await canUsePlanCapability(plan.plan, "imageGeneration.batch"))
+      !(await canUsePlanCapability(auth.plan, "imageGeneration.batch"))
     ) {
       return openAIImageError(
         "Batch image generation is not enabled for this plan.",
@@ -223,7 +221,7 @@ export const postExternalImageGenerations = withApiLogging(
     }
     if (
       wantsImageStreamResponse(request, parsed.data.stream) &&
-      !(await canUsePlanCapability(plan.plan, "externalApi.streaming"))
+      !(await canUsePlanCapability(auth.plan, "externalApi.streaming"))
     ) {
       return openAIImageError(
         "External API streaming is not enabled for this plan.",
@@ -258,6 +256,7 @@ export const postExternalImageGenerations = withApiLogging(
     const input = {
       mode: "generate" as const,
       userId: auth.userId,
+      resolvedUserPlan: auth.plan,
       apiKeyId: auth.apiKeyId,
       relayOnly: auth.relayOnly,
       backendRequestKind: "image_generation" as const,

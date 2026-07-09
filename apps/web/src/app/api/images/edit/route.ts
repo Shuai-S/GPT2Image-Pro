@@ -373,6 +373,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
         {
           mode: "edit",
           userId: session.user.id,
+          resolvedUserPlan: plan.plan,
           generationId,
           backendRequestKind: "image_edit" as const,
           prompt,

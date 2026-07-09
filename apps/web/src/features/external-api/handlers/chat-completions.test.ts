@@ -4,7 +4,6 @@ const mocks = vi.hoisted(() => ({
   authenticateExternalApiRequest: vi.fn(),
   canUsePlanCapability: vi.fn(),
   getPlanLimits: vi.fn(),
-  getUserPlan: vi.fn(),
   runBatchImageGeneration: vi.fn(),
   runImageGenerationForUser: vi.fn(),
   uploadTemporaryImageUrls: vi.fn(),
@@ -18,10 +17,6 @@ vi.mock("@repo/shared/subscription/services/plan-capabilities", () => ({
   MAX_PLAN_BATCH_COUNT: 10_000,
   canUsePlanCapability: mocks.canUsePlanCapability,
   getPlanLimits: mocks.getPlanLimits,
-}));
-
-vi.mock("@repo/shared/subscription/services/user-plan", () => ({
-  getUserPlan: mocks.getUserPlan,
 }));
 
 vi.mock("@/features/image-generation/operations", () => ({
@@ -59,9 +54,9 @@ describe("external chat completions handler streaming bridge", () => {
     mocks.authenticateExternalApiRequest.mockResolvedValue({
       userId: "user_1",
       apiKeyId: "key_1",
+      plan: "ultra",
       moderationBlockRiskLevel: undefined,
     });
-    mocks.getUserPlan.mockResolvedValue({ plan: "ultra" });
     mocks.canUsePlanCapability.mockResolvedValue(true);
     mocks.getPlanLimits.mockResolvedValue({
       maxBatchCount: 10,
@@ -112,6 +107,7 @@ describe("external chat completions handler streaming bridge", () => {
           messages: [{ role: "user", content: "hello" }],
         }),
         backendRequestKind: "chat",
+        resolvedUserPlan: "ultra",
       })
     );
     expect(callbacks).toBeUndefined();

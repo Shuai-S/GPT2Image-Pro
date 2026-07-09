@@ -956,6 +956,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
         {
           mode: "chat",
           userId: session.user.id,
+          resolvedUserPlan: plan.plan,
           generationId,
           prompt,
           apiPrompt,

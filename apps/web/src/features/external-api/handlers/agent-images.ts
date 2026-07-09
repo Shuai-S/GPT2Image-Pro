@@ -8,7 +8,6 @@ import {
   getPlanLimits,
 } from "@repo/shared/subscription/services/plan-capabilities";
 import { getPlanUploadLimits } from "@repo/shared/subscription/services/upload-limits";
-import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import type { NextRequest } from "next/server";
 
 import { authenticateExternalApiRequest } from "@/features/external-api/auth";
@@ -874,8 +873,7 @@ export const postExternalAgentImages = withApiLogging(
       );
     }
 
-    const plan = await getUserPlan(auth.userId);
-    if (!(await canUsePlanCapability(plan.plan, "externalApi.agent"))) {
+    if (!(await canUsePlanCapability(auth.plan, "externalApi.agent"))) {
       return openAIImageError(
         "External Agent image API requires Ultra plan or higher.",
         403,
@@ -883,8 +881,8 @@ export const postExternalAgentImages = withApiLogging(
       );
     }
 
-    const planLimits = await getPlanLimits(plan.plan);
-    const uploadLimits = await getPlanUploadLimits(plan.plan);
+    const planLimits = await getPlanLimits(auth.plan);
+    const uploadLimits = await getPlanUploadLimits(auth.plan);
     const maxImageBytes = uploadLimits.maxFileSizeBytes;
     const maxRequestBytes = uploadLimits.maxUploadBytes;
 
@@ -1029,7 +1027,7 @@ export const postExternalAgentImages = withApiLogging(
     );
     if (
       useStreamResponse &&
-      !(await canUsePlanCapability(plan.plan, "externalApi.streaming"))
+      !(await canUsePlanCapability(auth.plan, "externalApi.streaming"))
     ) {
       return openAIImageError(
         "External API streaming is not enabled for this plan.",
@@ -1158,6 +1156,7 @@ export const postExternalAgentImages = withApiLogging(
           {
             mode: "chat",
             userId: auth.userId,
+            resolvedUserPlan: auth.plan,
             generationId: randomUUID(),
             apiKeyId: auth.apiKeyId,
             relayOnly: auth.relayOnly,

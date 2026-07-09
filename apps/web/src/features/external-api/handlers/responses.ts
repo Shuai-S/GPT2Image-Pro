@@ -6,7 +6,6 @@ import {
   canUsePlanCapability,
   getPlanLimits,
 } from "@repo/shared/subscription/services/plan-capabilities";
-import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
@@ -798,8 +797,7 @@ export const postExternalResponses = withApiLogging(
       );
     }
 
-    const plan = await getUserPlan(auth.userId);
-    if (!(await canUsePlanCapability(plan.plan, "externalApi.responses"))) {
+    if (!(await canUsePlanCapability(auth.plan, "externalApi.responses"))) {
       return openAIImageError(
         "External Responses image generation requires Pro plan or higher.",
         403,
@@ -808,7 +806,7 @@ export const postExternalResponses = withApiLogging(
     }
     if (
       wantsImageStreamResponse(request, parsed.data.stream) &&
-      !(await canUsePlanCapability(plan.plan, "externalApi.streaming"))
+      !(await canUsePlanCapability(auth.plan, "externalApi.streaming"))
     ) {
       return openAIImageError(
         "External API streaming is not enabled for this plan.",
@@ -820,7 +818,7 @@ export const postExternalResponses = withApiLogging(
     if (
       !(await isExternalResponsesImageModelAllowed(
         parsed.data.model,
-        plan.plan
+        auth.plan
       ))
     ) {
       return openAIImageError(
@@ -883,10 +881,11 @@ export const postExternalResponses = withApiLogging(
       );
     }
 
-    const limits = await getPlanLimits(plan.plan);
+    const limits = await getPlanLimits(auth.plan);
     const input = {
       mode: "chat" as const,
       userId: auth.userId,
+      resolvedUserPlan: auth.plan,
       apiKeyId: auth.apiKeyId,
       relayOnly: auth.relayOnly,
       backendRequestKind: "responses" as const,
