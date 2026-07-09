@@ -1,0 +1,107 @@
+{
+  "Common": {
+    "getStarted": "开始使用",
+    "login": "登录",
+    "dashboard": "控制台",
+    "products": "功能",
+    "pricing": "定价",
+    "blog": "博客",
+    "docs": "文档",
+    "features": "功能",
+    "changelog": "更新日志",
+    "relativeTime": {
+      "justNow": "刚刚",
+      "minutesAgo": "{count} 分钟前",
+      "hoursAgo": "{count} 小时前",
+      "daysAgo": "{count} 天前",
+      "monthsAgo": "{count} 个月前",
+      "yearsAgo": "{count} 年前"
+    }
+  },
+  "Navigation": {
+    "menu": "导航",
+    "products": "创作",
+    "features": "功能",
+    "docs": "文档",
+    "pseo": "PSEO",
+    "pricing": "定价",
+    "blog": "博客",
+    "about": "关于",
+    "productsMenu": {
+      "core": {
+        "title": "生成能力",
+        "chatToImage": "对话生图",
+        "chatToImageDesc": "通过自然对话生成图片",
+        "gallery": "视觉画廊",
+        "galleryDesc": "浏览、整理并回看所有作品",
+        "batch": "批量生成",
+        "batchDesc": "一次请求产出多个变体"
+      },
+      "platform": {
+        "title": "平台",
+        "api": "GPT Image 2",
+        "apiDesc": "新一代图像模型，品质惊艳",
+        "multiModel": "多模型支持",
+        "multiModelDesc": "主流图像生成模型一站集成",
+        "credits": "积分系统",
+        "creditsDesc": "订阅按套餐周期有效，批次到期清晰可查"
+      }
+    }
+  },
+  "Header": {
+    "dashboard": "控制台",
+    "login": "登录",
+    "getStarted": "免费开始",
+    "docs": "文档"
+  },
+  "Cookie": {
+    "title": "Cookie 设置",
+    "description": "我们使用 Cookie 来确保您在我们网站上获得最佳体验。继续使用本网站即表示您同意我们的",
+    "privacyPolicy": "隐私政策",
+    "acceptAll": "接受全部",
+    "rejectAll": "仅必要",
+    "managePreferences": "管理偏好",
+    "back": "返回",
+    "preferencesTitle": "Cookie 偏好设置",
+    "dialog": {
+      "title": "管理 Cookie 偏好",
+      "heading": "您的隐私选择",
+      "description": "您可以在此面板中随时查看并修改 Cookie 偏好。若不希望我们使用可选类别，请关闭对应开关；若只接受必要 Cookie，也可以直接选择“仅必要”。",
+      "acceptCurrentSelection": "接受当前选择"
+    },
+    "card": {
+      "title": "Cookie 设置",
+      "description": "在这里管理您的 Cookie 设置。",
+      "savePreferences": "保存偏好"
+    },
+    "essential": {
+      "title": "必要 Cookie",
+      "description": "这些 Cookie 是网站正常运行所必需的，无法关闭。"
+    },
+    "functional": {
+      "title": "功能性 Cookie",
+      "description": "这些 Cookie 用于启用个性化功能与体验。"
+    },
+    "analytics": {
+      "title": "分析 Cookie",
+      "description": "帮助我们了解访问者如何与网站互动，以便改进用户体验。"
+    },
+    "performance": {
+      "title": "性能 Cookie",
+      "description": "这些 Cookie 帮助我们了解访问者如何与网站互动。"
+    },
+    "marketing": {
+      "title": "营销 Cookie",
+      "description": "用于向您展示相关广告和营销内容。"
+    },
+    "alwaysEnabled": "始终启用",
+    "saveSettings": "保存设置"
+  },
+  "Toggle": {
+    "theme": "切换主题",
+    "language": "切换语言",
+    "light": "浅色",
+    "dark": "深色",
+    "system": "跟随系统"
+  }
+}

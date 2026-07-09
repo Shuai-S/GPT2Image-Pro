@@ -16,7 +16,10 @@ import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { LanguageSwitcher } from "@/components/language-switcher";
-import { useCurrentSession } from "@/features/auth/hooks/use-current-session";
+import {
+  type CurrentSession,
+  useCurrentSession,
+} from "@/features/auth/hooks/use-current-session";
 import { Link } from "@/i18n/routing";
 
 import { NavMenu } from "./nav-menu";
@@ -24,6 +27,12 @@ import { NavMenu } from "./nav-menu";
 interface HeaderProps {
   branding: BrandingConfig;
   operationFlags: OperationFeatureFlags;
+  /**
+   * 由 marketing 布局预取下发的初始会话。
+   * 传入后首屏不再发 POST /api/session/current，避免导航闪烁。
+   * 不传时回退到客户端自行 fetch（兼容旧调用方）。
+   */
+  initialSession?: CurrentSession;
 }
 
 const desktopOnlyFlexClassName = "max-md:hidden md:flex";
@@ -39,9 +48,13 @@ const desktopOnlyBlockClassName = "max-md:hidden md:block";
  *
  * 布局: [Logo + Nav 靠左] -------- [Actions 靠右]
  */
-export function Header({ branding, operationFlags }: HeaderProps) {
-  // 获取当前用户会话状态
-  const { data: session, isPending } = useCurrentSession();
+export function Header({
+  branding,
+  operationFlags,
+  initialSession,
+}: HeaderProps) {
+  // 获取当前用户会话状态；marketing 布局已预取时直接复用，避免再次 fetch。
+  const { data: session, isPending } = useCurrentSession(initialSession);
   const user = session?.user;
   const t = useTranslations("Header");
   const tNav = useTranslations("Navigation");

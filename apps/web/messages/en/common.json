@@ -1,0 +1,107 @@
+{
+  "Common": {
+    "getStarted": "Get Started",
+    "login": "Log in",
+    "dashboard": "Dashboard",
+    "products": "Create",
+    "pricing": "Pricing",
+    "blog": "Blog",
+    "docs": "Documentation",
+    "features": "Features",
+    "changelog": "Changelog",
+    "relativeTime": {
+      "justNow": "Just now",
+      "minutesAgo": "{count, plural, one {# minute ago} other {# minutes ago}}",
+      "hoursAgo": "{count, plural, one {# hour ago} other {# hours ago}}",
+      "daysAgo": "{count, plural, one {# day ago} other {# days ago}}",
+      "monthsAgo": "{count, plural, one {# month ago} other {# months ago}}",
+      "yearsAgo": "{count, plural, one {# year ago} other {# years ago}}"
+    }
+  },
+  "Navigation": {
+    "menu": "Navigation",
+    "products": "Features",
+    "features": "Features",
+    "docs": "Docs",
+    "pseo": "PSEO",
+    "pricing": "Pricing",
+    "blog": "Blog",
+    "about": "About",
+    "productsMenu": {
+      "core": {
+        "title": "Generation",
+        "chatToImage": "Chat-to-Image",
+        "chatToImageDesc": "Generate images through natural conversation",
+        "gallery": "Visual Gallery",
+        "galleryDesc": "Browse, organize, and revisit your creations",
+        "batch": "Batch Generation",
+        "batchDesc": "Produce multiple variations in one request"
+      },
+      "platform": {
+        "title": "Platform",
+        "api": "GPT Image 2",
+        "apiDesc": "Next-generation image model with stunning quality",
+        "multiModel": "Multi-model Support",
+        "multiModelDesc": "Leading image generation models in one place",
+        "credits": "Credits System",
+        "creditsDesc": "Plan-period subscription credits with clear batch expiries"
+      }
+    }
+  },
+  "Header": {
+    "dashboard": "Dashboard",
+    "login": "Login",
+    "getStarted": "Get Started",
+    "docs": "Docs"
+  },
+  "Cookie": {
+    "title": "Cookie Settings",
+    "description": "We use cookies to ensure you get the best experience on our website. By continuing to use this site, you agree to our",
+    "privacyPolicy": "Privacy Policy",
+    "acceptAll": "Accept all",
+    "rejectAll": "Essential only",
+    "managePreferences": "Manage preferences",
+    "back": "Back",
+    "preferencesTitle": "Cookie Preferences",
+    "dialog": {
+      "title": "Manage cookie preferences",
+      "heading": "Your Privacy Choices",
+      "description": "In this panel you can review and change your cookie preferences at any time. Turn optional categories off if you do not want us to use them, or choose essential only to keep strictly necessary cookies enabled.",
+      "acceptCurrentSelection": "Accept current selection"
+    },
+    "card": {
+      "title": "Cookie Settings",
+      "description": "Manage your cookie settings here.",
+      "savePreferences": "Save preferences"
+    },
+    "essential": {
+      "title": "Essential Cookies",
+      "description": "These cookies are necessary for the website to function and cannot be disabled."
+    },
+    "functional": {
+      "title": "Functional Cookies",
+      "description": "These cookies enable personalized features and functionality."
+    },
+    "analytics": {
+      "title": "Analytics Cookies",
+      "description": "Help us understand how visitors interact with our website to improve user experience."
+    },
+    "performance": {
+      "title": "Performance Cookies",
+      "description": "These cookies help us understand how visitors interact with the website."
+    },
+    "marketing": {
+      "title": "Marketing Cookies",
+      "description": "Used to show you relevant ads and marketing content."
+    },
+    "alwaysEnabled": "Always enabled",
+    "saveSettings": "Save settings"
+  },
+  "Toggle": {
+    "theme": "Toggle Theme",
+    "language": "Toggle Language",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
+  }
+}

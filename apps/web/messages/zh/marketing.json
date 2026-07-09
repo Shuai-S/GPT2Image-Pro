@@ -1,0 +1,338 @@
+{
+  "HomePage": {
+    "title": "NexaRelay IMAGE",
+    "subtitle": "AI 对话生图平台",
+    "description": "通过自然对话将你的想法转化为精美视觉，由最先进的 AI 模型驱动。"
+  },
+  "Hero": {
+    "badge": "AI 图像生成",
+    "title1": "将文字",
+    "titleHighlight": "变为艺术",
+    "subtitle": "通过自然对话生成精美图片。由最先进的 AI 模型驱动。",
+    "getStarted": "开始创作",
+    "seeDemo": "查看示例",
+    "trustLine": "深受全球创作者喜爱",
+    "stats": {
+      "cards": "已生成图片",
+      "users": "活跃用户",
+      "rating": "满意度"
+    }
+  },
+  "Features": {
+    "label": "核心功能",
+    "title": "创作所需，一应俱全",
+    "subtitle": "从对话生图到批量生成，搭载最先进 AI 模型，完整工具链助你把想象变为现实。",
+    "items": {
+      "ai": {
+        "title": "对话生图",
+        "description": "用自然语言描述你的想法，AI 即刻呈现。无需复杂的提示词工程，对话即可创作。"
+      },
+      "multiSource": {
+        "title": "视觉画廊",
+        "description": "整理、浏览并回顾你创作的每一张图片。强大的筛选、标签与合集，让所有作品尽在指尖。"
+      },
+      "outline": {
+        "title": "批量生成",
+        "description": "一次请求生成多个变体，适合探索概念、迭代设计或规模化生产内容。"
+      },
+      "export": {
+        "title": "前沿模型",
+        "description": "搭载最新 AI 模型，包括 GPT Image 2。获得令人惊叹的逼真图像、艺术渲染与创意构图，品质顶尖。"
+      },
+      "batch": {
+        "title": "积分管理",
+        "description": "订阅积分按套餐周期有效，其他积分按发放批次有效期计算。跟踪使用情况、监控消耗，随需充值。"
+      },
+      "multilingual": {
+        "title": "深色模式",
+        "description": "为长时间创作精心打造的深色主题。在浅色与深色之间轻松切换，匹配你的心境。"
+      }
+    }
+  },
+  "HowItWorks": {
+    "label": "使用流程",
+    "title": "从想法到图片，四步搞定",
+    "subtitle": "无需设计经验，也无需提示词技巧，几分钟即可开始创作。",
+    "steps": {
+      "upload": {
+        "title": "注册账号",
+        "description": "几秒钟即可免费注册，无需信用卡。注册后立即获得积分，开始你的创作之旅。"
+      },
+      "generate": {
+        "title": "描述你的构想",
+        "description": "开启对话，描述你想要的画面——一个场景、一位角色、一种氛围。持续迭代，直到它触动你的灵感。"
+      },
+      "export": {
+        "title": "AI 生成作品",
+        "description": "AI 解读你的提示词，数秒内产出高质量图像。生成多个变体，探索每一种创作方向。"
+      }
+    },
+    "completion": {
+      "title": "下载并分享",
+      "description": "将作品高清下载或直接分享。所有图片都保留在画廊中，随时可回看。"
+    }
+  },
+  "UseCases": {
+    "label": "适用场景",
+    "title": "为每一位创作者而生",
+    "subtitle": "{brandName} 契合设计师、营销人员、开发者与内容创作者的日常工作流。",
+    "items": {
+      "designers": {
+        "title": "设计师与艺术家",
+        "subtitle": "视觉创意",
+        "description": "勾勒概念、探索风格、生成参考图，加速你的创作流程。",
+        "examples": [
+          "情绪板",
+          "概念设计",
+          "风格探索"
+        ]
+      },
+      "marketers": {
+        "title": "营销人员",
+        "subtitle": "规模化内容",
+        "description": "为营销活动、社交媒体与博客头图生产符合品牌调性的视觉素材，无需等待素材库或设计排期。",
+        "examples": [
+          "社交图像",
+          "广告创意",
+          "博客配图"
+        ]
+      },
+      "creators": {
+        "title": "创作者与讲故事的人",
+        "subtitle": "视觉叙事",
+        "description": "为故事绘制插图、构建世界观、呈现角色形象。把想法变成能吸引读者的画面。",
+        "examples": [
+          "故事插画",
+          "角色设定",
+          "世界构建"
+        ]
+      },
+      "developers": {
+        "title": "开发者",
+        "subtitle": "自动化工作流",
+        "description": "将图像生成能力集成到你的应用和工作流中。打造原生集成 AI 视觉的产品功能。",
+        "examples": [
+          "应用集成",
+          "自动化流程",
+          "自定义工具"
+        ]
+      }
+    }
+  },
+  "Testimonials": {
+    "label": "用户评价",
+    "title": "听听创作者们怎么说",
+    "subtitle": "全球的设计师、营销人员与开发者每天都在使用 {brandName}。",
+    "items": [
+      {
+        "content": "对话式界面让图像生成变得毫不费力。我可以用日常语言描述脑海中的画面，反复迭代到满意为止。",
+        "author": "林小雨",
+        "role": "产品设计师"
+      },
+      {
+        "content": "批量生成每周为我节省了大量时间。我可以轻松产出十几张主视觉变体用于 A/B 测试。",
+        "author": "张明远",
+        "role": "营销负责人"
+      },
+      {
+        "content": "注册之后几分钟就生成了第一批图片。界面非常直观，只需描述你想要的画面，AI 就能完美呈现。",
+        "author": "陈思琪",
+        "role": "全栈工程师"
+      },
+      {
+        "content": "画廊是我保持高效的关键。我生成过的每一张图都可搜索、可打标签，一键即可复用。",
+        "author": "王浩然",
+        "role": "内容创作者"
+      },
+      {
+        "content": "积分余额和到期提醒都很清楚。我可以按创作节奏使用积分，也能及时安排补充。",
+        "author": "李雨桐",
+        "role": "插画师"
+      },
+      {
+        "content": "{brandName} 替代了我工作流中的三款工具。对话生图、批量生成与精美画廊，都集中在一个平台。",
+        "author": "赵一鸣",
+        "role": "创意总监"
+      }
+    ]
+  },
+  "FAQ": {
+    "label": "常见问题",
+    "title": "你可能想了解的",
+    "subtitle": "关于 {brandName} 的常见问题与解答。",
+    "items": [
+      {
+        "question": "{brandName} 是什么？",
+        "answer": "{brandName} 是一个由 AI 驱动的图像生成平台，通过自然对话即可产出高质量图片。你只需描述想要的画面，AI 便会生成——无需提示词工程。平台内置对话生图、视觉画廊、批量生成与灵活的积分系统等功能。"
+      },
+      {
+        "question": "支持哪些 AI 图像模型？",
+        "answer": "{brandName} 支持市面上主流的图像生成模型，包括 GPT Image 2。只需注册账号、选择套餐即可开始生成——平台自动将请求路由到对应模型，并在统一界面中呈现结果。"
+      },
+      {
+        "question": "积分系统如何工作？",
+        "answer": "每次图像生成会按输出像素量和审核次数消耗积分。订阅积分按对应套餐周期有效，其他积分以用量页显示的批次到期时间为准；你可以在用量页查看余额与即将到期的批次。"
+      },
+      {
+        "question": "如何开始使用？",
+        "answer": "只需免费注册一个账号，无需信用卡。注册后即可获得初始积分，立即体验图像生成。当你准备好进阶使用时，可以选择适合自己的订阅套餐。"
+      },
+      {
+        "question": "批量生成会额外收费吗？",
+        "answer": "批量生成按每张图片消耗积分，与单张生成的计费方式一致。它是一个便捷功能，让你在一次请求中产出多个变体，非常适合概念探索或设计迭代。"
+      },
+      {
+        "question": "生成的图片可以下载并用于商业用途吗？",
+        "answer": "可以。你在 {brandName} 上生成的图片归你所有，可用于个人、编辑或商业项目。支持高分辨率下载，所有历史生成记录都保存在画廊中。"
+      }
+    ]
+  },
+  "CTA": {
+    "badge": "免费开始，无需信用卡",
+    "title": "今天就开始创作精美图片",
+    "subtitle": "几秒钟即可注册，并获得免费积分体验 {brandName}。用 AI 图像生成把你的想法变为现实。",
+    "getStarted": "免费注册",
+    "seeDemo": "查看示例"
+  },
+  "Pricing": {
+    "title": "简单透明的定价",
+    "subtitle": "按积分付费，订阅积分按套餐周期有效，其他积分以用量页显示的批次到期时间为准。",
+    "creditsUpfront": "一次性到账",
+    "creditsPerYear": "积分 / 年",
+    "monthly": "月付",
+    "yearly": "年付",
+    "save": "省",
+    "mostPopular": "性价比最高",
+    "currentPlan": "当前套餐",
+    "alreadySubscribed": "已订阅",
+    "upgradePlan": "补差升级",
+    "manageSubscription": "管理订阅",
+    "booksNote": "≈ {count} 张 4K 文生图（含文本审核）",
+    "cardsNote": "≈ {count} 次图片生成",
+    "uploadLimitFeature": "上传上限：单图 {file}，总上传 {total}",
+    "billingRules": {
+      "title": "积分计价规则"
+    },
+    "plans": {
+      "free": {
+        "name": "免费版",
+        "description": "体验基础图片生成",
+        "cta": "免费开始",
+        "creditsAmount": "100",
+        "creditsLabel": "积分",
+        "creditsNote": "一次性",
+        "features": {
+          "creditsValidity": "积分按发放批次有效期有效",
+          "credits": "100 积分（一次性）",
+          "input": "文生图与图生图",
+          "characters": "标准图像分辨率",
+          "batch": "每批最多 4 张图",
+          "fileSize": "上传上限：单图 5MB，总上传 75MB",
+          "queue": "单用户最多 2 并发",
+          "export": "下载与分享",
+          "history": "画廊历史永久保存"
+        }
+      },
+      "starter": {
+        "name": "入门版",
+        "description": "开放外接 API Key 和自接 API",
+        "cta": "订阅",
+        "creditsAmount": "5,000",
+        "creditsLabel": "积分 / 月",
+        "booksCount": "498",
+        "features": {
+          "creditsValidity": "订阅积分按套餐周期有效",
+          "credits": "每月 5,000 积分",
+          "input": "文生图与图生图",
+          "characters": "标准图像分辨率",
+          "batch": "每批最多 4 张图",
+          "fileSize": "上传上限：单图 20MB，总上传 75MB",
+          "queue": "单用户最多 5 并发",
+          "externalApi": "外接 API Key 调用",
+          "customApi": "自接 OpenAI 兼容 API",
+          "export": "下载与分享",
+          "history": "画廊历史永久保存",
+          "support": "邮件支持"
+        }
+      },
+      "pro": {
+        "name": "专业版",
+        "description": "增加对话生图和 Responses 生图 API",
+        "cta": "订阅",
+        "creditsAmount": "20,000",
+        "creditsLabel": "积分 / 月",
+        "booksCount": "1,992",
+        "features": {
+          "creditsValidity": "订阅积分按套餐周期有效",
+          "credits": "每月 20,000 积分",
+          "input": "文生图与图生图",
+          "characters": "高分辨率输出",
+          "batch": "每批最多 4 张图",
+          "fileSize": "上传上限：单图 50MB，总上传 75MB",
+          "chat": "对话生图功能",
+          "promptOptimization": "可尽量减少提示词改动",
+          "queue": "优先队列，单用户最多 15 并发",
+          "export": "下载与分享",
+          "history": "画廊历史永久保存",
+          "externalApi": "外接 API Key 调用",
+          "customApi": "自接 OpenAI 兼容 API",
+          "support": "优先支持"
+        }
+      },
+      "ultra": {
+        "name": "旗舰版",
+        "description": "适合高频创作，包含 GPT-5.5、最高优先级和更稳妥的审核成本",
+        "cta": "订阅",
+        "creditsAmount": "80,000",
+        "creditsLabel": "积分 / 月",
+        "booksCount": "7,968",
+        "features": {
+          "creditsValidity": "订阅积分按套餐周期有效",
+          "credits": "每月 80,000 积分",
+          "input": "文生图与图生图",
+          "characters": "最高分辨率输出",
+          "batch": "每批最多 4 张图",
+          "fileSize": "上传上限：单图 100MB，总上传 100MB",
+          "chatGpt55": "对话生图支持 GPT-5.5",
+          "moderationSettlement": "审核失败只扣审核积分",
+          "moderationLowControl": "可选择放开 low 级审核拦截",
+          "promptOptimization": "可尽量减少提示词改动",
+          "queue": "最高优先队列，单用户最多 50 并发",
+          "export": "下载与分享",
+          "history": "画廊历史永久保存",
+          "externalApi": "外接 API Key 调用",
+          "customApi": "自接 OpenAI 兼容 API",
+          "support": "专属支持"
+        }
+      },
+      "enterprise": {
+        "name": "企业版",
+        "description": "包含旗舰版能力，并开放企业资源包持续扩容",
+        "cta": "订阅",
+        "creditsAmount": "320,000",
+        "creditsLabel": "积分 / 月",
+        "booksCount": "31,872",
+        "features": {
+          "creditsValidity": "订阅积分按套餐周期有效",
+          "credits": "每月 320,000 积分",
+          "input": "文生图与图生图",
+          "batch": "每批最多 4 张图",
+          "fileSize": "上传上限：单图 200MB，总上传 200MB",
+          "chatGpt55": "对话生图支持 GPT-5.5",
+          "moderationSettlement": "审核失败只扣审核积分",
+          "moderationMediumControl": "可选择放开 low 和 medium 级审核拦截",
+          "promptOptimization": "可尽量减少提示词改动",
+          "queue": "最高优先队列，单用户最多 100 并发",
+          "enterpriseResourcePack": "企业资源包：每份 5,000 积分，约 3 分 / 张 4K",
+          "enterpriseResourcePackUnlimited": "企业资源包可按数量不限量购买",
+          "export": "下载与分享",
+          "history": "画廊历史永久保存",
+          "externalApi": "外接 API Key 调用",
+          "customApi": "自接 OpenAI 兼容 API",
+          "support": "专属支持"
+        }
+      }
+    }
+  },
+  "Solutions": {}
+}

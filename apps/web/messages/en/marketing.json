@@ -1,0 +1,338 @@
+{
+  "HomePage": {
+    "title": "NexaRelay IMAGE",
+    "subtitle": "AI-Powered Chat-to-Image Generation Platform",
+    "description": "Transform your ideas into stunning visuals through natural conversation, powered by state-of-the-art AI models."
+  },
+  "Hero": {
+    "badge": "AI Image Generation",
+    "title1": "Transform Words",
+    "titleHighlight": "into Stunning Art",
+    "subtitle": "Generate beautiful images through natural conversation. Powered by state-of-the-art AI models.",
+    "getStarted": "Start Creating",
+    "seeDemo": "See Examples",
+    "trustLine": "Trusted by creators worldwide",
+    "stats": {
+      "cards": "Images Generated",
+      "users": "Active Users",
+      "rating": "Satisfaction Rate"
+    }
+  },
+  "Features": {
+    "label": "Core Features",
+    "title": "Everything You Need to Create",
+    "subtitle": "A complete toolkit for turning imagination into reality — from conversational prompts to batch generation, powered by cutting-edge AI.",
+    "items": {
+      "ai": {
+        "title": "Chat-to-Image",
+        "description": "Describe your vision in natural language and watch AI bring it to life. No complex prompt engineering required — just conversation."
+      },
+      "multiSource": {
+        "title": "Visual Gallery",
+        "description": "Organize, browse, and revisit every image you've created. Powerful filters, tags, and collections keep your work at your fingertips."
+      },
+      "outline": {
+        "title": "Batch Generation",
+        "description": "Generate multiple variations in a single request. Perfect for exploring concepts, iterating on designs, or producing content at scale."
+      },
+      "export": {
+        "title": "Cutting-Edge Models",
+        "description": "Powered by the latest AI models including GPT Image 2. Get stunning photorealistic images, artistic renders, and creative compositions with state-of-the-art quality."
+      },
+      "batch": {
+        "title": "Credits System",
+        "description": "Subscription credits are valid for the plan period, and other credits follow their issued batch expiry. Track usage, monitor consumption, and top up whenever you need."
+      },
+      "multilingual": {
+        "title": "Dark Mode",
+        "description": "A polished dark theme designed for long creative sessions. Switch effortlessly between light and dark to match your mood."
+      }
+    }
+  },
+  "HowItWorks": {
+    "label": "How It Works",
+    "title": "From Idea to Image in Four Steps",
+    "subtitle": "Start generating in minutes — no design skills, no prompt expertise required.",
+    "steps": {
+      "upload": {
+        "title": "Sign Up",
+        "description": "Create your free account in seconds. No credit card required — just sign up and you're ready to start generating."
+      },
+      "generate": {
+        "title": "Describe Your Vision",
+        "description": "Start a conversation and describe the image you want — a scene, a character, a mood. Refine iteratively until it feels right."
+      },
+      "export": {
+        "title": "AI Generates",
+        "description": "Our AI interprets your prompt and produces high-quality images in seconds. Generate variations to explore every creative direction."
+      }
+    },
+    "completion": {
+      "title": "Download & Share",
+      "description": "Save your favorites in high resolution or share them directly. Every image stays in your gallery for future reference."
+    }
+  },
+  "UseCases": {
+    "label": "Use Cases",
+    "title": "Made for Every Creator",
+    "subtitle": "{brandName} fits the workflows of designers, marketers, developers, and storytellers alike.",
+    "items": {
+      "designers": {
+        "title": "Designers & Artists",
+        "subtitle": "Visual Ideation",
+        "description": "Sketch concepts, explore styles, and generate reference images to accelerate your creative process.",
+        "examples": [
+          "Mood boards",
+          "Concept art",
+          "Style exploration"
+        ]
+      },
+      "marketers": {
+        "title": "Marketers",
+        "subtitle": "Content at Scale",
+        "description": "Produce on-brand visuals for campaigns, social posts, and blog headers without waiting on stock photos or design queues.",
+        "examples": [
+          "Social graphics",
+          "Ad creative",
+          "Blog images"
+        ]
+      },
+      "creators": {
+        "title": "Creators & Storytellers",
+        "subtitle": "Visual Narratives",
+        "description": "Illustrate stories, build worlds, and visualize characters. Turn ideas into imagery that draws your audience in.",
+        "examples": [
+          "Story illustrations",
+          "Character art",
+          "World-building"
+        ]
+      },
+      "developers": {
+        "title": "Developers",
+        "subtitle": "Automated Workflows",
+        "description": "Integrate image generation into your applications and workflows. Build product features that leverage AI visuals natively.",
+        "examples": [
+          "App integrations",
+          "Automated pipelines",
+          "Custom tools"
+        ]
+      }
+    }
+  },
+  "Testimonials": {
+    "label": "Testimonials",
+    "title": "What Creators Say",
+    "subtitle": "Designers, marketers, and developers around the world are using {brandName} every day.",
+    "items": [
+      {
+        "content": "The chat interface makes image generation feel effortless. I can describe what I'm imagining in plain language and iterate until it's perfect.",
+        "author": "Sarah Lin",
+        "role": "Product Designer"
+      },
+      {
+        "content": "Batch generation saves me hours every week. I can produce a dozen hero image variations for A/B testing without breaking a sweat.",
+        "author": "Michael Zhang",
+        "role": "Marketing Lead"
+      },
+      {
+        "content": "I signed up and had my first batch of images within minutes. The interface is incredibly intuitive — just describe what you want and the AI nails it.",
+        "author": "Emily Chen",
+        "role": "Full-Stack Developer"
+      },
+      {
+        "content": "The gallery is how I stay organized. Every image I've ever generated is searchable, taggable, and a click away from being reused.",
+        "author": "David Wang",
+        "role": "Content Creator"
+      },
+      {
+        "content": "The balance and expiry reminders are clear. I can use credits at my own creative pace and top up before a batch expires.",
+        "author": "Lisa Li",
+        "role": "Illustrator"
+      },
+      {
+        "content": "{brandName} replaced three other tools in my workflow. Chat-based prompting, batch runs, and a stunning gallery — it's everything in one place.",
+        "author": "Kevin Zhao",
+        "role": "Creative Director"
+      }
+    ]
+  },
+  "FAQ": {
+    "label": "FAQ",
+    "title": "Questions You Might Have",
+    "subtitle": "Common questions about {brandName} and how it works.",
+    "items": [
+      {
+        "question": "What is {brandName}?",
+        "answer": "{brandName} is an AI-powered platform that turns natural-language conversations into high-quality images. Describe what you want, and our AI generates it — no prompt engineering required. Features include chat-to-image generation, a visual gallery, batch generation, and a flexible credits system."
+      },
+      {
+        "question": "Which AI image models are supported?",
+        "answer": "{brandName} supports the leading image generation models on the market, including GPT Image 2. Just sign up, choose a plan, and start generating — the platform handles model routing and delivers results in a unified interface."
+      },
+      {
+        "question": "How does the credits system work?",
+        "answer": "Every image generation consumes credits based on output pixels and moderation checks. Subscription credits are valid for the matching plan period, while other credits follow the batch expiry shown on the usage page."
+      },
+      {
+        "question": "How do I get started?",
+        "answer": "Just sign up for a free account — no credit card required. You'll receive starter credits to try out image generation immediately. When you're ready for more, choose a subscription plan that fits your needs."
+      },
+      {
+        "question": "Does batch generation cost more?",
+        "answer": "Batch generation consumes credits per image generated, the same as single generation. It's a convenience feature that lets you produce multiple variations in one request — perfect for exploring concepts or iterating on designs quickly."
+      },
+      {
+        "question": "Can I download and use the images commercially?",
+        "answer": "Yes. Images you generate on {brandName} are yours to use — for personal, editorial, or commercial projects. Downloads are available in high resolution, and your full generation history stays in your gallery."
+      }
+    ]
+  },
+  "CTA": {
+    "badge": "Start free, no credit card required",
+    "title": "Start generating stunning images today",
+    "subtitle": "Sign up in seconds and get free credits to try {brandName}. Bring your ideas to life with AI-powered image generation.",
+    "getStarted": "Get Started Free",
+    "seeDemo": "See Examples"
+  },
+  "Pricing": {
+    "title": "Simple, transparent pricing",
+    "subtitle": "Pay by credits. Subscription credits are valid for the plan period, and other credits follow the batch expiry shown on the usage page.",
+    "creditsUpfront": "all at once",
+    "creditsPerYear": "credits / year",
+    "monthly": "Monthly",
+    "yearly": "Yearly",
+    "save": "Save",
+    "mostPopular": "Best Value",
+    "currentPlan": "Current Plan",
+    "alreadySubscribed": "Already Subscribed",
+    "upgradePlan": "Upgrade",
+    "manageSubscription": "Manage Subscription",
+    "booksNote": "≈ {count} 4K text-to-image generations, including text moderation",
+    "cardsNote": "≈ {count} image generations",
+    "uploadLimitFeature": "Uploads: {file} per image, {total} total",
+    "billingRules": {
+      "title": "Credit billing rules"
+    },
+    "plans": {
+      "free": {
+        "name": "Free",
+        "description": "Try basic image generation",
+        "cta": "Get Started",
+        "creditsAmount": "100",
+        "creditsLabel": "credits",
+        "creditsNote": "one-time",
+        "features": {
+          "creditsValidity": "Credits follow their issued batch expiry",
+          "credits": "100 credits (one-time)",
+          "input": "Text-to-image and image editing",
+          "characters": "Standard image resolutions",
+          "batch": "Up to 4 images per batch",
+          "fileSize": "Uploads: 5MB per image, 75MB total",
+          "queue": "Up to 2 concurrent generations",
+          "export": "Download & share",
+          "history": "Gallery history saved forever"
+        }
+      },
+      "starter": {
+        "name": "Starter",
+        "description": "External API keys and custom API access",
+        "cta": "Subscribe",
+        "creditsAmount": "5,000",
+        "creditsLabel": "credits / month",
+        "booksCount": "498",
+        "features": {
+          "creditsValidity": "Credits valid for the plan period",
+          "credits": "5,000 credits / month",
+          "input": "Text-to-image and image editing",
+          "characters": "Standard image resolutions",
+          "batch": "Up to 4 images per batch",
+          "fileSize": "Uploads: 20MB per image, 75MB total",
+          "queue": "Up to 5 concurrent generations",
+          "externalApi": "External API key calls",
+          "customApi": "Custom OpenAI-compatible API",
+          "export": "Download & share",
+          "history": "Gallery history saved forever",
+          "support": "Email support"
+        }
+      },
+      "pro": {
+        "name": "Pro",
+        "description": "Adds chat-to-image and Responses image API",
+        "cta": "Subscribe",
+        "creditsAmount": "20,000",
+        "creditsLabel": "credits / month",
+        "booksCount": "1,992",
+        "features": {
+          "creditsValidity": "Credits valid for the plan period",
+          "credits": "20,000 credits / month",
+          "input": "Text-to-image and image editing",
+          "characters": "High-resolution outputs",
+          "batch": "Up to 4 images per batch",
+          "fileSize": "Uploads: 50MB per image, 75MB total",
+          "chat": "Chat-to-image mode",
+          "promptOptimization": "Can minimize prompt changes",
+          "queue": "Priority queue, up to 15 concurrent generations",
+          "export": "Download & share",
+          "history": "Gallery history saved forever",
+          "externalApi": "External API key calls",
+          "customApi": "Custom OpenAI-compatible API",
+          "support": "Priority support"
+        }
+      },
+      "ultra": {
+        "name": "Ultra",
+        "description": "For high-volume creation with GPT-5.5, top priority, and safer review costs",
+        "cta": "Subscribe",
+        "creditsAmount": "80,000",
+        "creditsLabel": "credits / month",
+        "booksCount": "7,968",
+        "features": {
+          "creditsValidity": "Credits valid for the plan period",
+          "credits": "80,000 credits / month",
+          "input": "Text-to-image and image editing",
+          "characters": "Maximum-resolution outputs",
+          "batch": "Up to 4 images per batch",
+          "fileSize": "Uploads: 100MB per image, 100MB total",
+          "chatGpt55": "Chat-to-image supports GPT-5.5",
+          "moderationSettlement": "Moderation failures only charge review credits",
+          "moderationLowControl": "Option to allow low-risk moderation results",
+          "promptOptimization": "Can minimize prompt changes",
+          "queue": "Highest priority queue, up to 50 concurrent generations",
+          "export": "Download & share",
+          "history": "Gallery history saved forever",
+          "externalApi": "External API key calls",
+          "customApi": "Custom OpenAI-compatible API",
+          "support": "Dedicated support"
+        }
+      },
+      "enterprise": {
+        "name": "Enterprise",
+        "description": "Ultra capabilities plus enterprise resource packs for sustained volume",
+        "cta": "Subscribe",
+        "creditsAmount": "320,000",
+        "creditsLabel": "credits / month",
+        "booksCount": "31,872",
+        "features": {
+          "creditsValidity": "Credits valid for the plan period",
+          "credits": "320,000 credits / month",
+          "input": "Text-to-image and image editing",
+          "batch": "Up to 4 images per batch",
+          "fileSize": "Uploads: 200MB per image, 200MB total",
+          "chatGpt55": "Chat-to-image supports GPT-5.5",
+          "moderationSettlement": "Moderation failures only charge review credits",
+          "moderationMediumControl": "Option to allow low and medium-risk moderation results",
+          "promptOptimization": "Can minimize prompt changes",
+          "queue": "Highest priority queue, up to 100 concurrent generations",
+          "enterpriseResourcePack": "Enterprise resource packs: 5,000 credits per pack, about ¥0.03 per 4K image",
+          "enterpriseResourcePackUnlimited": "Unlimited enterprise resource pack purchases by quantity",
+          "export": "Download & share",
+          "history": "Gallery history saved forever",
+          "externalApi": "External API key calls",
+          "customApi": "Custom OpenAI-compatible API",
+          "support": "Dedicated support"
+        }
+      }
+    }
+  },
+  "Solutions": {}
+}

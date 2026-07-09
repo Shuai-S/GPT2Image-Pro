@@ -1,0 +1,436 @@
+{
+  "Dashboard": {
+    "nav": {
+      "dashboard": "Dashboard",
+      "create": "Create",
+      "createTextToImage": "Text to Image",
+      "createImageToImage": "Image to Image",
+      "createChat": "Chat",
+      "createChatWeb": "Chat Web",
+      "createAgent": "Agent",
+      "createWaterfall": "Waterfall",
+      "createVideo": "Video",
+      "infiniteCanvas": "Infinite Canvas",
+      "gallery": "Gallery",
+      "history": "Usage Records",
+      "backendHelp": "System Docs",
+      "externalApi": "External API",
+      "billing": "Billing & Usage",
+      "referral": "Referral",
+      "announcements": "Announcements",
+      "settings": "Settings",
+      "userManagement": "User Management",
+      "announcementManagement": "Announcement Management",
+      "referralManagement": "Referral Management",
+      "paymentManagement": "Payment Orders",
+      "systemSettings": "System Settings",
+      "globalStatus": "Global Status",
+      "imageBackendPool": "Image Backend Pool",
+      "support": "Support",
+      "newTicket": "New Ticket"
+    },
+    "pages": {
+      "dashboard": "Dashboard",
+      "create": "Create",
+      "infiniteCanvas": "Infinite Canvas",
+      "generate": "Generate",
+      "gallery": "Gallery",
+      "history": "Usage Records",
+      "tasks": "Tasks",
+      "myDecks": "My Decks",
+      "deckDetails": "Deck Details",
+      "support": "Support",
+      "announcements": "Announcements",
+      "newTicket": "New Ticket",
+      "settings": "Settings",
+      "externalApi": "External API",
+      "backendHelp": "System Docs",
+      "userManagement": "User Management",
+      "announcementManagement": "Announcement Management",
+      "referralManagement": "Referral Management",
+      "systemSettings": "System Settings",
+      "globalStatus": "Global Status",
+      "imageBackendPool": "Image Backend Pool",
+      "creditsBuy": "Buy Credits",
+      "profile": "Profile",
+      "security": "Security",
+      "billing": "Billing & Usage",
+      "referral": "Referral",
+      "notifications": "Notifications",
+      "ticketDetails": "Ticket Details",
+      "advanced": "Advanced"
+    },
+    "sidebar": {
+      "settings": "Settings",
+      "logout": "Logout"
+    }
+  },
+  "DashboardPages": {
+    "dashboard": {
+      "title": "Dashboard",
+      "subtitle": "Welcome back! Here's an overview of your account.",
+      "stats": {
+        "credits": {
+          "title": "Credits",
+          "description": "Available balance"
+        }
+      },
+      "actions": {
+        "credits": "View Credits",
+        "settings": "Account Settings",
+        "support": "Get Support"
+      }
+    }
+  },
+  "ImageGeneration": {},
+  "Gallery": {},
+  "AnonymousGenerate": {},
+  "CreditTransactions": {
+    "anonymous_migration": "Migrated {cardCount} images from anonymous session",
+    "anonymous_migration_bonus": "New user bonus: Saved {cardCount} images for free"
+  },
+  "Support": {
+    "title": "Support Center",
+    "subtitle": "View and manage your support tickets",
+    "adminSubtitle": "View and handle support tickets from all users",
+    "newTicket": "New Ticket",
+    "noTickets": "No Tickets",
+    "noTicketsDescription": "You haven't submitted any support tickets yet",
+    "createFirst": "Create Your First Ticket",
+    "unknownUser": "Unknown User",
+    "categories": {
+      "billing": "Billing",
+      "technical": "Technical Support",
+      "bug": "Bug Report",
+      "feature": "Feature Request",
+      "other": "Other"
+    },
+    "priorities": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High"
+    },
+    "statuses": {
+      "open": "Open",
+      "in_progress": "In Progress",
+      "resolved": "Resolved",
+      "closed": "Closed"
+    }
+  },
+  "Subscription": {
+    "plans": {
+      "free": "Free",
+      "starter": "Starter",
+      "pro": "Pro",
+      "ultra": "Ultra",
+      "enterprise": "Enterprise"
+    }
+  },
+  "Settings": {
+    "tabs": {
+      "account": "Account",
+      "security": "Security",
+      "billing": "Billing & Usage",
+      "usage": "Usage",
+      "externalApi": "External API",
+      "backend": "Backend",
+      "profile": "Profile",
+      "advanced": "Advanced"
+    },
+    "backend": {
+      "title": "Image backend",
+      "description": "Choose the default system backend account-pool group for web generation. This does not affect external API calls; external API keys choose their own group in the API key list, and unbound keys use the platform default group."
+    },
+    "advanced": {
+      "title": "Advanced Settings",
+      "description": "Configuration options for power users."
+    },
+    "moderation": {
+      "title": "Moderation block level",
+      "description": "This setting applies only to web (creation page) generation and only takes effect when moderation blocking is enabled; requests made with an external API key use that key's own level.",
+      "upgradeHint": "Ultra can allow low-risk results. Enterprise can also allow medium-risk results.",
+      "disabledByPlan": "Moderation blocking is not enabled for your current plan, so this setting has no effect.",
+      "options": {
+        "low": {
+          "label": "Block low and above",
+          "description": "Strictest: low, medium, and high are blocked."
+        },
+        "medium": {
+          "label": "Allow low",
+          "description": "Blocks medium and high only. Available on Ultra."
+        },
+        "high": {
+          "label": "Block high only",
+          "description": "Allows low and medium. Available on Enterprise."
+        }
+      }
+    },
+    "externalApi": {
+      "title": "External API access",
+      "description": "Create {brandName} OpenAI-compatible API keys for other sites or applications. Image generation and image edits require Starter or higher; Responses requires Pro or higher. External calls use your account credits and appear in your generation history.",
+      "requiresStarter": "Your current plan cannot create or use external API keys. Upgrade to Starter or higher.",
+      "responsesRequiresPro": "POST /v1/responses requires Pro plan or higher.",
+      "baseUrl": "Base URL: {url}",
+      "defaultName": "Default API key",
+      "newKeyLabel": "New API key. It is shown only once.",
+      "namePlaceholder": "API key name",
+      "create": "Create API Key",
+      "refresh": "Refresh API keys",
+      "loading": "Loading API keys",
+      "empty": "No external API keys yet.",
+      "active": "Active",
+      "revoked": "Revoked",
+      "lastUsed": "Last used",
+      "never": "Never",
+      "revoke": "Revoke",
+      "delete": "Delete",
+      "confirmDelete": "Delete this revoked API key? This cannot be undone.",
+      "quota": {
+        "label": "Credit limit",
+        "description": "Each API key can have its own total credit limit. Leave it empty for unlimited; account credits are still consumed.",
+        "createPlaceholder": "Limit, optional",
+        "placeholder": "Empty = unlimited",
+        "used": "Used",
+        "remaining": "Remaining",
+        "unlimited": "Unlimited",
+        "save": "Save"
+      },
+      "moderation": {
+        "label": "Moderation level",
+        "hint": "The moderation level only takes effect when moderation blocking is enabled; it has no effect when moderation is off.",
+        "disabledByPlan": "Moderation blocking is not enabled for your current plan, so API key moderation levels have no effect.",
+        "options": {
+          "low": "Block low and above",
+          "medium": "Allow low",
+          "high": "Block high only"
+        }
+      },
+      "backendGroup": {
+        "label": "Backend group",
+        "default": "Platform default group"
+      },
+      "success": {
+        "created": "API key created",
+        "copied": "API key copied",
+        "revoked": "API key revoked",
+        "deleted": "API key deleted",
+        "updated": "Settings updated",
+        "quotaUpdated": "API key quota updated"
+      },
+      "errors": {
+        "load": "Failed to load API keys",
+        "create": "Failed to create API key",
+        "revoke": "Failed to revoke API key",
+        "delete": "Failed to delete API key",
+        "update": "Failed to update settings",
+        "quota": "Failed to update API key quota",
+        "quotaInvalid": "Enter a credit limit greater than or equal to 0, or leave it empty for unlimited"
+      }
+    },
+    "apiConfig": {
+      "warning": {
+        "title": "Advanced Configuration",
+        "description": "Configure your own OpenAI-compatible API endpoint. When active, image generation will use your API key instead of platform credits."
+      },
+      "customEndpoint": "Custom API Endpoint",
+      "enabled": "Use Custom API",
+      "enabledDescription": "When enabled, bypasses platform credits",
+      "baseUrl": "API Base URL",
+      "apiKey": "API Key",
+      "model": "Model (optional)",
+      "modelHint": "Leave blank to use the default model",
+      "useStream": "Stream responses",
+      "useStreamDescription": "Send stream=true and accept New API image event streams.",
+      "save": "Save Configuration",
+      "remove": "Remove",
+      "docsLink": "API Documentation",
+      "paidOnly": "Custom API configuration is available on Starter and higher plans.",
+      "saveFailed": "Failed to save",
+      "saved": "API configuration saved",
+      "removed": "API configuration removed",
+      "updateFailed": "Failed to update",
+      "requiresPaid": "Custom API requires Starter plan or higher",
+      "test": "Test image",
+      "testing": "Testing…",
+      "testNeedsInput": "Enter the API base URL and key first",
+      "testOk": "Health check passed: image returned ({latency}ms)",
+      "testNoImage": "Connected but no image returned (model may not support image generation)",
+      "testAuthFailed": "API key rejected",
+      "testError": "Image generation failed",
+      "testUnreachable": "Endpoint unreachable or timed out"
+    },
+    "general": {
+      "title": "General",
+      "description": "Update your personal information and account settings.",
+      "save": "Save",
+      "name": "Name",
+      "namePlaceholder": "Enter your name",
+      "nameDescription": "Name is required and must be at least 2 characters.",
+      "email": "Email",
+      "emailDescription": "To change your email, please contact support."
+    },
+    "avatar": {
+      "title": "Avatar",
+      "description": "Upload a profile picture to personalize your account.",
+      "uploading": "Uploading...",
+      "supportedFormats": "Supports JPG, PNG, GIF, WebP, max {size}MB"
+    },
+    "language": {
+      "title": "Language Settings",
+      "description": "Select your preferred language for the interface.",
+      "placeholder": "Select language"
+    },
+    "deleteAccount": {
+      "title": "Delete Account",
+      "description": "Permanently delete your account and all associated data. This action cannot be undone.",
+      "button": "Delete Account",
+      "warning": "This action is irreversible. Please proceed with caution.",
+      "confirmTitle": "Delete this account?",
+      "confirmDescription": "Your account and all associated data will be permanently deleted. This action cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Yes, delete account",
+      "error": "Failed to delete account. Please try again later."
+    },
+    "security": {
+      "changePassword": {
+        "title": "Change Password",
+        "description": "Update your password to keep your account secure.",
+        "currentPassword": "Current Password",
+        "currentPasswordPlaceholder": "Enter current password",
+        "newPassword": "New Password",
+        "newPasswordPlaceholder": "Enter new password",
+        "confirmPassword": "Confirm New Password",
+        "confirmPasswordPlaceholder": "Confirm new password",
+        "submit": "Update Password",
+        "updating": "Updating..."
+      },
+      "errors": {
+        "missingFields": "Please fill in all password fields.",
+        "passwordTooShort": "New password must be at least 8 characters.",
+        "passwordMismatch": "New passwords do not match.",
+        "samePassword": "New password must be different from current password.",
+        "wrongPassword": "Current password is incorrect."
+      },
+      "success": "Password updated successfully."
+    },
+    "errors": {
+      "unsupportedFileType": "Unsupported file type. Supported: {types}",
+      "fileTooLarge": "File too large. Maximum size: {size}MB",
+      "uploadFailed": "Failed to get upload URL",
+      "fileUploadFailed": "File upload failed",
+      "avatarUploadError": "Avatar upload failed",
+      "validationFailed": "Validation failed"
+    },
+    "success": {
+      "avatarUpdated": "Avatar updated successfully"
+    },
+    "billing": {
+      "pageTitle": "Billing & Usage",
+      "description": "Manage subscriptions, billing history, and credit usage here.",
+      "tabs": {
+        "billing": "Billing",
+        "usage": "Usage"
+      },
+      "currentPlan": {
+        "title": "Current Plan",
+        "description": "Manage your subscription and billing cycle.",
+        "freePlan": "Free Plan",
+        "current": "Current",
+        "basicFeatures": "Basic features with limited credits",
+        "premiumFeatures": "API, chat, and model benefits follow your current plan",
+        "upgradePlan": "Upgrade Plan",
+        "managePlan": "Manage Plan",
+        "monthlyCredits": "Monthly Credits",
+        "renewalDate": "Renewal Date",
+        "notApplicable": "N/A",
+        "price": "Price",
+        "perMonth": "month",
+        "perYear": "year",
+        "cancelSubscription": "Cancel Subscription",
+        "cancelPending": "Cancels on {date}",
+        "cancelDialog": {
+          "title": "Cancel Subscription?",
+          "description": "Your subscription will remain active until the end of your current billing period ({date}). After that, your plan will revert to Free.",
+          "keepBenefits": "You'll keep all your current plan benefits until {date}",
+          "confirm": "Yes, Cancel Subscription",
+          "cancel": "Keep Subscription"
+        }
+      },
+      "paymentMethods": {
+        "title": "Payment Methods",
+        "description": "Add or manage your payment methods for subscriptions and purchases.",
+        "addMethod": "Add Payment Method",
+        "noMethods": "No payment methods added",
+        "noMethodsHint": "Add a payment method to upgrade your plan or purchase credits"
+      },
+      "history": {
+        "title": "Billing History",
+        "description": "View and download your past invoices.",
+        "date": "Date",
+        "historyDescription": "Description",
+        "amount": "Amount",
+        "status": "Status",
+        "invoice": "Invoice",
+        "loading": "Loading...",
+        "paid": "Paid",
+        "noHistory": "No billing history",
+        "noHistoryHint": "Your invoices will appear here after your first purchase"
+      }
+    },
+    "usage": {
+      "title": "Credit Usage",
+      "description": "Credits used for image generation.",
+      "availableCredits": "Available Credits",
+      "creditsAvailable": "credits available",
+      "getMoreCredits": {
+        "title": "Get More Credits",
+        "description": "Buy one-time pay-as-you-go credits, or subscribe for monthly credits and advanced features",
+        "buyCredits": "Pay as you go",
+        "viewPlans": "View Subscription Plans"
+      },
+      "sources": {
+        "bonus": "Free Credits",
+        "purchase": "Pay as you go",
+        "subscription": "Plan Credits",
+        "refund": "Refund Credits"
+      },
+      "expiringSoon": {
+        "title": "Credits Expiring Soon",
+        "message": "{count} credits will expire on {date}"
+      },
+      "transactions": {
+        "title": "Transaction History",
+        "description": "View all your credit transactions including grants and consumption",
+        "date": "Date",
+        "type": "Type",
+        "transactionDescription": "Description",
+        "transactionAmount": "Amount",
+        "noTransactions": "No transactions yet",
+        "noTransactionsHint": "Your credit transactions will appear here",
+        "loading": "Loading...",
+        "showing": "Showing {from} to {to} of {total} transactions",
+        "rowsPerPage": "Rows per page",
+        "pageOf": "Page {page} of {total}",
+        "types": {
+          "registration_bonus": "Registration Bonus",
+          "admin_grant": "Admin Grant",
+          "monthly_grant": "Monthly Grant",
+          "purchase": "Purchase",
+          "consumption": "Usage",
+          "expiration": "Expired",
+          "refund": "Refund"
+        },
+        "descriptions": {
+          "registration_bonus": "New user registration bonus",
+          "monthly_grant": "{plan} monthly subscription credits",
+          "yearly_grant": "{plan} yearly subscription credits ({monthly} x 12)",
+          "purchase": "Pay-as-you-go credit purchase",
+          "consumption": "Image generation",
+          "expiration": "Credits expired",
+          "admin_grant": "Admin granted credits",
+          "refund": "Credits refund"
+        }
+      }
+    }
+  }
+}

@@ -8,7 +8,7 @@ import {
   NavigationMenuList,
 } from "@repo/ui/components/navigation-menu";
 import { cn } from "@repo/ui/utils";
-import { motion } from "framer-motion";
+import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
@@ -18,8 +18,28 @@ import { Link } from "@/i18n/routing";
  * 营销页桌面导航菜单。
  *
  * 使用方: Header 顶部导航。关键依赖: next-intl 文案、共享导航配置、
- * Framer Motion 悬浮动画，以及 @repo/ui 的 NavigationMenu 基础结构。
+ * Framer Motion 悬浮动画（懒加载），以及 @repo/ui 的 NavigationMenu 基础结构。
  */
+
+/**
+ * B-P1-2：framer-motion 仅用于导航项悬浮 pill 动画，不属于首屏 critical chunk。
+ * 通过 next/dynamic(ssr:false) 懒加载 motion.span，使 framer-motion 拆到独立
+ * chunk，营销首屏不再加载。未加载完成时渲染 null（pill 不可见，视觉无影响）。
+ */
+type MotionSpanProps = {
+  layoutId?: string;
+  className?: string;
+  transition?: Record<string, unknown>;
+  children?: React.ReactNode;
+};
+
+const MotionSpan = dynamic<MotionSpanProps>(
+  () => import("framer-motion").then((mod) => mod.motion.span),
+  {
+    ssr: false,
+    loading: () => null,
+  }
+);
 
 /**
  * 营销主导航属性。
@@ -92,7 +112,7 @@ export function NavMenu({ mainNavItems }: NavMenuProps) {
               className="relative inline-flex h-9 items-center justify-center px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
               {hoveredItem === "products" && (
-                <motion.span
+                <MotionSpan
                   layoutId="nav-pill"
                   className="absolute inset-0 -z-10 rounded-md bg-muted"
                   transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
@@ -121,7 +141,7 @@ export function NavMenu({ mainNavItems }: NavMenuProps) {
                   )}
                 >
                   {hoveredItem === item.href && (
-                    <motion.span
+                    <MotionSpan
                       layoutId="nav-pill"
                       className="absolute inset-0 -z-10 rounded-md bg-muted"
                       transition={{
@@ -132,7 +152,7 @@ export function NavMenu({ mainNavItems }: NavMenuProps) {
                     />
                   )}
                   {active && !hoveredItem && (
-                    <motion.span className="absolute inset-0 -z-10 rounded-md bg-muted/50" />
+                    <MotionSpan className="absolute inset-0 -z-10 rounded-md bg-muted/50" />
                   )}
                   {navTitleMap[item.title] || item.title}
                 </Link>
