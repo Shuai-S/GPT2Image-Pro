@@ -3,13 +3,13 @@ import { siteConfig } from "@repo/shared/config";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { NextIntlClientProvider } from "next-intl";
-import { getMessages } from "next-intl/server";
 import { Toaster } from "sonner";
 import { Analytics } from "@/features/analytics";
 // 深路径直引(不经 marketing barrel):barrel 同时 re-export Header/PricingSection,
 // 它们 import framer-motion(~62KB gzip)。经 barrel 引入会把 framer 引擎拖进每个
 // 非营销路由(dashboard/auth 共 21 个)的首屏。直引 cookie-consent 即可避免。
 import { CookieConsent } from "@/features/marketing/components/cookie-consent";
+import { loadMessageGroup } from "@/i18n/message-loader";
 import { routing } from "@/i18n/routing";
 
 /**
@@ -67,8 +67,10 @@ export default async function LocaleLayout({
     notFound();
   }
 
-  // 获取翻译消息
-  const messages = await getMessages();
+  // 只在根布局向客户端注入跨路由都要用到的公共消息：语言切换、Cookie 设置、
+  // 站点头部基础文案等。营销/Auth/Dashboard/Docs 分组分别在各自 layout 增量注入，
+  // 避免每次页面切换都把整份 messages 目录序列化到 RSC payload。
+  const messages = await loadMessageGroup(locale, "common");
 
   return (
     <NextIntlClientProvider messages={messages}>

@@ -8,6 +8,7 @@ import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import {
   Download,
   ImagePlus,
+  Loader2,
   MousePointerClick,
   Trash2,
   X,
@@ -25,12 +26,14 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
+import { getGalleryPageAction } from "@/features/image-generation/gallery-actions";
 import { batchDeleteGenerationAction } from "@/features/image-generation/actions";
-import { ImageCard } from "@/features/image-generation/components/image-card";
 import type {
-  LightboxGeneration,
-  LightboxReferenceImage,
-} from "@/features/image-generation/components/image-lightbox";
+  GalleryGenerationItem,
+  GalleryTab,
+} from "@/features/image-generation/gallery-data";
+import { ImageCard } from "@/features/image-generation/components/image-card";
+import type { LightboxGeneration } from "@/features/image-generation/components/image-lightbox";
 import { prefetchLocalImageCache } from "@/features/shared/components/local-image-cache";
 import { generateDownloadFilename } from "@/lib/download-filename";
 
@@ -43,36 +46,15 @@ const ImageLightbox = dynamic(
   { ssr: false }
 );
 
-export interface GenerationWithUrl {
-  id: string;
-  parentId?: string;
-  prompt: string;
-  revisedPrompt: string | null;
-  promptRepairNotice?: string | null;
-  model: string;
-  size: string;
-  creditsConsumed: number;
-  status: "pending" | "completed" | "failed";
-  createdAt: string;
-  storageKey: string | null;
-  storageBucket: string | null;
-  imageUrl: string | null;
-  // 视频项(视频 tab)：产物 mp4 的签名 URL;imageUrl 为空,渲染 <video> 而非 <img>。
-  videoUrl?: string | null;
-  outputRole?: "final" | "agent_draft" | "upload" | "video";
-  referenceImages?: LightboxReferenceImage[];
-  isLayered?: boolean;
-}
-
 export interface GalleryClientProps {
-  initialGenerations: GenerationWithUrl[];
+  initialGenerations: GalleryGenerationItem[];
   totalCount: number;
   finalCount: number;
   draftCount: number;
   uploadCount: number;
   videoCount: number;
-  activeTab: "final" | "agent-drafts" | "uploads" | "videos";
-  page: number;
+  activeTab: GalleryTab;
+  nextCursor: string | null;
 }
 
 export function GalleryClient({
@@ -83,7 +65,7 @@ export function GalleryClient({
   uploadCount,
   videoCount,
   activeTab,
-  page,
+  nextCursor: initialNextCursor,
 }: GalleryClientProps) {
   const locale = useLocale();
   const isZh = locale === "zh";
@@ -91,8 +73,13 @@ export function GalleryClient({
     (en: string, zh: string) => (isZh ? zh : en),
     [isZh]
   );
-  const [items, setItems] = useState<GenerationWithUrl[]>(initialGenerations);
+  const [items, setItems] =
+    useState<GalleryGenerationItem[]>(initialGenerations);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(
+    initialNextCursor
+  );
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   // -- 虚拟化:响应式列数。WHY 画廊是 CSS grid 多列(grid-cols-2 md:3 lg:4),
   // 直接虚拟化每个格子会与多列 grid 难以对齐;改为"虚拟行"(每行 N 个卡片,
@@ -123,7 +110,7 @@ export function GalleryClient({
   const [batchDeleting, setBatchDeleting] = useState(false);
 
   const selected = items.find((i) => i.id === selectedId) ?? null;
-  const hasMore = items.length < totalCount;
+  const hasMore = Boolean(nextCursor) && items.length < totalCount;
 
   // -- 多选模式:退出时清空选中集 --
   const exitSelectMode = useCallback(() => {
@@ -241,9 +228,13 @@ export function GalleryClient({
   }, [items, selectedIds.size]);
 
   const createHref = `/${locale}/dashboard/create`;
-  const galleryHref = (tab: GalleryClientProps["activeTab"], nextPage = 1) =>
-    `/${locale}/dashboard/gallery?tab=${tab}&page=${nextPage}`;
-  const nextPageHref = galleryHref(activeTab, page + 1);
+  const galleryHref = (tab: GalleryTab, cursor?: string | null) => {
+    const params = new URLSearchParams({ tab });
+    if (cursor) {
+      params.set("cursor", cursor);
+    }
+    return `/${locale}/dashboard/gallery?${params.toString()}`;
+  };
   const countBadgeClass = (active: boolean) =>
     [
       "ml-2 rounded-full px-1.5 py-0 text-[10px] font-normal",
@@ -255,6 +246,29 @@ export function GalleryClient({
   const handleDelete = (id: string) => {
     setItems((prev) => prev.filter((x) => x.id !== id));
   };
+
+  const handleLoadMore = useCallback(async () => {
+    if (!nextCursor || isLoadingMore) return;
+    setIsLoadingMore(true);
+    try {
+      const result = await getGalleryPageAction({
+        cursor: nextCursor,
+        tab: activeTab,
+        locale,
+      });
+      const page = result?.data;
+      if (!page) {
+        toast.error(copy("Failed to load more", "加载更多失败"));
+        return;
+      }
+      setItems((prev) => [...prev, ...page.items]);
+      setNextCursor(page.nextCursor);
+    } catch {
+      toast.error(copy("Failed to load more", "加载更多失败"));
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [activeTab, copy, isLoadingMore, locale, nextCursor]);
 
   const tabs = (
     <div className="flex items-center gap-3">
@@ -393,10 +407,15 @@ export function GalleryClient({
 
       {hasMore && (
         <div className="flex justify-center pt-4">
-          <Button asChild variant="outline">
-            <Link href={nextPageHref} scroll={false}>
-              {copy("Load more", "加载更多")}
-            </Link>
+          <Button
+            variant="outline"
+            onClick={handleLoadMore}
+            disabled={isLoadingMore}
+          >
+            {isLoadingMore ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            ) : null}
+            {copy("Load more", "加载更多")}
           </Button>
         </div>
       )}
@@ -472,7 +491,7 @@ const GalleryCard = memo(function GalleryCard({
   setSelectedId,
   copy,
 }: {
-  item: GenerationWithUrl;
+  item: GalleryGenerationItem;
   selectMode: boolean;
   selected: boolean;
   handleSelect: (id: string, event: MouseEvent) => void;
@@ -561,7 +580,7 @@ const GalleryVirtualGrid = function GalleryVirtualGrid({
   copy,
   gridRef,
 }: {
-  items: GenerationWithUrl[];
+  items: GalleryGenerationItem[];
   columns: number;
   selectMode: boolean;
   selectedIds: Set<string>;

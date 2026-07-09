@@ -1,7 +1,7 @@
 "use server";
 
 import { and, desc, eq, isNull, lt, lte, or, sql } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, unstable_cache, updateTag } from "next/cache";
 
 import { db } from "@repo/database";
 import {
@@ -31,6 +31,8 @@ export type AdminAnnouncementItem = {
   createdAt: string;
   updatedAt: string;
 };
+
+export const ANNOUNCEMENT_ADMIN_LIST_CACHE_TAG = "admin-announcements";
 
 const withAnnouncementAction = (name: string) =>
   protectedAction.metadata({ action: `announcements.${name}` });
@@ -233,6 +235,21 @@ export const markAnnouncementReadAction = withAnnouncementAction("markRead")
     return { message: "已标记为已读" };
   });
 
+const listAnnouncementsForAdminCached = unstable_cache(
+  async () => {
+    const rows = await db
+      .select()
+      .from(announcement)
+      .orderBy(desc(announcement.isPinned), desc(announcement.updatedAt));
+    return rows.map(serializeAdminAnnouncement);
+  },
+  ["announcements-admin-list"],
+  {
+    revalidate: 120,
+    tags: [ANNOUNCEMENT_ADMIN_LIST_CACHE_TAG],
+  }
+);
+
 export async function listAnnouncementsForAdmin() {
   return db
     .select()
@@ -242,8 +259,8 @@ export async function listAnnouncementsForAdmin() {
 
 export const getAdminAnnouncementsAction = withAdminAnnouncementAction("list")
   .action(async () => {
-    const rows = await listAnnouncementsForAdmin();
-    return { announcements: rows.map(serializeAdminAnnouncement) };
+    const announcements = await listAnnouncementsForAdminCached();
+    return { announcements };
   });
 
 export const createAnnouncementAction = withAdminAnnouncementAction("create")
@@ -278,6 +295,7 @@ export const createAnnouncementAction = withAdminAnnouncementAction("create")
 
     revalidatePath("/dashboard/announcements");
     revalidatePath("/dashboard/admin/announcements");
+    updateTag(ANNOUNCEMENT_ADMIN_LIST_CACHE_TAG);
     return { message: "公告已创建", id: row.id };
   });
 
@@ -326,6 +344,7 @@ export const updateAnnouncementAction = withAdminAnnouncementAction("update")
 
     revalidatePath("/dashboard/announcements");
     revalidatePath("/dashboard/admin/announcements");
+    updateTag(ANNOUNCEMENT_ADMIN_LIST_CACHE_TAG);
     return { message: "公告已更新" };
   });
 
@@ -351,6 +370,7 @@ export const deleteAnnouncementAction = withAdminAnnouncementAction("delete")
 
     revalidatePath("/dashboard/announcements");
     revalidatePath("/dashboard/admin/announcements");
+    updateTag(ANNOUNCEMENT_ADMIN_LIST_CACHE_TAG);
     return { message: "公告已删除" };
   });
 
@@ -391,5 +411,6 @@ export const toggleAnnouncementPublishAction = withAdminAnnouncementAction(
 
     revalidatePath("/dashboard/announcements");
     revalidatePath("/dashboard/admin/announcements");
+    updateTag(ANNOUNCEMENT_ADMIN_LIST_CACHE_TAG);
     return { message: nextPublished ? "公告已发布" : "公告已下线" };
   });

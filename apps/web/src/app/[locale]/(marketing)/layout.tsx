@@ -5,25 +5,34 @@
 import { getServerSession } from "@repo/shared/auth/server";
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
 import { getRuntimeOperationFeatureFlags } from "@repo/shared/system-settings";
+import { NextIntlClientProvider } from "next-intl";
 import type { CurrentSession } from "@/features/auth/hooks/use-current-session";
 import { Footer, Header } from "@/features/marketing/components";
+import { loadMessageGroups } from "@/i18n/message-loader";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export default async function MarketingLayout({
   children,
+  params,
 }: {
   children: React.ReactNode;
+  params: Promise<{ locale: string }>;
 }) {
+  const { locale } = await params;
+
   // B-P0-2：营销页多为匿名访问，但即便 session 为 null 也显式预取并下发，
   // 避免 header 客户端 hook 因缺 initialData 再发一次 POST /api/session/current。
   // getServerSession 由 React cache() 包裹，同一 RSC 请求内复用结果。
-  const [serverSession, branding, operationFlags] = await Promise.all([
-    getServerSession(),
-    getRuntimeBrandingConfig(),
-    getRuntimeOperationFeatureFlags(),
-  ]);
+  const [serverSession, branding, operationFlags, messages] = await Promise.all(
+    [
+      getServerSession(),
+      getRuntimeBrandingConfig(),
+      getRuntimeOperationFeatureFlags(),
+      loadMessageGroups(locale, ["common", "marketing"]),
+    ]
+  );
   const initialSession: CurrentSession = serverSession?.user?.id
     ? {
         user: {
@@ -36,14 +45,16 @@ export default async function MarketingLayout({
     : null;
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <Header
-        branding={branding}
-        operationFlags={operationFlags}
-        initialSession={initialSession}
-      />
-      <main className="flex-1">{children}</main>
-      <Footer branding={branding} />
-    </div>
+    <NextIntlClientProvider messages={messages}>
+      <div className="flex min-h-screen flex-col">
+        <Header
+          branding={branding}
+          operationFlags={operationFlags}
+          initialSession={initialSession}
+        />
+        <main className="flex-1">{children}</main>
+        <Footer branding={branding} />
+      </div>
+    </NextIntlClientProvider>
   );
 }
