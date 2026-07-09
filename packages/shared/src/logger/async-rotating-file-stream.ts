@@ -101,6 +101,15 @@ class RotatingFileStream implements AsyncRotatingFileStream {
   private readonly onError: LogStreamErrorHandler;
   private readonly queue: string[] = [];
   private readonly idleResolvers: Array<() => void> = [];
+  /**
+   * 在途 gzip 归档 Promise 集合。
+   *
+   * WHY: rotateCurrentFile 启动后台 gzip 后立即返回,但 flush() 的语义是"已写日志
+   * 全部落盘(含归档)".不登记则进程在轮转后很快退出会让后台 gzip 被中断,留下
+   * 截断损坏的 .gz;也会让 await flush() 的调用方在 gzip finish 之前读到半成品.
+   * flush/resolveIdle 等待此集合,保证优雅停机时归档完整.
+   */
+  private readonly pendingArchives: Array<Promise<void>> = [];
   private currentSize: number | null = null;
   private drainScheduled = false;
 
@@ -126,21 +135,24 @@ class RotatingFileStream implements AsyncRotatingFileStream {
     this.scheduleDrain();
   }
 
-  /**
-   * 等待当前队列写完
-   *
-   * @returns 当前已入队日志全部处理完成后的 Promise。
-   */
-  flush(): Promise<void> {
-    if (!this.drainScheduled && this.queue.length === 0) {
-      return Promise.resolve();
-    }
-
-    return new Promise((resolve) => {
-      this.idleResolvers.push(resolve);
-      this.scheduleDrain();
-    });
+/**
+ * 等待当前队列写完及其触发的全部归档完成
+ *
+ * WHY: flush 的契约是"已写日志全部安全落盘(含归档)".早退路径也不能跳过
+ * pendingArchives,否则轮转后的在途 gzip 在进程退出/紧接读取时被截断.
+ *
+ * @returns 当前已入队日志及其归档全部处理完成后的 Promise。
+ */
+flush(): Promise<void> {
+  if (!this.drainScheduled && this.queue.length === 0) {
+    return this.awaitPendingArchives();
   }
+
+  return new Promise((resolve) => {
+    this.idleResolvers.push(resolve);
+    this.scheduleDrain();
+  });
+}
 
   /**
    * 调度后台队列消费
@@ -154,15 +166,32 @@ class RotatingFileStream implements AsyncRotatingFileStream {
 
     this.drainScheduled = true;
     setImmediate(() => {
-      void this.drainQueue().finally(() => {
+      void this.drainQueue().finally(async () => {
         this.drainScheduled = false;
         if (this.queue.length > 0) {
           this.scheduleDrain();
           return;
         }
+        // 队列排空后等待所有在途 gzip 归档完成,再唤醒 flush/等停的调用方,
+        // 保证 await flush() 返回时归档已落盘、不会读到截断的 .gz。
+        await this.awaitPendingArchives();
         this.resolveIdle();
       });
     });
+  }
+
+  /**
+   * 等待所有在途归档完成
+   *
+   * WHY: pendingArchives 内的 Promise 自身已 catch onError 不 rejects,用
+   * allSettled 即可;直接 all 会在某个归档失败(已 onError 兜住)时让其余
+   * 归档被 race 抛弃等待.空集合时立即返回.
+   *
+   * @sideEffects 无;仅等待 Promise resolve.
+   */
+  private async awaitPendingArchives(): Promise<void> {
+    if (this.pendingArchives.length === 0) return;
+    await Promise.allSettled(this.pendingArchives);
   }
 
   /**
@@ -253,9 +282,32 @@ class RotatingFileStream implements AsyncRotatingFileStream {
 
     this.currentSize = 0;
     await appendFile(this.filePath, "");
-    void gzipAndRemovePlainLog(rotatedPath, `${rotatedPath}.gz`).catch(
-      this.onError
-    );
+    this.startArchive(rotatedPath, `${rotatedPath}.gz`);
+  }
+
+  /**
+   * 启动后台 gzip 归档并登记到 pendingArchives
+   *
+   * WHY: pipeline 在 finish 前会留下半成品 .gz.登记 Promise 让 flush() 等待其
+   * 完成,既保证优雅停机时归档完整,又让 await flush() 后读取归档文件不会读到
+   * 截断的 gzip 流.catch 里从集合移除自身,避免 leaked resolved Promise 累积.
+   *
+   * @param plainPath 待压缩的轮转日志文件。
+   * @param gzipPath 压缩目标路径。
+   * @sideEffects 后台读 plainPath 写 gzipPath 并删除原文件;失败调 onError.
+   */
+  private startArchive(plainPath: string, gzipPath: string): void {
+    const archive = (async () => {
+      try {
+        await gzipAndRemovePlainLog(plainPath, gzipPath);
+      } catch (error) {
+        this.onError(error);
+      } finally {
+        const index = this.pendingArchives.indexOf(archive);
+        if (index !== -1) this.pendingArchives.splice(index, 1);
+      }
+    })();
+    this.pendingArchives.push(archive);
   }
 
   /**
