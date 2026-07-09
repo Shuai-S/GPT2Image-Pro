@@ -99,6 +99,7 @@ import {
   repairModerationBlockedPromptWithResponses,
 } from "./service";
 import { isContentSafetyRejection } from "./sla-classification";
+import { invalidateSlaStatsCache } from "./sla";
 import { superResolve } from "./super-resolution";
 import {
   applyTransparentMatte,
@@ -2780,6 +2781,8 @@ async function runQueuedImageGenerationForUser({
             creditsConsumed: chargedCredits,
           })
           .where(isPendingGeneration(generationId));
+        // 生成失败后让首页 SLA 缓存即时失效(60s TTL 仍作兜底)。
+        invalidateSlaStatsCache();
         return {
           error: "Insufficient credits",
           generationId,
@@ -2820,6 +2823,8 @@ async function runQueuedImageGenerationForUser({
       })
       .where(isPendingGeneration(generationId));
 
+    // 生成完成后让首页 SLA 缓存即时失效(60s TTL 仍作兜底)。
+    invalidateSlaStatsCache();
     return {
       generationId,
       imageOutputs: result.imageOutputs,

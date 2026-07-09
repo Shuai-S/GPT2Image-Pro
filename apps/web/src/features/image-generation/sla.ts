@@ -3,7 +3,7 @@ import "server-only";
 import { db } from "@repo/database";
 import { generation } from "@repo/database/schema";
 import { desc, inArray } from "drizzle-orm";
-import { unstable_cache } from "next/cache";
+import { revalidateTag, unstable_cache } from "next/cache";
 
 export {
   classifyGenerationError,
@@ -107,3 +107,25 @@ export const getRecentGenerationSlaStats = unstable_cache(
   ["sla-recent-stats"],
   { revalidate: 60, tags: [SLA_STATS_CACHE_TAG] }
 );
+
+/**
+ * 失效首页 SLA 聚合缓存。
+ *
+ * WHY: 图像生成成功/失败后会写入 generation 行,首页 SLA 卡片依赖这些数据。
+ * 在生成完成后主动 revalidateTag 让首页在下次请求前刷新,避免最长 60s TTL
+ * 造成的滞后;散落在异常路径上的零散 generation 写入不接入,靠 60s TTL 兜底。
+ *
+ * 调用方包括 route handler 与 server action。revalidateTag 在两者上下文均可调,
+ * 但若在不允许的边缘上下文(如构建期)触发会抛错,故包一层 try/catch 降级,
+ * 仅记日志,绝不中断生成主流程——缓存新旧的代价远小于生成失败。
+ *
+ * @sideEffects 通过 revalidateTag 标记 SLA_STATS_CACHE_TAG 为待失效。
+ */
+export function invalidateSlaStatsCache() {
+  try {
+    revalidateTag(SLA_STATS_CACHE_TAG);
+  } catch (error) {
+    // 缓存失效失败不阻断主路径;60s TTL 仍会自然刷新。
+    console.warn("[sla] invalidateSlaStatsCache failed", error);
+  }
+}
