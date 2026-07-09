@@ -36,7 +36,6 @@ import {
   ChevronRight,
   CircleAlert,
   CircleOff,
-  FolderTree,
   Infinity as InfinityIcon,
   Loader2,
   Pencil,
@@ -128,6 +127,12 @@ const AdminApisTab = dynamic(
 );
 const AdminAdobeTab = dynamic(
   () => import("./admin-adobe-tab").then((m) => m.AdminAdobeTab),
+  { ssr: false, loading: () => null }
+);
+// groups 是非 readOnly 的默认 active Tab,首屏就会渲染;改 dynamic 后首帧会短暂
+// null 占位再加载 chunk,主 bundle 变小、chunk 与首屏并行加载,取舍可接受。
+const AdminGroupsTab = dynamic(
+  () => import("./admin-groups-tab").then((m) => m.AdminGroupsTab),
   { ssr: false, loading: () => null }
 );
 
@@ -265,9 +270,25 @@ export type AdobeAccountRow = {
   creditsError: string | null;
 };
 
-type ContentSafetyFormValue = "inherit" | "enabled" | "disabled";
+export type ContentSafetyFormValue = "inherit" | "enabled" | "disabled";
 type AccountBackendFormValue = "web" | "responses";
-type GroupBackendTypeFormValue = ImageBackendGroupBackendType;
+export type GroupBackendTypeFormValue = ImageBackendGroupBackendType;
+
+/** groups Tab 新增/编辑分组表单的受控状态；数值字段以 number 直接存。 */
+export type GroupFormState = {
+  id: string;
+  name: string;
+  description: string;
+  isEnabled: boolean;
+  isDefault: boolean;
+  isUserSelectable: boolean;
+  contentSafety: ContentSafetyFormValue;
+  backendType: GroupBackendTypeFormValue;
+  minPlan: SubscriptionPlan;
+  billingMultiplier: number;
+  childGroupIds: string[];
+  priority: number;
+};
 export type ApiProtocolFormValue = ImageBackendApiProtocol;
 export type ApiInterfaceModeFormValue = ImageBackendApiInterfaceMode;
 export type ChatCompletionsUpstreamModeFormValue =
@@ -446,7 +467,7 @@ type BulkAccountForm = {
   deleteSelected: boolean;
 };
 
-const PLAN_OPTIONS: Array<{ value: SubscriptionPlan; label: string }> = [
+export const PLAN_OPTIONS: Array<{ value: SubscriptionPlan; label: string }> = [
   { value: "free", label: "不限门槛" },
   { value: "starter", label: "入门版" },
   { value: "pro", label: "专业版" },
@@ -454,7 +475,7 @@ const PLAN_OPTIONS: Array<{ value: SubscriptionPlan; label: string }> = [
   { value: "enterprise", label: "企业版" },
 ];
 
-const GROUP_BACKEND_TYPE_OPTIONS: Array<{
+export const GROUP_BACKEND_TYPE_OPTIONS: Array<{
   value: GroupBackendTypeFormValue;
   label: string;
   detail: string;
@@ -667,24 +688,24 @@ export function formatModelList(models?: string[] | null) {
 }
 
 // 分组卡片空间有限，只展示前几个模型，其余用数量概括。
-function compactModelList(models: string[], maxVisible = 6) {
+export function compactModelList(models: string[], maxVisible = 6) {
   if (!models.length) return "不限";
   const visible = models.slice(0, maxVisible).join(", ");
   const hidden = models.length - maxVisible;
   return hidden > 0 ? `${visible} 等 ${models.length} 个` : visible;
 }
 
-function planLabel(plan: SubscriptionPlan) {
+export function planLabel(plan: SubscriptionPlan) {
   return PLAN_OPTIONS.find((option) => option.value === plan)?.label || plan;
 }
 
-function safetyLabel(value: boolean | null) {
+export function safetyLabel(value: boolean | null) {
   if (value === true) return "内容安全强制开启";
   if (value === false) return "内容安全强制关闭";
   return "内容安全继承成员";
 }
 
-function groupBackendTypeLabel(value: ImageBackendGroupBackendType) {
+export function groupBackendTypeLabel(value: ImageBackendGroupBackendType) {
   if (value === "web") return "仅 Web";
   if (value === "responses") return "仅 Codex";
   return "混合";
@@ -705,7 +726,7 @@ export function apiHealthStatusLabel(value: ImageApiHealthResult["status"]) {
   return "上游错误";
 }
 
-function childGroupNames(groups: Group[], childGroupIds: string[]) {
+export function childGroupNames(groups: Group[], childGroupIds: string[]) {
   if (!childGroupIds.length) return "无子分组";
   return childGroupIds
     .map(
@@ -940,7 +961,7 @@ export function ImageBackendPoolAdminPanel({
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [apis, setApis] = useState<Api[]>([]);
   const [adobes, setAdobes] = useState<Adobe[]>([]);
-  const [groupForm, setGroupForm] = useState({
+  const [groupForm, setGroupForm] = useState<GroupFormState>({
     id: "",
     name: "",
     description: "",
@@ -2608,371 +2629,19 @@ export function ImageBackendPoolAdminPanel({
             readOnly ? "lg:grid-cols-1" : "lg:grid-cols-[360px_1fr]"
           )}
         >
-          {!readOnly && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">
-                  {groupForm.id ? "编辑分组" : "新增分组"}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <Input
-                  placeholder="分组名称"
-                  value={groupForm.name}
-                  onChange={(event) =>
-                    setGroupForm((current) => ({
-                      ...current,
-                      name: event.target.value,
-                    }))
-                  }
-                />
-                <Textarea
-                  placeholder="说明"
-                  value={groupForm.description}
-                  onChange={(event) =>
-                    setGroupForm((current) => ({
-                      ...current,
-                      description: event.target.value,
-                    }))
-                  }
-                />
-                <div className="grid grid-cols-2 gap-3">
-                  <Label className="flex items-center gap-2 text-sm">
-                    <Checkbox
-                      checked={groupForm.isEnabled}
-                      onCheckedChange={(checked) =>
-                        setGroupForm((current) => ({
-                          ...current,
-                          isEnabled: Boolean(checked),
-                        }))
-                      }
-                    />
-                    启用
-                  </Label>
-                  <Label className="flex items-center gap-2 text-sm">
-                    <Checkbox
-                      checked={groupForm.isDefault}
-                      onCheckedChange={(checked) =>
-                        setGroupForm((current) => ({
-                          ...current,
-                          isDefault: Boolean(checked),
-                        }))
-                      }
-                    />
-                    默认
-                  </Label>
-                  <Label className="flex items-center gap-2 text-sm">
-                    <Checkbox
-                      checked={groupForm.isUserSelectable}
-                      onCheckedChange={(checked) =>
-                        setGroupForm((current) => ({
-                          ...current,
-                          isUserSelectable: Boolean(checked),
-                        }))
-                      }
-                    />
-                    用户可选
-                  </Label>
-                </div>
-                <div className="space-y-2">
-                  <Label>内容安全</Label>
-                  <Select
-                    value={groupForm.contentSafety}
-                    onValueChange={(value) =>
-                      setGroupForm((current) => ({
-                        ...current,
-                        contentSafety: value as ContentSafetyFormValue,
-                      }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="inherit">继承成员</SelectItem>
-                      <SelectItem value="enabled">强制开启</SelectItem>
-                      <SelectItem value="disabled">强制关闭</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>分组类型</Label>
-                  <Select
-                    value={groupForm.backendType}
-                    onValueChange={(value) =>
-                      setGroupForm((current) => ({
-                        ...current,
-                        backendType: value as GroupBackendTypeFormValue,
-                        childGroupIds:
-                          value === "mixed" ? current.childGroupIds : [],
-                      }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {GROUP_BACKEND_TYPE_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    {
-                      GROUP_BACKEND_TYPE_OPTIONS.find(
-                        (option) => option.value === groupForm.backendType
-                      )?.detail
-                    }
-                  </p>
-                </div>
-                <div
-                  className={cn(
-                    "space-y-2 rounded-md border p-3",
-                    groupForm.backendType !== "mixed" &&
-                      "bg-muted/30 text-muted-foreground"
-                  )}
-                >
-                  <div className="flex items-center gap-2">
-                    <FolderTree className="h-4 w-4 text-muted-foreground" />
-                    <Label>嵌套子分组</Label>
-                  </div>
-                  <p className="text-xs leading-relaxed text-muted-foreground">
-                    仅 mixed 分组可嵌套一层子分组，子分组必须是仅 Web 或仅
-                    Codex/Responses。调度时会先进入 mixed
-                    父组，再按请求类型筛选父组和子组内的可用成员。
-                  </p>
-                  {groupForm.backendType === "mixed" ? (
-                    childGroupOptions.length ? (
-                      <div className="grid max-h-52 gap-2 overflow-y-auto pr-1">
-                        {childGroupOptions.map((group) => (
-                          <Label
-                            key={group.id}
-                            className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm"
-                          >
-                            <span className="min-w-0">
-                              <span className="block truncate">
-                                {group.name}
-                              </span>
-                              <span className="text-xs text-muted-foreground">
-                                {groupBackendTypeLabel(group.backendType)} ·
-                                账号 {group.accountCount} · API {group.apiCount}
-                                · Adobe {group.adobeCount}
-                              </span>
-                            </span>
-                            <Checkbox
-                              checked={groupForm.childGroupIds.includes(
-                                group.id
-                              )}
-                              onCheckedChange={(checked) =>
-                                setGroupForm((current) => ({
-                                  ...current,
-                                  childGroupIds: checked
-                                    ? Array.from(
-                                        new Set([
-                                          ...current.childGroupIds,
-                                          group.id,
-                                        ])
-                                      )
-                                    : current.childGroupIds.filter(
-                                        (childGroupId) =>
-                                          childGroupId !== group.id
-                                      ),
-                                }))
-                              }
-                            />
-                          </Label>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-                        暂无可嵌套的非 mixed 分组。
-                      </div>
-                    )
-                  ) : (
-                    <div className="rounded-md border border-dashed p-3 text-xs">
-                      当前分组类型不能嵌套子分组。
-                    </div>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <Label>最低套餐</Label>
-                  <Select
-                    value={groupForm.minPlan}
-                    onValueChange={(value) =>
-                      setGroupForm((current) => ({
-                        ...current,
-                        minPlan: value as SubscriptionPlan,
-                      }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PLAN_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    用户套餐低于该档位时不可选择此后端分组，外接 API Key
-                    也不能绑定。
-                  </p>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>计费倍率</Label>
-                  <Input
-                    type="number"
-                    min={0.01}
-                    max={100}
-                    step={0.01}
-                    value={groupForm.billingMultiplier}
-                    onChange={(event) =>
-                      setGroupForm((current) => ({
-                        ...current,
-                        billingMultiplier: Number(event.target.value),
-                      }))
-                    }
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    该分组被用户选中或设为默认时，本站积分按此倍率结算；mixed
-                    父分组调度到子分组成员时，父分组倍率和实际命中的子分组倍率会相乘生效。
-                  </p>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>分组优先级</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={groupForm.priority}
-                    onChange={(event) =>
-                      setGroupForm((current) => ({
-                        ...current,
-                        priority: Number(event.target.value),
-                      }))
-                    }
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    数字越小，默认分组候选和分组列表越靠前；账号调度仍会继续比较账号优先级和负载。
-                  </p>
-                </div>
-                <Button
-                  className="w-full"
-                  onClick={() => saveGroup(groupForm)}
-                  disabled={isSavingGroup || !groupForm.name}
-                >
-                  {isSavingGroup && (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  )}
-                  保存分组
-                </Button>
-                {groupForm.id && (
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={resetGroupForm}
-                  >
-                    取消编辑
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          <div className="grid gap-3">
-            {groups.map((group) => (
-              <Card key={group.id}>
-                <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">{group.name}</span>
-                      {group.isDefault && <Badge>默认</Badge>}
-                      {!group.isEnabled && (
-                        <Badge variant="secondary">停用</Badge>
-                      )}
-                      {group.isUserSelectable && (
-                        <Badge variant="outline">用户可选</Badge>
-                      )}
-                      <Badge variant="outline">
-                        最低 {planLabel(group.minPlan)}
-                      </Badge>
-                      <Badge variant="outline">
-                        {groupBackendTypeLabel(group.backendType)}
-                      </Badge>
-                      {group.billingMultiplier !== 1 && (
-                        <Badge variant="secondary">
-                          计费 x{group.billingMultiplier}
-                        </Badge>
-                      )}
-                      {group.childGroupIds.length > 0 && (
-                        <Badge variant="secondary">
-                          子分组 {group.childGroupIds.length}
-                        </Badge>
-                      )}
-                      {group.availableModels.length > 0 && (
-                        <Badge variant="secondary">
-                          模型 {group.availableModels.length}
-                        </Badge>
-                      )}
-                      <Badge
-                        variant={
-                          group.contentSafetyEnabled === false
-                            ? "secondary"
-                            : "outline"
-                        }
-                      >
-                        {safetyLabel(group.contentSafetyEnabled)}
-                      </Badge>
-                    </div>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {group.description || "无说明"} · 优先级 {group.priority}{" "}
-                      · 计费倍率 x{group.billingMultiplier} · 账号{" "}
-                      {group.accountCount} · API {group.apiCount} · Adobe{" "}
-                      {group.adobeCount}
-                    </p>
-                    <p
-                      className="mt-1 text-xs text-muted-foreground"
-                      title={formatModelList(group.availableModels)}
-                    >
-                      可用模型：{compactModelList(group.availableModels)}
-                    </p>
-                    {group.childGroupIds.length > 0 && (
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        嵌套：{childGroupNames(groups, group.childGroupIds)}
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    {!readOnly && (
-                      <>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => editGroup(group)}
-                        >
-                          <Pencil className="mr-2 h-4 w-4" />
-                          编辑
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={isDeletingGroup}
-                          onClick={() => deleteGroup({ id: group.id })}
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          删除
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          <AdminGroupsTab
+          readOnly={readOnly}
+          groupForm={groupForm}
+          setGroupForm={setGroupForm}
+          groups={groups}
+          childGroupOptions={childGroupOptions}
+          resetGroupForm={resetGroupForm}
+          editGroup={editGroup}
+          saveGroup={saveGroup}
+          isSavingGroup={isSavingGroup}
+          deleteGroup={deleteGroup}
+          isDeletingGroup={isDeletingGroup}
+          />
         </TabsContent>
 
         <TabsContent
