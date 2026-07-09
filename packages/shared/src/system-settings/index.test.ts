@@ -13,12 +13,16 @@ import {
   importSystemSettingsFromEnv,
   isOperationFeatureEnabled,
   setSystemSettings,
+  SYSTEM_SETTINGS_CACHE_TAG,
 } from "./index";
 
 // DB-free 单测：用内存 store 模拟 systemSetting 表，覆盖 setSystemSettings
 // 的写入主入口、coerceValue 校验门、importSystemSettingsFromEnv 的 overwrite
 // 语义、getAdminSystemSettingsSnapshot 的密钥脱敏，以及运行时取值器的
 // stored↔env 回退路径。所有逻辑不触达真实 @repo/database。
+//
+// next/cache mock：unstable_cache 直通(立即执行回调返回结果，cache 层透明)，
+// updateTag 记录调用，可断言 mutation 是否触发了 tag 失效。
 
 type StoredSetting = {
   key: string;
@@ -135,11 +139,24 @@ vi.mock("drizzle-orm", () => ({
   })),
 }));
 
+// next/cache mock：unstable_cache 直通执行回调（单测里不去验证缓存命中/未命中分层，
+// 只验证读路径语义正确）；updateTag 记录调用以便断言 mutation 是否触发失效。
+const updateTagSpy = vi.hoisted(() => vi.fn());
+vi.mock("next/cache", () => ({
+  unstable_cache: <TArgs extends unknown[], TResult>(
+    fn: (...args: TArgs) => Promise<TResult>
+  ) => async (...args: TArgs): Promise<TResult> => fn(...args),
+  updateTag: updateTagSpy,
+}));
+
 describe("setSystemSettings", () => {
   beforeEach(() => {
     store.clear();
     deletedKeys.value = [];
     clearSystemSettingsCache();
+    // 在 clearSystemSettingsCache 之后清空 spy，使 beforeEach 触发的
+    // updateTag 不计入后续 mutation 断言。
+    updateTagSpy.mockClear();
   });
 
   afterEach(() => {
@@ -463,6 +480,24 @@ describe("setSystemSettings", () => {
       setSystemSettings([{ key: "CONTACT_EMAIL", value: "not-email" }], "admin")
     ).rejects.toThrow(/必须是有效邮箱地址/);
   });
+
+  it("invalidates system-settings cache via updateTag after write (C-P0-3)", async () => {
+    await setSystemSettings([{ key: "APP_TIME_ZONE", value: "UTC" }], "admin");
+
+    expect(updateTagSpy).toHaveBeenCalledWith(SYSTEM_SETTINGS_CACHE_TAG);
+    expect(updateTagSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("invalidates cache via updateTag even when clearing a setting", async () => {
+    store.set("APP_TIME_ZONE", { key: "APP_TIME_ZONE", value: "UTC" });
+
+    await setSystemSettings(
+      [{ key: "APP_TIME_ZONE", value: "", clear: true }],
+      "admin"
+    );
+
+    expect(updateTagSpy).toHaveBeenCalledWith(SYSTEM_SETTINGS_CACHE_TAG);
+  });
 });
 
 describe("importSystemSettingsFromEnv", () => {
@@ -470,6 +505,7 @@ describe("importSystemSettingsFromEnv", () => {
     store.clear();
     deletedKeys.value = [];
     clearSystemSettingsCache();
+    updateTagSpy.mockClear();
   });
 
   afterEach(() => {
@@ -509,6 +545,14 @@ describe("importSystemSettingsFromEnv", () => {
     expect(store.get("BETTER_AUTH_SECRET")?.value).toBe("env-secret");
     expect(store.get("BETTER_AUTH_SECRET")?.isSecret).toBe(true);
   });
+
+  it("invalidates system-settings cache via updateTag after env import", async () => {
+    process.env.APP_TIME_ZONE = "UTC";
+
+    await importSystemSettingsFromEnv({ overwrite: true });
+
+    expect(updateTagSpy).toHaveBeenCalledWith(SYSTEM_SETTINGS_CACHE_TAG);
+  });
 });
 
 describe("getAdminSystemSettingsSnapshot", () => {
@@ -516,6 +560,7 @@ describe("getAdminSystemSettingsSnapshot", () => {
     store.clear();
     deletedKeys.value = [];
     clearSystemSettingsCache();
+    updateTagSpy.mockClear();
   });
 
   afterEach(() => {
@@ -583,6 +628,7 @@ describe("runtime setting getters stored/env fallback (C-L29)", () => {
     store.clear();
     deletedKeys.value = [];
     clearSystemSettingsCache();
+    updateTagSpy.mockClear();
   });
 
   afterEach(() => {

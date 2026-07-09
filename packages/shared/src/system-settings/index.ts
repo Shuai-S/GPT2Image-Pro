@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { db } from "@repo/database";
 import { systemSetting } from "@repo/database/schema";
 import { eq, inArray, sql } from "drizzle-orm";
+import { unstable_cache, updateTag } from "next/cache";
 
 import {
   formatRegistrationEmailDomains,
@@ -34,8 +35,17 @@ export {
   SYSTEM_SETTING_DEFINITIONS,
 } from "./definitions";
 
-const CACHE_TTL_MS = 10_000;
+const CACHE_TTL_SECONDS = 60;
 const SKIP_RUNTIME_SETTINGS_DB_ENV = "GPT2IMAGE_SKIP_RUNTIME_SETTINGS_DB";
+
+/**
+ * system-settings 全表快照在 Next data cache 中的失效 tag。
+ *
+ * 所有写入 system_setting 表的触点在 mutation 完成后须调用
+ * `clearSystemSettingsCache()`(内部转发 `updateTag(SYSTEM_SETTINGS_CACHE_TAG)`)
+ * 才能让 `unstable_cache` 在下次请求前刷新缓存。
+ */
+export const SYSTEM_SETTINGS_CACHE_TAG = "system-settings";
 
 export type OperationFeatureKey =
   | "blog"
@@ -64,12 +74,10 @@ const OPERATION_FEATURE_SETTING_KEYS = {
   externalApi: "OPERATION_EXTERNAL_API_ENABLED",
 } as const satisfies Record<OperationFeatureKey, SettingKey>;
 
-let settingsCache:
-  | {
-      expiresAt: number;
-      values: Map<string, unknown>;
-    }
-  | undefined;
+// 运行期进程级"上次成功加载的设置快照",仅用作 unstable_cache 抛错时的兜底,
+// 保持与原进程内 10s 缓存一致的"DB 异常回退旧值"容错语义。unstable_cache 命中
+// 时不会更新本变量,因此它只在稳定请求成功后于一处写入,作为短暂的 stale 数据。
+let lastGoodMap: Map<string, unknown> | undefined;
 
 function normalizeStoredValue(value: unknown) {
   if (typeof value === "string") {
@@ -79,40 +87,76 @@ function normalizeStoredValue(value: unknown) {
   return value;
 }
 
-async function loadSystemSettingsMap() {
-  const now = Date.now();
-  if (settingsCache && settingsCache.expiresAt > now) {
-    return settingsCache.values;
-  }
+/**
+ * 实际扫描 system_setting 全表并归一化为 Map(无缓存)。
+ *
+ * @returns 以 key→normalized value 形式返回当前整张配置表快照。
+ * @sideEffects 全表扫描 system_setting,无 WHERE、无分页;调用方应经缓存包装器访问。
+ */
+async function querySystemSettingsMap(): Promise<Map<string, unknown>> {
+  const rows = await db
+    .select({
+      key: systemSetting.key,
+      value: systemSetting.value,
+    })
+    .from(systemSetting);
 
-  try {
-    const rows = await db
-      .select({
-        key: systemSetting.key,
-        value: systemSetting.value,
-      })
-      .from(systemSetting);
-
-    const values = new Map<string, unknown>();
-    for (const row of rows) {
-      const normalized = normalizeStoredValue(row.value);
-      if (normalized !== undefined) {
-        values.set(row.key, normalized);
-      }
+  const values = new Map<string, unknown>();
+  for (const row of rows) {
+    const normalized = normalizeStoredValue(row.value);
+    if (normalized !== undefined) {
+      values.set(row.key, normalized);
     }
+  }
+  return values;
+}
 
-    settingsCache = {
-      expiresAt: now + CACHE_TTL_MS,
-      values,
-    };
+/**
+ * unstable_cache 包装的全表查询入口。
+ *
+ * WHY: generateMetadata/branding/运营开关等高频读路径原来每次都打 DB;改用
+ * Next data cache(unstable_cache) 后二次访问命中缓存层不再触碰 DB,既改善
+ * 所有页面 metadata 性能,又通过 SYSTEM_SETTINGS_CACHE_TAG 在 mutation 后
+ * 即时失效,保持数据一致性。
+ *
+ * unstable_cache 只接受可序列化的缓存载荷;Map 不能直接被 JSON 序列化(会丢成
+ * 普通对象、再读不回 Map),故内部以 entries 数组为缓存载荷,外层 loadSystemSettingsMap
+ * 重建 Map。
+ *
+ * 回调无参数:全表查询不依赖可变入参,固定 keyParts ["system-settings-map"] 即可,
+ * 配合 tag 做精准失效,而非按入参分桶。
+ */
+const cachedQuerySystemSettingsEntries = unstable_cache(
+  async (): Promise<Array<[string, unknown]>> => {
+    const map = await querySystemSettingsMap();
+    return [...map.entries()];
+  },
+  ["system-settings-map"],
+  { revalidate: CACHE_TTL_SECONDS, tags: [SYSTEM_SETTINGS_CACHE_TAG] }
+);
 
+/**
+ * 读取整张 system_setting 表的归一化快照(带缓存 + stale fallback)。
+ *
+ * WHY: 先走 unstable_cache 命中 Next data cache;若缓存层抛错(如构建期 data cache
+ * 不可用、序列化异常),退而复用模块级 lastGoodMap 上次成功结果,与原 10s 进程内
+ * 缓存的"DB 异常复用旧值"语义一致,避免设置读取链因瞬时缓存故障导致全站功能掉线。
+ *
+ * @returns 当前生效的 system_settings 快照 Map。
+ * @sideEffects 成功时刷新 lastGoodMap;失败且无兜底时向上抛错。
+ */
+async function loadSystemSettingsMap(): Promise<Map<string, unknown>> {
+  try {
+    const entries = await cachedQuerySystemSettingsEntries();
+    const values = new Map<string, unknown>(entries);
+    lastGoodMap = values;
     return values;
   } catch (error) {
-    if (settingsCache) {
-      logWarn("System settings DB unavailable; reusing stale cache", {
+    if (lastGoodMap) {
+      logWarn("System settings cache unavailable; reusing stale snapshot", {
         error: error instanceof Error ? error.message : String(error),
       });
-      return settingsCache.values;
+      return lastGoodMap;
     }
     throw error;
   }
@@ -140,8 +184,19 @@ async function getRuntimeSystemSettingValue(key: SettingKey) {
   return getSystemSettingValue(key);
 }
 
+/**
+ * 让 system-settings 全表缓存失效。
+ *
+ * WHY: 内部读路径已升级为 unstable_cache + tag,失效须用 `updateTag` 而非清进程变量。
+ * 保留原导出名以避免破坏所有现有调用点(mutation/单测等);内部同时丢弃 lastGoodMap,
+ * 使下一次 unstable_cache 抛错时不再复用过期兜底。
+ *
+ * @sideEffects 调用 Next 的 updateTag 标记 SYSTEM_SETTINGS_CACHE_TAG 为待失效;
+ *              清空模块级 stale 兜底快照。
+ */
 export function clearSystemSettingsCache() {
-  settingsCache = undefined;
+  lastGoodMap = undefined;
+  updateTag(SYSTEM_SETTINGS_CACHE_TAG);
 }
 
 export async function getSystemSettingValue(

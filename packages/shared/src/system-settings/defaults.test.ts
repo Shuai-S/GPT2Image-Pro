@@ -96,6 +96,15 @@ vi.mock("drizzle-orm", () => ({
   })),
 }));
 
+// next/cache mock：单测不在 Server Action 上下文，真实 updateTag 会抛错，
+// 故直通 unstable_cache 并以 vi.fn 吞掉 updateTag 调用。
+vi.mock("next/cache", () => ({
+  unstable_cache: <TArgs extends unknown[], TResult>(
+    fn: (...args: TArgs) => Promise<TResult>
+  ) => async (...args: TArgs): Promise<TResult> => fn(...args),
+  updateTag: vi.fn(),
+}));
+
 describe("system setting default initialization", () => {
   beforeEach(() => {
     store.clear();
