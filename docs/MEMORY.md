@@ -39,6 +39,7 @@
 
 ## 性能
 
+- [2026-07-10 系统工程与性能审计](plan/2026-07-10-system-performance-audit.md) — 已落地 ISR/运行时域名/UOL 身份边界/发布门禁/依赖修复；剩余 P0 为后台任务长事务、进程内异步任务与队列、积分过期 N+1、订阅用户唯一约束。
 - [2026-07-09 性能优化总计划](plan/2026-07-09-performance-and-concurrency.md) — 响应慢/卡顿 6 工作流(A–F)总计划，14 项任务。
 - **2026-07-09 perf-wave3 剩余批次落地**（6 commits 877f8185..1ee6b363，详见 [memory](memory/2026-07-09-perf-wave3-batch-implementation.md)）：C-P0-3 system-settings 升级 unstable_cache+`SYSTEM_SETTINGS_CACHE_TAG`(updateTag 转发失效)+lastGoodMap 兜底；F-P2-1 无限画布可视区 AABB 裁剪(computeVisibleNodes+ResizeObserver+边裁剪+首帧回退)；F-P1-1 创作页 video+waterfall dynamic(videoMounted 惰性挂载保留草稿)；F-P2-2 admin-panel register+import dynamic；C-P0-1 SLA 失效接入生成完成(用 `revalidateTag` max profile 而非 updateTag 因 operations 被 route handler 直调)+try/catch 降级；B-P1-2 AnimatedPrice 动态化移出 framer-motion 首屏 chunk。后置：3c UserDetailSheet 剥离(高耦合)、4b admin 聚合缓存(权限审计面大)、4c history 虚拟化(每页20条已合理)。
 - **2026-07-09 perf-wave4 收尾**（5 commits 775c59ce..39d2284a，详见 [memory](memory/2026-07-09-perf-wave3-batch-implementation.md) 追加）：logger flush 等在途 gzip 归档(修复 flaky 测试 + 生产停机丢归档风险)；3c UserDetailSheet 剥离为独立 chunk(detailMounted 惰性挂载,2371→1746+592+180 三文件,admin-users-shared 解依赖环)；4b admin/payments 聚合统计走 unstable_cache+`admin-payments-aggregate` tag(type/provider 低基数键,q/日期穿透),epay 三写入点接 revalidateTag max+降级;admin-panel groups/apis/adobe/accounts 4 Tab 全剥离为 dynamic chunk(5331→3728 行,apis20/adobe34/groups11 props)。4c history 虚拟化确认不做(每页20条已合理)。
