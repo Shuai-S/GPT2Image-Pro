@@ -562,7 +562,8 @@ const GalleryCard = memo(function GalleryCard({
  * 行之间用 top:virtualRow.start 做绝对定位,外层容器 height = totalSize 作为
  * 占位,使页面整体可滚动;滚动事件由 window 拦截(virtualizer 默认行为),与原
  * CSS grid 整页滚动表现一致。scrollMargin 动态测量网格容器顶到文档顶的距离,
- * 兼容标题/Tab 等上方占位,避免可视区偏移导致首行漏渲染。
+ * 兼容标题/Tab 等上方占位;渲染时必须从 virtualRow.start 扣回 scrollMargin,
+ * 因为测量值本身已包含文档偏移,否则首行会被整体下推形成大块空白。
  *
  * @param props.items 全部画廊项(来自累积分页)。
  * @param props.columns 当前响应式列数(与 CSS grid 断点一致)。
@@ -615,6 +616,7 @@ const GalleryVirtualGrid = function GalleryVirtualGrid({
     count: rowCount,
     estimateSize: () => 360,
     overscan: 4,
+    useFlushSync: false,
     scrollMargin: computeScrollMargin(),
     getItemKey: (index) => {
       // 行内取首卡片 id 作为行 key,跨行稳定;列数变化导致重排时仍能复用 DOM。
@@ -622,6 +624,7 @@ const GalleryVirtualGrid = function GalleryVirtualGrid({
       return item ? `row-${item.id}` : `row-${index}`;
     },
   });
+  const scrollMargin = rowVirtualizer.options.scrollMargin;
 
   return (
     <div
@@ -639,7 +642,9 @@ const GalleryVirtualGrid = function GalleryVirtualGrid({
             ref={rowVirtualizer.measureElement}
             className="absolute left-0 top-0 grid w-full grid-cols-2 gap-4 pb-4 md:grid-cols-3 lg:grid-cols-4"
             style={{
-              transform: `translateY(${virtualRow.start}px)`,
+              transform: `translate3d(0, ${
+                virtualRow.start - scrollMargin
+              }px, 0)`,
             }}
           >
             {rowItems.map((item) => (
