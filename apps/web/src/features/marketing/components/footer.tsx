@@ -10,7 +10,6 @@ import { footerNav } from "@repo/shared/config";
 import type { BrandingConfig } from "@repo/shared/config/branding";
 import { getRuntimeContactEmail } from "@repo/shared/config/contact-runtime";
 import Link from "next/link";
-import { getLocale } from "next-intl/server";
 
 const footerTitleMap = {
   product: {
@@ -27,6 +26,7 @@ const footerTitleMap = {
 
 interface FooterProps {
   branding: BrandingConfig;
+  locale: string;
 }
 
 /**
@@ -76,14 +76,12 @@ function getFooterLinkHref(
  * - 版权信息
  *
  * @param branding - 管理员配置的应用名称和描述。
+ * @param locale - 路由路径中已校验的当前语言。
  * @returns Marketing 页面底部。
- * @sideEffects 读取当前 locale 和运行时系统设置中的联系邮箱。
+ * @sideEffects 读取运行时系统设置中的联系邮箱。
  */
-export async function Footer({ branding }: FooterProps) {
-  const [locale, contactEmail] = await Promise.all([
-    getLocale(),
-    getRuntimeContactEmail(),
-  ]);
+export async function Footer({ branding, locale }: FooterProps) {
+  const contactEmail = await getRuntimeContactEmail();
   const isZh = locale === "zh";
 
   return (

@@ -1,10 +1,12 @@
 "use client";
 
+import { isAdminRole } from "@repo/shared/auth/roles";
 import { Button } from "@repo/ui/components/button";
 import { Eye, Loader2, X } from "lucide-react";
 import { useAction } from "next-safe-action/hooks";
 import { useState } from "react";
 import { toast } from "sonner";
+import { useCurrentSession } from "@/features/auth/hooks/use-current-session";
 import type { GenerationSlaStats } from "@/features/image-generation/sla";
 import { updateMarketingSlaStatusVisibilityAction } from "@/features/marketing/actions/sla-status";
 
@@ -19,14 +21,14 @@ function formatNumber(value: number) {
 export function SlaStatusSection({
   locale,
   stats,
-  canToggleVisibility = false,
   initiallyEnabled = true,
 }: {
   locale: string;
   stats: GenerationSlaStats;
-  canToggleVisibility?: boolean;
   initiallyEnabled?: boolean;
 }) {
+  const { data: session } = useCurrentSession();
+  const canToggleVisibility = isAdminRole(session?.user?.role);
   const isZh = locale === "zh";
   const copy = (en: string, zh: string) => (isZh ? zh : en);
   const [visible, setVisible] = useState(initiallyEnabled);

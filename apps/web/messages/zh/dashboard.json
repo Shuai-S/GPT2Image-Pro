@@ -117,15 +117,6 @@
       "closed": "已关闭"
     }
   },
-  "Subscription": {
-    "plans": {
-      "free": "免费版",
-      "starter": "入门版",
-      "pro": "专业版",
-      "ultra": "旗舰版",
-      "enterprise": "企业版"
-    }
-  },
   "Settings": {
     "tabs": {
       "account": "账户",

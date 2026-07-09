@@ -11,6 +11,10 @@ export const routing = defineRouting({
   locales: ["en", "zh"],
   // 默认语言
   defaultLocale: "en",
+  // 所有公开 URL 都显式携带语言前缀，无需再写 NEXT_LOCALE Cookie。
+  // 关闭 Cookie 与请求头探测后，同一 URL 可被 CDN 在匿名用户之间安全复用。
+  localeCookie: false,
+  localeDetection: false,
 });
 
 /**

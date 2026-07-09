@@ -19,8 +19,7 @@ import {
 } from "@/features/image-generation/pricing-settings";
 import { PricingSection } from "@/features/marketing/components/pricing-section";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+export const revalidate = 60;
 
 /**
  * 生成定价页 Metadata。

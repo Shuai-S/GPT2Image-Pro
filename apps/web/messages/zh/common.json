@@ -103,5 +103,14 @@
     "light": "浅色",
     "dark": "深色",
     "system": "跟随系统"
+  },
+  "Subscription": {
+    "plans": {
+      "free": "免费版",
+      "starter": "入门版",
+      "pro": "专业版",
+      "ultra": "旗舰版",
+      "enterprise": "企业版"
+    }
   }
 }

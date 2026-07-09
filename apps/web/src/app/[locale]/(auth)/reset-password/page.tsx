@@ -1,3 +1,5 @@
+import { Suspense } from "react";
+import { AuthFormFallback } from "@/features/auth/components/auth-form-fallback";
 import { ResetPasswordForm } from "@/features/auth/components/reset-password-form";
 
 /**
@@ -5,5 +7,9 @@ import { ResetPasswordForm } from "@/features/auth/components/reset-password-for
  * 路由: /reset-password
  */
 export default function ResetPasswordPage() {
-  return <ResetPasswordForm />;
+  return (
+    <Suspense fallback={<AuthFormFallback />}>
+      <ResetPasswordForm />
+    </Suspense>
+  );
 }

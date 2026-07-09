@@ -9,6 +9,8 @@ import { isSelfUseModeEnabled } from "@repo/shared/auth/self-use-mode";
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
 import { getRuntimeRegistrationEmailDomains } from "@repo/shared/system-settings";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
+import { AuthFormFallback } from "@/features/auth/components/auth-form-fallback";
 import { SignUpForm } from "@/features/auth/components/sign-up-form";
 
 function isGoogleAuthEnabled() {
@@ -37,10 +39,12 @@ export default async function SignUpPage({
   ]);
 
   return (
-    <SignUpForm
-      googleAuthEnabled={isGoogleAuthEnabled()}
-      branding={branding}
-      registrationEmailDomains={registrationEmailDomains}
-    />
+    <Suspense fallback={<AuthFormFallback />}>
+      <SignUpForm
+        googleAuthEnabled={isGoogleAuthEnabled()}
+        branding={branding}
+        registrationEmailDomains={registrationEmailDomains}
+      />
+    </Suspense>
   );
 }

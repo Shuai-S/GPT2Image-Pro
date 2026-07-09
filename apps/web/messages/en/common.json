@@ -103,5 +103,14 @@
     "light": "Light",
     "dark": "Dark",
     "system": "System"
+  },
+  "Subscription": {
+    "plans": {
+      "free": "Free",
+      "starter": "Starter",
+      "pro": "Pro",
+      "ultra": "Ultra",
+      "enterprise": "Enterprise"
+    }
   }
 }

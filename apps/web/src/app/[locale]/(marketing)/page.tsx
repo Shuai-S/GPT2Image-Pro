@@ -1,6 +1,3 @@
-import { getUserRoleById } from "@repo/shared/auth/role-server";
-import { isAdminRole } from "@repo/shared/auth/roles";
-import { getServerSession } from "@repo/shared/auth/server";
 import { siteConfig } from "@repo/shared/config";
 import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
 import { getRuntimeSettingBoolean } from "@repo/shared/system-settings";
@@ -16,8 +13,7 @@ import { SlaStatusSection } from "@/features/marketing/components/sla-status-sec
 import { Testimonials } from "@/features/marketing/components/testimonials";
 import { UseCasesSection } from "@/features/marketing/components/use-cases-section";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+export const revalidate = 60;
 
 /**
  * 生成首页 Metadata
@@ -82,16 +78,11 @@ export default async function HomePage({
   params: Promise<{ locale: string }>;
 }) {
   const { locale } = await params;
-  const [slaEnabled, slaStats, session, branding] = await Promise.all([
+  const [slaEnabled, slaStats, branding] = await Promise.all([
     getRuntimeSettingBoolean("MARKETING_SLA_STATUS_ENABLED", true),
     getRecentGenerationSlaStats(1000),
-    getServerSession(),
     getRuntimeBrandingConfig(),
   ]);
-  const role = session?.user?.id
-    ? await getUserRoleById(session.user.id)
-    : "user";
-  const canToggleSlaStatus = isAdminRole(role);
 
   return (
     <>
@@ -105,14 +96,11 @@ export default async function HomePage({
       <HowItWorks />
       <UseCasesSection brandName={branding.name} />
       <Testimonials brandName={branding.name} />
-      {(slaEnabled || canToggleSlaStatus) && (
-        <SlaStatusSection
-          locale={locale}
-          stats={slaStats}
-          initiallyEnabled={slaEnabled}
-          canToggleVisibility={canToggleSlaStatus}
-        />
-      )}
+      <SlaStatusSection
+        locale={locale}
+        stats={slaStats}
+        initiallyEnabled={slaEnabled}
+      />
       <FAQSection brandName={branding.name} />
       <CTASection brandName={branding.name} />
     </>

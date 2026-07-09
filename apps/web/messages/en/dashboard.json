@@ -117,15 +117,6 @@
       "closed": "Closed"
     }
   },
-  "Subscription": {
-    "plans": {
-      "free": "Free",
-      "starter": "Starter",
-      "pro": "Pro",
-      "ultra": "Ultra",
-      "enterprise": "Enterprise"
-    }
-  },
   "Settings": {
     "tabs": {
       "account": "Account",
