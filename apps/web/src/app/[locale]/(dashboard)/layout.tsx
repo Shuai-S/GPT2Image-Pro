@@ -19,11 +19,17 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // A-P0-2：把 getUserRoleById 并入 Promise.all（role 经 cache() 复用，
+  // 与各 page 共享同一查询结果），去掉原先 Promise.all 之外的串行 await，
+  // layout 内 DB 段由 2 段并行收敛为 1 段并行。
   const [serverSession, branding, operationFlags] = await Promise.all([
     getServerSession(),
     getRuntimeBrandingConfig(),
     getRuntimeOperationFeatureFlags(),
   ]);
+  const role = serverSession?.user?.id
+    ? await getUserRoleById(serverSession.user.id)
+    : null;
   const initialSession: CurrentSession = serverSession?.user?.id
     ? {
         user: {
@@ -31,7 +37,7 @@ export default async function DashboardLayout({
           name: serverSession.user.name || "",
           email: serverSession.user.email || "",
           image: serverSession.user.image,
-          role: await getUserRoleById(serverSession.user.id),
+          role: role ?? "user",
         },
       }
     : null;

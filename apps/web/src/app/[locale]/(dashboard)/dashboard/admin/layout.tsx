@@ -29,6 +29,8 @@ export default async function DashboardAdminLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // A-P0-4：session/role 均经 cache() 包装，与各 admin 子页及 dashboard
+  // layout 共享同一查询结果，layout 内只查一次、子页复用，不再每页各打 DB。
   const session = await getServerSession();
   const locale = await getLocale();
   if (!session?.user) {

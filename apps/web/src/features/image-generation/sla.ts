@@ -3,6 +3,7 @@ import "server-only";
 import { db } from "@repo/database";
 import { generation } from "@repo/database/schema";
 import { desc, inArray } from "drizzle-orm";
+import { unstable_cache } from "next/cache";
 
 export {
   classifyGenerationError,
@@ -21,8 +22,19 @@ export type GenerationSlaStats = {
   userRequestErrors: number;
 };
 
-export async function getRecentGenerationSlaStats(
-  limit = 1000
+/** unstable_cache 的 tag,用于生成完成后 revalidateTag 失效首页 SLA 缓存。 */
+export const SLA_STATS_CACHE_TAG = "sla-stats";
+
+/**
+ * 实际扫描最近生成记录并聚合 SLA 指标的查询(无缓存)。
+ *
+ * @param limit 抽取的最近已完成记录数上限。
+ * @returns 成败计数与错误分类统计。
+ * @sideEffects 全表扫描 generation(按 createdAt desc 取最近 limit 条 completed/failed),
+ *             扫描成本随 limit 线性增长;调用方应避免高频触发,统一走缓存包装器。
+ */
+async function queryRecentGenerationSlaStats(
+  limit: number
 ): Promise<GenerationSlaStats> {
   // 样本只取已完结记录(completed/failed):pending 在途任务既不属于成功也
   // 不属于失败,混进样本会让"样本数"与各分类卡片的合计对不上(差额即在途数)。
@@ -73,3 +85,25 @@ export async function getRecentGenerationSlaStats(
     userRequestErrors,
   };
 }
+
+/**
+ * 读取最近生成记录的 SLA 聚合指标(带缓存)。
+ *
+ * WHY: 首页每次访问都全表扫描最近 1000 条 generation 行,无缓存时既慢又压 DB。
+ * 用 unstable_cache 包一层(60s TTL + tag 失效),首页重复访问秒开;生成完成
+ * 后通过 revalidateTag(SLA_STATS_CACHE_TAG) 即可让首页在下次请求前刷新。
+ *
+ * 包装在 unstable_cache 外层,内部仍调用 queryRecentGenerationSlaStats。
+ * 参数兼容:透传 limit(number 可序列化),不同 limit 值会命中不同的缓存条目
+ * (key 含 limit)。回调内不返回函数,只返回纯数据对象。
+ *
+ * @param limit 抽取的最近已完成记录数上限,默认 1000。
+ * @returns 缓存命中或新算的 SLA 指标对象。
+ * @sideEffects 命中缓存时不查 DB;未命中时执行全表扫描聚合查询。
+ */
+export const getRecentGenerationSlaStats = unstable_cache(
+  async (limit = 1000): Promise<GenerationSlaStats> =>
+    queryRecentGenerationSlaStats(limit),
+  ["sla-recent-stats"],
+  { revalidate: 60, tags: [SLA_STATS_CACHE_TAG] }
+);

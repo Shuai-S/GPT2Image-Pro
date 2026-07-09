@@ -1359,13 +1359,16 @@ export async function runImageGenerationForUser(
     (await getRuntimeSettingString("NEXT_PUBLIC_GENERATIONS_BUCKET_NAME")) ||
     "generations";
   const userPlan = await getUserPlan(input.userId);
-  const planCapabilities = await getPlanCapabilitySnapshot(userPlan.plan);
-  const queueSettings = await getPlanQueueSettings(userPlan.plan);
-  const moderationBlockRiskLevel = await getUserModerationBlockRiskLevel(
-    input.userId,
-    userPlan.plan,
-    input.moderationBlockRiskLevel
-  );
+  const [planCapabilities, queueSettings, moderationBlockRiskLevel] =
+    await Promise.all([
+      getPlanCapabilitySnapshot(userPlan.plan),
+      getPlanQueueSettings(userPlan.plan),
+      getUserModerationBlockRiskLevel(
+        input.userId,
+        userPlan.plan,
+        input.moderationBlockRiskLevel
+      ),
+    ]);
   const moderationBlockingEnabled =
     planCapabilities.features["moderation.blocking"];
   const promptOptimizationAllowed =
@@ -1509,7 +1512,10 @@ export async function runImageGenerationForUser(
       async () => {
         let leasedConfig: ApiConfig | null = null;
         try {
-          const userConfig = await getUserApiConfig(input.userId);
+          const userConfig = await getUserApiConfig(
+            input.userId,
+            userPlan.plan
+          );
           let effectiveConfig: Awaited<ReturnType<typeof getEffectiveConfig>>;
           try {
             try {

@@ -1,6 +1,6 @@
 import { db } from "@repo/database";
 import { creditsBalance, generation } from "@repo/database/schema";
-import { auth } from "@repo/shared/auth";
+import { getServerSession } from "@repo/shared/auth/server";
 import { getUserRoleById } from "@repo/shared/auth/role-server";
 import { formatCredits } from "@repo/shared/credits/format";
 import { logError } from "@repo/shared/logger";
@@ -18,7 +18,6 @@ import {
 } from "@repo/ui/components/card";
 import { and, count, desc, eq } from "drizzle-orm";
 import { Coins, Image as ImageIcon, ImagePlus } from "lucide-react";
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getLocale } from "next-intl/server";
 import { ImagePricingChartCardLazy } from "@/features/dashboard/components/image-pricing-chart-card-lazy";
@@ -51,7 +50,9 @@ function pickReferralCode(value: string | string[] | undefined) {
 export default async function DashboardPage({
   searchParams,
 }: DashboardPageProps) {
-  const session = await auth.api.getSession({ headers: await headers() });
+  // A-P0-3：改用 cache 化的 getServerSession，与 layout 共享同一查询结果，
+  // 不再每页各自调 auth.api.getSession 打 DB。
+  const session = await getServerSession();
   const locale = await getLocale();
   if (!session?.user) {
     redirect(`/${locale}/sign-in`);
@@ -68,6 +69,7 @@ export default async function DashboardPage({
   if (referralCode) {
     // WHY: 绑定失败（码失效、已绑定、DB 抖动）不应让 dashboard 首页 500，
     // 记日志后照常跳转清除 query 即可。
+    // A-P0-3：role 经 cache() 与 layout 共享，无需重复 DB 查询。
     try {
       const role = await getUserRoleById(userId);
       await invokeOperation(
@@ -93,6 +95,10 @@ export default async function DashboardPage({
   const isZh = locale === "zh";
   const copy = (en: string, zh: string) => (isZh ? zh : en);
 
+  // A-P0-3：把原第二段 Promise.all 的 getUserPlan 前置依赖解开——capabilities
+  // 依赖 userPlanInfo.plan，故仍分两段：先并行取聚合数据 + userPlan，再取
+  // 依赖 plan 的 capabilities/backendGroups/preference。整体段数不变，但
+  // session/role 已由 cache 复用 layout 结果，不再独立打 DB。
   const [
     balanceData,
     recentGenerations,

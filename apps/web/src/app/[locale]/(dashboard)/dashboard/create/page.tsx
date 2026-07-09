@@ -38,13 +38,12 @@ export default async function CreatePage() {
   const locale = await getLocale();
   if (!user) redirect(`/${locale}/sign-in`);
 
-  const [creditsData, recentGenerations, plan, userApiConfig] =
-    await Promise.all([
-      getCreditsBalance(user.id),
-      getUserRecentGenerations(user.id, 6),
-      getUserPlan(user.id),
-      getUserApiConfig(user.id),
-    ]);
+  const [plan, creditsData, recentGenerations] = await Promise.all([
+    getUserPlan(user.id),
+    getCreditsBalance(user.id),
+    getUserRecentGenerations(user.id, 6),
+  ]);
+  const userApiConfig = await getUserApiConfig(user.id, plan.plan);
   const [
     uploadLimits,
     backendGroups,

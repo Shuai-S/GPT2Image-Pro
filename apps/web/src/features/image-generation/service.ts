@@ -10,6 +10,7 @@ import {
   GPT54_MINI_CHAT_MODEL,
   GPT55_CHAT_MODEL,
   RESPONSES_IMAGE_MODELS,
+  type SubscriptionPlan,
 } from "@repo/shared/config/subscription-plan";
 import { logError, logWarn } from "@repo/shared/logger";
 import { canUsePlanCapability } from "@repo/shared/subscription/services/plan-capabilities";
@@ -4244,10 +4245,14 @@ async function postTaskImageGeneration(
 }
 
 export async function getUserApiConfig(
-  userId: string
+  userId: string,
+  plan?: SubscriptionPlan
 ): Promise<ApiConfig | null> {
-  const plan = await getUserPlan(userId);
-  if (!(await canUsePlanCapability(plan.plan, "customApi.configure"))) {
+  // 第 2 波性能优化：CreatePage 与 runImageGenerationForUser 在当前请求里
+  // 已经算过 user plan。这里允许上层透传 plan，避免重复打 subscription/user
+  // 读路径；未透传时保持原有回退逻辑，兼容其余调用点。
+  const effectivePlan = plan ?? (await getUserPlan(userId)).plan;
+  if (!(await canUsePlanCapability(effectivePlan, "customApi.configure"))) {
     return null;
   }
 

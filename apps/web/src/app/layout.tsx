@@ -1,6 +1,14 @@
 // 全站根布局:负责加载全局样式、品牌 metadata 与 html/body 外壳。
 // Fumadocs 会生成第二套 Tailwind utilities。必须先于应用样式加载,否则从
 // 文档页客户端跳转到控制台/定价页后,后加载的 .hidden 会压过 md:flex 等响应式类。
+//
+// 缓存边界:本布局不再全局声明 force-dynamic/revalidate=0,让动态性下沉到
+// 真正需要的子路由(营销首页、定价页、dashboard/admin 等)各自声明。
+// generateMetadata 读取 getRuntimeBrandingConfig(底层走 system-settings 缓存,
+// 见 C-P0-3),legal/blog/pseo 等无 per-request 依赖的页面可走 ISR/静态,
+// admin 子路由因 getServerSession(读 Cookie)会自动判定为 dynamic,不会被误静态化。
+// 越权防护:dashboard/(dashboard)/admin 子树由其 layout 的 getServerSession 兜底,
+// 普通用户/未登录访问必跳转,不会因根布局去掉 force-dynamic 而静态化泄露。
 import "fumadocs-ui/style.css";
 
 import { siteConfig } from "@repo/shared/config";
@@ -9,9 +17,6 @@ import { getRuntimeBrandingConfig } from "@repo/shared/config/branding";
 import type { Metadata } from "next";
 
 import "@repo/ui/globals.css";
-
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
 /**
  * 为 favicon 链接生成随 Logo 地址变化的版本号。
