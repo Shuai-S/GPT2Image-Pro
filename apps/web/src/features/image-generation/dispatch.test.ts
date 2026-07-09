@@ -54,6 +54,46 @@ describe("dispatchConcurrentChannels", () => {
     expect(loserAborted).toBe(true);
   });
 
+  it("不会让较慢的低序号渠道阻塞已成功的后续渠道", async () => {
+    type R = { imageBase64?: string; error?: string };
+    let invocation = 0;
+    let slowChannelAborted = false;
+    const attemptOne = vi.fn(
+      async ({ signal }: { signal: AbortSignal }): Promise<R> => {
+        invocation += 1;
+        if (invocation === 2) {
+          return { imageBase64: "fast-winner" };
+        }
+        return new Promise<R>((resolve) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              slowChannelAborted = true;
+              resolve({ error: "aborted" });
+            },
+            { once: true }
+          );
+        });
+      }
+    );
+
+    const dispatchPromise = dispatchConcurrentChannels<R>({
+      channels: 2,
+      attemptOne,
+      buildAllFailed: () => ({ error: "all failed" }),
+      parentSignal: new AbortController().signal,
+    });
+    const timedResult = await Promise.race([
+      dispatchPromise,
+      new Promise<"test-timeout">((resolve) => {
+        setTimeout(() => resolve("test-timeout"), 100);
+      }),
+    ]);
+
+    expect(timedResult).toEqual({ imageBase64: "fast-winner" });
+    expect(slowChannelAborted).toBe(true);
+  });
+
   it("全部渠道失败时返回 buildAllFailed", async () => {
     const attemptOne = vi.fn().mockResolvedValue({ error: "channel failed" });
 

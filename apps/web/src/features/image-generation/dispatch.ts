@@ -86,8 +86,6 @@ export async function dispatchConcurrentChannels<TResult>({
     return attemptOne({ signal: parentSignal });
   }
 
-  // 胜出控制器：当任一渠道成功，调用 winnerController.abort() 中止其它。
-  const winnerController = new AbortController();
   const channelAbortControllers: AbortController[] = [];
   // 为每条渠道构造独立 abort signal，并跟随 parentSignal。
   const getChannelSignal = () => {
@@ -104,6 +102,10 @@ export async function dispatchConcurrentChannels<TResult>({
 
   // 各渠道 promise：失败/胜出时通过 settled 收集最终态。
   const inFlight: Array<Promise<TResult>> = [];
+  const pending = new Map<
+    number,
+    Promise<{ channelIndex: number; result: TResult | undefined }>
+  >();
   const results: Array<TResult | undefined> = [];
 
   // 启动 channels 条渠道。
@@ -125,26 +127,29 @@ export async function dispatchConcurrentChannels<TResult>({
       }
     })();
     inFlight.push(p);
+    pending.set(
+      i,
+      settled(p).then((result) => ({ channelIndex: i, result }))
+    );
   }
 
-  // 竞赛等待：顺序等条渠道完成；一旦发现成功即中止其它并返回。
-  for (let i = 0; i < inFlight.length; i += 1) {
-    const inflightPromise = inFlight[i];
-    if (!inflightPromise) continue;
-    const result = await settled(inflightPromise);
-    results[i] = result;
+  // 每轮只等待当前最先完成的渠道，不能按数组顺序 await；否则序号较小的慢
+  // 渠道会阻塞已经成功的后续渠道，违背“先成功者胜出”的竞赛语义。
+  while (pending.size > 0) {
+    const { channelIndex, result } = await Promise.race(pending.values());
+    pending.delete(channelIndex);
+    results[channelIndex] = result;
     if (result && isSuccess(result)) {
       // 胜出：中止其它渠道。
-      winnerController.abort();
       for (let j = 0; j < channelAbortControllers.length; j += 1) {
-        if (j !== i) channelAbortControllers[j]?.abort();
+        if (j !== channelIndex) channelAbortControllers[j]?.abort();
       }
       // 等待其它渠道 settle，避免孤儿 promise 与未释放的 lease。
-      const losers = inFlight.filter((_, idx) => idx !== i);
+      const losers = inFlight.filter((_, idx) => idx !== channelIndex);
       await Promise.allSettled(losers.map((p) => settled(p)));
       logWarn("生图渠道并发：有渠道胜出", {
         ...(context ?? {}),
-        winnerChannelIndex: i,
+        winnerChannelIndex: channelIndex,
       });
       return result;
     }
