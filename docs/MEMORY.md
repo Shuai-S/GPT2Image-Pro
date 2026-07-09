@@ -37,6 +37,11 @@
 - **kysely 被 pnpm override 钉在 0.28.17**（根 package.json）：better-auth 1.6 放宽 peer 让 kysely 浮到 0.29，而 0.29 把迁移导出迁到 `kysely/migration` 子路径、随 better-auth 打包的 kysely-adapter 仍从根导入 → next build 编译炸。待上游修复后移除（见 docs/TODO.md）
 - [2026-07-06 工程化风险后续专项](plan/2026-07-06-engineering-risk-followups.md) — 本轮 lint 接入四包并清理低风险告警后，剩余创作页 hook 依赖、积分首次创建并发、UOL capability、MCP schema、SSRF 网段覆盖作为独立专项推进。
 
+## 性能
+
+- [2026-07-09 性能优化总计划](plan/2026-07-09-performance-and-concurrency.md) — 响应慢/卡顿 6 工作流(A–F)总计划，14 项任务。
+- **2026-07-09 perf-wave3 剩余批次落地**（6 commits 877f8185..1ee6b363，详见 [memory](memory/2026-07-09-perf-wave3-batch-implementation.md)）：C-P0-3 system-settings 升级 unstable_cache+`SYSTEM_SETTINGS_CACHE_TAG`(updateTag 转发失效)+lastGoodMap 兜底；F-P2-1 无限画布可视区 AABB 裁剪(computeVisibleNodes+ResizeObserver+边裁剪+首帧回退)；F-P1-1 创作页 video+waterfall dynamic(videoMounted 惰性挂载保留草稿)；F-P2-2 admin-panel register+import dynamic；C-P0-1 SLA 失效接入生成完成(用 `revalidateTag` 而非 `updateTag` 因 operations 被 route handler 直调)+try/catch 降级；B-P1-2 AnimatedPrice 动态化移出 framer-motion 首屏 chunk。后置：3c UserDetailSheet 剥离(高耦合)、4b admin 聚合缓存(权限审计面大)、4c history 虚拟化(每页20条已合理)。
+
 ## 关键架构事实
 
 - 5 个 v1 handler 最终汇入 `apps/web/src/features/image-generation/operations.ts` 同一管线（`runImageGenerationForUser`）

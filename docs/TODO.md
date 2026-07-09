@@ -378,4 +378,20 @@
 
 ---
 
+## 性能优化（响应慢 / 页面卡顿）
+
+> 计划见 `docs/plan/2026-07-09-performance-and-concurrency.md`（6 工作流 14 项），本轮落地详情见 `docs/memory/2026-07-09-perf-wave3-batch-implementation.md`。
+
+- [x] **C-P0-3 system-settings 缓存升级**（877f8185）：进程内 10s 缓存 → `unstable_cache`+`SYSTEM_SETTINGS_CACHE_TAG`，消除 generateMetadata/branding 每次打 DB；`clearSystemSettingsCache` 转发 `updateTag`+清 `lastGoodMap`；建期跳过与 stale fallback 保留。
+- [x] **F-P2-1 无限画布视口 AABB 裁剪**（d680e599）：`computeVisibleNodes`+`boardSize` ResizeObserver，仅渲染可见节点与任一端可见的边；首帧回退全量。
+- [x] **F-P1-1 创作页 video+waterfall dynamic**（5a135abd）：`VideoCreatePanel`/`CreatePageWaterfallGrid` 改 `next/dynamic`；video 加 `videoMounted` 惰性挂载保留草稿。
+- [x] **F-P2-2 admin-panel register+import dynamic**（370b4385）：`ChatgptRegisterTab`/`Sub2ApiImportSection` 拆独立 chunk。
+- [x] **C-P0-1 SLA 失效接入生成完成**（ad47ceb9）：`invalidateSlaStatsCache`（`revalidateTag`+try/catch 降级），operations 完成/失败收口调用。
+- [x] **B-P1-2 AnimatedPrice 动态化**（1ee6b363）：framer-motion 移出营销 pricing 首屏 chunk。
+- [ ] **3c admin-users UserDetailSheet 剥离+lazy**（后置）：高耦合父 state，props 注入回归风险大。
+- [ ] **4b admin/payments 聊合 unstable_cache+tag**（后置）：1370 行单文件需逐 query 权限审计。
+- [ ] **4c history-client 虚拟化**（确认不做）：每页固定 20 条+memo+prefetch 已合理，原注释明确判定虚拟化收益有限风险偏高。
+
+---
+
 运维层补救（轮换密钥 / 配置 Upstash 等）见 `docs/security-audit-2026-05.md` C 节，本清单不展开。
