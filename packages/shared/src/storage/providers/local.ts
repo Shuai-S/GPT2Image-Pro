@@ -41,11 +41,18 @@ export function resolveSafePath(
   if (key.includes("..") || bucket.includes("..")) {
     throw new Error("Invalid path: directory traversal not allowed");
   }
-  const filePath = path.join(baseDir, bucket, key);
+  const filePath = path.join(
+    /* turbopackIgnore: true */ baseDir,
+    bucket,
+    key
+  );
 
   // 防止路径遍历攻击：确保解析后的路径在允许的目录范围内
-  const resolvedPath = path.resolve(filePath);
-  const resolvedBase = path.resolve(baseDir, bucket);
+  const resolvedPath = path.resolve(/* turbopackIgnore: true */ filePath);
+  const resolvedBase = path.resolve(
+    /* turbopackIgnore: true */ baseDir,
+    bucket
+  );
   if (
     !resolvedPath.startsWith(resolvedBase + path.sep) &&
     resolvedPath !== resolvedBase
@@ -62,7 +69,10 @@ async function getBaseDir() {
   if (configured === "~" || configured.startsWith("~/")) {
     const os = await import("node:os");
     const path = await getPath();
-    return path.join(os.homedir(), configured.slice(2));
+    return path.join(
+      /* turbopackIgnore: true */ os.homedir(),
+      configured.slice(2)
+    );
   }
   return configured;
 }
@@ -111,7 +121,7 @@ export const localProvider: StorageProvider = {
     const filePath = await safePath(bucket, key);
     const fs = await getFs();
     try {
-      await fs.unlink(filePath);
+      await fs.unlink(/* turbopackIgnore: true */ filePath);
     } catch {
       // File may not exist
     }
@@ -126,7 +136,7 @@ export const localProvider: StorageProvider = {
     const fs = await getFs();
     // 透传 signal：调用方取消时中止读取（fs/promises.readFile 支持 { signal }）。
     return fs.readFile(
-      filePath,
+      /* turbopackIgnore: true */ filePath,
       options?.signal ? { signal: options.signal } : {}
     ) as Promise<Buffer>;
   },
@@ -140,8 +150,8 @@ export const localProvider: StorageProvider = {
     const filePath = await safePath(bucket, key);
     const fs = await getFs();
     const path = await getPath();
-    const dir = path.dirname(filePath);
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(filePath, data);
+    const dir = path.dirname(/* turbopackIgnore: true */ filePath);
+    await fs.mkdir(/* turbopackIgnore: true */ dir, { recursive: true });
+    await fs.writeFile(/* turbopackIgnore: true */ filePath, data);
   },
 };
