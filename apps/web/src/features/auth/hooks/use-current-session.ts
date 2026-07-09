@@ -58,7 +58,7 @@ export function useCurrentSession(initialData?: CurrentSession) {
         });
 
         if (!response.ok) {
-          setData(null);
+          setData((current) => current ?? null);
           return;
         }
 

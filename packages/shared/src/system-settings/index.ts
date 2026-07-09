@@ -11,6 +11,7 @@ import {
   REGISTRATION_EMAIL_DOMAINS_SETTING_KEY,
 } from "../auth/email-domain";
 import { normalizeContactEmail } from "../config/contact";
+import { logWarn } from "../logger";
 import {
   getModelPricingRulesValidationIssues,
   MODEL_PRICING_RULES_SETTING_KEY,
@@ -84,27 +85,37 @@ async function loadSystemSettingsMap() {
     return settingsCache.values;
   }
 
-  const rows = await db
-    .select({
-      key: systemSetting.key,
-      value: systemSetting.value,
-    })
-    .from(systemSetting);
+  try {
+    const rows = await db
+      .select({
+        key: systemSetting.key,
+        value: systemSetting.value,
+      })
+      .from(systemSetting);
 
-  const values = new Map<string, unknown>();
-  for (const row of rows) {
-    const normalized = normalizeStoredValue(row.value);
-    if (normalized !== undefined) {
-      values.set(row.key, normalized);
+    const values = new Map<string, unknown>();
+    for (const row of rows) {
+      const normalized = normalizeStoredValue(row.value);
+      if (normalized !== undefined) {
+        values.set(row.key, normalized);
+      }
     }
+
+    settingsCache = {
+      expiresAt: now + CACHE_TTL_MS,
+      values,
+    };
+
+    return values;
+  } catch (error) {
+    if (settingsCache) {
+      logWarn("System settings DB unavailable; reusing stale cache", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return settingsCache.values;
+    }
+    throw error;
   }
-
-  settingsCache = {
-    expiresAt: now + CACHE_TTL_MS,
-    values,
-  };
-
-  return values;
 }
 
 /**
