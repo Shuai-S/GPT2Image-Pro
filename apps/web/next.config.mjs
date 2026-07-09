@@ -17,6 +17,9 @@ const nextConfig = {
   assetPrefix: process.env.NEXT_PUBLIC_ASSET_PREFIX || "",
   images: {
     minimumCacheTTL: 2_592_000,
+    // 显式声明优化后的图片格式优先级：avif 优先于 webp，
+    // 让 next/image 按浏览器 Accept 头自动选择最优编码，降低体积。
+    formats: ["image/avif", "image/webp"],
   },
   // Enable standalone output for Docker deployment
   output: "standalone",
@@ -48,6 +51,24 @@ const nextConfig = {
     serverActions: {
       bodySizeLimit: "200mb",
     },
+    // 显式声明按需引入的常用包，让 Next 对其做 barrel 优化，
+    // 只把实际被使用的具名导出打进 client/server bundle，
+    // 显著降低 dev/prod 的 transform 量与产物体积。
+    // 清单基于 apps/web/src 实际 import 的 grep 统计：
+    // - lucide-react: 68 处 import，图标库典型 barrel
+    // - recharts / framer-motion: 图表与动画库，按需 tree-shaking 受益明显
+    // - @repo/ui、@repo/shared、@repo/database: monorepo 包，配合 transpilePackages 优化
+    //   其二级 barrel 的按需引入
+    // 其余被使用的包(next-intl、zod、react-hook-form、@hookform/resolvers、sonner、
+    // @aws-sdk/client-s3 等)多为运行时单点引入或已被 Next 自动优化，未列入。
+    optimizePackageImports: [
+      "lucide-react",
+      "recharts",
+      "framer-motion",
+      "@repo/ui",
+      "@repo/shared",
+      "@repo/database",
+    ],
   },
   // Transpile monorepo packages
   transpilePackages: ["@repo/ui", "@repo/database", "@repo/shared"],
@@ -57,7 +78,6 @@ const nextConfig = {
     "sql.js",
     "pino",
     "pino-pretty",
-    "@axiomhq/pino",
     // 原生模块（存储路由的按需缩略图缩放）：保持外置，避免被打进 server bundle。
     "sharp",
     // PSD 导出组装库:仅被 server action 经 use server 引用,Next 默认未把它 trace 进

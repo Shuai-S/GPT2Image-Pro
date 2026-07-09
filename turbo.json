@@ -3,6 +3,9 @@
   "globalPassThroughEnv": [
     "APP_TIME_ZONE",
     "CREDITS_EXPIRY_DAYS",
+    "DB_CONNECTION_TIMEOUT_MILLIS",
+    "DB_IDLE_TIMEOUT_MILLIS",
+    "DB_POOL_MAX",
     "GPT2IMAGE_BOOTSTRAP_CREDENTIALS_PATH",
     "GPT2IMAGE_BOOTSTRAP_RESET_LOCAL_ADMIN_PASSWORD",
     "GPT2IMAGE_SYSTEM_LOG_PATH",
@@ -25,6 +28,25 @@
     "build": {
       "dependsOn": ["^build"],
       "outputs": [".next/**", "!.next/cache/**", "dist/**"],
+      "inputs": [
+        "src/**",
+        "public/**",
+        "messages/**",
+        "next.config.mjs",
+        "source.config.ts",
+        "sentry.client.config.ts",
+        "sentry.server.config.ts",
+        "sentry.edge.config.ts",
+        "postcss.config.mjs",
+        "tsconfig.json",
+        "package.json",
+        "components.json",
+        "!src/**/*.test.ts",
+        "!src/**/*.test.tsx",
+        "!src/**/__snapshots__/**",
+        "!**/.turbo/**",
+        "!**/.next/**"
+      ],
       "env": [
         "NEXT_PUBLIC_ASSET_PREFIX",
         "GPT2IMAGE_SKIP_RUNTIME_SETTINGS_DB",
@@ -101,11 +123,43 @@
       "persistent": true
     },
     "typecheck": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "inputs": [
+        "src/**",
+        "tsconfig.json",
+        "tsconfig.tsbuildinfo",
+        "package.json",
+        "next.config.mjs",
+        "next-env.d.ts",
+        "source.config.ts",
+        "!**/.turbo/**",
+        "!**/.next/**"
+      ]
     },
     "test": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "inputs": [
+        "src/**",
+        "vitest.config.ts",
+        "tsconfig.json",
+        "package.json",
+        "next.config.mjs",
+        "!**/.turbo/**",
+        "!**/.next/**",
+        "!**/dist/**"
+      ]
     },
-    "lint": {}
+    "lint": {
+      "inputs": [
+        "src/**",
+        "biome.json",
+        "package.json",
+        "tsconfig.json",
+        "next.config.mjs",
+        "!**/.turbo/**",
+        "!**/.next/**",
+        "!**/dist/**"
+      ]
+    }
   }
 }

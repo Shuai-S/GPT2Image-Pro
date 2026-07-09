@@ -2,8 +2,16 @@
 @import "tw-animate-css";
 
 @source "./components";
-@source "../../shared/src";
-@source "../../../apps/web/src";
+/* 收窄 @source 扫描范围：
+ * 原写法把整个 monorepo 源码(.ts/.tsx/.mdx/...)全量纳入 Tailwind 扫描，
+ * dev 下每次 HMR 重扫，开销大且无意义。
+ * 经 grep 核查，packages/shared 与 apps/web 中真正使用 Tailwind 类名
+ * (className={...}) 的文件几乎全为 *.tsx；少量 *.ts 仅出现在测试用例，
+ * 其类名是字面量字符串，不影响 UI 样式。.mdx 也可能内嵌组件，一并保留。
+ * 故仅扫 *.tsx 与 *.mdx，排除 schema/test/service/util 等 .ts 文件，
+ * 既覆盖所有实际样式来源，又显著减少 dev HMR 扫描量。 */
+@source "../../shared/src/**/*.{tsx,mdx}";
+@source "../../../apps/web/src/**/*.{tsx,mdx}";
 
 @custom-variant dark (&:is(.dark *));
 
