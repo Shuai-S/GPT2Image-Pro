@@ -32,7 +32,7 @@ export type AdminAnnouncementItem = {
   updatedAt: string;
 };
 
-export const ANNOUNCEMENT_ADMIN_LIST_CACHE_TAG = "admin-announcements";
+const ANNOUNCEMENT_ADMIN_LIST_CACHE_TAG = "admin-announcements";
 
 const withAnnouncementAction = (name: string) =>
   protectedAction.metadata({ action: `announcements.${name}` });
