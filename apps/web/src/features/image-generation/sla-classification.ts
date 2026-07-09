@@ -29,6 +29,11 @@ export const USER_INPUT_LIMIT_PATTERNS = [
   "image_too_large",
   "image dimensions exceed",
   "decompression bomb",
+  // 请求体/上传体过大(413)：上游中转常以"payload too large"等文案回传，切后端无解，算用户错。
+  "payload too large",
+  "payload_too_large",
+  "request entity too large",
+  "content too large",
 ];
 
 const USER_REQUEST_PATTERNS = [

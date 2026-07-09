@@ -30,15 +30,20 @@ import {
   isUnclassifiedBackendError,
   recordImageBackendSchedulerSwitch,
   releaseImageBackendInflightLease,
+  renewImageBackendInflightLease,
   reportImageBackendResult,
   resolveImageBackendPoolConfig,
-  renewImageBackendInflightLease,
 } from "@/features/image-backend-pool/service";
 import type {
   ImageBackendAccountBackend,
   ImageBackendPreferenceMode,
   ImageBackendRequestKind,
 } from "@/features/image-backend-pool/types";
+import {
+  isAbortLikeError,
+  mergeAbortSignals,
+  PER_ATTEMPT_TIMEOUT_ERROR,
+} from "./abort-signal-utils";
 import { runAdobeDirectImageRequest } from "./adobe-direct";
 import {
   pickAdobeFamilyFromModel,
@@ -59,10 +64,6 @@ import {
   generateImageWithChatGptWeb,
 } from "./chatgpt-web";
 import {
-  getInputImageUrl,
-  isImageDownloadUpstreamError,
-} from "./input-image-url";
-import {
   buildGoogleImageRequest,
   buildGoogleImageUrl,
   getGoogleImageHeaders,
@@ -70,15 +71,14 @@ import {
   parseGoogleImageResponse,
 } from "./google-image-protocol";
 import {
+  getInputImageUrl,
+  isImageDownloadUpstreamError,
+} from "./input-image-url";
+import {
   appendImagesUpstreamNonce,
   buildOpenAIPromptCacheKey,
   buildPromptCacheSalt,
 } from "./openai-prompt-cache";
-import {
-  isAbortLikeError,
-  mergeAbortSignals,
-  PER_ATTEMPT_TIMEOUT_ERROR,
-} from "./abort-signal-utils";
 import {
   normalizeImageBackground,
   normalizeOutputCompression,
@@ -727,6 +727,44 @@ function getHttpErrorMessage(
   return apiError ? `${fallback}: ${apiError}` : `${fallback}: ${trimmedBody}`;
 }
 
+// 判定上游 HTTP 响应是否为"请求体过大"(413)或"URI 过长"(414)。命中时调用方应
+// 当作用户错直接返回不重试，并把 Content-Length 等诊断信息拼进错误文案。
+export function isHttpPayloadTooLargeStatus(response: Response) {
+  return response.status === 413 || response.status === 414;
+}
+
+/**
+ * 构造 413/414 的诊断错误文案：把上游响应体、上游声明的请求上限(Content-Length/
+ * Retry-After)与文案一并拼进去，便于运营在日志中比对"我方阈值 vs 上游阈值"。
+ * 仅在 HTTP 413/414 时调用；其它状态仍走 getHttpErrorMessage 的常规文案。
+ */
+function getPayloadTooLargeMessage(
+  response: Response,
+  rawBody: string,
+  apiName: "Images API" | "Responses API" | "Adobe Firefly API"
+) {
+  const fallback = `Upstream ${apiName} returned HTTP ${response.status}`;
+  const upstreamContentLength = response.headers.get("content-length");
+  const retryAfter = response.headers.get("retry-after");
+  const trimmedBody = truncateResponseBody(rawBody);
+  const segments: string[] = [];
+  if (trimmedBody) {
+    segments.push(
+      trimmedBody.startsWith("<")
+        ? "HTML response body. Check that the API base URL points to an OpenAI-compatible /v1 endpoint."
+        : trimmedBody
+    );
+  }
+  if (upstreamContentLength) {
+    segments.push(`upstream content-length: ${upstreamContentLength}`);
+  }
+  if (retryAfter) {
+    segments.push(`retry-after: ${retryAfter}`);
+  }
+  if (segments.length === 0) return fallback;
+  return `${fallback}: ${segments.join(" | ")}`;
+}
+
 function getNonJsonErrorMessage(
   rawBody: string,
   apiName: "Images API" | "Responses API",
@@ -1340,7 +1378,11 @@ async function retryPoolBackendResult(
       // 只在 per-attempt 信号触发时翻成可重试错误；若 parentSignal 已 abort
       // （外层总超时），仍让原错误冒泡到调用方以彻底终止全链；避免把全局
       // 总超时误判为"可重试"导致持续尝试已经过期的请求。
-      if (attemptSignal?.aborted && !parentSignal?.aborted && isAbortLikeError(error)) {
+      if (
+        attemptSignal?.aborted &&
+        !parentSignal?.aborted &&
+        isAbortLikeError(error)
+      ) {
         result = { error: PER_ATTEMPT_TIMEOUT_ERROR };
       } else {
         throw error;
@@ -1821,7 +1863,9 @@ async function parseChatCompletionsResponse(
   if (!response.ok) {
     const rawBody = await response.text().catch(() => "");
     return {
-      error: getHttpErrorMessage(response, rawBody, "Responses API"),
+      error: isHttpPayloadTooLargeStatus(response)
+        ? getPayloadTooLargeMessage(response, rawBody, "Responses API")
+        : getHttpErrorMessage(response, rawBody, "Responses API"),
       ...responseRetryMetadata,
       ...extractPayloadRetryMetadata(safeParseJson(rawBody)),
     };
@@ -3661,7 +3705,9 @@ async function parseResponsesResponse(
   if (!response.ok) {
     const rawBody = await response.text().catch(() => "");
     return {
-      error: getHttpErrorMessage(response, rawBody, "Responses API"),
+      error: isHttpPayloadTooLargeStatus(response)
+        ? getPayloadTooLargeMessage(response, rawBody, "Responses API")
+        : getHttpErrorMessage(response, rawBody, "Responses API"),
       ...responseRetryMetadata,
       ...extractPayloadRetryMetadata(safeParseJson(rawBody)),
     };
@@ -3893,7 +3939,9 @@ async function parseImageResponse(
   if (!response.ok) {
     const rawBody = await response.text().catch(() => "");
     return {
-      error: getHttpErrorMessage(response, rawBody, "Images API"),
+      error: isHttpPayloadTooLargeStatus(response)
+        ? getPayloadTooLargeMessage(response, rawBody, "Images API")
+        : getHttpErrorMessage(response, rawBody, "Images API"),
       ...responseRetryMetadata,
       ...extractPayloadRetryMetadata(safeParseJson(rawBody)),
     };
@@ -4091,7 +4139,9 @@ async function parseTaskStatusResponse(response: Response) {
   if (!response.ok) {
     const rawBody = await response.text().catch(() => "");
     return {
-      error: getHttpErrorMessage(response, rawBody, "Images API"),
+      error: isHttpPayloadTooLargeStatus(response)
+        ? getPayloadTooLargeMessage(response, rawBody, "Images API")
+        : getHttpErrorMessage(response, rawBody, "Images API"),
       payload: null,
     };
   }
@@ -4166,7 +4216,11 @@ async function postTaskImageGeneration(
 
   if (!response.ok) {
     const rawBody = await response.text().catch(() => "");
-    return { error: getHttpErrorMessage(response, rawBody, "Images API") };
+    return {
+      error: isHttpPayloadTooLargeStatus(response)
+        ? getPayloadTooLargeMessage(response, rawBody, "Images API")
+        : getHttpErrorMessage(response, rawBody, "Images API"),
+    };
   }
 
   const contentType = response.headers.get("content-type") || "";

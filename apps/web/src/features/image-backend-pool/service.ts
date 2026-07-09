@@ -60,8 +60,8 @@ import type { ApiConfig } from "@/features/image-generation/types";
 import {
   imageBackendApiInterfaceAllowsRequest,
   normalizeChatCompletionsUpstreamMode,
-  normalizeImageBackendApiProtocol,
   normalizeImageBackendApiInterfaceMode,
+  normalizeImageBackendApiProtocol,
   normalizeImagesUpstreamMode,
 } from "./api-interface-mode";
 import {
@@ -82,8 +82,8 @@ import type {
   ContentSafetyOverride,
   ImageBackendAccountBackend,
   ImageBackendAccountPlanFilter,
-  ImageBackendApiProtocol,
   ImageBackendApiInterfaceMode,
+  ImageBackendApiProtocol,
   ImageBackendGroupBackendType,
   ImageBackendGroupSummary,
   ImageBackendPreferenceMode,
@@ -1718,6 +1718,14 @@ function isUserRequestBackendError(error?: string | null) {
     // 与 SLA 侧共用 USER_INPUT_LIMIT_PATTERNS(sla-classification.ts),码 + 中英文案兜底,避免
     // 两处分类器漂移;限流类(rate limit/concurrency/too many requests)不在表内,仍可切换。
     USER_INPUT_LIMIT_PATTERNS.some((pattern) => normalized.includes(pattern)) ||
+    // 请求体过大(上传图/请求超出上游或我方 body 上限):换任何后端都不解决 → 算用户错、不重试。
+    // 上游中转常以 413/414 或 "payload too large" 文案回传,因此按码与文案双重判定。
+    normalized.includes("http 413") ||
+    normalized.includes("http 414") ||
+    normalized.includes("payload too large") ||
+    normalized.includes("payload_too_large") ||
+    normalized.includes("request entity too large") ||
+    normalized.includes("content too large") ||
     normalized.includes(
       "the image data you provided does not represent a valid image"
     ) ||
