@@ -48,6 +48,7 @@ import {
   getModerationFailureCharge,
   getTextChatSuccessTargetCredits,
 } from "./billing-policy";
+import { dispatchConcurrentChannels } from "./dispatch";
 import { toClientErrorMessage } from "./error-sanitize";
 import { buildInputImagesMetadata } from "./generation-metadata";
 import { generativeRepairImage } from "./generative-repair";
@@ -55,9 +56,9 @@ import { restoreImage } from "./image-restoration";
 import { maskedOutpaintImage } from "./masked-outpaint";
 import {
   getImageModelPricingBreakdown,
+  type ImageModelPricingBreakdown,
   resolveConfiguredImageModelMultiplier,
   resolveFixedImageModelCharge,
-  type ImageModelPricingBreakdown,
 } from "./model-pricing-adapter";
 import {
   detectImageOutputFormatFromBuffer,
@@ -2305,8 +2306,13 @@ async function runQueuedImageGenerationForUser({
     }
   };
 
-  const attemptGeneration = async (background: typeof input.background) => {
-    const commonSignal = AbortSignal.timeout(totalTimeoutMs);
+  const attemptGeneration = async (
+    background: typeof input.background,
+    channelSignal?: AbortSignal
+  ) => {
+    // 渠道并发竞赛时，每条渠道传入自己独立的 AbortSignal 替换 commonSignal，
+    // 使胜出渠道触发其它渠道的 fetch abort。默认串行路径保留原 commonSignal。
+    const commonSignal = channelSignal ?? AbortSignal.timeout(totalTimeoutMs);
     return input.mode === "edit"
       ? await editImage(
           config,
@@ -2401,30 +2407,32 @@ async function runQueuedImageGenerationForUser({
     input.transparentMatte === true &&
     !(input.mode === "chat" && input.agentMode === true);
   // 不透明重生成 + 服务端 ISNet 抠图。opaque 自身失败则原样返回其错误,不去 matte。
-  const fallbackToOpaqueMatte = async () => {
-    const opaque = await attemptGeneration(undefined);
+  const fallbackToOpaqueMatte = async (signal?: AbortSignal) => {
+    const opaque = await attemptGeneration(undefined, signal);
     if (opaque.error) {
       return opaque;
     }
     return applyTransparentMatte(opaque);
   };
-  const runGenerationAttempt = async () => {
+  const runGenerationAttempt = async (
+    signalOverride?: AbortSignal
+  ): Promise<GenerateImageResult> => {
     if (!transparentMatteEnabled) {
-      return attemptGeneration(input.background);
+      return attemptGeneration(input.background, signalOverride);
     }
     // 后端不支持透明有两条出口:generateImage/editImage 吞错后以 result.error 返回(主路径),
     // 少数路径会 throw。两条都要触发回退,否则用户仍只看到 400。
     try {
-      const first = await attemptGeneration(input.background);
+      const first = await attemptGeneration(input.background, signalOverride);
       if (first.error && isTransparentUnsupportedError(first.error)) {
-        return fallbackToOpaqueMatte();
+        return fallbackToOpaqueMatte(signalOverride);
       }
       return first;
     } catch (error) {
       if (!isTransparentUnsupportedError(error)) {
         throw error;
       }
-      return fallbackToOpaqueMatte();
+      return fallbackToOpaqueMatte(signalOverride);
     }
   };
 
@@ -2508,7 +2516,37 @@ async function runQueuedImageGenerationForUser({
     }
 
     try {
-      result = await runGenerationAttempt();
+      // 渠道并发竞赛调度：运营在「性能」分组配置 IMAGE_CONCURRENT_CHANNELS。
+      // Agent 多轮流式不并发（事件乱序、孤儿存储风险高），avatar/瀑布流内部的
+      // editImage 闭包不并发（块内单渠道可靠），其它 generate/edit/chat 直接
+      // 走串行（channels=1 默认）。共享 generationId 保证扣费幂等。
+      const concurrentChannels = await getRuntimeSettingNumber(
+        "IMAGE_CONCURRENT_CHANNELS",
+        1,
+        { positive: true }
+      );
+      const commonSignal = AbortSignal.timeout(totalTimeoutMs);
+      const isChatAgent = input.mode === "chat" && input.agentMode === true;
+      const effectiveChannels =
+        concurrentChannels > 1 && !isChatAgent ? concurrentChannels : 1;
+      if (effectiveChannels > 1) {
+        result = await dispatchConcurrentChannels<GenerateImageResult>({
+          channels: effectiveChannels,
+          attemptOne: ({ signal }) => runGenerationAttempt(signal),
+          isSuccess: (r) => Boolean(r) && !r.error,
+          buildAllFailed: (errors) => {
+            // 全失败：取最后一条有意义的结果（含 error 文案）回传给上层失败分支。
+            const lastDefined = [...errors].filter(Boolean).pop() as
+              | GenerateImageResult
+              | undefined;
+            return lastDefined ?? { error: "All concurrent channels failed" };
+          },
+          parentSignal: commonSignal,
+          context: { generationId, mode: input.mode },
+        });
+      } else {
+        result = await runGenerationAttempt(commonSignal);
+      }
     } catch (error) {
       // 同上:生成尝试阶段的 DB/内部异常也脱敏,避免裸 SQL 漏到前端。
       const message = toClientErrorMessage(
