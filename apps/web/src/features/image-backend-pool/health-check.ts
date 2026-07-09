@@ -20,6 +20,10 @@ import type {
   ImagesUpstreamMode,
 } from "./types";
 
+// 注意：system-settings 在 module 顶层 import 会通过 @repo/database 拖入 DB 连接，
+// 破坏本模块的 DB-free 单测可加载性（health-check.test.ts 不连库）。改为在
+// resolveHealthCheckTimeoutMs 内动态 import，把 DB 拖入时机推迟到真正运行时。
+
 /**
  * 测活结果状态：
  * - `ok`：真实返回了图片。
@@ -66,12 +70,36 @@ export interface ImageApiHealthCheckInput {
 
 // 真实出图可能较慢（实测有可用后端需 45s+），给慢但可用的后端留足时间，
 // 避免把"慢"误判成"不可用"。仍设上限防止挂死。
+// 默认值与下界由运营在系统设置「性能」分组 IMAGE_HEALTH_CHECK_TIMEOUT_MS 调整。
 const DEFAULT_TIMEOUT_MS = 90_000;
 const MIN_TIMEOUT_MS = 5_000;
 const MAX_TIMEOUT_MS = 180_000;
 const HEALTH_CHECK_PROMPT =
   "Health check: a small solid red circle centered on a plain white background.";
 const MAX_DIAGNOSTIC_TEXT_LENGTH = 4000;
+
+/**
+ * 读取运营配置的测活超时（毫秒）。未配置或非法时回退 DEFAULT_TIMEOUT_MS。
+ * 调用方传 input.timeoutMs 显式覆盖时，仍受 [MIN, MAX] 钳制。
+ *
+ * 动态 import system-settings：顶层 import 会经 @repo/database 拖入 DB 连接，
+ * 破坏 health-check DB-free 单测可加载性。
+ */
+async function resolveHealthCheckTimeoutMs(override?: number) {
+  const { getRuntimeSettingNumber } = await import(
+    "@repo/shared/system-settings"
+  );
+  const configured = await getRuntimeSettingNumber(
+    "IMAGE_HEALTH_CHECK_TIMEOUT_MS",
+    DEFAULT_TIMEOUT_MS,
+    { positive: true }
+  );
+  const base =
+    typeof override === "number" && Number.isFinite(override) && override > 0
+      ? override
+      : configured;
+  return Math.min(Math.max(base, MIN_TIMEOUT_MS), MAX_TIMEOUT_MS);
+}
 
 type HealthCheckImageOutput = {
   imageBase64?: string;
@@ -216,10 +244,10 @@ export function interpretImageHealthResult(
 export async function checkImageBackendApiHealth(
   input: ImageApiHealthCheckInput
 ): Promise<ImageApiHealthResult> {
-  const timeoutMs = Math.min(
-    Math.max(input.timeoutMs ?? DEFAULT_TIMEOUT_MS, MIN_TIMEOUT_MS),
-    MAX_TIMEOUT_MS
-  );
+  const timeoutMs = await resolveHealthCheckTimeoutMs(input.timeoutMs);
+  // 外部取消信号：管理员在前端点"终止测试"时 input.signal.abort()，立即让本
+  // 次 fetch abort，并在不可达文案里标注"已手动终止"以便运营区分超时/手动。
+  const manualAbort = input.signal?.aborted === true;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   if (input.signal) {
@@ -269,7 +297,8 @@ export async function checkImageBackendApiHealth(
         status: "unreachable",
         latencyMs,
         imageReturned: false,
-        message: `超时（${timeoutMs}ms）或已取消`,
+        // 区分"超时自动 abort"与"管理员手动 abort"：前者给超时文案，后者标注"已手动终止"。
+        message: manualAbort ? "已手动终止" : `超时（${timeoutMs}ms）或已取消`,
       };
     }
     const message =

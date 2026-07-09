@@ -60,7 +60,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useAction } from "next-safe-action/hooks";
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import {
@@ -98,7 +98,6 @@ import {
   setImageBackendApiEnabledAction,
   setSub2ApiAutoSyncTaskEnabledAction,
   setSub2ApiAutoSyncTaskOverwriteLocalUnavailableStateAction,
-  testImageBackendApiAction,
   updateSub2ApiAutoSyncTaskOptionsAction,
 } from "./actions";
 import { ChatgptRegisterTab } from "./chatgpt-register-tab";
@@ -1857,7 +1856,9 @@ export function ImageBackendPoolAdminPanel({
   const [apiHealthChecks, setApiHealthChecks] = useState<
     Record<string, ApiHealthCheckView>
   >({});
-  const { executeAsync: testApi } = useAction(testImageBackendApiAction);
+  // 每个 API 正在测活的 AbortController：前端 abort 时由对应 controller 触发
+  // probe API route 的 request.signal 中断上游 fetch，从而回报"已手动终止"。
+  const testingAbortControllersRef = useRef(new Map<string, AbortController>());
 
   const { executeAsync: runSub2ApiManualSync } = useAction(
     runSub2ApiManualSyncAction
@@ -1988,6 +1989,11 @@ export function ImageBackendPoolAdminPanel({
   /**
    * 对单个 API 后端发起真实测活，并只更新该行的加载态。
    *
+   * 改用 /api/admin/image-backend-pool/probe route + 前端 AbortController：Server
+   * Action 无法把前端 abort 信号中继到长任务；route 模式下前端 abort 即可让
+   * serve 侧 request.signal 触发，probe 内 AbortController 取消上游 fetch，
+   * 回报 unreachable + "已手动终止"，管理员可手动停止挂死测活。
+   *
    * @param apiId 需要测活的 imageBackendApi id。
    * @returns Promise<void>；成功或可识别失败会提示结果，服务端异常提示通用错误。
    * @sideEffects 消耗一次上游出图额度、更新后端健康字段、触发列表刷新。
@@ -1996,15 +2002,33 @@ export function ImageBackendPoolAdminPanel({
     setTestingApiIds((current) =>
       current.includes(apiId) ? current : [...current, apiId]
     );
+    const controller = new AbortController();
+    testingAbortControllersRef.current.set(apiId, controller);
 
     try {
-      const response = await testApi({ id: apiId });
-      if (response?.serverError) {
-        throw new Error(response.serverError);
+      const response = await fetch("/api/admin/image-backend-pool/probe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: apiId }),
+        signal: controller.signal,
+      });
+      let payload: {
+        success?: boolean;
+        id?: string;
+        name?: string;
+        result?: ApiHealthCheckView["result"];
+        error?: string;
+      } = {};
+      try {
+        payload = (await response.json()) as typeof payload;
+      } catch {
+        // 响应非 JSON（多见于网络中断）；以状态码兜底。
       }
-
-      const result = response?.data?.result;
-      const name = response?.data?.name ?? "";
+      if (!response.ok) {
+        throw new Error(payload.error || `测活失败（HTTP ${response.status}）`);
+      }
+      const result = payload.result;
+      const name = payload.name ?? "";
       if (!result) {
         throw new Error("测活失败");
       }
@@ -2021,25 +2045,39 @@ export function ImageBackendPoolAdminPanel({
           `测活成功：${name} 真实返回了图片（${result.latencyMs}ms）`
         );
       } else {
+        const isManualAbort = result.message.startsWith("已手动终止");
         const detail =
           result.status === "no_image"
             ? "连接成功但未返回图片（可能模型不支持出图）"
             : result.status === "auth_failed"
               ? "密钥被拒绝"
               : result.status === "unreachable"
-                ? "无法连接或超时"
+                ? isManualAbort
+                  ? "已手动终止"
+                  : "无法连接或超时"
                 : "出图失败";
-        toast.error(`测活失败：${name} ${detail}`);
+        if (isManualAbort) {
+          toast.info(`已手动终止测活：${name}`);
+        } else {
+          toast.error(`测活失败：${name} ${detail}`);
+        }
       }
       reload();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "测活失败";
+      // 前端 abort（手动终止）会以 AbortError 进入此分支；以 info 提示而非错误。
+      const isAbort =
+        error instanceof DOMException && error.name === "AbortError";
+      const message = isAbort
+        ? "已手动终止"
+        : error instanceof Error
+          ? error.message
+          : "测活失败";
       setApiHealthChecks((current) => ({
         ...current,
         [apiId]: {
           result: {
             ok: false,
-            status: "error",
+            status: "unreachable",
             latencyMs: 0,
             imageReturned: false,
             message,
@@ -2048,10 +2086,22 @@ export function ImageBackendPoolAdminPanel({
           checkedAt: new Date().toISOString(),
         },
       }));
-      toast.error(message);
+      if (isAbort) {
+        toast.info("已手动终止测活");
+      } else {
+        toast.error(message);
+      }
     } finally {
+      testingAbortControllersRef.current.delete(apiId);
       setTestingApiIds((current) => current.filter((id) => id !== apiId));
     }
+  };
+
+  /** 管理员手动终止正在进行的测活：触发前端 AbortController，server route
+   * 收到 request.signal 命中后取消上游 fetch，回传 unreachable + "已手动终止"。 */
+  const abortApiHealthCheck = (apiId: string) => {
+    const controller = testingAbortControllersRef.current.get(apiId);
+    if (controller) controller.abort();
   };
 
   const runManualRefreshTokenImport = async () => {
@@ -4438,6 +4488,17 @@ export function ImageBackendPoolAdminPanel({
                             )}
                             测活
                           </Button>
+                          {testingApiIds.includes(api.id) ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => abortApiHealthCheck(api.id)}
+                              title="手动终止测活"
+                            >
+                              <Ban className="mr-2 h-4 w-4" />
+                              终止
+                            </Button>
+                          ) : null}
                           <Button
                             variant="outline"
                             size="sm"
