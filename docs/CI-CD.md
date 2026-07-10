@@ -8,7 +8,7 @@
 | 文件 | 触发 | 作用 |
 |---|---|---|
 | `.github/workflows/ci.yml` | PR / push → `main`，手动 | 提交门禁：文档镜像、风格、类型、测试、构建、容器可构建性 |
-| `.github/workflows/docker-release.yml` | push → `main` / tag `v*`，手动 | 镜像 CI：构建 4 个组件；合法版本 tag 原子移动 release descriptor channel 并起草 GitHub Release |
+| `.github/workflows/docker-release.yml` | push → `main` / `my-main`，tag `v*`，手动 | 镜像 CI：构建 4 个组件；合法版本 tag 原子移动 release descriptor channel 并起草 GitHub Release |
 | `.github/actions/setup/action.yml` | 被 ci.yml 复用 | 统一 Node 22 + pnpm + frozen-lockfile 安装 |
 | `.github/dependabot.yml` | 每周 | 依赖 / Action 安全更新自动开 PR |
 
@@ -32,13 +32,13 @@
 
 ## docker-release.yml —— 镜像 CI 与发布
 
-- 触发：推送到 `main`、推送形如 `v*` 的 tag、或手动触发。
+- 触发：推送到 `main` 或 `my-main`、推送形如 `v*` 的 tag、或手动触发。
 - 镜像命名空间：运行时从 `GITHUB_REPOSITORY_OWNER` 小写化得到，例如 fork
   `Shuai-S/GPT2Image-Pro` 会推送到 `ghcr.io/shuai-s/*`。
 - 矩阵构建向 GHCR 推送 `web`、`migrate`、`chatgpt-web-proxy`、
   `chatgpt-register` 四个组件。构建阶段只写本次 workflow 唯一的
   `sha-<commit>-<run-id>-<run-attempt>` 源标签。
-- `main` 分支构建 `linux/amd64`，不产生消费者 channel。版本 tag 为 `web`、
+- `main` 与 `my-main` 分支构建 `linux/amd64`，不产生消费者 channel。版本 tag 为 `web`、
   `migrate`、`chatgpt-web-proxy` 构建 `linux/amd64,linux/arm64`；
   `chatgpt-register` 因 Wine/x86 依赖仅构建 `linux/amd64`。
 - promotion 只接受完整的 `vX.Y.Z-(alpha|beta|rc).N`（正式版无后缀）。四组件仅发布不可变
@@ -61,8 +61,8 @@
 版本格式：`v<MAJOR>.<MINOR>.<PATCH>-<alpha|beta|rc>.<N>`（正式版去后缀）。
 
 ```bash
-# 推送 main 只构建 run-scoped 源镜像，不移动发布 channel：
-git push origin main
+# 推送 main 或 my-main 只构建 run-scoped 源镜像，不移动发布 channel：
+git push origin my-main
 
 # 在目标提交上打完整版本 tag 才会提升 exact 与 descriptor channel：
 git tag v0.2.0-rc.1
