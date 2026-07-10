@@ -35,6 +35,7 @@ const validRow: GenerationTaskWorkerRow = {
   userId: "user-1",
   apiKeyId: "key-1",
   taskType: "image",
+  userConcurrency: 2,
   initialPayload: { generationId: "gen-1" },
   requestPayload: {
     kind: "image_edit",

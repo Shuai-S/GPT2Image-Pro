@@ -33,6 +33,7 @@ const row = {
   userId: "user-1",
   apiKeyId: "key-1",
   taskType: "image" as const,
+  userConcurrency: 2,
   initialPayload: { generationId: "gen-1" },
   requestPayload: null,
 };

@@ -91,6 +91,12 @@ type ImageSnapshot = {
   pending: Generation[];
 };
 
+type ImageExecutionOutcome =
+  | { status: "completed" }
+  | { status: "failed"; error: Error }
+  | { status: "requeue" }
+  | { status: "thrown"; error: unknown };
+
 /**
  * 校验并分类一组图像业务行。
  *
@@ -161,13 +167,114 @@ function requiredExecutionCapability(
 }
 
 /**
+ * 把 task 入队时持久化的用户并发快照收窄为本批 worker 数量。
+ *
+ * @param userConcurrency task 行的套餐并发快照。
+ * @param itemCount 本次仍需执行的 generation 数量。
+ * @returns 1..itemCount 的有限整数；异常快照回退为 1。
+ * @sideEffects 无。
+ */
+function imageWorkerCount(userConcurrency: number, itemCount: number): number {
+  const normalized = Math.floor(userConcurrency);
+  return Number.isFinite(normalized) && normalized > 0
+    ? Math.min(itemCount, normalized)
+    : 1;
+}
+
+/**
+ * 在单一 task 租约内有界并行执行未决 generation。
+ *
+ * @param input 原始 ID 顺序、持久并发、同一 fencing token/signal 与执行快照。
+ * @param dependencies 统一图像管线及业务行重查依赖。
+ * @returns 按 unresolvedIds 下标保存的执行观察；未派发项保持 undefined。
+ * @sideEffects 最多同时调用 userConcurrency 个统一图像管线，并在每项返回后重查业务行。
+ * @failureMode 明确失败、pending/缺失、异常或 signal 中止会停止继续派发；已在途项会等待
+ * 收敛，避免 resolver 返回后仍有旧租约业务运行。
+ */
+async function executeUnresolvedImages(
+  input: {
+    row: GenerationTaskWorkerRow;
+    request: Extract<
+      GenerationTaskRequestPayload,
+      { kind: "image_generate" | "image_edit" }
+    >;
+    generationIds: readonly string[];
+    unresolvedIds: readonly string[];
+    executionToken: string;
+    context: GenerationTaskExecutionContext;
+    inputs: readonly LoadedGenerationTaskInput[];
+    signal: AbortSignal;
+  },
+  dependencies: GenerationTaskResolverDependencies
+): Promise<Array<ImageExecutionOutcome | undefined>> {
+  const outcomes: Array<ImageExecutionOutcome | undefined> = Array.from({
+    length: input.unresolvedIds.length,
+  });
+  let nextIndex = 0;
+  let stopDispatch = false;
+
+  const runWorker = async () => {
+    while (!stopDispatch && !input.signal.aborted) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const generationId = input.unresolvedIds[index];
+      if (!generationId) return;
+
+      try {
+        await dependencies.runImage({
+          row: input.row,
+          request: input.request,
+          generationId,
+          executionToken: input.executionToken,
+          context: input.context,
+          inputs: input.inputs,
+          signal: input.signal,
+        });
+        const rows = await dependencies.readImageRows(input.generationIds);
+        const snapshot = inspectImageRows(
+          rows,
+          input.generationIds,
+          input.row.userId
+        );
+        const current = snapshot.byId.get(generationId);
+        if (current?.status === "failed") {
+          outcomes[index] = {
+            status: "failed",
+            error: new Error(current.error || "Image generation failed"),
+          };
+          stopDispatch = true;
+          return;
+        }
+        if (!current || current.status === "pending") {
+          outcomes[index] = { status: "requeue" };
+          stopDispatch = true;
+          return;
+        }
+        outcomes[index] = { status: "completed" };
+      } catch (error) {
+        outcomes[index] = { status: "thrown", error };
+        stopDispatch = true;
+        return;
+      }
+    }
+  };
+
+  const workerCount = imageWorkerCount(
+    input.row.userConcurrency,
+    input.unresolvedIds.length
+  );
+  await Promise.all(Array.from({ length: workerCount }, runWorker));
+  return outcomes;
+}
+
+/**
  * 对账并按需执行一个图像任务。
  *
  * @param input task、严格请求或 legacy IDs、租约与执行模式。
  * @param dependencies 数据库、维护、鉴权与业务管线适配。
  * @returns 只有全部业务行终结才返回 task 终态；否则显式返回两类 requeue。
  * @throws 数据库、维护、输入存储或业务管线异常，交 core 作为暂态错误处理。
- * @sideEffects 可运行超时维护、读取输入并顺序调用统一图像管线。
+ * @sideEffects 可运行超时维护、读取输入并按 task 持久并发调用统一图像管线。
  */
 async function resolveImageTask(
   input: {
@@ -238,31 +345,34 @@ async function resolveImageTask(
     return !row || row.status === "pending";
   });
 
-  for (const generationId of unresolvedIds) {
-    await dependencies.runImage({
+  const outcomes = await executeUnresolvedImages(
+    {
       row: input.row,
       request: input.request,
-      generationId,
+      generationIds: input.generationIds,
+      unresolvedIds,
       executionToken: input.executionToken,
       context: authorization.context,
       inputs: loadedInputs,
       signal: input.signal,
-    });
-    rows = await dependencies.readImageRows(input.generationIds);
-    snapshot = inspectImageRows(rows, input.generationIds, input.row.userId);
-    const current = snapshot.byId.get(generationId);
-    if (current?.status === "failed") {
-      return failedResolution(
-        "image",
-        new Error(current.error || "Image generation failed"),
-        dependencies
-      );
-    }
-    if (!current || current.status === "pending") {
-      return executionRequeue();
-    }
+    },
+    dependencies
+  );
+  const blockingOutcome = outcomes.find(
+    (outcome) => outcome && outcome.status !== "completed"
+  );
+  if (blockingOutcome?.status === "thrown") {
+    throw blockingOutcome.error;
+  }
+  if (blockingOutcome?.status === "failed") {
+    return failedResolution("image", blockingOutcome.error, dependencies);
+  }
+  if (blockingOutcome?.status === "requeue") {
+    return executionRequeue();
   }
 
+  rows = await dependencies.readImageRows(input.generationIds);
+  snapshot = inspectImageRows(rows, input.generationIds, input.row.userId);
   if (snapshot.pending.length > 0 || snapshot.missingIds.length > 0) {
     return executionRequeue();
   }

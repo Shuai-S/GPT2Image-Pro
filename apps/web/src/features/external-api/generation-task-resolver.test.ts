@@ -27,6 +27,7 @@ const taskRow: GenerationTaskWorkerRow = {
   userId: "user-1",
   apiKeyId: "key-1",
   taskType: "image",
+  userConcurrency: 2,
   initialPayload: { generationId: "gen-1" },
   requestPayload: null,
 };
@@ -48,6 +49,16 @@ const imageRequest = {
   responseFormat: "url" as const,
   input: { prompt: "移除背景", model: "gpt-image-2" },
   inputReferences: [sourceReference],
+};
+
+const batchGenerationIds = ["gen-1", "gen-2", "gen-3", "gen-4"];
+const batchGenerateRequest = {
+  kind: "image_generate" as const,
+  relayOnly: false,
+  generationIds: batchGenerationIds,
+  createdAtEpochSeconds: 1_788_000_000,
+  responseFormat: "url" as const,
+  input: { prompt: "生成四张海报", model: "gpt-image-2" },
 };
 
 const videoRequest = {
@@ -81,6 +92,26 @@ function createImageRow(overrides: Partial<Generation> = {}): Generation {
     completedAt: now,
     ...overrides,
   };
+}
+
+/** 构造一个由测试显式释放的 Promise，用于观察并发派发边界。 */
+function deferred() {
+  let release: () => void = () => {
+    throw new Error("Deferred promise was not initialized");
+  };
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
+
+/** 等待事件循环推进，直到并发测试的可观察条件成立。 */
+async function waitUntil(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error("Timed out waiting for resolver concurrency state");
 }
 
 /**
@@ -210,6 +241,168 @@ describe("generation task resolver", () => {
         signal: controller.signal,
       })
     );
+  });
+
+  it("image_generate 按持久 userConcurrency 有界并行且保持结果 ID 顺序", async () => {
+    const controller = new AbortController();
+    const gates = new Map(
+      batchGenerationIds.map((generationId) => [generationId, deferred()])
+    );
+    const completedRows = new Map<string, Generation>();
+    const started: string[] = [];
+    let active = 0;
+    let maxActive = 0;
+    let harness: ReturnType<typeof createHarness>;
+    harness = createHarness({
+      runImage: async ({ generationId }) => {
+        started.push(generationId);
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        const gate = gates.get(generationId);
+        if (!gate) throw new Error(`Missing gate for ${generationId}`);
+        await gate.promise;
+        active -= 1;
+        completedRows.set(generationId, createImageRow({ id: generationId }));
+        harness.setImageRows([...completedRows.values()]);
+      },
+    });
+
+    const resolution = harness.resolvers.resolveTask({
+      row: taskRow,
+      request: batchGenerateRequest,
+      leaseToken: "lease-token-1",
+      reconcileOnly: false,
+      signal: controller.signal,
+    });
+
+    await waitUntil(() => started.length === 2);
+    expect(started).toEqual(["gen-1", "gen-2"]);
+    expect(maxActive).toBe(2);
+
+    gates.get("gen-1")?.release();
+    await waitUntil(() => started.length === 3);
+    expect(started).toEqual(["gen-1", "gen-2", "gen-3"]);
+
+    gates.get("gen-2")?.release();
+    await waitUntil(() => started.length === 4);
+    expect(started).toEqual(batchGenerationIds);
+
+    gates.get("gen-3")?.release();
+    gates.get("gen-4")?.release();
+
+    await expect(resolution).resolves.toEqual({
+      status: "completed",
+      objectType: "image",
+      resultPayload: { generationIds: batchGenerationIds },
+    });
+    expect(maxActive).toBe(2);
+    for (const [call] of harness.runImage.mock.calls) {
+      expect(call).toEqual(
+        expect.objectContaining({
+          executionToken: "lease-token-1",
+          signal: controller.signal,
+        })
+      );
+    }
+  });
+
+  it("image_edit 明确失败后停止派发尚未开始的 generation", async () => {
+    const gates = new Map([
+      ["gen-1", deferred()],
+      ["gen-2", deferred()],
+    ]);
+    const currentRows = new Map<string, Generation>();
+    const started: string[] = [];
+    let harness: ReturnType<typeof createHarness>;
+    harness = createHarness({
+      runImage: async ({ generationId }) => {
+        started.push(generationId);
+        const gate = gates.get(generationId);
+        if (!gate) throw new Error(`Unexpected dispatch for ${generationId}`);
+        await gate.promise;
+        currentRows.set(
+          generationId,
+          createImageRow({
+            id: generationId,
+            status: generationId === "gen-1" ? "failed" : "completed",
+            error: generationId === "gen-1" ? "upstream rejected" : null,
+          })
+        );
+        harness.setImageRows([...currentRows.values()]);
+      },
+    });
+
+    const resolution = harness.resolvers.resolveTask({
+      row: taskRow,
+      request: { ...imageRequest, generationIds: batchGenerationIds },
+      leaseToken: "lease-token-1",
+      reconcileOnly: false,
+      signal: new AbortController().signal,
+    });
+
+    await waitUntil(() => started.length === 2);
+    gates.get("gen-1")?.release();
+    await waitUntil(() => harness.readImageRows.mock.calls.length >= 2);
+    expect(started).toEqual(["gen-1", "gen-2"]);
+
+    gates.get("gen-2")?.release();
+    await expect(resolution).resolves.toMatchObject({
+      status: "failed",
+      objectType: "image",
+      errorPayload: { error: { message: "upstream rejected" } },
+    });
+    expect(started).toEqual(["gen-1", "gen-2"]);
+  });
+
+  it("批量执行后业务仍 pending 时停止派发并保留 attempt 重试语义", async () => {
+    const gates = new Map([
+      ["gen-1", deferred()],
+      ["gen-2", deferred()],
+    ]);
+    const currentRows = new Map<string, Generation>();
+    const started: string[] = [];
+    let harness: ReturnType<typeof createHarness>;
+    harness = createHarness({
+      runImage: async ({ generationId }) => {
+        started.push(generationId);
+        const gate = gates.get(generationId);
+        if (!gate) throw new Error(`Unexpected dispatch for ${generationId}`);
+        await gate.promise;
+        currentRows.set(
+          generationId,
+          createImageRow({
+            id: generationId,
+            ...(generationId === "gen-1"
+              ? { status: "pending", completedAt: null, storageKey: null }
+              : { status: "completed" }),
+          })
+        );
+        harness.setImageRows([...currentRows.values()]);
+      },
+    });
+
+    const resolution = harness.resolvers.resolveTask({
+      row: taskRow,
+      request: {
+        ...batchGenerateRequest,
+        generationIds: ["gen-1", "gen-2", "gen-3"],
+      },
+      leaseToken: "lease-token-1",
+      reconcileOnly: false,
+      signal: new AbortController().signal,
+    });
+
+    await waitUntil(() => started.length === 2);
+    gates.get("gen-1")?.release();
+    await waitUntil(() => harness.readImageRows.mock.calls.length >= 2);
+    gates.get("gen-2")?.release();
+
+    await expect(resolution).resolves.toEqual({
+      status: "requeue",
+      consumeAttempt: true,
+      delayMs: 2_000,
+    });
+    expect(started).toEqual(["gen-1", "gen-2"]);
   });
 
   it("接管 pending 后业务仍 pending 时消耗本次 attempt 并重排", async () => {

@@ -31,6 +31,7 @@ import {
   heartbeatGenerationTask,
   releaseUnstartedGenerationTask,
 } from "./external-async-task-store";
+import { getGenerationTaskAccessError } from "./generation-task-access";
 import {
   runGenerationTaskImage,
   runGenerationTaskVideo,
@@ -41,7 +42,6 @@ import {
   type LoadedGenerationTaskInput,
   loadGenerationTaskInputs,
 } from "./generation-task-input";
-import { getGenerationTaskAccessError } from "./generation-task-access";
 import {
   createGenerationTaskResolvers,
   type GenerationTaskExecutionCapability,
@@ -245,6 +245,7 @@ function toWorkerClaim(input: {
       userId: input.row.userId,
       apiKeyId: input.row.apiKeyId,
       taskType: input.row.taskType,
+      userConcurrency: input.row.userConcurrency,
       initialPayload: input.row.initialPayload,
       requestPayload: input.row.requestPayload,
     },

@@ -18,6 +18,7 @@ export type GenerationTaskWorkerRow = {
   userId: string;
   apiKeyId: string | null;
   taskType: "image" | "video";
+  userConcurrency: number;
   initialPayload: Record<string, unknown>;
   requestPayload: Record<string, unknown> | null;
 };
