@@ -1,7 +1,10 @@
 /**
- * 积分系统核心逻辑
+ * 积分系统核心服务。
  *
- * 实现企业级双重记账和 FIFO 过期机制
+ * 职责：实现积分发放、FIFO 消费、过期、退款相关的双重记账和预计算余额维护。
+ * 使用方：UOL 积分操作、支付履约、生图结算、管理员动作与余额查询热路径。
+ * 关键依赖：Drizzle/PostgreSQL 事务、credits_batch/credits_transaction 账本表、
+ * 系统设置与结构化日志；财务写入失败时显式回滚或上抛。
  */
 
 import { db } from "@repo/database";
@@ -12,10 +15,30 @@ import {
   creditsBatch,
   creditsTransaction,
 } from "@repo/database/schema";
-import { and, asc, eq, gt, gte, isNull, lt, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import { logEvent } from "../logger/index";
 import { getRuntimeSettingNumber } from "../system-settings";
 import { CREDIT_CONFIG_DEFAULTS } from "./config";
+import {
+  assertExpiredCreditsBalances,
+  CREDITS_EXPIRATION_PAGE_SIZE,
+  drainExpiredCreditsPages,
+  type ExpiredCreditsPageResult,
+  summarizeExpiredCreditsByUser,
+} from "./expiration";
 import {
   isUniqueConstraintViolation,
   readConsumedBatchesFromMetadata,
@@ -336,7 +359,7 @@ export async function ensureRegistrationBonusExpiry(userId: string) {
     .returning({ id: creditsBatch.id });
 
   if (updatedBatches.length > 0) {
-    await processExpiredBatches();
+    await processExpiredBatches({ userId });
   }
 }
 
@@ -910,107 +933,225 @@ export async function voidActiveSubscriptionCreditsForUpgrade(
   });
 }
 
-/**
- * 处理过期批次
- *
- * 扫描并标记所有过期的批次，同时更新用户余额。
- * 使用条件更新保证同一批次在并发运行时只会被处理一次。
- */
-export async function processExpiredBatches(options?: { userId?: string }) {
-  const now = new Date();
+/** 过期批处理的可选用户范围。 */
+export interface ProcessExpiredBatchesOptions {
+  /** 仅结算指定用户；省略时由全局 worker 并发领取。 */
+  userId?: string;
+}
 
-  const expiredBatches = await db
-    .select({
-      id: creditsBatch.id,
-    })
-    .from(creditsBatch)
-    .where(
-      and(
-        eq(creditsBatch.status, "active"),
-        options?.userId ? eq(creditsBatch.userId, options.userId) : sql`true`,
-        lt(creditsBatch.expiresAt, now),
-        gt(creditsBatch.remaining, 0)
+/**
+ * 从 node-postgres 或 Neon execute 结果中读取行数组。
+ *
+ * @param result Drizzle execute 返回的未知驱动结果。
+ * @returns 仅包含普通对象的结果行；无法识别时返回空数组。
+ * @sideEffects 无。
+ */
+function readExecutedRows(result: unknown): Record<string, unknown>[] {
+  const rows = Array.isArray(result)
+    ? result
+    : typeof result === "object" && result !== null && "rows" in result
+      ? (result as { rows?: unknown }).rows
+      : undefined;
+  return Array.isArray(rows)
+    ? rows.filter(
+        (row): row is Record<string, unknown> =>
+          typeof row === "object" && row !== null
+      )
+    : [];
+}
+
+/**
+ * 在单个短事务中领取并结算一页过期批次。
+ *
+ * @param cutoff 本次调用固定的到期截止时间，避免处理过程中不断追逐新数据。
+ * @param options 可选用户范围；用户热路径不跳锁，全局 worker 使用 SKIP LOCKED。
+ * @returns 本页已提交的批次、金额、余额更新数和至多 500 条明细。
+ * @throws 余额缺失、余额不足或条件更新数量不一致时回滚整页，禁止账实不平。
+ * @sideEffects 更新 credits_batch、批量写 credits_transaction、集合更新余额。
+ */
+async function processExpiredBatchesPage(
+  cutoff: Date,
+  options: ProcessExpiredBatchesOptions
+): Promise<ExpiredCreditsPageResult> {
+  return await db.transaction(async (tx) => {
+    const userId = options.userId;
+    const query = tx
+      .select({
+        id: creditsBatch.id,
+        userId: creditsBatch.userId,
+        amount: creditsBatch.amount,
+        remaining: creditsBatch.remaining,
+        expiresAt: creditsBatch.expiresAt,
+      })
+      .from(creditsBatch)
+      .where(
+        and(
+          eq(creditsBatch.status, "active"),
+          userId === undefined ? sql`true` : eq(creditsBatch.userId, userId),
+          isNotNull(creditsBatch.expiresAt),
+          lte(creditsBatch.expiresAt, cutoff),
+          gt(creditsBatch.remaining, 0)
+        )
+      )
+      .orderBy(asc(creditsBatch.expiresAt), asc(creditsBatch.id))
+      .limit(CREDITS_EXPIRATION_PAGE_SIZE);
+    const claimedBatches =
+      userId === undefined
+        ? await query.for("update", { skipLocked: true })
+        : await query.for("update");
+
+    if (claimedBatches.length === 0) {
+      return {
+        processedCount: 0,
+        totalExpired: 0,
+        balanceUpdates: 0,
+        details: [],
+      };
+    }
+
+    const claimedTotals = summarizeExpiredCreditsByUser(claimedBatches);
+    const lockedBalances = await tx
+      .select({
+        userId: creditsBalance.userId,
+        balance: creditsBalance.balance,
+      })
+      .from(creditsBalance)
+      .where(
+        inArray(
+          creditsBalance.userId,
+          claimedTotals.map((total) => total.userId)
+        )
+      )
+      .orderBy(asc(creditsBalance.userId))
+      .for("update");
+    const balancesByUser = new Map(
+      lockedBalances.map((balance) => [balance.userId, balance.balance])
+    );
+
+    assertExpiredCreditsBalances(claimedTotals, balancesByUser);
+
+    const processedAt = new Date();
+    const expiredBatches = await tx
+      .update(creditsBatch)
+      .set({
+        status: "expired",
+        updatedAt: processedAt,
+      })
+      .where(
+        and(
+          inArray(
+            creditsBatch.id,
+            claimedBatches.map((batch) => batch.id)
+          ),
+          eq(creditsBatch.status, "active"),
+          isNotNull(creditsBatch.expiresAt),
+          lte(creditsBatch.expiresAt, cutoff),
+          gt(creditsBatch.remaining, 0)
+        )
+      )
+      .returning({
+        id: creditsBatch.id,
+        userId: creditsBatch.userId,
+        amount: creditsBatch.amount,
+        remaining: creditsBatch.remaining,
+        expiresAt: creditsBatch.expiresAt,
+      });
+
+    if (expiredBatches.length !== claimedBatches.length) {
+      throw new Error("过期积分批次条件更新数量不一致");
+    }
+
+    const expiredTotals = summarizeExpiredCreditsByUser(expiredBatches);
+    await tx.insert(creditsTransaction).values(
+      expiredBatches.map((batch) => ({
+        id: crypto.randomUUID(),
+        userId: batch.userId,
+        type: "expiration" as const,
+        amount: batch.remaining,
+        debitAccount: `WALLET:${batch.userId}`,
+        creditAccount: "SYSTEM:expired",
+        description: `批次 ${batch.id} 过期`,
+        sourceRef: `credits_batch_expiration:${batch.id}`,
+        metadata: {
+          batchId: batch.id,
+          originalAmount: batch.amount,
+          expiredAmount: batch.remaining,
+          expiresAt: batch.expiresAt,
+        },
+      }))
+    );
+
+    const expiredValues = sql.join(
+      expiredTotals.map(
+        (total) => sql`(${total.userId}, ${total.amount}::numeric)`
+      ),
+      sql`, `
+    );
+    const balanceUpdateResult = await tx.execute(sql`
+      WITH "expired_totals" ("user_id", "amount") AS (
+        VALUES ${expiredValues}
+      )
+      UPDATE "credits_balance" AS "balance"
+      SET
+        "balance" = "balance"."balance" - "expired_totals"."amount",
+        "updated_at" = ${processedAt}
+      FROM "expired_totals"
+      WHERE "balance"."user_id" = "expired_totals"."user_id"
+        AND "balance"."balance" >= "expired_totals"."amount"
+      RETURNING "balance"."user_id"
+    `);
+    const updatedBalanceUserIds = new Set(
+      readExecutedRows(balanceUpdateResult).flatMap((row) =>
+        typeof row.user_id === "string" ? [row.user_id] : []
       )
     );
+    if (updatedBalanceUserIds.size !== expiredTotals.length) {
+      throw new Error("过期积分余额集合更新数量不一致");
+    }
 
-  const results: Array<{
-    batchId: string;
-    userId: string;
-    expiredAmount: number;
-  }> = [];
-
-  for (const batch of expiredBatches) {
-    await db.transaction(async (tx) => {
-      const [expiredBatch] = await tx
-        .update(creditsBatch)
-        .set({
-          status: "expired",
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(creditsBatch.id, batch.id),
-            eq(creditsBatch.status, "active"),
-            gt(creditsBatch.remaining, 0)
-          )
-        )
-        .returning({
-          id: creditsBatch.id,
-          userId: creditsBatch.userId,
-          amount: creditsBatch.amount,
-          remaining: creditsBatch.remaining,
-          expiresAt: creditsBatch.expiresAt,
-        });
-
-      if (!expiredBatch) {
-        return;
-      }
-
-      const transactionId = crypto.randomUUID();
-      await tx.insert(creditsTransaction).values({
-        id: transactionId,
-        userId: expiredBatch.userId,
-        type: "expiration",
-        amount: expiredBatch.remaining,
-        debitAccount: `WALLET:${expiredBatch.userId}`,
-        creditAccount: "SYSTEM:expired",
-        description: `批次 ${expiredBatch.id} 过期`,
-        metadata: {
-          batchId: expiredBatch.id,
-          originalAmount: expiredBatch.amount,
-          expiredAmount: expiredBatch.remaining,
-          expiresAt: expiredBatch.expiresAt,
-        },
-      });
-
-      await tx
-        .update(creditsBalance)
-        .set({
-          balance: sql`GREATEST(0, ${creditsBalance.balance} - ${expiredBatch.remaining})`,
-          updatedAt: new Date(),
-        })
-        .where(eq(creditsBalance.userId, expiredBatch.userId));
-
-      results.push({
-        batchId: expiredBatch.id,
-        userId: expiredBatch.userId,
-        expiredAmount: expiredBatch.remaining,
-      });
-    });
-  }
-
-  if (results.length > 0) {
-    const totalExpired = results.reduce(
-      (sum, item) => sum + item.expiredAmount,
-      0
+    const totalExpired = normalizeCreditAmount(
+      expiredTotals.reduce((sum, total) => sum + total.amount, 0)
     );
-    logEvent("credits.expired", {
-      count: results.length,
+    return {
+      processedCount: expiredBatches.length,
       totalExpired,
+      balanceUpdates: expiredTotals.length,
+      details: expiredBatches.map((batch) => ({
+        batchId: batch.id,
+        userId: batch.userId,
+        expiredAmount: batch.remaining,
+      })),
+    };
+  });
+}
+
+/**
+ * 分页处理已到期的活跃积分批次。
+ *
+ * @param options 可选用户范围；指定用户时等待并发结算，确保随后余额读取不陈旧。
+ * @returns 有界汇总：处理行数、金额、事务页数、余额更新次数和最多 100 条明细。
+ * @throws 任一页账实校验失败时停止并上抛；已提交的前序页保持幂等终态。
+ * @sideEffects 每页使用一个短事务修改批次、账本和预计算余额，并记录汇总日志。
+ */
+export async function processExpiredBatches(
+  options: ProcessExpiredBatchesOptions = {}
+) {
+  const cutoff = new Date();
+  const summary = await drainExpiredCreditsPages(() =>
+    processExpiredBatchesPage(cutoff, options)
+  );
+
+  if (summary.processedCount > 0) {
+    logEvent("credits.expired", {
+      count: summary.processedCount,
+      totalExpired: summary.totalExpired,
+      batchCount: summary.batchCount,
+      balanceUpdates: summary.balanceUpdates,
+      detailsTruncated: summary.detailsTruncated,
     });
   }
 
-  return results;
+  return summary;
 }
 
 /**

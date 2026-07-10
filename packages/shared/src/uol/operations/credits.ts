@@ -545,14 +545,35 @@ export const processExpired = defineOperation({
   title: "Process Expired Batches",
   description:
     "扫描并处理所有已过期但状态仍为 active 的积分批次。" +
-    "逐批次置 expired + 写 expiration 交易 + 扣减余额 + logEvent。" +
-    "条件更新保证每批只处理一次（幂等收敛）。" +
+    "每页有界领取后批量置 expired、写 expiration 交易并集合扣减余额。" +
+    "用户路径等待并发结算，条件更新和稳定 sourceRef 保证幂等收敛。" +
     "由 cron/getBalance/consume 内部触发。",
   input: z.object({
-    userId: z.string().describe("目标用户 ID"),
+    userId: z.string().min(1).describe("目标用户 ID"),
   }),
   output: z.object({
-    processedCount: z.number().describe("已处理的过期批次数量"),
+    processedCount: z
+      .number()
+      .int()
+      .nonnegative()
+      .describe("已处理的过期批次数量"),
+    totalExpired: z.number().nonnegative().describe("已过期的积分总额"),
+    batchCount: z.number().int().nonnegative().describe("已提交的事务页数"),
+    balanceUpdates: z
+      .number()
+      .int()
+      .nonnegative()
+      .describe("集合更新的用户余额行次数"),
+    details: z
+      .array(
+        z.object({
+          batchId: z.string(),
+          userId: z.string(),
+          expiredAmount: z.number().positive(),
+        })
+      )
+      .max(100),
+    detailsTruncated: z.boolean().describe("明细是否因固定上限被截断"),
   }),
   access: { kind: "system" },
   readOnly: false,
@@ -561,8 +582,7 @@ export const processExpired = defineOperation({
   sideEffects: ["billing"],
   hasMaintenanceWrite: true,
   execute: async (input) => {
-    const results = await processExpiredBatches({ userId: input.userId });
-    return { processedCount: results?.length ?? 0 };
+    return await processExpiredBatches({ userId: input.userId });
   },
 });
 
@@ -574,20 +594,30 @@ export const runExpireJob = defineOperation({
   domain: "credits",
   title: "Run Credits Expire Job",
   description:
-    "积分过期 cron 任务入口。扫描所有有活跃批次待过期的用户，" +
-    "逐用户调用 processExpiredBatches。依赖底层幂等保证可安全重复执行。" +
+    "积分过期 cron 任务入口。按固定页领取全局到期批次，" +
+    "多副本通过 SKIP LOCKED 并发处理。依赖底层幂等保证可安全重复执行。" +
     "通过 cron-secret Bearer token 鉴权（timingSafeEqual）。",
   input: z.object({}),
   output: z.object({
     success: z.literal(true),
-    processed: z.number().describe("过期的批次总数"),
-    details: z.array(
-      z.object({
-        batchId: z.string(),
-        userId: z.string(),
-        expiredAmount: z.number(),
-      })
-    ),
+    processed: z.number().int().nonnegative().describe("过期的批次总数"),
+    totalExpired: z.number().nonnegative().describe("过期积分总额"),
+    batchCount: z.number().int().nonnegative().describe("已提交的事务页数"),
+    balanceUpdates: z
+      .number()
+      .int()
+      .nonnegative()
+      .describe("集合更新的用户余额行次数"),
+    details: z
+      .array(
+        z.object({
+          batchId: z.string(),
+          userId: z.string(),
+          expiredAmount: z.number().positive(),
+        })
+      )
+      .max(100),
+    detailsTruncated: z.boolean().describe("明细是否因固定上限被截断"),
     timestamp: z.string(),
   }),
   access: { kind: "cron" },
@@ -597,15 +627,15 @@ export const runExpireJob = defineOperation({
   sideEffects: ["billing"],
   hasMaintenanceWrite: true,
   execute: async () => {
-    const results = await processExpiredBatches();
+    const summary = await processExpiredBatches();
     return {
       success: true as const,
-      processed: results.length,
-      details: results.map((result) => ({
-        batchId: result.batchId,
-        userId: result.userId,
-        expiredAmount: result.expiredAmount,
-      })),
+      processed: summary.processedCount,
+      totalExpired: summary.totalExpired,
+      batchCount: summary.batchCount,
+      balanceUpdates: summary.balanceUpdates,
+      details: summary.details,
+      detailsTruncated: summary.detailsTruncated,
       timestamp: new Date().toISOString(),
     };
   },

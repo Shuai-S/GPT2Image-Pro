@@ -407,6 +407,13 @@
       "when": 1783681200000,
       "tag": "0057_external_async_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1783684800000,
+      "tag": "0058_credits_expiration_indexes",
+      "breakpoints": true
     }
   ]
 }

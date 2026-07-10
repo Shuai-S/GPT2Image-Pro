@@ -533,6 +533,19 @@ export const creditsBatch = pgTable(
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
   (table) => [
+    // 全局 cron 按到期时间和 id 有界领取 active 批次；partial 条件把永久、
+    // 已消费和已过期行排除在热索引外，对齐 SKIP LOCKED 查询谓词。
+    index("credits_batch_expiration_active_idx")
+      .on(table.expiresAt, table.id)
+      .where(
+        sql`${table.status} = 'active' AND ${table.remaining} > 0 AND ${table.expiresAt} IS NOT NULL`
+      ),
+    // 余额/消费热路径只结算当前用户，user_id 前缀避免在全表到期积压中扫描。
+    index("credits_batch_user_expiration_active_idx")
+      .on(table.userId, table.expiresAt, table.id)
+      .where(
+        sql`${table.status} = 'active' AND ${table.remaining} > 0 AND ${table.expiresAt} IS NOT NULL`
+      ),
     // 幂等性约束：同一 (来源类型, 来源引用) 只能发放一次。
     // 关闭支付 webhook 重放 / 并发双发 / 注册奖励farming 等积分双重发放风险。
     // 偏索引：source_ref 为空的批次（如手动调整）不受约束。
