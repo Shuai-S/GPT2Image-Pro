@@ -37,24 +37,46 @@ INSERT INTO "subscription" (
   'active'
 );
 
--- 0059 必须从重复历史行中保留最近完整事实，并写审计后建立 user_id 唯一约束。
-INSERT INTO "subscription" (
-  "id",
-  "user_id",
-  "subscription_id",
-  "price_id",
-  "status",
-  "created_at",
-  "updated_at"
-) VALUES (
-  'migration-ci-subscription-newer',
-  'migration-ci-user',
-  'migration-ci-provider-subscription-newer',
-  'migration-ci-price-newer',
-  'trialing',
-  now() + interval '1 minute',
-  now() + interval '1 minute'
-);
+-- 0059 之前的正式版必须制造重复历史行，验证迁移会保留较新的完整事实。0059 已进入
+-- 正式版后，旧 schema 本身已禁止重复；此时就地把单行更新成同一预期赢家，避免门禁
+-- 在执行待测增量迁移前被旧版本的正确约束误杀。
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'subscription_user_id_unique'
+      AND conrelid = 'public.subscription'::regclass
+  ) THEN
+    UPDATE "subscription"
+    SET
+      "id" = 'migration-ci-subscription-newer',
+      "subscription_id" = 'migration-ci-provider-subscription-newer',
+      "price_id" = 'migration-ci-price-newer',
+      "status" = 'trialing',
+      "created_at" = now() + interval '1 minute',
+      "updated_at" = now() + interval '1 minute'
+    WHERE "id" = 'migration-ci-subscription';
+  ELSE
+    INSERT INTO "subscription" (
+      "id",
+      "user_id",
+      "subscription_id",
+      "price_id",
+      "status",
+      "created_at",
+      "updated_at"
+    ) VALUES (
+      'migration-ci-subscription-newer',
+      'migration-ci-user',
+      'migration-ci-provider-subscription-newer',
+      'migration-ci-price-newer',
+      'trialing',
+      now() + interval '1 minute',
+      now() + interval '1 minute'
+    );
+  END IF;
+END $$;
 
 INSERT INTO "credits_balance" (
   "id",
