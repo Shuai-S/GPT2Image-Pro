@@ -12,14 +12,20 @@ const mocks = vi.hoisted(() => ({
   authenticateExternalApiRequest: vi.fn(),
   canUsePlanCapability: vi.fn(),
   enqueueGenerationTask: vi.fn(),
+  fetchPublicImage: vi.fn(),
   getPlanLimits: vi.fn(),
   getPlanUploadLimits: vi.fn(),
   getRuntimeImageEditMaxReferenceImages: vi.fn(),
   logError: vi.fn(),
+  lookup: vi.fn(),
   runBatchImageGeneration: vi.fn(),
   runImageGenerationForUser: vi.fn(),
   uploadModerationImages: vi.fn(),
   validateCallbackUrl: vi.fn(),
+}));
+
+vi.mock("node:dns/promises", () => ({
+  lookup: mocks.lookup,
 }));
 
 vi.mock("@repo/shared/api-logger", () => ({
@@ -55,6 +61,12 @@ vi.mock("@/features/external-api/generation-task-service", () => ({
   enqueueGenerationTask: mocks.enqueueGenerationTask,
 }));
 
+vi.mock("@/features/external-api/safe-image-fetch", () => ({
+  fetchPublicImage: mocks.fetchPublicImage,
+  readResponseBytesWithLimit: async (response: Response) =>
+    Buffer.from(await response.arrayBuffer()),
+}));
+
 vi.mock("@/features/image-generation/batch-runner", () => ({
   runBatchImageGeneration: mocks.runBatchImageGeneration,
 }));
@@ -82,7 +94,13 @@ vi.mock("@/features/image-generation/request-utils", () => ({
   validateImageFile: vi.fn(),
 }));
 
-/** 构造带 NextRequest.nextUrl 的 multipart 图像编辑请求。 */
+/**
+ * 构造带 NextRequest.nextUrl 的 multipart 图像编辑请求。
+ *
+ * @param input 可覆盖 async 开关，默认走持久任务路径。
+ * @returns 含一张 WebP source 和一张 PNG mask 的请求。
+ * @sideEffects 在内存中构造 FormData/File，不触达网络或存储。
+ */
 function imageEditRequest(input?: { relayAsync?: boolean }): NextRequest {
   const formData = new FormData();
   formData.set("prompt", "remove the background");
@@ -114,6 +132,25 @@ function imageEditRequest(input?: { relayAsync?: boolean }): NextRequest {
   return request as NextRequest;
 }
 
+/**
+ * 构造 JSON 图像编辑请求，验证 JSON 标量白名单与 multipart 语义一致。
+ *
+ * @param body 外部请求 JSON；测试负责提供必填 prompt 与 image_url。
+ * @returns 带 NextRequest.nextUrl 的内存请求。
+ * @sideEffects 序列化 JSON，不触达网络或存储。
+ */
+function jsonImageEditRequest(body: Record<string, unknown>): NextRequest {
+  const request = new Request("https://example.test/v1/images/edits", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  Object.defineProperty(request, "nextUrl", {
+    value: new URL(request.url),
+  });
+  return request as NextRequest;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.authenticateExternalApiRequest.mockResolvedValue({
@@ -135,6 +172,13 @@ beforeEach(() => {
     maxUploadBytes: 100 * 1024 * 1024,
   });
   mocks.getRuntimeImageEditMaxReferenceImages.mockResolvedValue(4);
+  mocks.lookup.mockResolvedValue([{ address: "203.0.113.10", family: 4 }]);
+  mocks.fetchPublicImage.mockResolvedValue(
+    new Response(Uint8Array.from([9, 8, 7]), {
+      status: 200,
+      headers: { "Content-Type": "image/png" },
+    })
+  );
   mocks.validateCallbackUrl.mockImplementation(async (value: string) => value);
   mocks.enqueueGenerationTask.mockResolvedValue({
     id: "task-1",
@@ -246,5 +290,68 @@ describe("postExternalImageEdits async", () => {
     );
     expect(mocks.runBatchImageGeneration).not.toHaveBeenCalled();
     expect(mocks.runImageGenerationForUser).not.toHaveBeenCalled();
+  });
+
+  it("JSON 修复字段别名与 multipart 一致进入严格任务载荷", async () => {
+    const { postExternalImageEdits } = await import("./image-edits");
+
+    const response = await postExternalImageEdits(
+      jsonImageEditRequest({
+        prompt: "restore the old photo",
+        model: "gpt-image-2",
+        image_url: "https://cdn.example/source.png",
+        async: true,
+        hd_repair: false,
+        blockRepair: true,
+        repair_prompt: "preserve the original lettering",
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.enqueueGenerationTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          kind: "image_edit",
+          input: expect.objectContaining({
+            hdRepair: false,
+            blockRepair: true,
+            repairPrompt: "preserve the original lettering",
+          }),
+        }),
+        mediaInputs: [
+          expect.objectContaining({
+            data: Buffer.from([9, 8, 7]),
+            contentType: "image/png",
+            role: "source",
+          }),
+        ],
+      })
+    );
+    expect(mocks.runImageGenerationForUser).not.toHaveBeenCalled();
+  });
+
+  it("JSON 超长 repairPrompt 在远程媒体下载前返回 400", async () => {
+    const { postExternalImageEdits } = await import("./image-edits");
+
+    const response = await postExternalImageEdits(
+      jsonImageEditRequest({
+        prompt: "restore the old photo",
+        model: "gpt-image-2",
+        image_url: "https://cdn.example/source.png",
+        async: true,
+        repairPrompt: "x".repeat(8001),
+      })
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toEqual(
+      expect.objectContaining({
+        message: "repairPrompt must be 8000 characters or less.",
+      })
+    );
+    expect(mocks.lookup).not.toHaveBeenCalled();
+    expect(mocks.fetchPublicImage).not.toHaveBeenCalled();
+    expect(mocks.enqueueGenerationTask).not.toHaveBeenCalled();
   });
 });
