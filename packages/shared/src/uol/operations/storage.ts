@@ -46,6 +46,11 @@ const storageReferenceSchema = z.object({
   bucket: storageBucketSchema,
   key: storageKeySchema,
 });
+/** 校验 Node Buffer 与标准 Uint8Array，同时保留 ArrayBufferLike 泛型兼容。 */
+const storageBinarySchema = z.custom<Uint8Array<ArrayBufferLike>>(
+  (value) => value instanceof Uint8Array,
+  "Storage data must be a byte array"
+);
 
 type UserStorageBuckets = {
   avatars: string;
@@ -400,7 +405,7 @@ export const readObject = defineOperation({
       .optional(),
   }),
   output: z.object({
-    data: z.instanceof(Uint8Array).or(z.unknown()),
+    data: storageBinarySchema,
     contentType: z.string().optional(),
     contentLength: z.number().optional(),
   }),

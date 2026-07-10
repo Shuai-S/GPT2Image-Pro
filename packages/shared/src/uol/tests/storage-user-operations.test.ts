@@ -231,6 +231,23 @@ describe("storage.readObject", () => {
       )
     ).rejects.toMatchObject({ code: "upstream_error", httpStatus: 502 });
   });
+
+  it("provider 返回非字节对象时由 UOL 输出校验 fail-closed", async () => {
+    storageMocks.getObject.mockResolvedValue({ length: 5 });
+    const { invokeOperation } = await loadOperation();
+
+    await expect(
+      invokeOperation(
+        "storage.readObject",
+        {
+          bucket: "generations",
+          key: "user-1/result.png",
+          maxBytes: 1024,
+        },
+        { type: "user", userId: "user-1", role: "user" }
+      )
+    ).rejects.toMatchObject({ code: "internal_error", httpStatus: 500 });
+  });
 });
 
 describe("storage 用户文件写操作", () => {
