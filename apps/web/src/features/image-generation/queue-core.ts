@@ -43,6 +43,8 @@ type QueueTask<T> = {
   reject: (reason?: unknown) => void;
   run: (signal: AbortSignal) => Promise<T>;
   blockedReason?: ImageGenerationConcurrencyBlockReason;
+  cancelled: boolean;
+  removeAbortListener?: () => void;
   timeout?: ReturnType<typeof setTimeout>;
 };
 
@@ -119,6 +121,24 @@ export function createImageGenerationQueue(
     return true;
   }
 
+  /** 清理任务仍在等待阶段使用的 timeout 与外部 abort listener。 */
+  function clearWaitingResources(task: QueueTask<unknown>): void {
+    if (task.timeout) clearTimeout(task.timeout);
+    task.removeAbortListener?.();
+    task.timeout = undefined;
+    task.removeAbortListener = undefined;
+  }
+
+  /** 把 AbortSignal reason 收窄为稳定可抛错误。 */
+  function abortReason(signal: AbortSignal): Error {
+    return signal.reason instanceof Error
+      ? signal.reason
+      : new DOMException(
+          "Image generation queue wait was aborted",
+          "AbortError"
+        );
+  }
+
   /** 安排下一次许可轮询，保证同一队列最多只有一个 poll timer。 */
   function schedulePoll(): void {
     if (pollTimer || queue.length === 0) return;
@@ -138,7 +158,7 @@ export function createImageGenerationQueue(
     task: QueueTask<T>,
     lease: ImageGenerationConcurrencyLease
   ): void {
-    if (task.timeout) clearTimeout(task.timeout);
+    clearWaitingResources(task as QueueTask<unknown>);
     dependencies.coordinator
       .runWithLease(lease, task.run)
       .then(task.resolve, task.reject)
@@ -163,9 +183,10 @@ export function createImageGenerationQueue(
         Math.floor(await dependencies.getGlobalConcurrency())
       );
 
-      for (let index = 0; index < queue.length; index += 1) {
-        const task = queue[index];
-        if (!task) continue;
+      // 使用本轮快照遍历；timeout/abort 可在 await acquire 期间从原队列删除任意项，
+      // 按数组下标继续会误删随后移位的其它用户任务。
+      for (const task of [...queue]) {
+        if (task.cancelled || !queue.includes(task)) continue;
 
         let acquisition: Awaited<
           ReturnType<ImageGenerationConcurrencyCoordinator["acquire"]>
@@ -178,14 +199,26 @@ export function createImageGenerationQueue(
             globalConcurrency,
           });
         } catch (error) {
-          queue.splice(index, 1);
-          index -= 1;
-          if (task.timeout) clearTimeout(task.timeout);
+          removeQueuedTask(task);
+          if (task.cancelled) continue;
+          clearWaitingResources(task);
           task.reject(
             new Error("Image generation queue is temporarily unavailable.", {
               cause: error,
             })
           );
+          continue;
+        }
+
+        if (task.cancelled) {
+          // timeout/abort 可在 acquire 的数据库往返中移除任务。晚到许可必须立即经
+          // coordinator finally 释放，绝不能在调用方已收到拒绝后继续跑业务闭包。
+          if (acquisition.acquired) {
+            await dependencies.coordinator.runWithLease(
+              acquisition.lease,
+              async () => undefined
+            );
+          }
           continue;
         }
 
@@ -195,8 +228,7 @@ export function createImageGenerationQueue(
           continue;
         }
 
-        queue.splice(index, 1);
-        index -= 1;
+        if (!removeQueuedTask(task)) continue;
         startTask(task, acquisition.lease);
       }
     } finally {
@@ -216,11 +248,16 @@ export function createImageGenerationQueue(
       userId: string;
       priority: QueuePriority;
       userConcurrency: number;
+      signal?: AbortSignal;
       timeoutMs?: number;
     },
     run: (signal: AbortSignal) => Promise<T>
   ): Promise<T> {
     return await new Promise<T>((resolve, reject) => {
+      if (options.signal?.aborted) {
+        reject(abortReason(options.signal));
+        return;
+      }
       const timeoutMs = options.timeoutMs ?? dependencies.getQueueTimeoutMs();
       let task: QueueTask<T>;
       task = {
@@ -232,12 +269,29 @@ export function createImageGenerationQueue(
         resolve,
         reject,
         run,
+        cancelled: false,
         timeout: setTimeout(() => {
           if (removeQueuedTask(task as QueueTask<unknown>)) {
+            task.cancelled = true;
+            clearWaitingResources(task as QueueTask<unknown>);
             reject(getQueuedTaskTimeoutError(task, timeoutMs));
           }
         }, timeoutMs),
       };
+
+      if (options.signal) {
+        const signal = options.signal;
+        const onAbort = () => {
+          if (removeQueuedTask(task as QueueTask<unknown>)) {
+            task.cancelled = true;
+            clearWaitingResources(task as QueueTask<unknown>);
+            reject(abortReason(signal));
+          }
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+        task.removeAbortListener = () =>
+          signal.removeEventListener("abort", onAbort);
+      }
 
       queue.push(task as QueueTask<unknown>);
       void scheduleQueue();

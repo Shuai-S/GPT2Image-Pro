@@ -1755,6 +1755,7 @@ export async function runImageGenerationForUser(
         userId: input.userId,
         priority: queueSettings.priority,
         userConcurrency: queueSettings.userConcurrency,
+        signal: input.signal,
       },
       async (concurrencySignal) => {
         const queuedInput = {

@@ -283,4 +283,75 @@ describe("createImageGenerationQueue", () => {
     ).rejects.toThrow("temporarily unavailable");
     expect(run).not.toHaveBeenCalled();
   });
+
+  it("等待用户槽时收到外部中止会立即移除且不运行闭包", async () => {
+    const queue = createQueue(createMemoryCoordinator());
+    const blocker = deferred<string>();
+    const first = queue(
+      { userId: "user", priority: "normal", userConcurrency: 1 },
+      async () => await blocker.promise
+    );
+    await flushTasks();
+
+    const controller = new AbortController();
+    const aborted = new Error("task lease lost");
+    const run = vi.fn(async () => "unexpected");
+    const waiting = queue(
+      {
+        userId: "user",
+        priority: "normal",
+        userConcurrency: 1,
+        signal: controller.signal,
+      },
+      run
+    );
+    await flushTasks();
+    controller.abort(aborted);
+
+    await expect(waiting).rejects.toBe(aborted);
+    blocker.resolve("done");
+    await first;
+    await flushTasks();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("acquire 往返期间超时只释放晚到许可而不执行任务", async () => {
+    const acquisition =
+      deferred<
+        Awaited<ReturnType<ImageGenerationConcurrencyCoordinator["acquire"]>>
+      >();
+    const releasedLeaseIds: string[] = [];
+    const runWithLease: ImageGenerationConcurrencyCoordinator["runWithLease"] =
+      async <T>(
+        lease: ImageGenerationConcurrencyLease,
+        run: (signal: AbortSignal) => Promise<T>
+      ) => {
+        releasedLeaseIds.push(lease.leaseId);
+        return await run(new AbortController().signal);
+      };
+    const queue = createQueue({
+      acquire: async () => await acquisition.promise,
+      runWithLease,
+    });
+    const run = vi.fn(async () => "unexpected");
+    const waiting = queue(
+      {
+        userId: "user",
+        priority: "normal",
+        userConcurrency: 1,
+        timeoutMs: 10,
+      },
+      run
+    );
+
+    await expect(waiting).rejects.toThrow(/queue is busy/i);
+    acquisition.resolve({
+      acquired: true,
+      lease: { leaseId: "late", taskId: "task", userId: "user" },
+    });
+    await flushTasks();
+
+    expect(run).not.toHaveBeenCalled();
+    expect(releasedLeaseIds).toEqual(["late"]);
+  });
 });
