@@ -9,6 +9,45 @@
 const CREDIT_DECIMAL_PLACES = 2;
 const CREDIT_DECIMAL_FACTOR = 10 ** CREDIT_DECIMAL_PLACES;
 
+export type ExternalApiKeyUsageStatus = "reserved" | "refunded";
+export type ExternalApiKeyUsageMutation = "insert" | "transition" | "noop";
+
+/**
+ * 规范化内部计费幂等键；未提供时返回 null，显式空白值视为调用错误。
+ */
+export function normalizeExternalApiKeyUsageSourceRef(sourceRef?: string) {
+  if (sourceRef === undefined) return null;
+  const normalized = sourceRef.trim();
+  if (!normalized) {
+    throw new Error("API Key 配额 sourceRef 不能为空");
+  }
+  return normalized;
+}
+
+/**
+ * 解析配额账本状态迁移，并校验同一幂等键不会绑定到不同金额。
+ * refunded 是终态，后续 reserve/refund 重试都不再改动聚合计数。
+ */
+export function resolveExternalApiKeyUsageMutation(params: {
+  existing: { status: string; amount: number } | null;
+  requestedStatus: ExternalApiKeyUsageStatus;
+  amount: number;
+}): ExternalApiKeyUsageMutation {
+  const { existing, requestedStatus } = params;
+  const amount = roundQuotaCredits(params.amount);
+  if (!existing) return "insert";
+  if (existing.status !== "reserved" && existing.status !== "refunded") {
+    throw new Error(`未知的 API Key 配额账本状态: ${existing.status}`);
+  }
+  if (roundQuotaCredits(existing.amount) !== amount) {
+    throw new Error("同一 API Key 配额 sourceRef 的金额不一致");
+  }
+  if (existing.status === requestedStatus || existing.status === "refunded") {
+    return "noop";
+  }
+  return "transition";
+}
+
 // 与积分账本同一精度不变量：四舍五入到两位小数（EPSILON 修正浮点误差）。
 export function roundQuotaCredits(value: number) {
   return (

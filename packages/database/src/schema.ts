@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   index,
   integer,
   json,
@@ -1582,6 +1583,62 @@ export const externalApiKey = pgTable("external_api_key", {
 
 export type ExternalApiKey = typeof externalApiKey.$inferSelect;
 export type NewExternalApiKey = typeof externalApiKey.$inferInsert;
+
+// ============================================
+// External API Key Usage Ledger
+// ============================================
+/**
+ * API Key 配额幂等账本 - 记录每个计费 sourceRef 的预占/退款终态。
+ *
+ * apiKeyId + sourceRef 唯一约束负责并发去重；status 从 reserved 单向转为
+ * refunded，防止重试重复增加或扣减 external_api_key.credits_used。
+ */
+export const externalApiKeyUsage = pgTable(
+  "external_api_key_usage",
+  {
+    apiKeyId: text("api_key_id")
+      .notNull()
+      .references(() => externalApiKey.id, { onDelete: "cascade" }),
+    sourceRef: text("source_ref").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    amount: numeric("amount", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    }).notNull(),
+    status: text("status")
+      .$type<"reserved" | "refunded">()
+      .notNull()
+      .default("reserved"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    refundedAt: timestamp("refunded_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("external_api_key_usage_source_unique").on(
+      table.apiKeyId,
+      table.sourceRef
+    ),
+    index("external_api_key_usage_user_created_idx").on(
+      table.userId,
+      table.createdAt
+    ),
+    check("external_api_key_usage_amount_check", sql`${table.amount} > 0`),
+    check(
+      "external_api_key_usage_status_check",
+      sql`${table.status} IN ('reserved', 'refunded')`
+    ),
+  ]
+);
+
+export type ExternalApiKeyUsage = typeof externalApiKeyUsage.$inferSelect;
+export type NewExternalApiKeyUsage = typeof externalApiKeyUsage.$inferInsert;
 
 // ============================================
 // Image Generation

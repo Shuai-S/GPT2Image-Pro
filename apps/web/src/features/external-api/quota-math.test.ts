@@ -5,8 +5,95 @@ import {
   getExternalApiKeyQuotaRemaining,
   isExternalApiKeyQuotaExceededError,
   normalizeExternalApiKeyCreditLimit,
+  normalizeExternalApiKeyUsageSourceRef,
+  resolveExternalApiKeyUsageMutation,
   roundQuotaCredits,
 } from "./quota-math";
+
+describe("normalizeExternalApiKeyUsageSourceRef", () => {
+  it("keeps the legacy path when sourceRef is omitted", () => {
+    expect(normalizeExternalApiKeyUsageSourceRef()).toBeNull();
+  });
+
+  it("trims a provided sourceRef and rejects an empty value", () => {
+    expect(normalizeExternalApiKeyUsageSourceRef(" generation:1 ")).toBe(
+      "generation:1"
+    );
+    expect(() => normalizeExternalApiKeyUsageSourceRef("   ")).toThrow(
+      "sourceRef 不能为空"
+    );
+  });
+});
+
+describe("resolveExternalApiKeyUsageMutation", () => {
+  it("inserts the first reserve or refund event", () => {
+    expect(
+      resolveExternalApiKeyUsageMutation({
+        existing: null,
+        requestedStatus: "reserved",
+        amount: 2,
+      })
+    ).toBe("insert");
+    expect(
+      resolveExternalApiKeyUsageMutation({
+        existing: null,
+        requestedStatus: "refunded",
+        amount: 2,
+      })
+    ).toBe("insert");
+  });
+
+  it("makes repeated reserves and refunds no-ops", () => {
+    expect(
+      resolveExternalApiKeyUsageMutation({
+        existing: { status: "reserved", amount: 2 },
+        requestedStatus: "reserved",
+        amount: 2,
+      })
+    ).toBe("noop");
+    expect(
+      resolveExternalApiKeyUsageMutation({
+        existing: { status: "refunded", amount: 2 },
+        requestedStatus: "refunded",
+        amount: 2,
+      })
+    ).toBe("noop");
+  });
+
+  it("transitions a reservation to refunded exactly once", () => {
+    expect(
+      resolveExternalApiKeyUsageMutation({
+        existing: { status: "reserved", amount: 2 },
+        requestedStatus: "refunded",
+        amount: 2,
+      })
+    ).toBe("transition");
+    expect(
+      resolveExternalApiKeyUsageMutation({
+        existing: { status: "refunded", amount: 2 },
+        requestedStatus: "reserved",
+        amount: 2,
+      })
+    ).toBe("noop");
+  });
+
+  it("rejects amount drift and invalid persisted states", () => {
+    expect(() =>
+      resolveExternalApiKeyUsageMutation({
+        existing: { status: "reserved", amount: 2 },
+        requestedStatus: "reserved",
+        amount: 3,
+      })
+    ).toThrow("金额不一致");
+    expect(() =>
+      resolveExternalApiKeyUsageMutation({
+        existing: { status: "invalid", amount: 2 },
+        requestedStatus: "reserved",
+        amount: 2,
+      })
+    ).toThrow("未知的 API Key 配额账本状态");
+  });
+});
 
 describe("normalizeExternalApiKeyCreditLimit", () => {
   it("treats empty / null / undefined as unlimited (null)", () => {

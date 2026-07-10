@@ -2025,6 +2025,7 @@ async function runQueuedImageGenerationForUser({
       apiKeyId: input.apiKeyId,
       userId: input.userId,
       amount: roundedAmount,
+      sourceRef,
     });
     chargedCredits = roundCreditAmount(
       Math.max(0, chargedCredits - roundedAmount)
@@ -2043,10 +2044,11 @@ async function runQueuedImageGenerationForUser({
       apiKeyId: input.apiKeyId,
       userId: input.userId,
       amount: roundedAmount,
+      sourceRef,
     });
     let userCreditsConsumed = false;
     try {
-      const consumeResult = await consumeCredits({
+      await consumeCredits({
         userId: input.userId,
         amount: roundedAmount,
         serviceName,
@@ -2057,15 +2059,6 @@ async function runQueuedImageGenerationForUser({
           externalApiKeyId: input.apiKeyId,
         },
       });
-      if (consumeResult.alreadyConsumed) {
-        // WHY: API Key 配额没有 sourceRef 幂等索引，必须在账本幂等命中时撤销
-        // 本次预占，避免同一 generation/settlement 重试反复吃掉 key 额度。
-        await refundExternalApiKeyCredits({
-          apiKeyId: input.apiKeyId,
-          userId: input.userId,
-          amount: roundedAmount,
-        });
-      }
       userCreditsConsumed = true;
     } finally {
       if (!userCreditsConsumed) {
@@ -2073,6 +2066,7 @@ async function runQueuedImageGenerationForUser({
           apiKeyId: input.apiKeyId,
           userId: input.userId,
           amount: roundedAmount,
+          sourceRef,
         });
       }
     }

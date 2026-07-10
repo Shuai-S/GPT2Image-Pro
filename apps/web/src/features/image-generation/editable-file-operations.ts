@@ -22,15 +22,15 @@ import {
 } from "@repo/shared/system-settings";
 import { nanoid } from "nanoid";
 import {
+  refundExternalApiKeyCredits,
+  reserveExternalApiKeyCredits,
+} from "@/features/external-api/quota";
+import {
   ImageBackendPoolUnavailableError,
   releaseImageBackendInflightLease,
   reportImageBackendResult,
   resolveImageBackendPoolConfig,
 } from "@/features/image-backend-pool/service";
-import {
-  refundExternalApiKeyCredits,
-  reserveExternalApiKeyCredits,
-} from "@/features/external-api/quota";
 import {
   type EditableFileBinary,
   type EditableFileKind,
@@ -183,19 +183,21 @@ export async function runEditableFileForUser(params: {
       );
       let creditsCharged = 0;
       if (amount > 0) {
+        const sourceRef = `editable-file:${taskId}`;
         await reserveExternalApiKeyCredits({
           apiKeyId,
           userId,
           amount,
+          sourceRef,
         });
         let userCreditsConsumed = false;
         try {
-          const consumeResult = await consumeCredits({
+          await consumeCredits({
             userId,
             amount,
             serviceName: editableFileServiceName(kind),
             description: kind === "psd" ? "生成 PSD 文件" : "生成 PPT 文件",
-            sourceRef: `editable-file:${taskId}`,
+            sourceRef,
             metadata: {
               kind,
               taskId,
@@ -203,15 +205,15 @@ export async function runEditableFileForUser(params: {
               apiKeyId: apiKeyId || null,
             },
           });
-          if (consumeResult.alreadyConsumed) {
-            // WHY: 外部 API Key creditsUsed 没有 sourceRef 维度；重复 client_task_id
-            // 命中账本幂等时必须撤回本次预占，避免重复占用 key 额度。
-            await refundExternalApiKeyCredits({ apiKeyId, userId, amount });
-          }
           userCreditsConsumed = true;
         } finally {
           if (!userCreditsConsumed) {
-            await refundExternalApiKeyCredits({ apiKeyId, userId, amount });
+            await refundExternalApiKeyCredits({
+              apiKeyId,
+              userId,
+              amount,
+              sourceRef,
+            });
           }
         }
         creditsCharged = amount;

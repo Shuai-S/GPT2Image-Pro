@@ -312,6 +312,7 @@ export async function runAdobeVideoGenerationForUser(
       apiKeyId: input.apiKeyId ?? undefined,
       userId: input.userId,
       amount: billedCost,
+      sourceRef,
     });
   } catch (error) {
     await releaseInflightLease();
@@ -326,7 +327,7 @@ export async function runAdobeVideoGenerationForUser(
   }
   let userCreditsConsumed = false;
   try {
-    const consumeResult = await consumeCredits({
+    await consumeCredits({
       userId: input.userId,
       amount: billedCost,
       serviceName: "adobe-video",
@@ -344,15 +345,6 @@ export async function runAdobeVideoGenerationForUser(
         ...(input.apiKeyId ? { externalApiKeyId: input.apiKeyId } : {}),
       },
     });
-    if (consumeResult.alreadyConsumed) {
-      // WHY: 外部 API Key creditsUsed 没有 sourceRef 维度；重复 videoId 命中账本
-      // 幂等时要撤回本次预占，避免同一任务重试重复占用 key 配额。
-      await refundExternalApiKeyCredits({
-        apiKeyId: input.apiKeyId ?? undefined,
-        userId: input.userId,
-        amount: billedCost,
-      });
-    }
     userCreditsConsumed = true;
   } catch (error) {
     if (!userCreditsConsumed) {
@@ -360,6 +352,7 @@ export async function runAdobeVideoGenerationForUser(
         apiKeyId: input.apiKeyId ?? undefined,
         userId: input.userId,
         amount: billedCost,
+        sourceRef,
       });
     }
     await releaseInflightLease();
@@ -400,11 +393,12 @@ export async function runAdobeVideoGenerationForUser(
     }).catch((error) =>
       logError(error, { source: "adobe-video-refund", videoId })
     );
-    if (refund?.refunded) {
+    if (refund) {
       await refundExternalApiKeyCredits({
         apiKeyId: input.apiKeyId ?? undefined,
         userId: input.userId,
         amount: billedCost,
+        sourceRef,
       }).catch((error) =>
         logError(error, { source: "adobe-video-quota-refund", videoId })
       );
