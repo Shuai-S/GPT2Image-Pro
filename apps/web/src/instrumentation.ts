@@ -27,14 +27,19 @@ export async function register(): Promise<void> {
     );
     await startInternalJobScheduler();
     if (process.env.NEXT_PHASE !== "phase-production-build") {
-      const [{ startEditableTaskWorker }, { startAsyncCallbackWorker }] =
-        await Promise.all([
-          import("./features/external-api/editable-task-worker"),
-          import("./features/external-api/async-callback-worker"),
-        ]);
+      const [
+        { startEditableTaskWorker },
+        { startAsyncCallbackWorker },
+        { startGenerationTaskWorker },
+      ] = await Promise.all([
+        import("./features/external-api/editable-task-worker"),
+        import("./features/external-api/async-callback-worker"),
+        import("./features/external-api/generation-task-worker"),
+      ]);
       await Promise.all([
         startEditableTaskWorker(),
         startAsyncCallbackWorker(),
+        startGenerationTaskWorker(),
       ]);
     }
     // Sentry 服务端初始化
