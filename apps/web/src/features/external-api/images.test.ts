@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+/**
+ * 外部图像 API 响应、存储 URL 与安全取图逻辑的 DB-free 单元测试。
+ * 测试使用固定第一方 origin，避免 CI 的构建期环境变量改变同源边界。
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { NO_WEB_ACCOUNT_ERROR } from "@/features/image-generation/editable-file-util";
 import {
@@ -38,6 +42,10 @@ vi.mock("./safe-image-fetch", async (importOriginal) => {
   };
 });
 
+/**
+ * 读取并取消响应流的首个分块，用于验证首字节与 keep-alive 行为。
+ * 响应没有可读 body 时抛错，避免将无效响应误判为通过。
+ */
 async function readFirstChunk(response: Response) {
   const reader = response.body?.getReader();
   if (!reader) throw new Error("missing response body");
@@ -51,7 +59,14 @@ beforeEach(() => {
   storageMocks.getStorageProviderMock.mockClear();
   safeImageFetchMocks.fetchPublicImageMock.mockReset();
   vi.unstubAllGlobals();
+  // 工作流会提供生产构建用的公开地址；单测必须自行声明同源边界，
+  // 否则宿主环境会把 example.com 测试 URL 错判成第三方地址。
+  vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://example.com");
   vi.stubEnv("BETTER_AUTH_SECRET", "test-storage-signing-secret");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("external image stream response", () => {
@@ -321,6 +336,28 @@ describe("external image base64 loading", () => {
 
     expect(safeImageFetchMocks.fetchPublicImageMock).toHaveBeenCalledWith(
       "https://cdn.example.test/out.png",
+      { headers: {} }
+    );
+  });
+
+  it("does not trust the request origin over the configured public origin", async () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "http://localhost:3000");
+    safeImageFetchMocks.fetchPublicImageMock.mockResolvedValue(
+      new Response("cross-origin-image")
+    );
+    const request = new Request("https://example.com/v1/images/generations", {
+      headers: { Authorization: "Bearer external-key" },
+    });
+    const imageUrl =
+      "https://example.com/api/storage/generations/user/external.jpg";
+
+    await expect(getImageBase64(request, imageUrl)).resolves.toBe(
+      Buffer.from("cross-origin-image").toString("base64")
+    );
+
+    expect(storageMocks.getStorageProviderMock).not.toHaveBeenCalled();
+    expect(safeImageFetchMocks.fetchPublicImageMock).toHaveBeenCalledWith(
+      imageUrl,
       { headers: {} }
     );
   });
