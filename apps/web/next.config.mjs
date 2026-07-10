@@ -1,3 +1,4 @@
+import { withSentryConfig } from "@sentry/nextjs";
 import { createMDX } from "fumadocs-mdx/next";
 import createNextIntlPlugin from "next-intl/plugin";
 
@@ -94,5 +95,17 @@ const nextConfig = {
   ],
 };
 
-// 组合插件: MDX -> NextIntl -> NextConfig
-export default withMDX(withNextIntl(nextConfig));
+// 组合插件: MDX -> NextIntl -> Sentry。没有 auth token 时仍启用运行时 SDK，但不上传
+// source map；配置 token 的发布构建才上传并在完成后删除浏览器 source map。
+const configuredNext = withMDX(withNextIntl(nextConfig));
+export default withSentryConfig(configuredNext, {
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  silent: !process.env.SENTRY_AUTH_TOKEN,
+  sourcemaps: {
+    disable: !process.env.SENTRY_AUTH_TOKEN,
+    deleteSourcemapsAfterUpload: true,
+  },
+  widenClientFileUpload: true,
+});

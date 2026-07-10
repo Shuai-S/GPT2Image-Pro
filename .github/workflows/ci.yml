@@ -247,6 +247,8 @@ jobs:
       DATABASE_URL: postgresql://gpt2image:gpt2image@localhost:5432/gpt2image
       BETTER_AUTH_SECRET: build-time-placeholder-secret-not-for-runtime
       BETTER_AUTH_URL: http://localhost:3000
+      # build job 不启动 PostgreSQL；公开 ISR 在构建期用 env/default，运行时再读 DB。
+      GPT2IMAGE_SKIP_RUNTIME_SETTINGS_DB: "1"
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5（钉 SHA 防 tag 重指向；dependabot 维护）
       - uses: ./.github/actions/setup

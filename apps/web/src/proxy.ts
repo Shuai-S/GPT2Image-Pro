@@ -67,7 +67,11 @@ export async function proxy(request: NextRequest) {
   // ============================================
   if (pathname.startsWith("/api/")) {
     // 跳过健康检查和 webhook（webhook 需要验证签名，不应被限流阻断）
-    if (pathname === "/api/health" || pathname.startsWith("/api/webhooks/")) {
+    if (
+      pathname === "/api/health" ||
+      pathname.startsWith("/api/health/") ||
+      pathname.startsWith("/api/webhooks/")
+    ) {
       return NextResponse.next();
     }
 

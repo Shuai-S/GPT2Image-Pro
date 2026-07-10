@@ -46,3 +46,16 @@ export async function register(): Promise<void> {
     await import("../sentry.edge.config");
   }
 }
+
+/**
+ * 捕获 React Server Component 与路由渲染阶段错误。
+ *
+ * 使用动态导入避免未配置 Sentry 时提前加载 SDK 服务端实现；Sentry 自身会按 DSN
+ * 决定是否发送。参数类型从 SDK 函数派生，跟随 Next/Sentry 契约升级。
+ */
+export async function onRequestError(
+  ...args: Parameters<typeof import("@sentry/nextjs")["captureRequestError"]>
+): Promise<void> {
+  const { captureRequestError } = await import("@sentry/nextjs");
+  captureRequestError(...args);
+}
