@@ -10,7 +10,7 @@
 - **2026-05-31 修复 workflow 完成**：先修 S-C1(03cc6bd)/S-H5(edbc0d6)/S-H1+H2(f1216df)；再经 15 单元并行修复 workflow 共修 94 条、未修 23 条、defer 4 个上帝组件；dev 9 主题提交 0babd1f..01906e0(封禁会话/回调SSRF/存储越权/限流fail-open/moderate恒定时间/注册冷却/external-api+支付+订阅+生成覆盖)；终验 typecheck+test 全绿(shared235+web257=492)。未修与 defer backlog 见 [测试重构计划](plan/2026-05-31-audit-test-refactor.md)
 - **2026-05-31 安全修复 workflow 二轮（遗留项）**：7 单元对抗复核后保留 5 条(dev 提交 4208681..6f48522)——S-L2 webhook 不吞异常 / S-L1 consumeCredits 按 userId 归属+迁移0029 / S-M8 设置范围校验 / M-H5 admin 集中守卫 / v1 per-key 限流；S-M11 仅 detect-only 软门闩(默认不拒)。**回退 2 条**：U3 S-L7 generations 桶 cookie 鉴权(破坏 v1 API 默认 url 返回的无 cookie 拉取，须改签名 URL)；U7 SSRF pin(Next16 patchFetch 致生产不走 pin+假绿灯)。详见 [测试重构计划](plan/2026-05-31-audit-test-refactor.md)
 - **#1/#15/#16 浏览器实测通过**（api2 隔离测试栈 2026-05-31，未发现真实 Bug；积分首屏短暂0为异步发放假象自愈）
-- **2026-05-31 安全修复三轮（全部遗留项）**：4 条并行修复+对抗复核，dev 提交 cfb3861..06e4709——S-L7 签名 URL 替代 cookie 鉴权 / S-M11 Creem 纯函数抽离+369 行单测 / SSRF 无条件 DNS pin(node:http/https 不经 Next patch) / COST quality+thinking 积分倍率。288 web + shared 全绿。残留：裸 fetch 路径(operations.ts toImageBuffer/images.ts getImageBase64)未接 pin，见 TODO。
+- **2026-05-31 安全修复三轮（全部遗留项）**：4 条并行修复+对抗复核，dev 提交 cfb3861..06e4709——S-L7 签名 URL 替代 cookie 鉴权 / S-M11 Creem 纯函数抽离+369 行单测 / SSRF 无条件 DNS pin(node:http/https 不经 Next patch) / COST quality+thinking 积分倍率。288 web + shared 全绿。后续裸 fetch 已在 2026-07-10 统一 HTTP 资源边界改造中收敛，见性能审计实施记录。
 - [待办清单](TODO.md) — 仍存在的代码层问题 + 部署前必做
 
 ## 架构
@@ -39,7 +39,7 @@
 
 ## 性能
 
-- [2026-07-10 系统工程与性能审计](plan/2026-07-10-system-performance-audit.md) — 已落地 ISR/运行时域名/UOL 身份边界/发布门禁/依赖修复；剩余 P0 为后台任务长事务、进程内异步任务与队列、积分过期 N+1、订阅用户唯一约束。
+- [2026-07-10 系统工程与性能审计](plan/2026-07-10-system-performance-audit.md) / [实施记录](memory/2026-07-10-system-performance-audit-implementation.md) — P0/P1 已落地：短事务可恢复租约、持久异步任务与集群 semaphore、积分过期分页聚合、订阅用户唯一、候选限流指标、统一 fetch、原子 Docker release descriptor、真实迁移 CI；P2 已接 Sentry/Web Vitals/LHCI/资源体积预算、直传与 2 MiB 控制面、retention/Idempotency-Key、视频 semaphore、storage 输出边界。残余仅为 esbuild 低/中风险、真实环境 CI 首次留档和巨型文件按职责渐进拆分。
 - [2026-07-09 性能优化总计划](plan/2026-07-09-performance-and-concurrency.md) — 响应慢/卡顿 6 工作流(A–F)总计划，14 项任务。
 - **2026-07-09 perf-wave3 剩余批次落地**（6 commits 877f8185..1ee6b363，详见 [memory](memory/2026-07-09-perf-wave3-batch-implementation.md)）：C-P0-3 system-settings 升级 unstable_cache+`SYSTEM_SETTINGS_CACHE_TAG`(updateTag 转发失效)+lastGoodMap 兜底；F-P2-1 无限画布可视区 AABB 裁剪(computeVisibleNodes+ResizeObserver+边裁剪+首帧回退)；F-P1-1 创作页 video+waterfall dynamic(videoMounted 惰性挂载保留草稿)；F-P2-2 admin-panel register+import dynamic；C-P0-1 SLA 失效接入生成完成(用 `revalidateTag` max profile 而非 updateTag 因 operations 被 route handler 直调)+try/catch 降级；B-P1-2 AnimatedPrice 动态化移出 framer-motion 首屏 chunk。后置：3c UserDetailSheet 剥离(高耦合)、4b admin 聚合缓存(权限审计面大)、4c history 虚拟化(每页20条已合理)。
 - **2026-07-09 perf-wave4 收尾**（5 commits 775c59ce..39d2284a，详见 [memory](memory/2026-07-09-perf-wave3-batch-implementation.md) 追加）：logger flush 等在途 gzip 归档(修复 flaky 测试 + 生产停机丢归档风险)；3c UserDetailSheet 剥离为独立 chunk(detailMounted 惰性挂载,2371→1746+592+180 三文件,admin-users-shared 解依赖环)；4b admin/payments 聚合统计走 unstable_cache+`admin-payments-aggregate` tag(type/provider 低基数键,q/日期穿透),epay 三写入点接 revalidateTag max+降级;admin-panel groups/apis/adobe/accounts 4 Tab 全剥离为 dynamic chunk(5331→3728 行,apis20/adobe34/groups11 props)。4c history 虚拟化确认不做(每页20条已合理)。

@@ -1,128 +1,133 @@
-# 2026-07-10 系统工程与性能审计
+# 2026-07-10 系统工程与性能审计实施验收
 
-> 范围：工程规范、公开页面加载、接口热路径、数据库并发、后台任务、部署发布与依赖安全。
-> 原则：本轮直接修复可独立验证、回滚边界清晰的问题；涉及财务迁移、分布式队列或核心调度器的改造保留为专项。
+> 范围：工程规范、公开页面加载、接口热路径、数据库并发、后台任务、
+> 部署发布、可观测性与依赖安全。
+> 状态：P0/P1 已实施；P2 中可独立验收的基础设施已实施，巨型模块继续按职责渐进拆分。
+> 详细实施记录：`docs/memory/2026-07-10-system-performance-audit-implementation.md`。
 
-## 已完成
+## 验收结论
 
-1. 生图请求复用套餐与能力上下文，避免同一请求重复查套餐。
-2. 公开页、认证页与文档页改为 60 秒 ISR；语言选择不再写 Cookie，CDN 可共享缓存。
-3. 共享会话 Provider、移除营销组件 barrel 深依赖，降低公共页面客户端依赖。
-4. 创作页服务端数据改为 Promise DAG，消除三段串行瀑布；修复视频价格预览租约泄漏。
-5. 首页 SLA 查询使用缓存，构建期跳过数据库；数据库故障时公开页降级为空样本。
-6. metadata、canonical、JSON-LD、OG、支付回调、邮件、图片外链、robots 与 sitemap 改读运行时站点地址。
-7. UOL 生图与 PPT/PSD 计费用户只从 Principal 派生，API Key 的 relayOnly 不可被输入降级。
-8. Turbo 缓存输入补齐；固定 Node/pnpm/Turbo，修复根 DB 脚本与失效 Vitest 配置。
-9. Docker standalone 补齐 AMD64/ARM64 sharp、ONNX 原生依赖，并加入构建层加载冒烟。
-10. Docker 发布统一到 main，推送镜像前强制 lint、typecheck、test 与生产构建。
-11. Nodemailer 升级；Vite、YAML、PostCSS、js-yaml 固定到安全补丁版本。
+- [x] 后台任务不再把网络或整段业务包进数据库事务；PostgreSQL 租约具备
+  `ownerId + runId` fencing、心跳、超时接管和持久终态。
+- [x] PPT/PSD、普通图像与视频异步任务、callback outbox 均已持久化；图像和视频
+  共用集群级 PostgreSQL semaphore，等待或执行期间失去租约会中止旧执行者。
+- [x] 积分过期改为 500 条分页、`SKIP LOCKED`、按用户聚合结算；订阅表增加
+  每用户唯一约束并统一走 upsert。
+- [x] 后端池候选查询下推可用性条件、设置上限并记录候选数、冲突数与耗时；
+  多组候选先去重再限流。
+- [x] 第三方 HTTP 统一具备 deadline、组合 abort、有限正文读取与错误正文上限；
+  审核路径 fail-closed，公开图片继续执行 DNS pin 与 SSRF 校验。
+- [x] Docker 发布改为单一 OCI release descriptor；组件只写不可变 exact semver，
+  全部成功后才移动 `latest` 或 `prerelease` channel。
+- [x] CI 在真实 PostgreSQL 16 上执行空库迁移、上一正式版本升级、二次幂等迁移和
+  关键 schema 断言；正式 tag 会排除自身并选择上一稳定版本。
+- [x] 已接入 Sentry 客户端/服务端错误钩子与 source map、Web Vitals、公开页和登录态
+  Lighthouse、客户端资源体积预算、liveness/readiness、受保护 Prometheus 指标。
+- [x] 创作页与无限画布大文件先直传对象存储，控制面请求收敛到 2 MiB；读取按
+  Principal、用户 key、桶、套餐与真实字节上限校验。
+- [x] 异步终态 retention 只处理可安全删除的任务；先清理输入对象，失败保留任务行
+  重试。普通图像/视频异步入口支持 `Idempotency-Key` 内容一致重放和 409 冲突。
+- [x] `storage.readObject` 输出收紧为 `Uint8Array`，并在输出校验与 `maxBytes` 硬上限
+  之间形成双重边界。
 
-## 已验证基线
+## P0 实施与证据
 
-- Web：70 个测试文件、609 项测试通过，其中 UOL 身份边界测试 3 项。
-- Shared：55 个测试文件、662 项测试通过。
-- Next 生产构建：123/123 页面生成成功。
-- 公开首页、定价、博客、法律、PSEO、Docs、Auth 均为 60 秒 ISR；Dashboard 保持动态。
-- 运行时域名冒烟：以 `build.example` 构建、`runtime.example` 启动，ISR 后首页、JSON-LD、robots、sitemap 均只包含运行时域名。
-- 生产依赖审计：从 11 项（3 high）降到 3 项（0 high、1 moderate、2 low）。
+### 后台任务租约
 
-## P0 专项
+状态：已完成，提交 `9fd07727`。
 
-### 1. 后台任务长事务
+`internal_job_lease` 以短事务完成领取、心跳和终态写入，任务主体在事务外运行。
+同名任务由数据库租约跨副本互斥，旧执行者的 `runId` 不能覆盖接管者终态。DB-free
+状态机测试覆盖成功、失败、超时、失权与崩溃接管；真实连接是否出现
+`idle in transaction` 由部署监控继续观察。
 
-证据：`apps/web/src/server/internal-job-scheduler.ts` 的 `withJobLock()` 在
-`db.transaction()` 内调用完整 `run()`。图像清理、积分过期、账号刷新、注册补号和
-Sub2API 同步都可能包含批量数据库或网络 I/O，期间一直占用连接与事务级 advisory lock。
+### 持久异步任务与集群并发
 
-方案：把“抢租约/写 running 状态”做成短事务，任务在事务外运行，结束后再用短事务写终态。
-跨副本互斥改为带 `ownerId + expiresAt + heartbeat` 的租约行，或使用独立 PostgreSQL session
-级 advisory lock；不得把第三方网络请求放进事务。
+状态：已完成，主要提交 `525f8206`、`a4bcacb4`、`720e8443`、`bd210244`、
+`13bbd47d`、`aa9e7bd1`、`840cb8ba`。
 
-验收：任务运行期间数据库连接不保持 `idle in transaction`；进程崩溃后租约可自动过期；
-双副本并发触发只有一个执行者；覆盖成功、失败、超时与接管测试。
+`external_async_task`、普通 generation/video 业务行、callback outbox 和并发槽位均落入
+PostgreSQL。worker 用 `SKIP LOCKED`、租约和 execution token 领取，结果按业务行动态
+物化；生产对账器可补回已排队但缺任务的记录。普通图像批量执行恢复有界并发，
+同步与异步视频都进入同一集群 semaphore，并复用入口解析的套餐上下文。
 
-### 2. 异步任务与用户队列仅存在单进程
+### 财务分页与订阅唯一
 
-证据：`apps/web/src/features/external-api/async-image-tasks.ts` 使用模块级 Map，
-`apps/web/src/features/image-generation/queue.ts` 使用模块级数组与 `runningByUser` Map。
-进程重启会丢失 PPT/PSD 任务，多副本会让轮询随机 404，并使用户/全局并发上限按副本放大。
+状态：已完成，提交 `02503433`、`0a9cf48b`、`8bc4627c`。
 
-方案：任务状态持久化到 PostgreSQL；执行队列使用 Redis/BullMQ 或 PostgreSQL
-`FOR UPDATE SKIP LOCKED` worker。用户并发采用分布式 semaphore，任务领取与状态迁移带租约、
-重试次数和幂等键。图像 generation 已有 DB 行，可复用；PPT/PSD 需新增持久任务表。
+积分过期每页最多 500 个 active batch，`FOR UPDATE SKIP LOCKED` 支持并行 worker；
+同一用户先聚合后更新余额，流水继续遵守双重记账。订阅迁移 `0059` 先归并历史重复，
+再建立 `user_id` 唯一索引；Webhook、Epay 和管理员路径复用同一 upsert 服务。
 
-验收：重启与双副本下任务可继续查询；同一 clientRequestId 不重复扣费；worker 崩溃后可接管；
-用户并发上限在集群维度成立。
+## P1 实施与证据
 
-### 3. 积分过期无界扫描与逐行事务
+### 后端池候选热路径
 
-证据：`packages/shared/src/credits/core.ts` 的 `processExpiredBatches()` 先无 limit 读取全部过期
-批次，再为每行开启一次事务，执行批次更新、流水插入和余额更新。积压时形成 1 + 3N 查询和
-大量串行事务，也会被用户余额热路径惰性触发。
+状态：已完成热路径收敛，提交 `1d83039c`、`2abe86c4`。
 
-方案：按固定批量选取并锁定过期批次，使用 `SKIP LOCKED` 支持多 worker；同一用户的过期金额
-先聚合后单次更新余额，交易流水批量插入。保持 `active -> expired` 条件更新和双重记账不变量，
-每批提交后继续下一批。
+候选读取按模型、车道、状态和冷却条件尽量下推 SQL，单类候选设置上限；多组同一成员
+先去重再限流。调度日志/指标记录 SQL 次数、候选行数、租约冲突和耗时，既有对拍测试
+锁定 alwaysActive、粘性、混合车道和满并发回退语义。
 
-验收：10 万过期批次压测无无界内存；查询数与批次数相关而非行数相关；并发 worker 不重复过期；
-流水借贷合计与余额变化严格一致。
+### HTTP 资源边界
 
-### 4. 订阅每用户唯一性缺少数据库约束
+状态：已完成，提交 `9b7e58ef`、`9813be89`、`ff584c74`。
 
-证据：`packages/database/src/schema.ts` 仅约束 `subscriptionId` 唯一，`userId` 无唯一索引；多处
-业务查询按 userId `limit(1)` 且无确定排序。并发 webhook/管理操作可产生同用户多行并读到任意行。
+`@repo/shared/http/fetch` 提供 deadline、外部 signal 合并、流式正文限额、JSON/错误正文
+有限解析。支付、Adobe、审核、生图、注册机和图片回读等关键路径已接入；OpenAI 审核
+使用真实 abort 和 1 MiB 限额，失败保持 fail-closed。跨来源请求不会透传客户端
+Authorization/Cookie。
 
-方案：先审计并确定历史多订阅归并规则，再手写幂等迁移清理重复行并增加 userId 唯一索引；
-所有创建路径改为 upsert，并补并发 webhook 测试。迁移前不可直接加约束，以免生产升级失败。
+### 发布与迁移门禁
 
-## P1 专项
+状态：已完成，提交 `a4de4f49`、`fff3b987`、`4471c0a5`、`48744965`。
 
-### 5. 后端池选路 SQL 与内存放大
+迁移 CI 覆盖空库与上一正式版本升级，并对迁移重复执行和唯一索引做断言。Docker 矩阵
+只推 run-scoped `sha-*`；promote 脚本先校验四组件 digest，写不可变组件/exact descriptor，
+最后仅移动 descriptor channel。故障注入脚本证明任一前置步骤失败时 channel 不移动。
 
-`apps/web/src/features/image-backend-pool/service.ts` 单文件 8,339 行。一次候选选择并行拉取 API、
-账号和 Adobe 全候选，再在进程内过滤、排序、尝试租约；嵌套组和多渠道会重复进入该路径。
+## P2 实施与残余
 
-先记录每次选择的 SQL 次数、候选行数、租约冲突数与总耗时，再把模型/车道/状态/冷却过滤尽量
-下推 SQL，并对候选设置小上限。分组静态配置可缓存 30 到 60 秒，租约与 lastUsedAt 保持实时。
-拆分 service 前先锁定调度对拍测试，避免改变 alwaysActive、粘性和混合车道语义。
+### 已落地基础设施
 
-### 6. 第三方 fetch 缺统一截止时间和响应上限
+- 可观测性：`56f6ab35`、`0d8f5e9f`、`464fa5ad` 接入 Sentry、Web Vitals、
+  健康检查、租约/队列指标、登录态 Lighthouse 和前端预算；`d414ef79` 保证登录与
+  Lighthouse 使用同一 `localhost` 来源。
+- 前序性能基线：`7b660124` 至 `fc997967` 已完成套餐上下文复用、60 秒 ISR、公共
+  会话/依赖收敛、创作页 Promise DAG、SLA 构建期降级、运行时站点地址、UOL 身份边界、
+  Turbo/Node/pnpm 固定、Docker 原生依赖冒烟与依赖安全补丁，本轮改造未回退这些基线。
+- 大文件边界：`f67a7107`、`093c89bb`、`ba73c7a5` 建立 UOL 直传授权、创作页/
+  无限画布对象引用和 2 MiB 控制面；`5405768a`、`38446bfd` 收紧用户对象归属、
+  `maxBytes` 与 UOL 输出类型。
+- 异步生命周期：`13097ae5`、`02540180` 增加终态有界 retention 与严格输入 GC；
+  `0f97e0f2` 增加普通图像/视频异步 HTTP 幂等、稳定内容摘要和唯一索引。
+- 资源预算：CI 强制客户端 gzip 资源体积预算、公开/登录态 LCP、CLS、TBT 等门槛；
+  Docker Compose 与发布文档使用 exact tag，避免运行组件漂移。
 
-非测试代码仍有约 40 条直接 fetch，分布在生图、ChatGPT Web、支付、审核、注册机和图片回读。
-部分已有 AbortSignal，但不是所有路径都同时限制连接总时长与响应正文。恶意或失控上游可长期占用
-连接，或返回超大正文造成内存压力。
+### 仍需持续推进
 
-建立共享 `fetchWithDeadline`/有限正文读取器，按 JSON、图片、视频分别设置上限；支付和审核默认
-fail-closed，非关键观测路径可降级。不得把客户端 Authorization/Cookie 转发到非同源 URL，
-图片外链继续复用 DNS pin/SSRF 校验。
+- 巨型文件仍需按真实职责渐进提取并逐块回归，禁止机械拆分。当前重点为
+  `image-backend-pool/service.ts`、`image-generation/service.ts`、`operations.ts`、
+  `create-page-client.tsx`、`admin-panel.tsx`、`system-settings-panel.tsx`。
+- `pnpm audit --prod` 仍报告 esbuild 开发工具链的 1 moderate、2 low；来源为 Drizzle
+  旧 `@esbuild-kit` 与 Vite/tsx，等待上游进入兼容范围，不做跨 major override 假修复。
+- 本机没有可用 PostgreSQL 服务、Chrome 与 Docker Buildx，无法本地复现真实迁移、
+  登录态 Lighthouse 和多架构/descriptor 发布；这些验收已固化在 CI，首次运行结果仍需
+  在 GitHub Actions 留档。
 
-### 7. 发布标签尚未原子提升
+## 验收命令
 
-发布前质量门已补，但 Docker 矩阵仍由每个镜像独立推送 `latest`/semver；某个镜像失败时，其他
-镜像的可变标签可能已更新，形成组件版本不一致。
+```bash
+turbo lint
+turbo typecheck
+turbo test
+turbo build
+pnpm performance:assets
+pnpm audit --prod
+pnpm install --offline --frozen-lockfile
+DATABASE_URL=postgresql://test:test@127.0.0.1:5432/test \
+  pnpm --dir packages/database exec drizzle-kit check --config drizzle.config.ts
+```
 
-改为矩阵只推 `sha-*` 不可变标签；全部平台与全部镜像成功后，由单一 promote job 用 manifest
-原子提升 semver/latest。失败时不得移动任何可变标签。
-
-### 8. 数据库迁移缺执行级 CI
-
-当前只检查 SQL 与 journal 文件存在性，CI 未启动 PostgreSQL 执行空库迁移和旧版本升级。
-增加 PostgreSQL service：从空库运行全部迁移、从上一个正式 tag 的 schema 运行增量迁移，
-再执行关键唯一索引与 schema smoke。财务迁移必须覆盖重复历史数据。
-
-## P2 工程债
-
-- 文件规模：生图 service 5,933 行、创作页客户端 5,858 行、后端池管理面板 3,728 行、系统设置面板 2,732 行。按协议适配、调度、持久化和 UI 面板逐块拆分，禁止纯机械切文件。
-- 可观测性：补 Next 16 `instrumentation-client.ts`、`onRequestError` 与 Sentry source map 上传；增加 liveness、数据库 readiness、队列/租约指标和 Web Vitals 性能预算。
-- 前端预算：为公开页、Docs、创作页、画布和管理页设置 gzip JS/CSS、LCP、INP、CLS 门槛，加入 Playwright/Lighthouse 关键流程；当前仅有单元测试和构建门禁。
-- 请求体：全局 200 MB 是企业套餐上限所需，不能直接下调。大文件改走预签名/流式上传后，再把 Server Action 与代理全局上限收敛到小控制面请求。
-- 依赖残留：audit 剩余 esbuild 1 moderate/2 low，来源是 Drizzle 旧 `@esbuild-kit` 和 Vite/tsx 的开发服务器；等待上游进入兼容依赖范围，禁止无测试跨 major override。
-
-## 执行顺序
-
-1. 后台任务短事务与可恢复租约。
-2. 持久异步任务和集群队列。
-3. 积分过期批处理，随后处理订阅唯一迁移。
-4. 后端池 SQL 基准与选路优化。
-5. fetch 统一截止时间/正文上限、迁移 CI、原子镜像标签。
-6. 可观测性、性能预算与大文件直传。
+CI 额外执行 PostgreSQL 16 空库/升级迁移、登录态 Lighthouse 和 Docker Buildx 发布
+故障注入。局部单测或静态检查通过不替代这些真实环境门禁。

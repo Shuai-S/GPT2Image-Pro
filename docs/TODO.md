@@ -42,19 +42,20 @@
 > 详见 `docs/plan/2026-05-31-audit-test-refactor.md`。本轮共修 94 条、未修 23 条、defer 4 个上帝组件；dev 9 主题提交 0babd1f..01906e0；终验 typecheck+test 全绿（shared235+web257=492）。
 
 - [ ] **上帝组件结构性拆分（defer，需人在环专项 + 重新 UI 实测）**：
-  - `image-generation/components/create-page-client.tsx` 9233 行（含已实测 #15/#16，拆分前须充分理解其状态机/runtime store）。
-  - `image-backend-pool/service.ts` 5310 行（按 7+ 职责拆为 scheduler/error-classification/cooldown/oauth/import/sub2api-sync/crud）。
-  - `image-backend-pool/admin-panel.tsx` 4350 行、`system-settings/components/system-settings-panel.tsx` 1825 行。
-- [ ] **跨文件重构/DB 迁移类未修 23 条**：C-H2 门闩抽纯函数、S-M11 Creem 金额校验、S-L1/S-L7 财务/存储归属深防御、M-M7/M-M10/M-M15/M-M17 DRY 合并等，逐条理由见计划文档 backlog 节。
-- [ ] **（复测新发现·既有 latent bug）create 页 hydration 不匹配**：硬加载创作页时客户端从 localStorage `gpt2image_create_active_mode_v1` 恢复激活模式（可能为锁定 tab），与服务端默认冲突触发 React hydration mismatch（低危，自愈）。修法：持久化模式恢复后置到 useEffect 或按当前套餐能力校正，避免恢复锁定/不可用模式。属 defer 的 create-page-client.tsx，随其重构一并修。
+  - `image-generation/components/create-page-client.tsx`、`image-generation/service.ts` 与 `operations.ts`：按状态机、协议适配和持久化边界渐进提取，每步补回归测试。
+  - `image-backend-pool/service.ts`：按 scheduler/error-classification/cooldown/oauth/import/sub2api-sync/crud 等真实职责渐进提取，保留调度对拍测试。
+  - `image-backend-pool/admin-panel.tsx`、`system-settings/components/system-settings-panel.tsx`：仅拆独立 UI 面板，不以行数做机械拆分。
+- [ ] **2026-05-31 审计的其余跨文件 backlog 需重新盘点**：原 23 条中的 Creem 金额校验、
+  财务幂等/存储归属等已在后续批次完成；C-H2 与 M-M7/M-M10/M-M15/M-M17 等尚未逐条
+  重新对照，处理时以计划文档和当前代码复核结果为准，不沿用旧总数。
+- [x] **create 页 hydration 不匹配**（`b0cd630d`）：持久创作模式恢复已延后到客户端挂载后，避免服务端默认值与 localStorage 初值冲突。
 
 ## 仍存在的代码层问题（待办）
 
 - [x] **成本放大（已修复）**：`quality`/`thinking` 参数已加积分倍率（quality: low=0.5x/high=1.5x; thinking: medium=1.3x/high=1.6x），operations.ts 4 处扣费调用已传入参数。`/v1/chat/completions` 纯文本按固定 1 积分/轮仍为独立定价（不在此修）。
 - [x] **v1 频率限流**：限流默认 fail-open 修复 + 可信代理头开关（d2a51f4）；**per-key 滑窗已补**（U6，commit 6f48522：authenticateExternalApiRequest 以 apiKey.id 复用 ai 桶）。残留(低)：复用 ai 桶且超限映射 401 非 429，如需独立阈值/语义码后续在 rate-limit 增 externalKey 类型。
 - [x] **generations 存储对象鉴权���S-L7，已修复）**：签名 URL 方案（HMAC-SHA256 over bucket/key/expiry，用 BETTER_AUTH_SECRET 签名，1h 有效期）。avatars 保持公开，generations 须 ?sig=&exp= 参数。所有出口（operations.ts/service.ts/v1 handlers）已改为生成签名 URL。单测覆盖签名/验签/过期/篡改。
-- [x] **SSRF DNS 重绑定（已修复主路��）**：`packages/shared/src/security/dns-pin.ts` 实现无条件 node:http/https DNS pin（不依赖 globalThis.fetch 比较）。`fetchPublicImage`/`fetchPublicCallback` 已改用 `fetchWithDnsPin`。测试 mock dns-pin 模块。
-  - [ ] **残留裸 fetch（对抗复核发现）**：`operations.ts toImageBuffer`（L291）和 `images.ts getImageBase64`（L158）直接 fetch 上游返回的 imageUrl 无 SSRF 防护——恶意自定义后端可返回内网 URL。需改为 fetchWithDnsPin 或 fetchPublicImage。
+- [x] **SSRF DNS 重绑定与统一资源边界**（`9b7e58ef`、`9813be89`）：公开图片继续走无条件 node:http/https DNS pin；生图、图片回读、支付、Adobe 与注册机等关键路径统一使用 deadline、组合 abort 和正文上限，不再保留旧裸 fetch 待办。
 - [x] **Creem 金额纯函数抽离（S-M11 已完成）**：`packages/shared/src/payment/creem-amount.ts` 导出 3 个纯函数 + 369 行��测覆盖（标准/零小数/三小数币种、金额匹配/不匹配、enforce/detect-only、边界值）。route.ts 已改为 import。
   - [x] **启用硬拒前置**：可比的金额/币种不匹配默认硬拒；仅 `CREEM_WEBHOOK_ENFORCE_AMOUNT=0/false/no/off` 允许临时软门闩。字段缺失或金额无法换算的不可比场景仍放行并告警，避免误拒真实支付。
 
@@ -120,7 +121,7 @@
 - PM2 ecosystem.config.js 启动 4 个进程绑定不同端口
 - 共享文件系统（.env.local / local storage 目录）、共享同一 DATABASE_URL
 - Nginx 按 Host header 反代到 127.0.0.1:3000-3003
-- 进程间不共享内存（队列/inflight/缓存各进程独立）——需迁 Redis 或接受退化
+- 持久 generation/task 队列与用户/全局 semaphore 已落 PostgreSQL；少量非权威缓存仍按进程隔离并允许退化。
 
 **隔离本质**：
 - 隔离的是**用户入口和界面**，不是数据——管理员需要操作主站所有数据（用户表/积分/生成记录等）
@@ -156,7 +157,7 @@
 - [ ] Nginx 配置：泛解析 `*.gpt2image.pro` + 4 个 upstream + SSL 泛域名证书
 - [ ] PM2 ecosystem.config.js + Dockerfile 多进程启动
 - [ ] Cookie domain 隔离验证（admin cookie 不泄露到 app/api/platform）
-- [ ] 进程内态退化评估：队列/inflight/settings 缓存 在多进程下的行为（是否需 Redis）
+- [ ] 进程内非权威缓存退化评估：settings 等缓存跨进程失效延迟是否需要 Redis；生成任务与并发槽位已由 PostgreSQL 保证。
 
 ---
 
@@ -346,7 +347,7 @@
 ### 关键基础设施变更
 
 - **Session 外置**：Better Auth session 存储迁移到 Redis（当前依赖 DB，已可水平扩展）
-- **队列外置**：图像生成任务队列从进程内存迁移到 Redis/BullMQ（当前 inflight map 进程独占）
+- **队列外置**：生成任务与并发槽位已持久化到 PostgreSQL；超大规模部署再基于压测决定是否迁 Redis/BullMQ，不再以进程内队列为前置缺口。
 - **缓存外置**：系统设置/套餐能力缓存迁移到 Redis（当前内存缓存进程独占）
 - **对象存储**：已用 S3 兼容存储（无状态，天然可水平扩展）
 - **数据库**：PostgreSQL 读写分离（主写从读）或 PgBouncer 连接池
@@ -357,7 +358,7 @@
 ### 依赖
 
 - 多 app 拆分完成
-- Redis 引入（Session/Queue/Cache 外置是分布式的前提）
+- Redis 引入（Session/跨进程缓存是否外置需另行评估；任务队列已由 PostgreSQL 持久化）
 - 组织空间/多租户方案确定（影响数据分片策略）
 
 ---
@@ -374,7 +375,7 @@
 
 - [ ] **UI/端到端实测**：用 Pro+ 账号创建纯中转 key，分别用 `b64_json` 与 `url` 跑 `/v1/images/generations`、`/v1/images/edits`、`/v1/chat/completions`、`/v1/responses`、`/v1/agents/images`，确认：图片正常返回、扣费正确、`generation` 表无新行、对象存储无新对象、画廊不可见。
 - [ ] **已知残留（低危）**：async/stream/callback 模式下含 base64 的结果会短暂驻留进程内存、callback 会 POST 到用户回调 URL——非落盘落库，但与"零服务器存储"字面有张力。如需绝对零驻留，再对中转 key 单独禁用 async。
-- [ ] **已知残留**：扣费幂等为请求级（按 `generationId`），可防同一请求重复执行；**跨请求客户端重试**仍需客户端自带 `Idempotency-Key`（未来项）。
+- [x] **普通图像/视频 async 跨请求幂等**（`0f97e0f2`）：支持客户端 `Idempotency-Key`，相同内容重放 winner，异内容返回 409，并发 loser 清理临时输入。纯中转模式的其余同步/stream 入口仍以 generationId 做请求级幂等。
 
 ---
 
@@ -392,6 +393,20 @@
 - [x] **4b admin/payments 聚合 unstable_cache+tag**（后补 commit）：顶部统计卡的状态分组聚合走 unstable_cache(type/provider 低基数键,300s TTL + admin-payments-aggregate tag);q/日期穿透实时查询;epay 三写入点接 revalidateTag max+降级;明细列表不缓存。
 - [x] **admin-panel groups/apis/adobe Tab 剥离**（后补 commit）：四个非 register/import 的 TabsContent 全剥离为 dynamic chunk(admin-groups-tab/admin-apis-tab/admin-adobe-tab),5331→3728 行;accounts 因多 form 交叉保留内联。
 - [ ] **4c history-client 虚拟化**（确认不做）：每页固定 20 条+memo+prefetch 已合理，原注释明确判定虚拟化收益有限风险偏高。
+
+## 2026-07-10 系统性能审计残余
+
+> 已完成项目与提交证据见 `docs/plan/2026-07-10-system-performance-audit.md` 和
+> `docs/memory/2026-07-10-system-performance-audit-implementation.md`。不再保留“后台任务长事务”
+> 或“生成队列仍在进程内”等过时条目。
+
+- [ ] **CI 真实环境首次留档**：本机没有 PostgreSQL、Chrome 和 Docker Buildx；需在
+  GitHub Actions 留存 PostgreSQL 空库/升级迁移、登录态 Lighthouse、多架构镜像与 OCI
+  release descriptor promote 的首次全绿记录。
+- [ ] **esbuild 开发链公告**：`pnpm audit --prod` 仍为 1 moderate、2 low，来自 Drizzle 旧
+  `@esbuild-kit` 与 Vite/tsx。等待上游落入兼容版本范围，禁止未经全量验证的跨 major override。
+- [ ] **巨型文件按职责渐进拆分**：优先提取后端池 error-classification/cooldown、生成协议适配
+  与独立 UI 面板；每次提取需有调度对拍或交互回归，不做机械分文件。
 
 ---
 
