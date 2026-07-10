@@ -11,10 +11,11 @@ const storageMocks = vi.hoisted(() => ({
   putObject: vi.fn(),
   getObject: vi.fn(),
   deleteObject: vi.fn(),
+  getStorageProvider: vi.fn(),
 }));
 
 vi.mock("@repo/shared/storage/providers", () => ({
-  getStorageProvider: vi.fn(async () => storageMocks),
+  getStorageProvider: storageMocks.getStorageProvider,
 }));
 
 vi.mock("@repo/shared/system-settings", () => ({
@@ -70,9 +71,11 @@ beforeEach(() => {
   storageMocks.putObject.mockReset();
   storageMocks.getObject.mockReset();
   storageMocks.deleteObject.mockReset();
+  storageMocks.getStorageProvider.mockReset();
   storageMocks.putObject.mockResolvedValue(undefined);
   storageMocks.getObject.mockResolvedValue(Buffer.from("data"));
   storageMocks.deleteObject.mockResolvedValue(undefined);
+  storageMocks.getStorageProvider.mockResolvedValue(storageMocks);
 });
 
 describe("generation task request payload", () => {
@@ -199,6 +202,17 @@ describe("generation task request payload", () => {
 });
 
 describe("generation task input storage", () => {
+  it("纯文生图没有媒体时不访问对象存储", async () => {
+    await expect(
+      storeGenerationTaskInputs({
+        userId: "user-1",
+        taskId: "task-1",
+        inputs: [],
+      })
+    ).resolves.toEqual([]);
+    expect(storageMocks.getStorageProvider).not.toHaveBeenCalled();
+  });
+
   it("只把媒体写入任务隔离对象并返回 JSON 引用", async () => {
     const references = await storeGenerationTaskInputs({
       userId: "user-1",
@@ -252,6 +266,39 @@ describe("generation task input storage", () => {
       sourceReference.key,
       sourceReference.bucket
     );
+  });
+
+  it("部分写入与回滚同时失败时显式汇总两个错误", async () => {
+    const storageError = new Error("storage unavailable");
+    const cleanupError = new Error("cleanup unavailable");
+    storageMocks.putObject
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(storageError);
+    storageMocks.deleteObject.mockRejectedValueOnce(cleanupError);
+
+    const operation = storeGenerationTaskInputs({
+      userId: "user-1",
+      taskId: "task-1",
+      inputs: [
+        {
+          data: Buffer.from("data"),
+          name: "source.png",
+          contentType: "image/png",
+          role: "source",
+        },
+        {
+          data: Buffer.from("mask"),
+          name: "mask.png",
+          contentType: "image/png",
+          role: "mask",
+        },
+      ],
+    });
+
+    await expect(operation).rejects.toMatchObject({
+      message: "Failed to store generation task inputs and clean partial objects",
+      errors: [storageError, cleanupError],
+    });
   });
 
   it("读取时复核 bucket、前缀、声明大小和正文上限", async () => {

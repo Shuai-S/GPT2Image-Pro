@@ -1,0 +1,250 @@
+/**
+ * 外部图像编辑 handler 的持久 async 入队测试。
+ *
+ * 使用 DB-free 依赖 mock 锁定严格 image_edit 标量、source/mask 媒体字节、套餐队列
+ * 快照与 fail-closed 错误；async Route 不得再执行统一图像管线或进程内批处理。
+ */
+
+import type { NextRequest } from "next/server";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  authenticateExternalApiRequest: vi.fn(),
+  canUsePlanCapability: vi.fn(),
+  enqueueGenerationTask: vi.fn(),
+  getPlanLimits: vi.fn(),
+  getPlanUploadLimits: vi.fn(),
+  getRuntimeImageEditMaxReferenceImages: vi.fn(),
+  logError: vi.fn(),
+  runBatchImageGeneration: vi.fn(),
+  runImageGenerationForUser: vi.fn(),
+  uploadModerationImages: vi.fn(),
+  validateCallbackUrl: vi.fn(),
+}));
+
+vi.mock("@repo/shared/api-logger", () => ({
+  withApiLogging: (handler: unknown) => handler,
+}));
+
+vi.mock("@repo/shared/logger", () => ({
+  logError: mocks.logError,
+}));
+
+vi.mock("@repo/shared/subscription/services/plan-capabilities", () => ({
+  canUsePlanCapability: mocks.canUsePlanCapability,
+  getPlanLimits: mocks.getPlanLimits,
+}));
+
+vi.mock("@repo/shared/subscription/services/upload-limits", () => ({
+  getPlanUploadLimits: mocks.getPlanUploadLimits,
+}));
+
+vi.mock("@/features/external-api/async-image-tasks", () => ({
+  toAsyncImageTaskResponse: (task: Record<string, unknown>) => {
+    const { apiKeyId: _apiKeyId, userId: _userId, ...publicTask } = task;
+    return publicTask;
+  },
+  validateCallbackUrl: mocks.validateCallbackUrl,
+}));
+
+vi.mock("@/features/external-api/auth", () => ({
+  authenticateExternalApiRequest: mocks.authenticateExternalApiRequest,
+}));
+
+vi.mock("@/features/external-api/generation-task-service", () => ({
+  enqueueGenerationTask: mocks.enqueueGenerationTask,
+}));
+
+vi.mock("@/features/image-generation/batch-runner", () => ({
+  runBatchImageGeneration: mocks.runBatchImageGeneration,
+}));
+
+vi.mock("@/features/image-generation/edit-reference-limits", () => ({
+  getEffectiveImageEditMaxReferenceImages: (
+    planLimit: number,
+    runtimeLimit: number
+  ) => Math.min(planLimit, runtimeLimit),
+  getRuntimeImageEditMaxReferenceImages:
+    mocks.getRuntimeImageEditMaxReferenceImages,
+}));
+
+vi.mock("@/features/image-generation/operations", () => ({
+  runImageGenerationForUser: mocks.runImageGenerationForUser,
+}));
+
+vi.mock("@/features/image-generation/request-utils", () => ({
+  DEFAULT_MAX_IMAGE_BYTES: 20 * 1024 * 1024,
+  filesToImageInputs: vi.fn(),
+  formatMegabytes: (bytes: number) => `${bytes / 1024 / 1024} MB`,
+  getTotalUploadSize: (files: readonly File[], mask?: File) =>
+    files.reduce((total, file) => total + file.size, mask?.size ?? 0),
+  uploadModerationImages: mocks.uploadModerationImages,
+  validateImageFile: vi.fn(),
+}));
+
+/** 构造带 NextRequest.nextUrl 的 multipart 图像编辑请求。 */
+function imageEditRequest(input?: { relayAsync?: boolean }): NextRequest {
+  const formData = new FormData();
+  formData.set("prompt", "remove the background");
+  formData.set("model", "gpt-image-2");
+  formData.set("n", "2");
+  formData.set("response_format", "url");
+  formData.set("quality", "high");
+  formData.set("async", String(input?.relayAsync ?? true));
+  formData.append(
+    "image",
+    new File([Uint8Array.from([1, 2, 3])], "source.webp", {
+      type: "image/webp",
+    })
+  );
+  formData.set(
+    "mask",
+    new File([Uint8Array.from([4, 5])], "mask.png", {
+      type: "image/png",
+    })
+  );
+
+  const request = new Request("https://example.test/v1/images/edits", {
+    method: "POST",
+    body: formData,
+  });
+  Object.defineProperty(request, "nextUrl", {
+    value: new URL(request.url),
+  });
+  return request as NextRequest;
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.authenticateExternalApiRequest.mockResolvedValue({
+    userId: "user-1",
+    apiKeyId: "key-1",
+    plan: "ultra",
+    moderationBlockRiskLevel: "medium",
+    relayOnly: false,
+  });
+  mocks.canUsePlanCapability.mockResolvedValue(true);
+  mocks.getPlanLimits.mockResolvedValue({
+    maxBatchCount: 4,
+    maxEditImages: 4,
+    imageGenerationConcurrency: 3,
+    queuePriority: "highest",
+  });
+  mocks.getPlanUploadLimits.mockResolvedValue({
+    maxFileSizeBytes: 25 * 1024 * 1024,
+    maxUploadBytes: 100 * 1024 * 1024,
+  });
+  mocks.getRuntimeImageEditMaxReferenceImages.mockResolvedValue(4);
+  mocks.validateCallbackUrl.mockImplementation(async (value: string) => value);
+  mocks.enqueueGenerationTask.mockResolvedValue({
+    id: "task-1",
+    object: "image.generation",
+    userId: "user-1",
+    apiKeyId: "key-1",
+    model: "gpt-image-2",
+    status: "processing",
+    created_at: "2026-07-10T00:00:00.000Z",
+  });
+});
+
+describe("postExternalImageEdits async", () => {
+  it("只入队严格标量和 source/mask 媒体，不在 Route 内执行生成", async () => {
+    const { postExternalImageEdits } = await import("./image-edits");
+
+    const response = await postExternalImageEdits(imageEditRequest());
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual(
+      expect.objectContaining({ id: "task-1", status: "processing" })
+    );
+    expect(payload).not.toHaveProperty("userId");
+    expect(payload).not.toHaveProperty("apiKeyId");
+    expect(mocks.enqueueGenerationTask).toHaveBeenCalledOnce();
+    const enqueueInput = mocks.enqueueGenerationTask.mock.calls[0]?.[0];
+    expect(enqueueInput).toEqual(
+      expect.objectContaining({
+        userId: "user-1",
+        apiKeyId: "key-1",
+        relayOnly: false,
+        priority: "highest",
+        userConcurrency: 3,
+        request: expect.objectContaining({
+          kind: "image_edit",
+          generationIds: [expect.any(String), expect.any(String)],
+          createdAtEpochSeconds: expect.any(Number),
+          responseFormat: "url",
+          input: expect.objectContaining({
+            prompt: "remove the background",
+            model: "gpt-image-2",
+            quality: "high",
+            moderation: "auto",
+            moderationBlockRiskLevel: "medium",
+          }),
+        }),
+      })
+    );
+    expect(enqueueInput?.request).not.toHaveProperty("inputReferences");
+    expect(enqueueInput?.mediaInputs).toEqual([
+      {
+        data: Buffer.from([1, 2, 3]),
+        name: "source.webp",
+        contentType: "image/webp",
+        role: "source",
+      },
+      {
+        data: Buffer.from([4, 5]),
+        name: "mask.png",
+        contentType: "image/png",
+        role: "mask",
+      },
+    ]);
+    expect(mocks.uploadModerationImages).not.toHaveBeenCalled();
+    expect(mocks.runBatchImageGeneration).not.toHaveBeenCalled();
+    expect(mocks.runImageGenerationForUser).not.toHaveBeenCalled();
+  });
+
+  it("relay-only async 在媒体持久化前返回明确错误", async () => {
+    mocks.authenticateExternalApiRequest.mockResolvedValue({
+      userId: "user-1",
+      apiKeyId: "key-1",
+      plan: "ultra",
+      moderationBlockRiskLevel: "low",
+      relayOnly: true,
+    });
+    const { postExternalImageEdits } = await import("./image-edits");
+
+    const response = await postExternalImageEdits(imageEditRequest());
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toEqual(
+      expect.objectContaining({ code: "unsupported_async_mode" })
+    );
+    expect(mocks.enqueueGenerationTask).not.toHaveBeenCalled();
+    expect(mocks.runImageGenerationForUser).not.toHaveBeenCalled();
+  });
+
+  it("入队失败返回可重试 503 且不启动后台生成", async () => {
+    const queueError = new Error("database unavailable");
+    mocks.enqueueGenerationTask.mockRejectedValueOnce(queueError);
+    const { postExternalImageEdits } = await import("./image-edits");
+
+    const response = await postExternalImageEdits(imageEditRequest());
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(payload.error).toEqual(
+      expect.objectContaining({ code: "queue_unavailable" })
+    );
+    expect(mocks.logError).toHaveBeenCalledWith(
+      queueError,
+      expect.objectContaining({
+        source: "external-api-image-edit-enqueue",
+        userId: "user-1",
+      })
+    );
+    expect(mocks.runBatchImageGeneration).not.toHaveBeenCalled();
+    expect(mocks.runImageGenerationForUser).not.toHaveBeenCalled();
+  });
+});

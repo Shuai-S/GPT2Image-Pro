@@ -64,12 +64,16 @@ function generationIdsForRequest(
 export async function enqueueGenerationTask(input: {
   userId: string;
   apiKeyId?: string;
+  relayOnly: boolean;
   callbackUrl?: string;
   priority: QueuePriority;
   userConcurrency: number;
   request: EnqueueGenerationTaskRequest;
   mediaInputs?: readonly GenerationTaskInputObject[];
 }): Promise<AsyncImageTask> {
+  if (input.relayOnly) {
+    throw new Error("Relay-only identities cannot enqueue generation tasks");
+  }
   const taskId = `task_${randomUUID().replace(/-/g, "")}`;
   const mediaInputs = input.mediaInputs ?? [];
   if (input.request.kind === "image_generate" && mediaInputs.length > 0) {
@@ -85,8 +89,8 @@ export async function enqueueGenerationTask(input: {
   try {
     const requestPayload = generationTaskRequestPayloadSchema.parse(
       input.request.kind === "image_generate"
-        ? { ...input.request, relayOnly: false }
-        : { ...input.request, relayOnly: false, inputReferences }
+        ? { ...input.request, relayOnly: input.relayOnly }
+        : { ...input.request, relayOnly: input.relayOnly, inputReferences }
     );
     const generationIds = generationIdsForRequest(input.request);
     return await createAsyncImageTask({

@@ -1,7 +1,15 @@
+/**
+ * 外部 OpenAI 兼容图像编辑接口。
+ *
+ * 职责：解析并校验 multipart/JSON 编辑请求；同步与流式请求直达统一图像管线，
+ * async 请求只把严格标量和媒体对象写入 PostgreSQL 持久任务，由 generation worker 执行。
+ */
+
 import { randomUUID } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { withApiLogging } from "@repo/shared/api-logger";
+import { logError } from "@repo/shared/logger";
 import {
   canUsePlanCapability,
   getPlanLimits,
@@ -10,12 +18,12 @@ import { getPlanUploadLimits } from "@repo/shared/subscription/services/upload-l
 import type { NextRequest } from "next/server";
 
 import {
-  completeAsyncImageTask,
-  createAsyncImageTask,
   toAsyncImageTaskResponse,
   validateCallbackUrl,
 } from "@/features/external-api/async-image-tasks";
 import { authenticateExternalApiRequest } from "@/features/external-api/auth";
+import type { GenerationTaskInputObject } from "@/features/external-api/generation-task-input";
+import { enqueueGenerationTask } from "@/features/external-api/generation-task-service";
 import {
   createExternalImageStreamResponse,
   createJsonKeepAliveResponse,
@@ -26,7 +34,6 @@ import {
   openAIImageError,
   toExternalErrorStreamData,
   toLoggedOpenAIErrorPayload,
-  toOpenAIErrorPayload,
   toOpenAIImagesResponse,
   wantsImageStreamResponse,
 } from "@/features/external-api/images";
@@ -111,6 +118,12 @@ const JSON_SCALAR_FIELDS = [
   "webFirst",
   "force_firefly",
   "forceFirefly",
+  "hdRepair",
+  "hd_repair",
+  "blockRepair",
+  "block_repair",
+  "repairPrompt",
+  "repair_prompt",
   "stream",
   "async",
   "callback_url",
@@ -466,6 +479,27 @@ async function resolveMaskReference(
   });
 }
 
+/**
+ * 把一份已校验媒体转成持久任务对象存储输入。
+ *
+ * @param file 已通过类型、单文件大小及请求总大小校验的媒体。
+ * @param role source 表示编辑参考图，mask 表示唯一 PNG 蒙版。
+ * @returns 含有界媒体字节与原始元数据的对象存储输入。
+ * @sideEffects 读取 File 的完整字节；不写数据库或对象存储。
+ * @failureMode File 读取失败时抛错，外层按请求失败处理且不会创建任务。
+ */
+async function toGenerationTaskMediaInput(
+  file: File,
+  role: "source" | "mask"
+): Promise<GenerationTaskInputObject> {
+  return {
+    data: Buffer.from(await file.arrayBuffer()),
+    name: file.name,
+    contentType: file.type,
+    role,
+  };
+}
+
 async function toStreamCompletedPayload(
   request: Request,
   result: Awaited<ReturnType<typeof runImageGenerationForUser>>,
@@ -657,6 +691,9 @@ export const postExternalImageEdits = withApiLogging(
       formData.get("repairPrompt") ?? formData.get("repair_prompt");
     const repairPrompt =
       typeof repairPromptRaw === "string" ? repairPromptRaw : undefined;
+    if (repairPrompt && repairPrompt.length > 8000) {
+      return openAIImageError("repairPrompt must be 8000 characters or less.");
+    }
 
     let count = 1;
     try {
@@ -739,6 +776,13 @@ export const postExternalImageEdits = withApiLogging(
     if (useAsync && useStreamResponse) {
       return openAIImageError("async cannot be used with stream.");
     }
+    if (useAsync && auth.relayOnly) {
+      return openAIImageError(
+        "Relay-only API keys cannot use persisted async generation.",
+        400,
+        "unsupported_async_mode"
+      );
+    }
     let callbackUrl: string | undefined;
     const callbackUrlValue = getText(formData, "callback_url");
     if (callbackUrlValue) {
@@ -750,6 +794,28 @@ export const postExternalImageEdits = withApiLogging(
         );
       }
     }
+
+    const operationInput = {
+      prompt,
+      promptOptimization,
+      moderationPromptRepair,
+      moderationBlockRiskLevel: auth.moderationBlockRiskLevel,
+      size,
+      model,
+      gptModel,
+      thinking,
+      quality,
+      moderation,
+      outputFormat,
+      outputCompression,
+      background,
+      transparentMatte,
+      hdRepair,
+      blockRepair,
+      repairPrompt,
+      forceWebBackend,
+      forceFirefly,
+    };
 
     try {
       const sourceFiles = await resolveImageReferences(
@@ -772,6 +838,46 @@ export const postExternalImageEdits = withApiLogging(
         );
       }
 
+      if (useAsync) {
+        const created = Math.floor(Date.now() / 1000);
+        const generationIds = Array.from({ length: count }, () => randomUUID());
+        const mediaInputs = await Promise.all(
+          sourceFiles.map((file) => toGenerationTaskMediaInput(file, "source"))
+        );
+        if (maskFile) {
+          mediaInputs.push(await toGenerationTaskMediaInput(maskFile, "mask"));
+        }
+        try {
+          const task = await enqueueGenerationTask({
+            userId: auth.userId,
+            apiKeyId: auth.apiKeyId,
+            relayOnly: auth.relayOnly,
+            callbackUrl,
+            priority: planLimits.queuePriority,
+            userConcurrency: planLimits.imageGenerationConcurrency,
+            request: {
+              kind: "image_edit",
+              generationIds,
+              createdAtEpochSeconds: created,
+              responseFormat,
+              input: operationInput,
+            },
+            mediaInputs,
+          });
+          return Response.json(toAsyncImageTaskResponse(task));
+        } catch (error) {
+          logError(error, {
+            source: "external-api-image-edit-enqueue",
+            userId: auth.userId,
+          });
+          return openAIImageError(
+            "Image generation queue is temporarily unavailable.",
+            503,
+            "queue_unavailable"
+          );
+        }
+      }
+
       const batchId = randomUUID();
       const moderationImages = await uploadModerationImages(
         auth.userId,
@@ -791,6 +897,7 @@ export const postExternalImageEdits = withApiLogging(
       ) =>
         await runImageGenerationForUser(
           {
+            ...operationInput,
             mode: "edit",
             userId: auth.userId,
             resolvedUserPlan: auth.plan,
@@ -798,26 +905,7 @@ export const postExternalImageEdits = withApiLogging(
             apiKeyId: auth.apiKeyId,
             relayOnly: auth.relayOnly,
             backendRequestKind: "image_edit" as const,
-            prompt,
-            promptOptimization,
-            moderationPromptRepair,
-            moderationBlockRiskLevel: auth.moderationBlockRiskLevel,
-            size,
-            model,
-            gptModel,
-            thinking,
-            quality,
-            moderation,
-            outputFormat,
-            outputCompression,
-            background,
-            transparentMatte,
-            hdRepair,
-            blockRepair,
-            repairPrompt,
             n: 1,
-            forceWebBackend,
-            forceFirefly,
             images: await buildImages(),
             mask: await buildMask(),
           },
@@ -873,57 +961,6 @@ export const postExternalImageEdits = withApiLogging(
             },
           });
         });
-      }
-
-      if (useAsync) {
-        const created = Math.floor(Date.now() / 1000);
-        const generationIds = Array.from({ length: count }, () => randomUUID());
-        const task = await createAsyncImageTask({
-          userId: auth.userId,
-          apiKeyId: auth.apiKeyId,
-          model,
-          generationIds,
-          callbackUrl,
-        });
-
-        void (async () => {
-          const results = await runBatchImageGeneration({
-            count,
-            concurrency: planLimits.imageGenerationConcurrency,
-            generationIds,
-            run: runEdit,
-          });
-          const resultPayload = await toOpenAIImagesResponse(
-            request,
-            results,
-            responseFormat,
-            created,
-            {
-              route: "/v1/images/edits",
-              async: true,
-              model,
-              size,
-            }
-          );
-          await completeAsyncImageTask(task.id, {
-            error:
-              resultPayload &&
-              typeof resultPayload === "object" &&
-              "error" in resultPayload
-                ? resultPayload
-                : undefined,
-            result: resultPayload,
-          });
-        })().catch(async (error) => {
-          const errorPayload = toOpenAIErrorPayload(
-            error instanceof Error ? error.message : "Async image edit failed"
-          );
-          await completeAsyncImageTask(task.id, {
-            error: errorPayload,
-          });
-        });
-
-        return Response.json(toAsyncImageTaskResponse(task));
       }
 
       return createJsonKeepAliveResponse(

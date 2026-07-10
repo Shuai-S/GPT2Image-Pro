@@ -1,5 +1,13 @@
+/**
+ * 外部 OpenAI 兼容图像生成接口。
+ *
+ * 职责：校验 JSON、套餐能力与响应模式；同步/流式请求直达统一图像管线，async
+ * 请求只创建 PostgreSQL 持久任务，由 generation worker 在请求结束后执行。
+ */
+
 import { randomUUID } from "node:crypto";
 import { withApiLogging } from "@repo/shared/api-logger";
+import { logError } from "@repo/shared/logger";
 import {
   canUsePlanCapability,
   getPlanLimits,
@@ -9,12 +17,11 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 
 import {
-  completeAsyncImageTask,
-  createAsyncImageTask,
   toAsyncImageTaskResponse,
   validateCallbackUrl,
 } from "@/features/external-api/async-image-tasks";
 import { authenticateExternalApiRequest } from "@/features/external-api/auth";
+import { enqueueGenerationTask } from "@/features/external-api/generation-task-service";
 import {
   createExternalImageStreamResponse,
   createJsonKeepAliveResponse,
@@ -25,7 +32,6 @@ import {
   openAIImageError,
   toExternalErrorStreamData,
   toLoggedOpenAIErrorPayload,
-  toOpenAIErrorPayload,
   toOpenAIImagesResponse,
   wantsImageStreamResponse,
 } from "@/features/external-api/images";
@@ -238,6 +244,13 @@ export const postExternalImageGenerations = withApiLogging(
     if (useAsync && useStreamResponse) {
       return openAIImageError("async cannot be used with stream.");
     }
+    if (useAsync && auth.relayOnly) {
+      return openAIImageError(
+        "Relay-only API keys cannot use persisted async generation.",
+        400,
+        "unsupported_async_mode"
+      );
+    }
     let callbackUrl: string | undefined;
     if (parsed.data.callback_url) {
       try {
@@ -252,13 +265,7 @@ export const postExternalImageGenerations = withApiLogging(
     const transparentMatte =
       parsed.data.transparentMatte ?? parsed.data.transparent_matte;
 
-    const input = {
-      mode: "generate" as const,
-      userId: auth.userId,
-      resolvedUserPlan: auth.plan,
-      apiKeyId: auth.apiKeyId,
-      relayOnly: auth.relayOnly,
-      backendRequestKind: "image_generation" as const,
+    const operationInput = {
       prompt: parsed.data.prompt,
       promptOptimization:
         parsed.data.promptOptimization ?? parsed.data.prompt_optimization,
@@ -286,6 +293,15 @@ export const postExternalImageGenerations = withApiLogging(
       hdRepair: parsed.data.hdRepair ?? parsed.data.hd_repair,
       blockRepair: parsed.data.blockRepair ?? parsed.data.block_repair,
       repairPrompt: parsed.data.repairPrompt ?? parsed.data.repair_prompt,
+    };
+    const input = {
+      ...operationInput,
+      mode: "generate" as const,
+      userId: auth.userId,
+      resolvedUserPlan: auth.plan,
+      apiKeyId: auth.apiKeyId,
+      relayOnly: auth.relayOnly,
+      backendRequestKind: "image_generation" as const,
     };
     const responseFormat = parsed.data.response_format || "b64_json";
 
@@ -344,53 +360,34 @@ export const postExternalImageGenerations = withApiLogging(
     if (useAsync) {
       const created = Math.floor(Date.now() / 1000);
       const generationIds = Array.from({ length: count }, () => randomUUID());
-      const task = await createAsyncImageTask({
-        userId: auth.userId,
-        apiKeyId: auth.apiKeyId,
-        model: imageModel,
-        generationIds,
-        callbackUrl,
-      });
-
-      void (async () => {
-        const results = await runBatchImageGeneration({
-          count,
-          concurrency: limits.imageGenerationConcurrency,
-          generationIds,
-          run: (generationId) =>
-            runImageGenerationForUser({ ...input, generationId }),
+      let task: Awaited<ReturnType<typeof enqueueGenerationTask>>;
+      try {
+        task = await enqueueGenerationTask({
+          userId: auth.userId,
+          apiKeyId: auth.apiKeyId,
+          relayOnly: auth.relayOnly,
+          callbackUrl,
+          priority: limits.queuePriority,
+          userConcurrency: limits.imageGenerationConcurrency,
+          request: {
+            kind: "image_generate",
+            generationIds,
+            createdAtEpochSeconds: created,
+            responseFormat,
+            input: operationInput,
+          },
         });
-        const resultPayload = await toOpenAIImagesResponse(
-          request,
-          results,
-          responseFormat,
-          created,
-          {
-            route: "/v1/images/generations",
-            async: true,
-            model: imageModel,
-            size: input.size,
-          }
+      } catch (error) {
+        logError(error, {
+          source: "external-api-image-generation-enqueue",
+          userId: auth.userId,
+        });
+        return openAIImageError(
+          "Image generation queue is temporarily unavailable.",
+          503,
+          "queue_unavailable"
         );
-        await completeAsyncImageTask(task.id, {
-          error:
-            resultPayload &&
-            typeof resultPayload === "object" &&
-            "error" in resultPayload
-              ? resultPayload
-              : undefined,
-          result: resultPayload,
-        });
-      })().catch(async (error) => {
-        const errorPayload = toOpenAIErrorPayload(
-          error instanceof Error
-            ? error.message
-            : "Async image generation failed"
-        );
-        await completeAsyncImageTask(task.id, {
-          error: errorPayload,
-        });
-      });
+      }
 
       return Response.json(toAsyncImageTaskResponse(task));
     }

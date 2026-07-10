@@ -11,24 +11,26 @@ import { isFireflyVideoModelId } from "@repo/shared/adobe/firefly-direct/video-c
 import { withApiLogging } from "@repo/shared/api-logger";
 import { logError } from "@repo/shared/logger";
 import { buildSignedStorageImageUrl } from "@repo/shared/storage/signed-url";
-import { canUsePlanCapability } from "@repo/shared/subscription/services/plan-capabilities";
+import {
+  canUsePlanCapability,
+  getPlanQueueSettings,
+} from "@repo/shared/subscription/services/plan-capabilities";
 import { getRuntimeSettingString } from "@repo/shared/system-settings";
 import { nanoid } from "nanoid";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 
 import {
-  completeAsyncImageTask,
-  createAsyncImageTask,
   toAsyncImageTaskResponse,
   validateCallbackUrl,
 } from "@/features/external-api/async-image-tasks";
 import { authenticateExternalApiRequest } from "@/features/external-api/auth";
+import type { GenerationTaskInputObject } from "@/features/external-api/generation-task-input";
+import { enqueueGenerationTask } from "@/features/external-api/generation-task-service";
 import {
   createJsonKeepAliveResponse,
   IMAGE_JSON_KEEP_ALIVE_INITIAL_WAIT_MS,
   openAIImageError,
-  toOpenAIErrorPayload,
 } from "@/features/external-api/images";
 import {
   IMAGE_PROMPT_MAX_CHARACTERS,
@@ -60,11 +62,37 @@ const externalVideoSchema = z.object({
   callbackUrl: z.string().url().max(2048).optional(),
 });
 
+/**
+ * 解码已通过外部请求 schema 限长和格式校验的图片 data URL。
+ *
+ * @param value 以 image MIME 开头的 base64 data URL。
+ * @returns 解码后的媒体字节与 MIME；正则不匹配时返回空 PNG，由后续大小校验拒绝。
+ * @sideEffects 分配有界 Buffer，不访问网络或存储。
+ */
 function decodeImageDataUrl(value: string): { data: Buffer; type: string } {
   const match = value.match(/^data:(image\/[a-zA-Z.+-]+);base64,(.*)$/);
   const type = match?.[1] || "image/png";
   const base64 = match?.[2] || "";
   return { data: Buffer.from(base64, "base64"), type };
+}
+
+/**
+ * 把视频输入图按 API 顺序映射为首帧、尾帧与参考图对象。
+ *
+ * @param images 已解码且最多三项的图片输入。
+ * @returns 可交给持久入队服务写对象存储的有序媒体。
+ * @sideEffects 无；Buffer 由返回对象共享，不复制正文。
+ */
+function toVideoTaskMediaInputs(
+  images: readonly { data: Buffer; type: string }[]
+): GenerationTaskInputObject[] {
+  const roles = ["first", "last", "reference"] as const;
+  return images.map((image, index) => ({
+    data: image.data,
+    name: `video-input-${index + 1}.img`,
+    contentType: image.type,
+    role: roles[index] ?? "reference",
+  }));
 }
 
 export const postExternalVideoGenerations = withApiLogging(
@@ -106,13 +134,20 @@ export const postExternalVideoGenerations = withApiLogging(
       );
     }
 
-    const inputImages = parsed.data.image?.map(decodeImageDataUrl);
     const negativePrompt =
       parsed.data.negativePrompt ?? parsed.data.negative_prompt;
 
     const useAsync =
       parsed.data.async === true ||
       request.nextUrl.searchParams.get("async") === "true";
+    if (useAsync && auth.relayOnly) {
+      return openAIImageError(
+        "Relay-only API keys cannot use persisted async generation.",
+        400,
+        "unsupported_async_mode"
+      );
+    }
+    const inputImages = parsed.data.image?.map(decodeImageDataUrl);
     let callbackUrl: string | undefined;
     if (parsed.data.callback_url || parsed.data.callbackUrl) {
       try {
@@ -138,63 +173,44 @@ export const postExternalVideoGenerations = withApiLogging(
       (await getRuntimeSettingString("NEXT_PUBLIC_GENERATIONS_BUCKET_NAME")) ||
       "generations";
 
-    // 异步：预供 videoId(令任务 generation_id = video_generation 行 id),立即返回
-    // task_...,后台跑生成 → 完成/失败时落任务态 + 可选 callback。凭 task_id 或
-    // generation_id 走 GET /v1/videos/{id} 轮询(后者 DB 持久,跨重启/多实例可查)。
+    // 异步仅持久化严格标量和对象引用；worker 用 lease token 创建/接管业务行。
     if (useAsync) {
       const videoId = nanoid();
-      const task = await createAsyncImageTask({
-        userId: auth.userId,
-        apiKeyId: auth.apiKeyId,
-        model: parsed.data.model,
-        generationIds: [videoId],
-        taskType: "video",
-        callbackUrl,
-      });
-
-      void (async () => {
-        try {
-          const result = await runAdobeVideoGenerationForUser({
-            ...runInput,
-            videoGenerationId: videoId,
-          });
-          if ("error" in result) {
-            // 传 OpenAI 错误信封,使任务对象得到规范的 error:{message,...}（与图像异步一致）。
-            await completeAsyncImageTask(task.id, {
-              error: toOpenAIErrorPayload(result.error),
-            });
-          } else {
-            const videoUrl =
-              buildSignedStorageImageUrl(
-                result.storageKey,
-                await bucketName()
-              ) ?? "";
-            await completeAsyncImageTask(task.id, {
-              result: {
-                object: "video",
-                model: parsed.data.model,
-                video_url: videoUrl,
-                data: [{ url: videoUrl }],
-                credits_consumed: result.creditsConsumed,
-              },
-            });
-          }
-        } catch (error) {
-          logError(error, {
-            source: "external-api-async-video",
-            taskId: task.id,
-          });
-          await completeAsyncImageTask(task.id, {
-            error: toOpenAIErrorPayload(
-              error instanceof Error ? error.message : "Video generation failed"
-            ),
-          });
-        }
-      })();
-
-      return Response.json(toAsyncImageTaskResponse(task), {
-        headers: { "Cache-Control": "no-store" },
-      });
+      try {
+        const queueSettings = await getPlanQueueSettings(auth.plan);
+        const task = await enqueueGenerationTask({
+          userId: auth.userId,
+          apiKeyId: auth.apiKeyId,
+          relayOnly: auth.relayOnly,
+          callbackUrl,
+          priority: queueSettings.priority,
+          userConcurrency: queueSettings.userConcurrency,
+          request: {
+            kind: "video",
+            generationId: videoId,
+            createdAtEpochSeconds: Math.floor(Date.now() / 1000),
+            input: {
+              prompt: parsed.data.prompt,
+              model: parsed.data.model,
+              ...(negativePrompt ? { negativePrompt } : {}),
+            },
+          },
+          mediaInputs: toVideoTaskMediaInputs(inputImages ?? []),
+        });
+        return Response.json(toAsyncImageTaskResponse(task), {
+          headers: { "Cache-Control": "no-store" },
+        });
+      } catch (error) {
+        logError(error, {
+          source: "external-api-video-enqueue",
+          userId: auth.userId,
+        });
+        return openAIImageError(
+          "Video generation queue is temporarily unavailable.",
+          503,
+          "queue_unavailable"
+        );
+      }
     }
 
     // 同步：keep-alive 撑住长连接,跑完直接返回视频 URL(并带 generation_id 便于后续复查)。

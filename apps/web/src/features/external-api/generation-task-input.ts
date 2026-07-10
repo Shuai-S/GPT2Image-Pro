@@ -300,6 +300,8 @@ export async function storeGenerationTaskInputs(input: {
   taskId: string;
   inputs: readonly GenerationTaskInputObject[];
 }): Promise<GenerationTaskInputReference[]> {
+  // 纯文生图不依赖对象存储；可选存储故障不能阻断只写 PostgreSQL 的任务入队。
+  if (input.inputs.length === 0) return [];
   if (input.inputs.length > MAX_INPUT_REFERENCES) {
     throw new Error("Generation task has too many input objects");
   }
@@ -340,11 +342,20 @@ export async function storeGenerationTaskInputs(input: {
     }
     return generationTaskInputReferenceSchema.array().parse(references);
   } catch (error) {
-    await Promise.allSettled(
+    const cleanupResults = await Promise.allSettled(
       references.map((reference) =>
         storage.deleteObject(reference.key, reference.bucket)
       )
     );
+    const cleanupErrors = cleanupResults.flatMap((result) =>
+      result.status === "rejected" ? [result.reason as unknown] : []
+    );
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(
+        [error, ...cleanupErrors],
+        "Failed to store generation task inputs and clean partial objects"
+      );
+    }
     throw error;
   }
 }

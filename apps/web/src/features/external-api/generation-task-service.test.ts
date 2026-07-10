@@ -72,6 +72,7 @@ describe("enqueueGenerationTask", () => {
     await enqueueGenerationTask({
       userId: "user-1",
       apiKeyId: "key-1",
+      relayOnly: false,
       callbackUrl: "https://example.com/callback",
       priority: "highest",
       userConcurrency: 3,
@@ -118,6 +119,7 @@ describe("enqueueGenerationTask", () => {
       enqueueGenerationTask({
         userId: "user-1",
         apiKeyId: "key-1",
+        relayOnly: false,
         priority: "normal",
         userConcurrency: 2,
         request: editRequest,
@@ -135,5 +137,28 @@ describe("enqueueGenerationTask", () => {
       sourceReference.key,
       sourceReference.bucket
     );
+  });
+
+  it("relay-only 身份在写对象前即 fail-closed", async () => {
+    await expect(
+      enqueueGenerationTask({
+        userId: "user-1",
+        apiKeyId: "key-1",
+        relayOnly: true,
+        priority: "normal",
+        userConcurrency: 2,
+        request: editRequest,
+        mediaInputs: [
+          {
+            data: Buffer.from("data"),
+            name: "source.png",
+            contentType: "image/png",
+            role: "source",
+          },
+        ],
+      })
+    ).rejects.toThrow("Relay-only identities cannot enqueue");
+    expect(mocks.putObject).not.toHaveBeenCalled();
+    expect(mocks.createAsyncImageTask).not.toHaveBeenCalled();
   });
 });
