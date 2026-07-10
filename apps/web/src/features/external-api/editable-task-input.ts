@@ -176,24 +176,35 @@ export async function loadEditableTaskImages(input: {
  * @returns 所有合法且属于该任务前缀的对象删除结果；非法引用被安全忽略。
  * @sideEffects 并行调用对象存储删除；单个失败不阻断其他删除尝试。
  */
-async function settleEditableTaskInputCleanup(input: {
-  userId: string;
-  taskId: string;
-  references: readonly EditableTaskInputReference[];
-}): Promise<PromiseSettledResult<void>[]> {
-  const storage = await getStorageProvider();
+async function settleEditableTaskInputCleanup(
+  input: {
+    userId: string;
+    taskId: string;
+    references: readonly EditableTaskInputReference[];
+  },
+  strict = false
+): Promise<PromiseSettledResult<void>[]> {
   const expectedPrefix = `${input.userId}/editable-task-inputs/${input.taskId}/`;
   const references = input.references.flatMap((rawReference) => {
     const parsed = editableTaskInputReferenceSchema.safeParse(rawReference);
+    const suffix = parsed.success
+      ? parsed.data.key.slice(expectedPrefix.length)
+      : "";
     if (
       !parsed.success ||
       !parsed.data.key.startsWith(expectedPrefix) ||
-      parsed.data.key.slice(expectedPrefix.length).includes("/")
+      !suffix ||
+      suffix.includes("/") ||
+      suffix === "." ||
+      suffix === ".."
     ) {
+      if (strict) throw new Error("Invalid editable task input reference");
       return [];
     }
     return [parsed.data];
   });
+  if (references.length === 0) return [];
+  const storage = await getStorageProvider();
   return await Promise.allSettled(
     references.map(async (reference) => {
       await storage.deleteObject(reference.key, reference.bucket);
@@ -220,8 +231,8 @@ export async function cleanupEditableTaskInputs(input: {
  * 严格删除任务输入对象并汇总报告失败。
  *
  * @param input 用户、任务和经严格 payload 提取的受控对象引用。
- * @returns 所有合法对象均删除成功时完成；非法引用被安全忽略。
- * @throws 存储初始化或任一合法对象删除失败时抛出，供 retention 保留任务行重试。
+ * @returns 所有引用先通过归属校验且对象删除成功时完成。
+ * @throws 任一引用非法、存储初始化或对象删除失败时抛出，供 retention 保留任务行重试。
  * @sideEffects 并行删除对象存储中的任务输入。
  */
 export async function cleanupEditableTaskInputsStrict(input: {
@@ -229,7 +240,7 @@ export async function cleanupEditableTaskInputsStrict(input: {
   taskId: string;
   references: readonly EditableTaskInputReference[];
 }): Promise<void> {
-  const deletions = await settleEditableTaskInputCleanup(input);
+  const deletions = await settleEditableTaskInputCleanup(input, true);
   const failed = deletions.filter(
     (deletion): deletion is PromiseRejectedResult =>
       deletion.status === "rejected"

@@ -407,33 +407,64 @@ export async function loadGenerationTaskInputs(input: {
 }
 
 /**
- * 删除任务专属输入对象并汇总报告失败。
+ * 解析一组待清理引用并校验用户、任务前缀与单一 bucket。
  *
- * @param input 用户、任务和待清理引用；非法引用会被忽略而非用于任意删除。
- * @returns 所有合法引用均完成删除尝试且成功时结束。
- * @throws 一个或多个合法对象删除失败时抛 AggregateError；非法引用仍被忽略。
- * @sideEffects 并行删除对象存储；单个失败不会阻断其他删除尝试。
+ * @param input 用户、任务和未经信任的数据库引用。
+ * @param strict 严格模式遇到任一非法引用即抛错；普通模式安全忽略非法项。
+ * @returns 全部可安全删除的对象引用；严格模式在返回前已验证完整集合。
+ * @throws strict 为 true 且 schema、bucket 或 key 归属非法时抛出。
+ * @sideEffects 无；不会访问对象存储。
  */
-export async function cleanupGenerationTaskInputs(input: {
-  userId: string;
-  taskId: string;
-  references: readonly GenerationTaskInputReference[];
-}): Promise<void> {
-  const references = input.references.flatMap((rawReference) => {
+function parseGenerationTaskCleanupReferences(
+  input: {
+    userId: string;
+    taskId: string;
+    references: readonly GenerationTaskInputReference[];
+  },
+  strict: boolean
+): GenerationTaskInputReference[] {
+  const parsedReferences = input.references.flatMap((rawReference) => {
     const parsed = generationTaskInputReferenceSchema.safeParse(rawReference);
-    return parsed.success ? [parsed.data] : [];
+    if (parsed.success) return [parsed.data];
+    if (strict) throw new Error("Invalid generation task input reference");
+    return [];
   });
-  const bucket = references[0]?.bucket;
-  if (!bucket) return;
-  const storage = await getStorageProvider();
+  const bucket = parsedReferences[0]?.bucket;
+  if (!bucket) return [];
   const prefix = taskInputPrefix(input.userId, input.taskId);
+  return parsedReferences.flatMap((reference) => {
+    try {
+      assertOwnedTaskReference(reference, bucket, prefix);
+      return [reference];
+    } catch (error) {
+      if (strict) throw error;
+      return [];
+    }
+  });
+}
+
+/**
+ * 执行 generation 输入对象清理并汇总删除失败。
+ *
+ * @param input 用户、任务和待清理引用。
+ * @param strict 是否要求所有引用在任何存储副作用前通过归属校验。
+ * @returns 所有允许删除的对象尝试结束且成功时完成。
+ * @throws 严格校验失败或任一对象删除失败时抛出。
+ * @sideEffects 并行删除对象存储；单个删除失败不会阻断其他合法对象尝试。
+ */
+async function cleanupGenerationTaskInputsWithMode(
+  input: {
+    userId: string;
+    taskId: string;
+    references: readonly GenerationTaskInputReference[];
+  },
+  strict: boolean
+): Promise<void> {
+  const references = parseGenerationTaskCleanupReferences(input, strict);
+  if (references.length === 0) return;
+  const storage = await getStorageProvider();
   const deletions = await Promise.allSettled(
     references.map(async (reference) => {
-      try {
-        assertOwnedTaskReference(reference, bucket, prefix);
-      } catch {
-        return;
-      }
       await storage.deleteObject(reference.key, reference.bucket);
     })
   );
@@ -447,4 +478,36 @@ export async function cleanupGenerationTaskInputs(input: {
       `Failed to delete ${failed.length} generation task input object(s)`
     );
   }
+}
+
+/**
+ * 尽力删除任务专属输入对象。
+ *
+ * @param input 用户、任务和待清理引用；非法引用会被忽略而非用于任意删除。
+ * @returns 所有合法引用均完成删除尝试且成功时结束。
+ * @throws 一个或多个合法对象删除失败时抛 AggregateError；非法引用仍被忽略。
+ * @sideEffects 并行删除对象存储；单个失败不会阻断其他对象清理。
+ */
+export async function cleanupGenerationTaskInputs(input: {
+  userId: string;
+  taskId: string;
+  references: readonly GenerationTaskInputReference[];
+}): Promise<void> {
+  await cleanupGenerationTaskInputsWithMode(input, false);
+}
+
+/**
+ * 严格删除 retention 候选的 generation 输入对象。
+ *
+ * @param input 用户、任务和严格 payload 中的全部对象引用。
+ * @returns 全部引用先通过归属校验、随后删除成功时完成。
+ * @throws 任一引用非法或对象删除失败时抛出，调用方必须保留任务行重试。
+ * @sideEffects 仅在所有引用验证成功后并行删除对象存储。
+ */
+export async function cleanupGenerationTaskInputsStrict(input: {
+  userId: string;
+  taskId: string;
+  references: readonly GenerationTaskInputReference[];
+}): Promise<void> {
+  await cleanupGenerationTaskInputsWithMode(input, true);
 }

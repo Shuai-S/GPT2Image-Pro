@@ -24,7 +24,7 @@ import {
   listExternalAsyncTaskTerminalRetentionCandidates,
 } from "./external-async-task-store";
 import {
-  cleanupGenerationTaskInputs,
+  cleanupGenerationTaskInputsStrict,
   generationTaskRequestPayloadSchema,
 } from "./generation-task-input";
 
@@ -86,7 +86,7 @@ async function cleanupRetentionCandidateInputs(
     throw new Error("Generation task retention payload type mismatch");
   }
   if (request.data.kind === "image_generate") return;
-  await cleanupGenerationTaskInputs({
+  await cleanupGenerationTaskInputsStrict({
     userId: candidate.userId,
     taskId: candidate.id,
     references: request.data.inputReferences,

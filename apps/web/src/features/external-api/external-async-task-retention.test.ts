@@ -32,7 +32,7 @@ vi.mock("./external-async-task-store", () => ({
 
 vi.mock("./generation-task-input", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./generation-task-input")>()),
-  cleanupGenerationTaskInputs: mocks.cleanupGeneration,
+  cleanupGenerationTaskInputsStrict: mocks.cleanupGeneration,
 }));
 
 vi.mock("./editable-task-input", async (importOriginal) => ({

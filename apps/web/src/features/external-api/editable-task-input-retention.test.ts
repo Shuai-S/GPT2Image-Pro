@@ -1,8 +1,8 @@
 /**
  * 可编辑任务输入严格清理测试。
  *
- * 验证 retention 使用的严格入口会汇总合法对象删除失败，同时仍忽略越权引用；不访问
- * 真实对象存储。
+ * 验证 retention 使用的严格入口会汇总对象删除失败，并在任何删除前拒绝越权引用；
+ * 不访问真实对象存储。
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -45,7 +45,7 @@ describe("cleanupEditableTaskInputsStrict", () => {
     ).rejects.toThrow("Failed to delete 1 editable task input object(s)");
   });
 
-  it("越权前缀不会触发任意对象删除", async () => {
+  it("越权前缀 fail-closed 且不会触发任意对象删除", async () => {
     await expect(
       cleanupEditableTaskInputsStrict({
         userId: "user-1",
@@ -57,7 +57,7 @@ describe("cleanupEditableTaskInputsStrict", () => {
           },
         ],
       })
-    ).resolves.toBeUndefined();
+    ).rejects.toThrow("Invalid editable task input reference");
     expect(storageMocks.deleteObject).not.toHaveBeenCalled();
   });
 });
