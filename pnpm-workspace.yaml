@@ -8,6 +8,9 @@ packageExtensions:
   "@alicloud/credentials@2.4.4":
     dependencies:
       debug: 4.4.3
+  "@hookform/resolvers@5.4.0":
+    peerDependencies:
+      zod: ^4.4.3
 overrides:
   kysely: 0.28.17
   js-yaml: 4.2.0

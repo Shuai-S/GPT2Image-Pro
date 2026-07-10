@@ -17,6 +17,7 @@
     "db:studio": "pnpm --filter @repo/database db:studio"
   },
   "devDependencies": {
+    "puppeteer-core": "^24.43.1",
     "turbo": "^2.9.18"
   },
   "engines": {

@@ -18,15 +18,16 @@ export async function register(): Promise<void> {
       "@repo/shared/system-settings/bootstrap"
     );
     await bootstrapSystemSettingsEnv();
-    const { bootstrapSelfUseSuperAdmin } = await import(
-      "@repo/shared/auth/bootstrap-super-admin"
-    );
-    await bootstrapSelfUseSuperAdmin();
-    const { startInternalJobScheduler } = await import(
-      "./server/internal-job-scheduler"
-    );
-    await startInternalJobScheduler();
     if (process.env.NEXT_PHASE !== "phase-production-build") {
+      const [
+        { bootstrapSelfUseSuperAdmin },
+        { startInternalJobScheduler },
+      ] = await Promise.all([
+        import("@repo/shared/auth/bootstrap-super-admin"),
+        import("./server/internal-job-scheduler"),
+      ]);
+      await bootstrapSelfUseSuperAdmin();
+      await startInternalJobScheduler();
       const [
         { startEditableTaskWorker },
         { startAsyncCallbackWorker },

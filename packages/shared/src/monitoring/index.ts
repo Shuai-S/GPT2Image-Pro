@@ -82,7 +82,8 @@ export function initSentryServer(): void {
  * 在 sentry.client.config.ts 中调用
  */
 export function initSentryClient(): void {
-  if (!isSentryEnabled()) {
+  // Next 16 instrumentation-client 与旧 sentry.client.config 可能同时被加载；SDK 只初始化一次。
+  if (!isSentryEnabled() || Sentry.getClient()) {
     return;
   }
 

@@ -235,6 +235,20 @@ jobs:
   build:
     name: Build web
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: gpt2image
+          POSTGRES_USER: gpt2image
+          POSTGRES_PASSWORD: gpt2image
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gpt2image -d gpt2image"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       NEXT_TELEMETRY_DISABLED: "1"
       NEXT_PUBLIC_APP_URL: http://localhost:3000
@@ -247,18 +261,23 @@ jobs:
       DATABASE_URL: postgresql://gpt2image:gpt2image@localhost:5432/gpt2image
       BETTER_AUTH_SECRET: build-time-placeholder-secret-not-for-runtime
       BETTER_AUTH_URL: http://localhost:3000
-      # build job 不启动 PostgreSQL；公开 ISR 在构建期用 env/default，运行时再读 DB。
+      # 构建阶段仍跳过 ISR 设置查询；LHCI 启动阶段使用同 job PostgreSQL 验证登录态页面。
       GPT2IMAGE_SKIP_RUNTIME_SETTINGS_DB: "1"
-      # Lighthouse 仅探测公开页面，不应启动需要数据库的后台循环。
+      SELF_USE_MODE_ENABLED: "true"
+      GPT2IMAGE_BOOTSTRAP_CREDENTIALS_PATH: /tmp/lhci-super-admin.txt
+      LHCI_AUTHENTICATED: "true"
+      # Lighthouse 不应启动与页面性能无关的后台循环。
       INTERNAL_JOB_SCHEDULER_ENABLED: "false"
       EXTERNAL_ASYNC_TASK_WORKERS_ENABLED: "false"
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5（钉 SHA 防 tag 重指向；dependabot 维护）
       - uses: ./.github/actions/setup
+      - name: Migrate Lighthouse database
+        run: pnpm --dir packages/database db:migrate
       - run: pnpm turbo build --filter=@repo/web
       - name: Enforce client asset budgets
         run: pnpm performance:assets
-      - name: Enforce public page Lighthouse budgets
+      - name: Enforce public and authenticated Lighthouse budgets
         uses: treosh/lighthouse-ci-action@3e7e23fb74242897f95c0ba9cabad3d0227b9b18 # v12
         with:
           configPath: ./lighthouserc.cjs
