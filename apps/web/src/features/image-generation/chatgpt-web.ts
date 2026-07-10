@@ -3016,6 +3016,7 @@ export async function generateFileWithChatGptWeb(params: {
   kind: EditableFileKind;
   prompt: string;
   images: ImageInputFile[];
+  signal?: AbortSignal;
 }): Promise<EditableFileResult> {
   const abortController = new AbortController();
   const timeout = setTimeout(
@@ -3023,7 +3024,10 @@ export async function generateFileWithChatGptWeb(params: {
     EDITABLE_FILE_POLL_TIMEOUT_MS + 60_000
   );
   try {
-    const config = { ...params.config, signal: abortController.signal };
+    const signal = params.signal
+      ? AbortSignal.any([params.signal, abortController.signal])
+      : abortController.signal;
+    const config = { ...params.config, signal };
     const requestMessageId = randomUUID();
     const prompt = editableFilePrompt(params.kind, params.prompt);
     const references = await Promise.all(

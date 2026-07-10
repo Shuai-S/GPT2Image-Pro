@@ -1432,8 +1432,10 @@ export const videoGeneration = pgTable(
     durationSeconds: integer("duration_seconds").notNull(),
     aspectRatio: text("aspect_ratio").notNull(),
     resolution: text("resolution").notNull(),
-    // pending / running / completed / failed。
+    // pending / running / recovering / completed / failed。
     status: text("status").notNull().default("pending"),
+    // generation worker 当前执行租约的 fencing token；同步路径为空。
+    executionToken: text("execution_token"),
     // 图生视频输入：引用历史生成（@ 历史图）或上传图的 storageKey / generationId。
     inputImageRefs:
       json("input_image_refs").$type<
@@ -1745,12 +1747,7 @@ export const externalAsyncTask = pgTable(
     callbackUrl: text("callback_url"),
     callbackStatus: text("callback_status")
       .$type<
-        | "none"
-        | "waiting"
-        | "sending"
-        | "retry"
-        | "sent"
-        | "permanent_failed"
+        "none" | "waiting" | "sending" | "retry" | "sent" | "permanent_failed"
       >()
       .notNull()
       .default("none"),
@@ -1846,6 +1843,8 @@ export const generation = pgTable(
     model: text("model").notNull(),
     size: text("size").notNull().default("1024x1024"),
     status: generationStatusEnum("status").notNull().default("pending"),
+    // generation worker 当前执行租约的 fencing token；同步路径为空。
+    executionToken: text("execution_token"),
     storageKey: text("storage_key"),
     storageBucket: text("storage_bucket").default("generations"),
     fileSize: integer("file_size"),

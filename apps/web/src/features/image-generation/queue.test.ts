@@ -64,10 +64,10 @@ function createMemoryCoordinator(options?: { failAcquire?: boolean }) {
     },
     async runWithLease<T>(
       lease: ImageGenerationConcurrencyLease,
-      run: () => Promise<T>
+      run: (signal: AbortSignal) => Promise<T>
     ) {
       try {
-        return await run();
+        return await run(new AbortController().signal);
       } finally {
         running -= 1;
         const userRunning = (runningByUser.get(lease.userId) ?? 1) - 1;
@@ -93,8 +93,7 @@ function createQueue(
     coordinator,
     getGlobalConcurrency: async () => options?.globalConcurrency ?? 500,
     getQueueTimeoutMs: () => 20 * 60_000,
-    createTaskId: () =>
-      `${options?.taskPrefix ?? "task"}-${++taskSequence}`,
+    createTaskId: () => `${options?.taskPrefix ?? "task"}-${++taskSequence}`,
     pollIntervalMs: 5,
   });
 }
@@ -276,16 +275,11 @@ describe("createImageGenerationQueue", () => {
   });
 
   it("协调器故障时 fail-closed 而不运行闭包", async () => {
-    const queue = createQueue(
-      createMemoryCoordinator({ failAcquire: true })
-    );
+    const queue = createQueue(createMemoryCoordinator({ failAcquire: true }));
     const run = vi.fn(async () => "unexpected");
 
     await expect(
-      queue(
-        { userId: "user", priority: "normal", userConcurrency: 1 },
-        run
-      )
+      queue({ userId: "user", priority: "normal", userConcurrency: 1 }, run)
     ).rejects.toThrow("temporarily unavailable");
     expect(run).not.toHaveBeenCalled();
   });

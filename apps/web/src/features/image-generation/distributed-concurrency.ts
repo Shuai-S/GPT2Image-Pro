@@ -22,6 +22,14 @@ const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const PROCESS_OWNER_ID = `${hostname()}:${process.pid}:${randomUUID()}`;
 const log = createContextLogger({ component: "image-generation-concurrency" });
 
+/** 数据库并发槽租约已失效，旧执行者不得继续产生业务副作用。 */
+export class ImageGenerationConcurrencyLeaseLostError extends Error {
+  constructor() {
+    super("Image generation concurrency lease was lost");
+    this.name = "ImageGenerationConcurrencyLeaseLostError";
+  }
+}
+
 /** 从 Drizzle 不同 PG 驱动的 execute 结果安全读取所有对象行。 */
 function resultRows(result: unknown): Record<string, unknown>[] {
   const rows = Array.isArray(result)
@@ -185,15 +193,29 @@ async function releaseConcurrencyLease(
  */
 async function runWithConcurrencyLease<T>(
   lease: ImageGenerationConcurrencyLease,
-  run: () => Promise<T>
+  run: (signal: AbortSignal) => Promise<T>
 ): Promise<T> {
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let heartbeatInFlight: Promise<void> = Promise.resolve();
+  let leaseValidUntilMs = Date.now() + LEASE_TTL_MS;
+  const controller = new AbortController();
+
+  /** 标记租约失效并中止业务；重复调用保持首个 reason。 */
+  const abortLostLease = (): void => {
+    if (controller.signal.aborted) return;
+    stopped = true;
+    controller.abort(new ImageGenerationConcurrencyLeaseLostError());
+    log.warn(
+      { leaseId: lease.leaseId, taskId: lease.taskId },
+      "Image generation concurrency lease was lost"
+    );
+  };
 
   const scheduleHeartbeat = () => {
     if (stopped) return;
     timer = setTimeout(() => {
-      void heartbeat();
+      heartbeatInFlight = heartbeat();
     }, HEARTBEAT_INTERVAL_MS);
     timer.unref?.();
   };
@@ -202,28 +224,34 @@ async function runWithConcurrencyLease<T>(
     try {
       const renewed = await heartbeatConcurrencyLease(lease);
       if (!renewed) {
-        stopped = true;
-        log.warn(
-          { leaseId: lease.leaseId, taskId: lease.taskId },
-          "Image generation concurrency lease was lost"
-        );
+        abortLostLease();
         return;
       }
+      leaseValidUntilMs = Date.now() + LEASE_TTL_MS;
     } catch (error) {
       log.warn(
         { err: error, leaseId: lease.leaseId, taskId: lease.taskId },
         "Image generation concurrency heartbeat failed"
       );
+      if (Date.now() >= leaseValidUntilMs) {
+        abortLostLease();
+        return;
+      }
     }
     scheduleHeartbeat();
   };
 
   scheduleHeartbeat();
   try {
-    return await run();
+    const result = await run(controller.signal);
+    if (controller.signal.aborted) {
+      throw controller.signal.reason;
+    }
+    return result;
   } finally {
     stopped = true;
     if (timer) clearTimeout(timer);
+    await heartbeatInFlight;
     await releaseConcurrencyLease(lease).catch((error: unknown) => {
       log.warn(
         { err: error, leaseId: lease.leaseId, taskId: lease.taskId },

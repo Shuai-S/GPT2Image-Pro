@@ -6,11 +6,12 @@
  * 内存依赖覆盖崩溃接管与旧 worker 晚到场景。
  */
 
+import { mergeAbortSignals } from "@/features/image-generation/abort-signal-utils";
+import type { EditableInputImage } from "@/features/image-generation/editable-file-util";
 import type {
   ImageGenerationConcurrencyCoordinator,
   ImageGenerationConcurrencyLease,
 } from "@/features/image-generation/queue-core";
-import type { EditableInputImage } from "@/features/image-generation/editable-file-util";
 
 import {
   type EditableTaskInputReference,
@@ -65,6 +66,7 @@ export type EditableTaskWorkerDependencies = {
     prompt: string;
     inputImages: readonly EditableInputImage[];
     taskId: string;
+    signal: AbortSignal;
   }) => Promise<Record<string, unknown>>;
   cleanupInputs: (input: {
     userId: string;
@@ -80,6 +82,7 @@ export type EditableTaskWorkerDependencies = {
 
 type TaskHeartbeat = {
   lost: () => boolean;
+  signal: AbortSignal;
   stop: () => Promise<void>;
 };
 
@@ -100,6 +103,7 @@ function startTaskHeartbeat(input: {
   let leaseLost = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let inFlight: Promise<void> = Promise.resolve();
+  const controller = new AbortController();
 
   const schedule = () => {
     if (stopped || leaseLost) return;
@@ -112,7 +116,10 @@ function startTaskHeartbeat(input: {
     if (stopped || leaseLost) return;
     try {
       const renewed = await input.heartbeat(input.id, input.leaseToken);
-      if (!renewed) leaseLost = true;
+      if (!renewed) {
+        leaseLost = true;
+        controller.abort(new Error("Editable task lease was lost"));
+      }
     } catch (error) {
       input.onError?.(error);
     }
@@ -122,6 +129,7 @@ function startTaskHeartbeat(input: {
   schedule();
   return {
     lost: () => leaseLost,
+    signal: controller.signal,
     async stop() {
       stopped = true;
       if (timer) clearTimeout(timer);
@@ -178,11 +186,7 @@ export async function processEditableTaskClaim(
   const request = editableTaskRequestPayloadSchema.safeParse(
     claim.row.requestPayload
   );
-  if (
-    !request.success ||
-    !claim.row.kind ||
-    !claim.row.clientRequestId
-  ) {
+  if (!request.success || !claim.row.kind || !claim.row.clientRequestId) {
     return await finalizeInvalidTask(
       claim,
       dependencies,
@@ -227,7 +231,7 @@ export async function processEditableTaskClaim(
   const references = request.data.inputReferences;
   return await dependencies.coordinator.runWithLease(
     acquired.lease as ImageGenerationConcurrencyLease,
-    async () => {
+    async (concurrencySignal) => {
       const heartbeat = startTaskHeartbeat({
         id: claim.row.id,
         leaseToken: claim.leaseToken,
@@ -235,7 +239,12 @@ export async function processEditableTaskClaim(
         heartbeat: dependencies.heartbeatTask,
         onError: dependencies.onHeartbeatError,
       });
+      const executionSignal = mergeAbortSignals(
+        heartbeat.signal,
+        concurrencySignal
+      );
       try {
+        if (executionSignal.aborted) throw executionSignal.reason;
         const inputImages = await dependencies.loadImages({
           userId: claim.row.userId,
           taskId: claim.row.id,
@@ -248,9 +257,12 @@ export async function processEditableTaskClaim(
           prompt: request.data.prompt,
           inputImages,
           taskId: clientRequestId,
+          signal: executionSignal,
         });
         await heartbeat.stop();
-        if (heartbeat.lost()) return { status: "lease_lost" };
+        if (heartbeat.lost() || concurrencySignal.aborted) {
+          return { status: "lease_lost" };
+        }
 
         const finalized = await dependencies.finalizeTask({
           id: claim.row.id,
@@ -265,7 +277,9 @@ export async function processEditableTaskClaim(
         return { status: "completed" };
       } catch (error) {
         await heartbeat.stop();
-        if (heartbeat.lost()) return { status: "lease_lost" };
+        if (heartbeat.lost() || concurrencySignal.aborted) {
+          return { status: "lease_lost" };
+        }
 
         const finalized = await dependencies.finalizeTask({
           id: claim.row.id,

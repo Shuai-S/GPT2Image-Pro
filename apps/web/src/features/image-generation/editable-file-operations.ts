@@ -50,6 +50,13 @@ import {
 const DEFAULT_EDITABLE_CREDITS = 25;
 const MAX_ACCOUNT_SWITCHES = 3;
 
+/** 持久任务或并发槽失权后中止可编辑文件副作用。 */
+function throwIfEditableExecutionAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  if (signal.reason instanceof Error) throw signal.reason;
+  throw new Error("Editable file execution was aborted");
+}
+
 export type EditableFileStorageReference = {
   bucket: string;
   key: string;
@@ -175,8 +182,10 @@ export async function runEditableFileForUser(params: {
   base64Images?: string[];
   inputImages?: readonly EditableInputImage[];
   taskId: string;
+  signal?: AbortSignal;
 }): Promise<EditableFileOutput> {
   const { userId, apiKeyId, kind, prompt, taskId } = params;
+  throwIfEditableExecutionAborted(params.signal);
   if (params.inputImages && (params.base64Images?.length ?? 0) > 0) {
     throw new Error("editable file input images were provided twice");
   }
@@ -190,6 +199,7 @@ export async function runEditableFileForUser(params: {
   const excluded: string[] = [];
   let lastError = "";
   for (let attempt = 0; attempt <= MAX_ACCOUNT_SWITCHES; attempt++) {
+    throwIfEditableExecutionAborted(params.signal);
     let resolved: Awaited<ReturnType<typeof resolveImageBackendPoolConfig>> =
       null;
     try {
@@ -233,12 +243,15 @@ export async function runEditableFileForUser(params: {
     let success = false;
     const storedOutputs: EditableFileStorageReference[] = [];
     try {
+      throwIfEditableExecutionAborted(params.signal);
       const result = await generateFileWithChatGptWeb({
         config,
         kind,
         prompt,
         images,
+        signal: params.signal,
       });
+      throwIfEditableExecutionAborted(params.signal);
       // 存 storage(先存后扣费:存失败不扣费)。
       const primaryStorage = await storeEditableBinary(
         userId,
@@ -248,10 +261,12 @@ export async function runEditableFileForUser(params: {
         false
       );
       storedOutputs.push(primaryStorage);
+      throwIfEditableExecutionAborted(params.signal);
       const zipStorage = result.zip
         ? await storeEditableBinary(userId, kind, taskId, result.zip, true)
         : null;
       if (zipStorage) storedOutputs.push(zipStorage);
+      throwIfEditableExecutionAborted(params.signal);
       // 按固定价扣费(仅成功;幂等键防重复扣;金额后台可配,默认 25)。
       const amount = Math.max(
         0,
@@ -266,6 +281,7 @@ export async function runEditableFileForUser(params: {
       );
       let creditsCharged = 0;
       if (amount > 0) {
+        throwIfEditableExecutionAborted(params.signal);
         const sourceRef = `editable-file:${taskId}`;
         await reserveExternalApiKeyCredits({
           apiKeyId,
@@ -275,6 +291,7 @@ export async function runEditableFileForUser(params: {
         });
         let userCreditsConsumed = false;
         try {
+          throwIfEditableExecutionAborted(params.signal);
           await consumeCredits({
             userId,
             amount,
@@ -301,6 +318,7 @@ export async function runEditableFileForUser(params: {
         }
         creditsCharged = amount;
       }
+      throwIfEditableExecutionAborted(params.signal);
       success = true;
       return {
         conversationId: result.conversationId,
@@ -314,6 +332,9 @@ export async function runEditableFileForUser(params: {
       };
     } catch (error) {
       await cleanupEditableOutputs(storedOutputs);
+      if (params.signal?.aborted) {
+        throwIfEditableExecutionAborted(params.signal);
+      }
       lastError = error instanceof Error ? error.message : String(error);
       if (backend.id) excluded.push(`${memberType}:${backend.id}`);
       logWarn("可编辑文件生成失败,换号重试", {

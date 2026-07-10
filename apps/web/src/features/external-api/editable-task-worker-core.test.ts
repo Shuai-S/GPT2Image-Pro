@@ -63,6 +63,7 @@ function makeDependencies(options?: {
     | { acquired: false; reason: "user_limit" | "global_limit" };
   runError?: Error;
   finalizeResult?: boolean;
+  loseConcurrencyDuringRun?: boolean;
 }) {
   const acquisition = options?.acquisition ?? {
     acquired: true as const,
@@ -70,12 +71,13 @@ function makeDependencies(options?: {
   };
   const acquire = vi.fn(async () => acquisition);
   const runWithLeaseCall = vi.fn();
+  const concurrencyController = new AbortController();
   const runWithLease = async <T>(
     activeLease: ImageGenerationConcurrencyLease,
-    run: () => Promise<T>
+    run: (signal: AbortSignal) => Promise<T>
   ): Promise<T> => {
     runWithLeaseCall(activeLease);
-    return await run();
+    return await run(concurrencyController.signal);
   };
   const coordinator: ImageGenerationConcurrencyCoordinator = {
     acquire,
@@ -92,6 +94,9 @@ function makeDependencies(options?: {
   ]);
   const runEditableFile = vi.fn(async () => {
     if (options?.runError) throw options.runError;
+    if (options?.loseConcurrencyDuringRun) {
+      concurrencyController.abort(new Error("concurrency lease lost"));
+    }
     return { storageKey: "user-1/results/task-1.pptx" };
   });
   const cleanupInputs = vi.fn(async () => {});
@@ -231,6 +236,21 @@ describe("processEditableTaskClaim", () => {
         dependencies
       )
     ).resolves.toEqual({ status: "lease_lost" });
+    expect(cleanupInputs).not.toHaveBeenCalled();
+  });
+
+  it("集群并发租约丢失时不写任务终态或清理输入", async () => {
+    const { dependencies, finalizeTask, cleanupInputs } = makeDependencies({
+      loseConcurrencyDuringRun: true,
+    });
+
+    await expect(
+      processEditableTaskClaim(
+        { row: validRow, leaseToken: "task-token-1" },
+        dependencies
+      )
+    ).resolves.toEqual({ status: "lease_lost" });
+    expect(finalizeTask).not.toHaveBeenCalled();
     expect(cleanupInputs).not.toHaveBeenCalled();
   });
 });

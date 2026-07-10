@@ -29,6 +29,11 @@ type RecoverableVideoGenerationRow = {
   error: string | null;
 };
 
+type RecoverableVideoGenerationState = {
+  status: string;
+  updatedAt: Date;
+};
+
 export type RecoveredImageGenerationResult = {
   error?: string;
   generationId: string;
@@ -55,6 +60,33 @@ export type RecoveredVideoGenerationResult =
       creditsConsumed: number;
     }
   | { error: string; videoGenerationId: string };
+
+/**
+ * 判断视频行是否需要由当前持久任务执行超时补偿。
+ *
+ * @param row 视频状态与最后更新时间；updatedAt 必须来自数据库。
+ * @param options 当前时钟与超时窗口，便于 worker 和测试使用同一判定。
+ * @returns recovering 始终允许重入补偿；pending/running 仅在达到超时后返回 true；
+ * 其他终态或非法时间返回 false。
+ * @sideEffects 无。
+ */
+export function videoGenerationNeedsRecovery(
+  row: RecoverableVideoGenerationState,
+  options: { nowMs: number; timeoutMs: number }
+): boolean {
+  if (row.status === "recovering") return true;
+  if (row.status !== "pending" && row.status !== "running") return false;
+  const updatedAtMs = row.updatedAt.getTime();
+  if (
+    !Number.isFinite(updatedAtMs) ||
+    !Number.isFinite(options.nowMs) ||
+    !Number.isFinite(options.timeoutMs) ||
+    options.timeoutMs < 0
+  ) {
+    return false;
+  }
+  return updatedAtMs <= options.nowMs - options.timeoutMs;
+}
 
 /** 判断未知值是否为可逐字段读取的普通对象。 */
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -178,8 +210,8 @@ export function recoverImageGenerationResult(
     imageUrl,
     imageOutputs:
       imageOutputs.length > 0
-        ? imageOutputs.map(({ primary: _primary, storageKey: _key, ...output }) =>
-            output
+        ? imageOutputs.map(
+            ({ primary: _primary, storageKey: _key, ...output }) => output
           )
         : [
             {
@@ -201,7 +233,7 @@ export function recoverImageGenerationResult(
  *
  * @param row 数据库读取的 video_generation 行。
  * @param options 期望用户及可选 API Key 归属。
- * @returns completed/failed 的恢复结果；pending/running 返回 undefined。
+ * @returns completed/failed 的恢复结果；pending/running/recovering 返回 undefined。
  * @throws 用户或 API Key 归属不符时 fail-closed。
  * @sideEffects 无。
  */
@@ -210,7 +242,9 @@ export function recoverVideoGenerationResult(
   options: { expectedUserId: string; expectedApiKeyId?: string | null }
 ): RecoveredVideoGenerationResult | undefined {
   if (row.userId !== options.expectedUserId) {
-    throw new Error("Video generation ID does not belong to the requesting user");
+    throw new Error(
+      "Video generation ID does not belong to the requesting user"
+    );
   }
   if (
     options.expectedApiKeyId !== undefined &&
@@ -220,7 +254,13 @@ export function recoverVideoGenerationResult(
       "Video generation ID does not belong to the requesting API key"
     );
   }
-  if (row.status === "pending" || row.status === "running") return undefined;
+  if (
+    row.status === "pending" ||
+    row.status === "running" ||
+    row.status === "recovering"
+  ) {
+    return undefined;
+  }
   if (row.status === "failed") {
     return {
       error: row.error || "Video generation failed",

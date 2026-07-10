@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   recoverImageGenerationResult,
   recoverVideoGenerationResult,
+  videoGenerationNeedsRecovery,
 } from "./generation-recovery";
 
 const buildImageUrl = vi.fn(
@@ -186,5 +187,41 @@ describe("recoverVideoGenerationResult", () => {
         expectedUserId: "user-1",
       })
     ).toEqual({ error: "video failed", videoGenerationId: "video-1" });
+  });
+
+  it("只领取超时执行态，并允许 recovering 补偿重入", () => {
+    const now = new Date("2026-07-10T10:30:00.000Z").getTime();
+    const timeoutMs = 20 * 60_000;
+
+    expect(
+      videoGenerationNeedsRecovery(
+        {
+          status: "running",
+          updatedAt: new Date("2026-07-10T10:00:00.000Z"),
+        },
+        { nowMs: now, timeoutMs }
+      )
+    ).toBe(true);
+    expect(
+      videoGenerationNeedsRecovery(
+        {
+          status: "pending",
+          updatedAt: new Date("2026-07-10T10:20:00.000Z"),
+        },
+        { nowMs: now, timeoutMs }
+      )
+    ).toBe(false);
+    expect(
+      videoGenerationNeedsRecovery(
+        { status: "recovering", updatedAt: new Date(now) },
+        { nowMs: now, timeoutMs }
+      )
+    ).toBe(true);
+    expect(
+      videoGenerationNeedsRecovery(
+        { status: "completed", updatedAt: new Date(0) },
+        { nowMs: now, timeoutMs }
+      )
+    ).toBe(false);
   });
 });

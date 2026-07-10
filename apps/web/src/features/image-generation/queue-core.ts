@@ -29,7 +29,7 @@ export type ImageGenerationConcurrencyCoordinator = {
   >;
   runWithLease: <T>(
     lease: ImageGenerationConcurrencyLease,
-    run: () => Promise<T>
+    run: (signal: AbortSignal) => Promise<T>
   ) => Promise<T>;
 };
 
@@ -41,7 +41,7 @@ type QueueTask<T> = {
   userConcurrency: number;
   resolve: (value: T) => void;
   reject: (reason?: unknown) => void;
-  run: () => Promise<T>;
+  run: (signal: AbortSignal) => Promise<T>;
   blockedReason?: ImageGenerationConcurrencyBlockReason;
   timeout?: ReturnType<typeof setTimeout>;
 };
@@ -218,7 +218,7 @@ export function createImageGenerationQueue(
       userConcurrency: number;
       timeoutMs?: number;
     },
-    run: () => Promise<T>
+    run: (signal: AbortSignal) => Promise<T>
   ): Promise<T> {
     return await new Promise<T>((resolve, reject) => {
       const timeoutMs = options.timeoutMs ?? dependencies.getQueueTimeoutMs();

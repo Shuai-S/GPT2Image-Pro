@@ -38,7 +38,7 @@ import {
   getRuntimeSettingNumber,
   getRuntimeSettingString,
 } from "@repo/shared/system-settings";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import {
   refundExternalApiKeyCredits,
@@ -54,6 +54,7 @@ import {
   releaseImageBackendInflightLease,
 } from "@/features/image-backend-pool/service";
 import type { ImageBackendRequestKind } from "@/features/image-backend-pool/types";
+import { mergeAbortSignals } from "./abort-signal-utils";
 import { getImageBatchCountLimit } from "./batch-limits";
 import {
   buildGenerationBillingPolicy,
@@ -144,6 +145,8 @@ type RunImageGenerationInput =
       resolvedUserPlan?: SubscriptionPlan;
       generationId?: string;
       apiKeyId?: string;
+      /** 持久任务本次租约 token；同步路径不传并只操作 NULL token 行。 */
+      executionToken?: string;
       // 请求级显式分组(创作页选择器 / 外部 API generation_group)。fail-closed:
       // 不可选/无权时整个请求报错,不降级(见 image-backend-pool/group-selection.ts)。
       requestGroupId?: string;
@@ -164,6 +167,8 @@ type RunImageGenerationInput =
       resolvedUserPlan?: SubscriptionPlan;
       generationId?: string;
       apiKeyId?: string;
+      /** 持久任务本次租约 token；同步路径不传并只操作 NULL token 行。 */
+      executionToken?: string;
       requestGroupId?: string;
       relayOnly?: boolean;
       backendRequestKind?: ImageBackendRequestKind;
@@ -182,6 +187,8 @@ type RunImageGenerationInput =
       resolvedUserPlan?: SubscriptionPlan;
       generationId?: string;
       apiKeyId?: string;
+      /** 持久任务本次租约 token；同步路径不传并只操作 NULL token 行。 */
+      executionToken?: string;
       requestGroupId?: string;
       relayOnly?: boolean;
       backendRequestKind?: ImageBackendRequestKind;
@@ -499,6 +506,38 @@ type StoredGeneratedImageOutput = {
   outputRole?: "final" | "agent_draft" | "choice";
 };
 
+/**
+ * 删除未取得 generation 终态所有权的本次图像对象。
+ *
+ * @param outputs 本次执行已确认写入的输出；纯中转空 key 会被忽略。
+ * @param bucket 本次执行持久化的 bucket 快照。
+ * @returns 所有删除尝试完成后结束；单个失败只记受限日志，不覆盖终态赢家。
+ * @sideEffects 删除对象存储并记录清理失败。
+ */
+async function cleanupStoredImageOutputs(
+  outputs: readonly StoredGeneratedImageOutput[],
+  bucket: string
+): Promise<void> {
+  const keys = [
+    ...new Set(outputs.map((output) => output.storageKey).filter(Boolean)),
+  ];
+  if (keys.length === 0) return;
+  const storage = await getStorageProvider();
+  const results = await Promise.allSettled(
+    keys.map((storageKey) => storage.deleteObject(storageKey, bucket))
+  );
+  const failedCount = results.filter(
+    (result) => result.status === "rejected"
+  ).length;
+  if (failedCount > 0) {
+    logWarn("晚到图像输出清理不完整", {
+      bucket,
+      objectCount: keys.length,
+      failedCount,
+    });
+  }
+}
+
 type ResponsesUploadedImageFile = {
   fileId: string;
   source: "files_api";
@@ -516,8 +555,78 @@ function resolveStoredImageFormat(buffer: Buffer, requestedFormat?: string) {
   };
 }
 
-function isPendingGeneration(generationId: string) {
-  return and(eq(generation.id, generationId), eq(generation.status, "pending"));
+/**
+ * 构造 generation 业务行的执行 fencing 条件。
+ *
+ * @param executionToken worker 租约 token；同步路径为空。
+ * @returns token 精确匹配条件；同步路径只允许 NULL，不能接管 worker 行。
+ * @sideEffects 无。
+ */
+function matchesImageExecutionToken(executionToken?: string) {
+  return executionToken
+    ? eq(generation.executionToken, executionToken)
+    : isNull(generation.executionToken);
+}
+
+/**
+ * 构造当前执行者仍拥有的 pending generation 条件。
+ *
+ * @param generationId 稳定业务 ID。
+ * @param executionToken worker 租约 token；同步路径为空。
+ * @returns 同时匹配 ID、pending 与 fencing token 的 Drizzle 条件。
+ * @sideEffects 无。
+ */
+function isPendingGeneration(generationId: string, executionToken?: string) {
+  return and(
+    eq(generation.id, generationId),
+    eq(generation.status, "pending"),
+    matchesImageExecutionToken(executionToken)
+  );
+}
+
+/**
+ * 把 task/request 中止转成不可吞掉的执行错误。
+ *
+ * @param signal 外部持久租约或请求信号。
+ * @throws signal 已中止时优先抛出 Error reason，否则抛出稳定错误。
+ * @sideEffects 无。
+ */
+function throwIfImageExecutionAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  if (signal.reason instanceof Error) throw signal.reason;
+  throw new Error("Image generation execution was aborted");
+}
+
+/** generation 业务行 token 已被新租约替换，旧执行者必须停止副作用。 */
+class ImageGenerationExecutionSupersededError extends Error {
+  constructor() {
+    super("Image generation execution was superseded");
+    this.name = "ImageGenerationExecutionSupersededError";
+  }
+}
+
+/**
+ * 在关键副作用前确认 worker 仍拥有 generation 业务行。
+ *
+ * @param input 当前统一管线输入。
+ * @param generationId 稳定业务 ID。
+ * @throws signal 已中止或 pending 行的 execution token 已被新租约替换时抛错。
+ * @sideEffects worker 路径读取一条 generation；同步路径只检查 signal。
+ */
+async function assertImageExecutionActive(
+  input: RunImageGenerationInput,
+  generationId: string
+): Promise<void> {
+  throwIfImageExecutionAborted(input.signal);
+  if (!input.executionToken || input.relayOnly) return;
+  const [owned] = await db
+    .select({ id: generation.id })
+    .from(generation)
+    .where(isPendingGeneration(generationId, input.executionToken))
+    .limit(1);
+  if (!owned) {
+    throw new ImageGenerationExecutionSupersededError();
+  }
 }
 
 function readUInt24LE(buffer: Buffer, offset: number) {
@@ -1323,20 +1432,75 @@ async function getUserModerationBlockRiskLevel(
 }
 
 /**
+ * 读取一条可用于终态恢复的 generation 快照。
+ *
+ * @param generationId 稳定业务 ID。
+ * @returns generation 行或 null。
+ * @sideEffects 读取数据库一行。
+ */
+async function getRecoverableImageGenerationById(generationId: string) {
+  const [existing] = await db
+    .select({
+      id: generation.id,
+      userId: generation.userId,
+      status: generation.status,
+      executionToken: generation.executionToken,
+      model: generation.model,
+      size: generation.size,
+      storageKey: generation.storageKey,
+      storageBucket: generation.storageBucket,
+      revisedPrompt: generation.revisedPrompt,
+      creditsConsumed: generation.creditsConsumed,
+      error: generation.error,
+      metadata: generation.metadata,
+    })
+    .from(generation)
+    .where(eq(generation.id, generationId))
+    .limit(1);
+  return existing ?? null;
+}
+
+/**
  * 对账调用方显式提供的 generation ID。
  *
  * @param input 已校验的统一管线输入。
  * @param generationId 服务端幂等 ID。
- * @returns 无历史行时返回 null；终态返回恢复结果；pending 返回处理中错误结果。
+ * @returns 无历史行时返回 null；终态返回恢复结果；worker pending 原子换 token 后
+ * 返回 null 继续执行；同步 pending 返回处理中错误。
  * @throws generation 归属不一致时 fail-closed。
- * @sideEffects 读取一条 generation；不触发过期扫描或任何财务写入。
+ * @sideEffects 读取 generation；worker 接管时条件更新 execution token。
  */
 async function reconcileExplicitGeneration(
   input: RunImageGenerationInput,
   generationId: string
 ): Promise<ImageGenerationOperationResult | null> {
   if (!input.generationId || input.relayOnly) return null;
-  const [existing] = await db
+  const existing = await getRecoverableImageGenerationById(generationId);
+  if (!existing) return null;
+
+  const recovered = recoverImageGenerationResult(existing, {
+    expectedUserId: input.userId,
+    buildImageUrl: buildSignedStorageImageUrl,
+  });
+  if (recovered) return recovered;
+  if (!input.executionToken) {
+    return {
+      error: "Image generation is already processing.",
+      generationId,
+    };
+  }
+  if (existing.executionToken === input.executionToken) return null;
+
+  const [claimed] = await db
+    .update(generation)
+    .set({ executionToken: input.executionToken })
+    .where(
+      isPendingGeneration(generationId, existing.executionToken ?? undefined)
+    )
+    .returning({ id: generation.id });
+  if (claimed) return null;
+
+  const [winner] = await db
     .select({
       id: generation.id,
       userId: generation.userId,
@@ -1353,14 +1517,14 @@ async function reconcileExplicitGeneration(
     .from(generation)
     .where(eq(generation.id, generationId))
     .limit(1);
-  if (!existing) return null;
-
-  const recovered = recoverImageGenerationResult(existing, {
-    expectedUserId: input.userId,
-    buildImageUrl: buildSignedStorageImageUrl,
-  });
+  const winnerResult = winner
+    ? recoverImageGenerationResult(winner, {
+        expectedUserId: input.userId,
+        buildImageUrl: buildSignedStorageImageUrl,
+      })
+    : undefined;
   return (
-    recovered ?? {
+    winnerResult ?? {
       error: "Image generation is already processing.",
       generationId,
     }
@@ -1372,6 +1536,7 @@ export async function runImageGenerationForUser(
   callbacks?: ImageGenerationCallbacks
 ): Promise<ImageGenerationOperationResult> {
   const generationId = input.generationId || nanoid();
+  throwIfImageExecutionAborted(input.signal);
   const reconciled = await reconcileExplicitGeneration(input, generationId);
   if (reconciled) return reconciled;
   const operationFlags = await getRuntimeOperationFeatureFlags();
@@ -1591,7 +1756,12 @@ export async function runImageGenerationForUser(
         priority: queueSettings.priority,
         userConcurrency: queueSettings.userConcurrency,
       },
-      async () => {
+      async (concurrencySignal) => {
+        const queuedInput = {
+          ...input,
+          signal: mergeAbortSignals(input.signal, concurrencySignal),
+        } satisfies RunImageGenerationInput;
+        throwIfImageExecutionAborted(queuedInput.signal);
         let leasedConfig: ApiConfig | null = null;
         try {
           const userConfig = await getUserApiConfig(input.userId, userPlan);
@@ -1823,8 +1993,9 @@ export async function runImageGenerationForUser(
                 initialCreditCharge,
               })
             : 0;
+          throwIfImageExecutionAborted(queuedInput.signal);
           const result = await runQueuedImageGenerationForUser({
-            input,
+            input: queuedInput,
             callbacks,
             generationId,
             size,
@@ -1958,6 +2129,10 @@ async function runQueuedImageGenerationForUser({
     IMAGE_GENERATION_PENDING_TIMEOUT_MS,
     { positive: true }
   );
+  const executionSignal = mergeAbortSignals(
+    input.signal,
+    AbortSignal.timeout(totalTimeoutMs)
+  );
   // 纯中转模式只影响历史与对象存储；计费按实际使用的本站资源和审核独立判断。
   // generationId 仍生成，用作扣费/退款的幂等 sourceRef 前缀。
   const relayOnly = input.relayOnly === true;
@@ -1999,71 +2174,29 @@ async function runQueuedImageGenerationForUser({
 
   // 纯中转：不落生成历史。其余 db.update(generation) 在无行时天然 no-op。
   if (!relayOnly)
-    await db.insert(generation).values({
-      id: generationId,
-      userId: input.userId,
-      prompt: input.prompt,
-      model: recordModel,
-      size,
-      status: "pending",
-      creditsConsumed: initialCreditCharge,
-      storageBucket: bucket,
-      metadata:
-        input.mode === "edit"
-          ? {
-              mode: "edit",
-              ...backendMetadata,
-              ...modelMetadata,
-              ...promptOptimizationMetadata,
-              ...inputImagesMetadata,
-              imageCount: input.images.length,
-              hasMask: Boolean(input.mask),
-              quality: input.quality || "auto",
-              outputFormat: input.outputFormat || null,
-              outputCompression: input.outputCompression ?? null,
-              background: input.background || null,
-              batchCount: input.n || 1,
-              forceWebBackend,
-              creditCost,
-              ...billingMetadata,
-              chatRoundCredits: billingPolicy.chargeImageCredits
-                ? chatRoundCredits
-                : 0,
-              moderationBlockingEnabled: moderationEnabled,
-              moderationFailureCredits,
-            }
-          : input.mode === "chat"
+    await db
+      .insert(generation)
+      .values({
+        id: generationId,
+        userId: input.userId,
+        prompt: input.prompt,
+        model: recordModel,
+        size,
+        status: "pending",
+        executionToken: input.executionToken ?? null,
+        creditsConsumed: initialCreditCharge,
+        storageBucket: bucket,
+        metadata:
+          input.mode === "edit"
             ? {
-                mode: input.agentMode
-                  ? "agent"
-                  : input.waterfallMode
-                    ? "waterfall"
-                    : "chat",
-                action: "auto",
+                mode: "edit",
                 ...backendMetadata,
                 ...modelMetadata,
                 ...promptOptimizationMetadata,
                 ...inputImagesMetadata,
-                imageCount: input.images?.length || 0,
-                fileContextChars: input.fileContext?.length || 0,
+                imageCount: input.images.length,
+                hasMask: Boolean(input.mask),
                 quality: input.quality || "auto",
-                moderation: input.moderation || "auto",
-                outputFormat: input.outputFormat || null,
-                outputCompression: input.outputCompression ?? null,
-                batchCount: input.n || 1,
-                forceWebBackend,
-                creditCost,
-                ...billingMetadata,
-                moderationBlockingEnabled: moderationEnabled,
-                moderationFailureCredits,
-              }
-            : {
-                mode: "generate",
-                ...backendMetadata,
-                ...modelMetadata,
-                ...promptOptimizationMetadata,
-                quality: input.quality || "auto",
-                moderation: input.moderation || "auto",
                 outputFormat: input.outputFormat || null,
                 outputCompression: input.outputCompression ?? null,
                 background: input.background || null,
@@ -2071,10 +2204,58 @@ async function runQueuedImageGenerationForUser({
                 forceWebBackend,
                 creditCost,
                 ...billingMetadata,
+                chatRoundCredits: billingPolicy.chargeImageCredits
+                  ? chatRoundCredits
+                  : 0,
                 moderationBlockingEnabled: moderationEnabled,
                 moderationFailureCredits,
-              },
-    });
+              }
+            : input.mode === "chat"
+              ? {
+                  mode: input.agentMode
+                    ? "agent"
+                    : input.waterfallMode
+                      ? "waterfall"
+                      : "chat",
+                  action: "auto",
+                  ...backendMetadata,
+                  ...modelMetadata,
+                  ...promptOptimizationMetadata,
+                  ...inputImagesMetadata,
+                  imageCount: input.images?.length || 0,
+                  fileContextChars: input.fileContext?.length || 0,
+                  quality: input.quality || "auto",
+                  moderation: input.moderation || "auto",
+                  outputFormat: input.outputFormat || null,
+                  outputCompression: input.outputCompression ?? null,
+                  batchCount: input.n || 1,
+                  forceWebBackend,
+                  creditCost,
+                  ...billingMetadata,
+                  moderationBlockingEnabled: moderationEnabled,
+                  moderationFailureCredits,
+                }
+              : {
+                  mode: "generate",
+                  ...backendMetadata,
+                  ...modelMetadata,
+                  ...promptOptimizationMetadata,
+                  quality: input.quality || "auto",
+                  moderation: input.moderation || "auto",
+                  outputFormat: input.outputFormat || null,
+                  outputCompression: input.outputCompression ?? null,
+                  background: input.background || null,
+                  batchCount: input.n || 1,
+                  forceWebBackend,
+                  creditCost,
+                  ...billingMetadata,
+                  moderationBlockingEnabled: moderationEnabled,
+                  moderationFailureCredits,
+                },
+      })
+      .onConflictDoNothing();
+
+  await assertImageExecutionActive(input, generationId);
 
   let chargedCredits = 0;
   const refundChargedCredits = async (
@@ -2109,6 +2290,7 @@ async function runQueuedImageGenerationForUser({
     sourceRef?: string
   ) => {
     if (!billingPolicy.chargesCredits || amount <= 0) return;
+    await assertImageExecutionActive(input, generationId);
     const roundedAmount = roundCreditAmount(amount);
     await reserveExternalApiKeyCredits({
       apiKeyId: input.apiKeyId,
@@ -2118,6 +2300,7 @@ async function runQueuedImageGenerationForUser({
     });
     let userCreditsConsumed = false;
     try {
+      await assertImageExecutionActive(input, generationId);
       await consumeCredits({
         userId: input.userId,
         amount: roundedAmount,
@@ -2150,6 +2333,7 @@ async function runQueuedImageGenerationForUser({
     metadata?: Record<string, unknown>
   ) => {
     if (!billingPolicy.chargesCredits) return;
+    await assertImageExecutionActive(input, generationId);
 
     const roundedTarget = roundCreditAmount(Math.max(0, targetCredits));
     const delta = roundCreditAmount(roundedTarget - chargedCredits);
@@ -2172,6 +2356,16 @@ async function runQueuedImageGenerationForUser({
     if (delta < 0) {
       await refundChargedCredits(Math.abs(delta), sourceRef, description);
     }
+  };
+
+  /**
+   * 在已扣费阶段确认执行权；失权只退出，不得退款正在接管的赢家。
+   *
+   * @throws task signal 中止或 token 失配。
+   * @sideEffects worker 路径读取一条 generation。
+   */
+  const assertActiveAfterCharge = async (): Promise<void> => {
+    await assertImageExecutionActive(input, generationId);
   };
 
   if (initialCreditCharge > 0) {
@@ -2204,6 +2398,12 @@ async function runQueuedImageGenerationForUser({
         `${generationId}:charge`
       );
     } catch (error: unknown) {
+      if (
+        input.signal?.aborted ||
+        error instanceof ImageGenerationExecutionSupersededError
+      ) {
+        throw error;
+      }
       const message =
         error instanceof Error ? error.message : "Insufficient credits";
       await db
@@ -2213,10 +2413,11 @@ async function runQueuedImageGenerationForUser({
           error: message,
           creditsConsumed: chargedCredits,
         })
-        .where(isPendingGeneration(generationId));
+        .where(isPendingGeneration(generationId, input.executionToken));
       return { error: message, generationId };
     }
   }
+  await assertActiveAfterCharge();
 
   const repairAttempts: ModerationPromptRepairAttempt[] = [];
   const isTimedOut = () => Date.now() - startedAt > totalTimeoutMs;
@@ -2254,7 +2455,7 @@ async function runQueuedImageGenerationForUser({
             )
           )}::jsonb`,
         })
-        .where(isPendingGeneration(generationId))
+        .where(isPendingGeneration(generationId, input.executionToken))
         .returning({ id: generation.id });
 
       // 中转模式无 generation 行，UPDATE 返回空；退款仍须照常执行。
@@ -2325,6 +2526,7 @@ async function runQueuedImageGenerationForUser({
     phase: ModerationPromptRepairAttempt["phase"],
     reason: string
   ) => {
+    await assertActiveAfterCharge();
     if (repairAttempts.length >= maxRepairRetries) return false;
     const attemptNumber = repairAttempts.length + 1;
     const attempt: ModerationPromptRepairAttempt = {
@@ -2355,7 +2557,7 @@ async function runQueuedImageGenerationForUser({
           failureReason: reason,
           mode: input.mode,
           size,
-          signal: AbortSignal.timeout(totalTimeoutMs),
+          signal: executionSignal,
         }
       );
       if (repaired.error || !repaired.prompt?.trim()) {
@@ -2372,6 +2574,9 @@ async function runQueuedImageGenerationForUser({
       attempt.repairedPrompt = truncateMetadataText(currentPrompt);
       return true;
     } catch (error) {
+      if (input.signal?.aborted) {
+        await assertActiveAfterCharge();
+      }
       attempt.status = "failed";
       attempt.error = truncateMetadataText(
         error instanceof Error ? error.message : "Prompt repair failed"
@@ -2379,6 +2584,7 @@ async function runQueuedImageGenerationForUser({
       return false;
     } finally {
       await releasePoolBackendConfigLease(repairConfig?.config);
+      await assertActiveAfterCharge();
       await db
         .update(generation)
         .set({
@@ -2386,7 +2592,7 @@ async function runQueuedImageGenerationForUser({
             buildModerationPromptRepairMetadata(repairAttempts)
           )}::jsonb`,
         })
-        .where(isPendingGeneration(generationId));
+        .where(isPendingGeneration(generationId, input.executionToken));
     }
   };
 
@@ -2397,7 +2603,7 @@ async function runQueuedImageGenerationForUser({
   ) => {
     // 渠道并发竞赛时，每条渠道传入自己独立的 AbortSignal 替换 commonSignal，
     // 使胜出渠道触发其它渠道的 fetch abort。默认串行路径保留原 commonSignal。
-    const commonSignal = channelSignal ?? AbortSignal.timeout(totalTimeoutMs);
+    const commonSignal = mergeAbortSignals(executionSignal, channelSignal);
     return input.mode === "edit"
       ? await editImage(
           channelConfig,
@@ -2533,6 +2739,7 @@ async function runQueuedImageGenerationForUser({
   };
 
   while (true) {
+    await assertActiveAfterCharge();
     const moderation = !moderationEnabled
       ? ({ decision: "skipped" } as const)
       : await moderateContent({
@@ -2544,6 +2751,8 @@ async function runQueuedImageGenerationForUser({
           userModerationBlockRiskLevel: moderationBlockRiskLevel,
           generationId,
         });
+
+    await assertActiveAfterCharge();
 
     if (isTimedOut()) {
       return failTimedOutGeneration();
@@ -2603,7 +2812,7 @@ async function runQueuedImageGenerationForUser({
               : {}
           )}::jsonb`,
         })
-        .where(isPendingGeneration(generationId));
+        .where(isPendingGeneration(generationId, input.executionToken));
       return {
         error: responseMessage,
         generationId,
@@ -2621,7 +2830,7 @@ async function runQueuedImageGenerationForUser({
         1,
         { positive: true }
       );
-      const commonSignal = AbortSignal.timeout(totalTimeoutMs);
+      const commonSignal = executionSignal;
       const isChatAgent = input.mode === "chat" && input.agentMode === true;
       const poolBackend = config.backend;
       const canUseConcurrentPool = Boolean(
@@ -2706,7 +2915,9 @@ async function runQueuedImageGenerationForUser({
       } else {
         result = await runGenerationAttempt(config, commonSignal);
       }
+      await assertActiveAfterCharge();
     } catch (error) {
+      await assertActiveAfterCharge();
       // 同上:生成尝试阶段的 DB/内部异常也脱敏,避免裸 SQL 漏到前端。
       const message = toClientErrorMessage(
         error,
@@ -2751,7 +2962,7 @@ async function runQueuedImageGenerationForUser({
               : {}
           )}::jsonb`,
         })
-        .where(isPendingGeneration(generationId));
+        .where(isPendingGeneration(generationId, input.executionToken));
       return {
         error: message,
         generationId,
@@ -2842,7 +3053,7 @@ async function runQueuedImageGenerationForUser({
           metadataWithPromptRepair({})
         )}::jsonb`,
       })
-      .where(isPendingGeneration(generationId));
+      .where(isPendingGeneration(generationId, input.executionToken));
     return {
       error: result.error,
       generationId,
@@ -2891,7 +3102,7 @@ async function runQueuedImageGenerationForUser({
           )}::jsonb`,
           completedAt: new Date(),
         })
-        .where(isPendingGeneration(generationId));
+        .where(isPendingGeneration(generationId, input.executionToken));
       return {
         error: message,
         generationId,
@@ -2922,7 +3133,9 @@ async function runQueuedImageGenerationForUser({
           }
         );
         finalChargedCredits = chargedCredits;
+        await assertActiveAfterCharge();
       } catch (error) {
+        await assertActiveAfterCharge();
         const message =
           error instanceof Error ? error.message : "Insufficient credits";
         await db
@@ -2932,7 +3145,7 @@ async function runQueuedImageGenerationForUser({
             error: message,
             creditsConsumed: chargedCredits,
           })
-          .where(isPendingGeneration(generationId));
+          .where(isPendingGeneration(generationId, input.executionToken));
         // 生成失败后让首页 SLA 缓存即时失效(60s TTL 仍作兜底)。
         invalidateSlaStatsCache();
         return {
@@ -2943,7 +3156,8 @@ async function runQueuedImageGenerationForUser({
       }
     }
 
-    await db
+    await assertActiveAfterCharge();
+    const [completed] = await db
       .update(generation)
       .set({
         status: "completed",
@@ -2973,7 +3187,27 @@ async function runQueuedImageGenerationForUser({
         )}::jsonb`,
         completedAt: new Date(),
       })
-      .where(isPendingGeneration(generationId));
+      .where(isPendingGeneration(generationId, input.executionToken))
+      .returning({ id: generation.id });
+
+    if (!completed) {
+      const existing = await getRecoverableImageGenerationById(generationId);
+      const recovered = existing
+        ? recoverImageGenerationResult(existing, {
+            expectedUserId: input.userId,
+            buildImageUrl: buildSignedStorageImageUrl,
+          })
+        : undefined;
+      return (
+        recovered ?? {
+          error: "Image generation execution was superseded.",
+          generationId,
+          model: recordModel,
+          size,
+          creditsConsumed: finalChargedCredits,
+        }
+      );
+    }
 
     // 生成完成后让首页 SLA 缓存即时失效(60s TTL 仍作兜底)。
     invalidateSlaStatsCache();
@@ -2997,6 +3231,7 @@ async function runQueuedImageGenerationForUser({
   }
 
   let storedOutputs: StoredGeneratedImageOutput[] = [];
+  await assertActiveAfterCharge();
   try {
     const imageOutputs = getResultImageOutputs(result).map(
       (output, index, items) => ({
@@ -3057,6 +3292,7 @@ async function runQueuedImageGenerationForUser({
       }
     } else {
       for (const [index, output] of imageOutputs.entries()) {
+        await assertActiveAfterCharge();
         const outputGenerationId = resolveOutputGenerationId(
           generationId,
           index,
@@ -3098,6 +3334,7 @@ async function runQueuedImageGenerationForUser({
             },
           })
         );
+        await assertActiveAfterCharge();
         if (isAgentChatInput) {
           await emitAgentOperationEvent(callbacks, {
             kind: "tool",
@@ -3112,7 +3349,10 @@ async function runQueuedImageGenerationForUser({
         }
       }
     }
+    await assertActiveAfterCharge();
   } catch (storageError: unknown) {
+    await cleanupStoredImageOutputs(storedOutputs, bucket);
+    await assertActiveAfterCharge();
     const message =
       storageError instanceof Error
         ? storageError.message
@@ -3152,7 +3392,8 @@ async function runQueuedImageGenerationForUser({
         )}::jsonb`,
         creditsConsumed: chargedCredits,
       })
-      .where(isPendingGeneration(generationId));
+      .where(isPendingGeneration(generationId, input.executionToken));
+    await cleanupStoredImageOutputs(storedOutputs, bucket);
     return {
       error: "Failed to save image",
       generationId,
@@ -3185,8 +3426,18 @@ async function runQueuedImageGenerationForUser({
         : storedOutputs.length - 1;
   const primaryOutput = storedOutputs[primaryOutputIndex];
   if (!primaryOutput) {
+    await cleanupStoredImageOutputs(storedOutputs, bucket);
     throw new Error("Stored image outputs are unexpectedly empty");
   }
+  /** token/signal 失权时先删除本次随机对象，再把错误交给新租约接管。 */
+  const assertActiveWithStoredOutputCleanup = async (): Promise<void> => {
+    try {
+      await assertActiveAfterCharge();
+    } catch (error) {
+      await cleanupStoredImageOutputs(storedOutputs, bucket);
+      throw error;
+    }
+  };
   const upstreamImageOutputCount = Math.max(
     Math.floor(result.imageOutputCount || 0),
     storedOutputs.length
@@ -3273,6 +3524,7 @@ async function runQueuedImageGenerationForUser({
     actualImageCredits,
     creditCost,
   });
+  await assertActiveWithStoredOutputCleanup();
   try {
     if (isAgentChatInput) {
       await emitAgentOperationEvent(callbacks, {
@@ -3307,6 +3559,7 @@ async function runQueuedImageGenerationForUser({
         billingMode: billingPolicy.mode,
       }
     );
+    await assertActiveWithStoredOutputCleanup();
     if (isAgentChatInput) {
       await emitAgentOperationEvent(callbacks, {
         kind: "tool",
@@ -3317,6 +3570,7 @@ async function runQueuedImageGenerationForUser({
       });
     }
   } catch (error) {
+    await assertActiveWithStoredOutputCleanup();
     const message =
       error instanceof Error ? error.message : "Insufficient credits";
     try {
@@ -3351,7 +3605,7 @@ async function runQueuedImageGenerationForUser({
           metadataWithPromptRepair({})
         )}::jsonb`,
       })
-      .where(isPendingGeneration(generationId));
+      .where(isPendingGeneration(generationId, input.executionToken));
     return {
       error: "Insufficient credits",
       generationId,
@@ -3360,88 +3614,118 @@ async function runQueuedImageGenerationForUser({
   }
 
   if (isTimedOut()) {
+    await cleanupStoredImageOutputs(storedOutputs, bucket);
     return failTimedOutGeneration();
   }
 
-  await db
-    .update(generation)
-    .set({
-      status: "completed",
-      storageKey: primaryOutput.storageKey,
-      fileSize: primaryOutput.fileSize,
-      size: primaryOutput.size,
-      revisedPrompt: result.revisedPrompt || primaryOutput.revisedPrompt,
-      creditsConsumed: chargedCredits,
-      metadata: sql`COALESCE(${generation.metadata}, '{}'::json)::jsonb || ${JSON.stringify(
-        metadataWithPromptRepair({
-          ...buildRevisedPromptMetadata({
-            input,
-            apiPrompt: currentApiPrompt,
-            result,
-          }),
-          ...buildResponseOutputMetadata(result),
-          webConversation: result.webConversation || null,
-          outputImage: {
-            requestedSize: size,
-            actualSize: primaryOutput.size,
-            actualSizeDetected: primaryOutput.actualSizeDetected,
-            actualSizeMatchesRequested: primaryOutput.size === size,
-            requestedFormat: input.outputFormat || null,
-            requestedCompression: input.outputCompression ?? null,
-            actualFormat: primaryOutput.actualOutputFormat,
-            actualFormatDetected: primaryOutput.actualOutputFormatDetected,
-            requestedCreditCost: creditCost,
-            actualCreditCost,
-            pricingSnapshot: actualCreditCost.pricingSnapshot,
-            perOutputCreditCosts,
-            chatRoundCredits: isChatInput ? chatRoundCredits : 0,
-            chatRoundCount,
-            billableImageOutputCount,
-            upstreamImageOutputCount,
-            imageOutputs: storedOutputs.map((output, index) => ({
-              generationId: output.generationId,
-              imageUrl: output.imageUrl,
-              imageFileId: output.imageFileId,
-              webImageMessageId: output.webImageMessageId,
-              webImageGroupId: output.webImageGroupId,
-              storageKey: output.storageKey,
-              size: output.size,
-              revisedPrompt: output.revisedPrompt,
-              upstreamRevisedPrompt: output.upstreamRevisedPrompt,
-              actualFormat: output.actualOutputFormat,
-              actualFormatDetected: output.actualOutputFormatDetected,
-              actualSizeDetected: output.actualSizeDetected,
-              role: resolveOutputRole({
-                input,
-                outputRole: output.outputRole,
-                index,
-                total: storedOutputs.length,
-              }),
-              primary: output.generationId === primaryOutput.generationId,
-            })),
-            layered: isLayeredRun
-              ? {
-                  version: 1,
-                  layers: storedOutputs.map((output, index) => ({
-                    storageKey: output.storageKey,
-                    size: output.size,
-                    // 0=整图合成(预览),1=背景(不透明),>=2=前景元素(抠白底)
-                    role:
-                      index === 0
-                        ? "composite"
-                        : index === 1
-                          ? "background"
-                          : "element",
-                    order: index,
-                  })),
-                }
-              : undefined,
-          },
+  await assertActiveWithStoredOutputCleanup();
+  let completed: { id: string } | undefined;
+  try {
+    [completed] = await db
+      .update(generation)
+      .set({
+        status: "completed",
+        storageKey: primaryOutput.storageKey,
+        storageBucket: bucket,
+        fileSize: primaryOutput.fileSize,
+        size: primaryOutput.size,
+        revisedPrompt: result.revisedPrompt || primaryOutput.revisedPrompt,
+        creditsConsumed: chargedCredits,
+        metadata: sql`COALESCE(${generation.metadata}, '{}'::json)::jsonb || ${JSON.stringify(
+          metadataWithPromptRepair({
+            ...buildRevisedPromptMetadata({
+              input,
+              apiPrompt: currentApiPrompt,
+              result,
+            }),
+            ...buildResponseOutputMetadata(result),
+            webConversation: result.webConversation || null,
+            outputImage: {
+              requestedSize: size,
+              actualSize: primaryOutput.size,
+              actualSizeDetected: primaryOutput.actualSizeDetected,
+              actualSizeMatchesRequested: primaryOutput.size === size,
+              requestedFormat: input.outputFormat || null,
+              requestedCompression: input.outputCompression ?? null,
+              actualFormat: primaryOutput.actualOutputFormat,
+              actualFormatDetected: primaryOutput.actualOutputFormatDetected,
+              requestedCreditCost: creditCost,
+              actualCreditCost,
+              pricingSnapshot: actualCreditCost.pricingSnapshot,
+              perOutputCreditCosts,
+              chatRoundCredits: isChatInput ? chatRoundCredits : 0,
+              chatRoundCount,
+              billableImageOutputCount,
+              upstreamImageOutputCount,
+              imageOutputs: storedOutputs.map((output, index) => ({
+                generationId: output.generationId,
+                imageUrl: output.imageUrl,
+                imageFileId: output.imageFileId,
+                webImageMessageId: output.webImageMessageId,
+                webImageGroupId: output.webImageGroupId,
+                storageKey: output.storageKey,
+                size: output.size,
+                revisedPrompt: output.revisedPrompt,
+                upstreamRevisedPrompt: output.upstreamRevisedPrompt,
+                actualFormat: output.actualOutputFormat,
+                actualFormatDetected: output.actualOutputFormatDetected,
+                actualSizeDetected: output.actualSizeDetected,
+                role: resolveOutputRole({
+                  input,
+                  outputRole: output.outputRole,
+                  index,
+                  total: storedOutputs.length,
+                }),
+                primary: output.generationId === primaryOutput.generationId,
+              })),
+              layered: isLayeredRun
+                ? {
+                    version: 1,
+                    layers: storedOutputs.map((output, index) => ({
+                      storageKey: output.storageKey,
+                      size: output.size,
+                      // 0=整图合成(预览),1=背景(不透明),>=2=前景元素(抠白底)
+                      role:
+                        index === 0
+                          ? "composite"
+                          : index === 1
+                            ? "background"
+                            : "element",
+                      order: index,
+                    })),
+                  }
+                : undefined,
+            },
+          })
+        )}::jsonb`,
+        completedAt: new Date(),
+      })
+      .where(isPendingGeneration(generationId, input.executionToken))
+      .returning({ id: generation.id });
+  } catch (error) {
+    await cleanupStoredImageOutputs(storedOutputs, bucket);
+    throw error;
+  }
+
+  if (!completed) {
+    await cleanupStoredImageOutputs(storedOutputs, bucket);
+    const existing = await getRecoverableImageGenerationById(generationId);
+    const recovered = existing
+      ? recoverImageGenerationResult(existing, {
+          expectedUserId: input.userId,
+          buildImageUrl: buildSignedStorageImageUrl,
         })
-      )}::jsonb`,
-      completedAt: new Date(),
-    })
-    .where(isPendingGeneration(generationId));
+      : undefined;
+    return (
+      recovered ?? {
+        error: "Image generation execution was superseded.",
+        generationId,
+        model: recordModel,
+        size,
+        creditsConsumed: chargedCredits,
+      }
+    );
+  }
 
   return {
     generationId,

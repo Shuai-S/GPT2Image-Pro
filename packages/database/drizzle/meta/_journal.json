@@ -421,6 +421,13 @@
       "when": 1783688400000,
       "tag": "0059_subscription_user_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1783692000000,
+      "tag": "0060_generation_execution_fencing",
+      "breakpoints": true
     }
   ]
 }
