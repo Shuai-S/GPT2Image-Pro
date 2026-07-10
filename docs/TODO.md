@@ -400,6 +400,9 @@
 > `docs/memory/2026-07-10-system-performance-audit-implementation.md`。不再保留“后台任务长事务”
 > 或“生成队列仍在进程内”等过时条目。
 
+- [ ] **切换 next-themes 官方稳定修复版**：当前 `0.4.6` 通过
+  `patches/next-themes@0.4.6.patch` 应用上游 PR #386。官方稳定版包含等价修复后，按
+  `docs/memory/2026-07-10-next-themes-react19-compat.md` 删除补丁、升级并完成双端回归。
 - [ ] **CI 真实环境首次留档**：本机没有 PostgreSQL、Chrome 和 Docker Buildx；需在
   GitHub Actions 留存 PostgreSQL 空库/升级迁移、登录态 Lighthouse、多架构镜像与 OCI
   release descriptor promote 的首次全绿记录。

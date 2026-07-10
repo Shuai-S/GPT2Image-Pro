@@ -39,6 +39,7 @@
 
 ## 性能
 
+- [2026-07-10 next-themes React 19 兼容补丁](memory/2026-07-10-next-themes-react19-compat.md) — 官方稳定版 `0.4.6` 在 React 19/Next 16.2 客户端重渲染内联脚本；当前用 pnpm 补丁应用上游 PR #386 的 SSR-only 修复，并以客户端/SSR 双测试锁定。待官方稳定版包含等价修复后删除补丁并升级。
 - [2026-07-10 系统工程与性能审计](plan/2026-07-10-system-performance-audit.md) / [实施记录](memory/2026-07-10-system-performance-audit-implementation.md) — P0/P1 已落地：短事务可恢复租约、持久异步任务与集群 semaphore、积分过期分页聚合、订阅用户唯一、候选限流指标、统一 fetch、原子 Docker release descriptor、真实迁移 CI；P2 已接 Sentry/Web Vitals/LHCI/资源体积预算、直传与 2 MiB 控制面、retention/Idempotency-Key、视频 semaphore、storage 输出边界，并完成后端池 error-classification/cooldown 的 DB-free 首块提取（`78f8e5fd`）。残余仅为 esbuild 低/中风险、真实环境 CI 首次留档和其余巨型文件按职责渐进拆分。
 - [2026-07-09 性能优化总计划](plan/2026-07-09-performance-and-concurrency.md) — 响应慢/卡顿 6 工作流(A–F)总计划，14 项任务。
 - **2026-07-09 perf-wave3 剩余批次落地**（6 commits 877f8185..1ee6b363，详见 [memory](memory/2026-07-09-perf-wave3-batch-implementation.md)）：C-P0-3 system-settings 升级 unstable_cache+`SYSTEM_SETTINGS_CACHE_TAG`(updateTag 转发失效)+lastGoodMap 兜底；F-P2-1 无限画布可视区 AABB 裁剪(computeVisibleNodes+ResizeObserver+边裁剪+首帧回退)；F-P1-1 创作页 video+waterfall dynamic(videoMounted 惰性挂载保留草稿)；F-P2-2 admin-panel register+import dynamic；C-P0-1 SLA 失效接入生成完成(用 `revalidateTag` max profile 而非 updateTag 因 operations 被 route handler 直调)+try/catch 降级；B-P1-2 AnimatedPrice 动态化移出 framer-motion 首屏 chunk。后置：3c UserDetailSheet 剥离(高耦合)、4b admin 聚合缓存(权限审计面大)、4c history 虚拟化(每页20条已合理)。
