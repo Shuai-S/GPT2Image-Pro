@@ -325,7 +325,7 @@ const sections = {
         "/v1/agents/images 和需要 Codex/Responses 能力的页面功能会忽略用户自接 API，按平台后端池或外接后端池结算本站积分。",
         "image 接口的 web_first / webFirst / force_web / forceWeb（chat 对应 mix_web_first）是 Web-first 优先路由，不是硬性只走 Web，且默认开启。开启时（不传或显式 true）按 Web-first 像素区间（IMAGE_FORCE_WEB_MIN_PIXELS / IMAGE_FORCE_WEB_MAX_PIXELS，默认 0.66MP-2MP）判定：尺寸落在区间内才优先 Web、失败则回到正常调度，超出区间（如 4K）则走正常调度；auto 或无法解析的尺寸视为可优先 Web。显式传 false 则不优先 Web。该路由只对 mixed 后端分组生效（纯 Web / 纯 Codex-Responses 分组无此概念），不会覆盖用户自接 API；agent 不受此项影响。",
         "Adobe（Firefly）后端：作为特殊成员按 priority 挂入分组同池调度——firefly-* 模型或 force_firefly=true 会把候选收敛到仅 Adobe；普通请求则只有当组内 web/codex/api 限流/耗尽/可切换失败时才兜底到 Adobe（取决于 Adobe 是否在该组及其优先级，priority 越大越靠后）。是否进 Adobe、计费倍率均随 admin「Adobe 后端」tab 配置变化。图像计费 = 尺寸基础积分 × 模型族倍率 × Adobe 后端倍率 × 分组倍率；视频计费见 /v1/videos/generations。路由兜底详见 /docs/adobe-firefly-routing，兼容转换（站内参数→Adobe 字段、被忽略参数、算例）详见 /docs/adobe-firefly-compat。",
-        "异步任务（async）：body async:true 或 URL ?async=true（等价、不能与 stream 同用）会立即返回 task_...。任务、重试预算、执行租约和 callback outbox 均持久化到 PostgreSQL，可跨服务重启和多副本继续轮询；worker 崩溃后由租约过期接管。图片用 GET /v1/images/{task_id}，视频用 GET /v1/videos/{id}；响应里的 generation_id 也可用于查询底层产物。callback_url 由持久 outbox 投递并重试。纯中转 API Key 不允许 async，因为持久任务会产生存储副作用。",
+        "异步任务（async）：body async:true 或 URL ?async=true（等价、不能与 stream 同用）会立即返回 task_...。任务、重试预算、执行租约和 callback outbox 均持久化到 PostgreSQL，可跨服务重启和多副本继续轮询；worker 崩溃后由租约过期接管。图片用 GET /v1/images/{task_id}，视频用 GET /v1/videos/{id}；响应里的 generation_id 也可用于查询底层产物。callback_url 由持久 outbox 投递并重试。可选 Idempotency-Key 请求头用于 image/video 异步创建：同一 API Key、任务类型和相同内容重放会返回原任务，内容不同返回 409，空值或超过 255 字符返回 400。callback 已结束的终态任务默认保留 30 天后按批清理，期限可由管理员调整。纯中转 API Key 不允许 async，因为持久任务会产生存储副作用。",
       ],
       officialRefsTitle: "官方参考",
       officialRefs: [
@@ -949,6 +949,7 @@ curl -N https://gpt2image.superapi.buzz/v1/images/generations \\
 # 6. 异步模式；也可在 URL 后追加 ?async=true（与 body async:true 等价）；callback_url 为可选完成回调
 curl https://gpt2image.superapi.buzz/v1/images/generations \\
   -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
+  -H "Idempotency-Key: image-job-20260710-001" \\
   -H "Content-Type: application/json" \\
   -d '{
     "model": "gpt-image-1.5",
@@ -1317,6 +1318,7 @@ curl -N https://gpt2image.superapi.buzz/v1/images/edits \\
 # 6. 异步图生图；也可在 URL 后追加 ?async=true（与 body async:true 等价）；callback_url 为可选完成回调
 curl https://gpt2image.superapi.buzz/v1/images/edits \\
   -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
+  -H "Idempotency-Key: image-edit-20260710-001" \\
   -F model="gpt-image-1.5" \\
   -F prompt="去除背景，输出透明 PNG" \\
   -F size="1024x1024" \\
@@ -1680,6 +1682,7 @@ curl https://gpt2image.superapi.buzz/v1/videos/generations \\
 # 3. 异步（长视频强烈建议）：async:true 立即返回 task_...，后台生成
 curl https://gpt2image.superapi.buzz/v1/videos/generations \\
   -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
+  -H "Idempotency-Key: video-job-20260710-001" \\
   -H "Content-Type: application/json" \\
   -d '{
     "model": "firefly-veo31-8s-16x9-1080p",
@@ -2786,7 +2789,7 @@ data: {"type":"response.completed","response":{"id":"resp_...","object":"respons
         "/v1/agents/images and page features that require Codex/Responses capability ignore user custom API and are billed through the platform or external backend pool.",
         "Image endpoint web_first / webFirst / force_web / forceWeb (chat: mix_web_first) is a Web-first preference route, not hard Web-only, and is on by default. When on (omitted or explicit true) it uses the Web-first pixel range (IMAGE_FORCE_WEB_MIN_PIXELS / IMAGE_FORCE_WEB_MAX_PIXELS, default 0.66MP-2MP): only sizes inside the range prefer Web and return to normal scheduling on failure, sizes outside (e.g. 4K) use normal scheduling, auto or unparseable sizes may prefer Web; explicit false disables it. It only applies to mixed backend groups (no effect for Web-only / Codex-Responses-only groups) and never overrides user custom API; agent is unaffected.",
         "Adobe (Firefly) backend: it joins the group as a special pool member ranked by priority. A firefly-* model or force_firefly=true narrows candidates to Adobe only; ordinary requests only fall back to Adobe once the group's web/codex/api members are rate-limited, exhausted, or fail with a switchable error (and only if Adobe is in that group — the larger its priority, the later it is tried). Whether a request reaches Adobe and its billing multiplier follow the admin 'Adobe backend' tab config. Image billing = size base credits × model-family multiplier × Adobe backend multiplier × group multiplier; see /v1/videos/generations for video billing. Routing/fallback: /docs/adobe-firefly-routing; compatibility conversion (in-app params → Adobe fields, ignored params, worked example): /docs/adobe-firefly-compat.",
-        "Async tasks (async): body async:true or URL ?async=true (equivalent, and cannot be combined with stream) returns a task_... immediately. Task state, retry budget, execution lease, and callback outbox are persisted in PostgreSQL, so polling survives restarts and multiple replicas; an expired worker lease can be taken over. Poll GET /v1/images/{task_id} for images or GET /v1/videos/{id} for videos. The generation_id also addresses the underlying persisted result. callback_url delivery is leased and retried from the persistent outbox. Relay-only API keys cannot use async because persisted tasks have storage side effects.",
+        "Async tasks (async): body async:true or URL ?async=true (equivalent, and cannot be combined with stream) returns a task_... immediately. Task state, retry budget, execution lease, and callback outbox are persisted in PostgreSQL, so polling survives restarts and multiple replicas; an expired worker lease can be taken over. Poll GET /v1/images/{task_id} for images or GET /v1/videos/{id} for videos. The generation_id also addresses the underlying persisted result. callback_url delivery is leased and retried from the persistent outbox. An optional Idempotency-Key header applies to async image/video creation: replaying the same content under the same API key and task type returns the original task, different content returns 409, and an empty or over-255-character key returns 400. Terminal tasks whose callbacks have finished are retained for 30 days by default before bounded cleanup; operators can change the retention period. Relay-only API keys cannot use async because persisted tasks have storage side effects.",
       ],
       officialRefsTitle: "Official References",
       officialRefs: [
@@ -3263,6 +3266,7 @@ curl -N https://gpt2image.superapi.buzz/v1/images/generations \\
 # 6. Async mode. You may also append ?async=true. callback_url is optional.
 curl https://gpt2image.superapi.buzz/v1/images/generations \\
   -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
+  -H "Idempotency-Key: image-job-20260710-001" \\
   -H "Content-Type: application/json" \\
   -d '{
     "model": "gpt-image-1.5",
@@ -3611,6 +3615,7 @@ curl -N https://gpt2image.superapi.buzz/v1/images/edits \\
 # 6. Async image edit. You may also append ?async=true. callback_url is optional.
 curl https://gpt2image.superapi.buzz/v1/images/edits \\
   -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
+  -H "Idempotency-Key: image-edit-20260710-001" \\
   -F model="gpt-image-1.5" \\
   -F prompt="Remove the background and output a transparent PNG" \\
   -F size="1024x1024" \\
@@ -3955,6 +3960,7 @@ curl https://gpt2image.superapi.buzz/v1/videos/generations \\
 # 3. Async (strongly recommended for long videos): async:true returns a task_... immediately, generated in the background
 curl https://gpt2image.superapi.buzz/v1/videos/generations \\
   -H "Authorization: Bearer $GPT2IMAGE_API_KEY" \\
+  -H "Idempotency-Key: video-job-20260710-001" \\
   -H "Content-Type: application/json" \\
   -d '{
     "model": "firefly-veo31-8s-16x9-1080p",
