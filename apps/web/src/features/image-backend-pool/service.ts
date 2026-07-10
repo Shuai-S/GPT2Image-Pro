@@ -48,6 +48,7 @@ import {
   notInArray,
   or,
   sql,
+  type SQLWrapper,
 } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { Pool } from "pg";
@@ -825,6 +826,26 @@ function excludedMemberIds(
     .filter((key) => key.startsWith(prefix))
     .map((key) => key.slice(prefix.length))
     .filter(Boolean);
+}
+
+/**
+ * 按当前分组上下文顺序为多对多成员关系排序。
+ *
+ * @param groupColumn 关联表的 group_id 列。
+ * @param orderedGroupIds 父组在前、声明顺序稳定的候选分组 ID。
+ * @returns PostgreSQL array_position 排序表达式。
+ * @sideEffects 无。
+ * @failureMode 仅在 orderedGroupIds 非空的候选查询中调用；未知组返回 NULL 并已被 WHERE 排除。
+ */
+function matchedGroupOrder(
+  groupColumn: SQLWrapper,
+  orderedGroupIds: readonly string[]
+) {
+  const groupIdValues = orderedGroupIds.map((id) => sql`${id}`);
+  return sql`array_position(
+    ARRAY[${sql.join(groupIdValues, sql`, `)}]::text[],
+    ${groupColumn}
+  )`;
 }
 
 function stripTrailingSlash(value: string) {
@@ -3023,10 +3044,21 @@ async function selectPoolMember(
       )
     )
   );
+  const accountMembershipWhere = and(
+    eq(imageBackendAccountGroup.accountId, imageBackendAccount.id),
+    accountContextWhere
+  );
+  const accountMatchedGroupId = sql<string | null>`(
+    SELECT ${imageBackendAccountGroup.groupId}
+    FROM ${imageBackendAccountGroup}
+    WHERE ${accountMembershipWhere}
+    ORDER BY ${matchedGroupOrder(imageBackendAccountGroup.groupId, groupIds)}
+    LIMIT 1
+  )`;
   const accountRowsPromise = groupIds.length
     ? db
         .select({
-          matchedGroupId: imageBackendAccountGroup.groupId,
+          matchedGroupId: accountMatchedGroupId,
           id: imageBackendAccount.id,
           alwaysActive: imageBackendAccount.alwaysActive,
           groupId: imageBackendAccount.groupId,
@@ -3043,11 +3075,16 @@ async function selectPoolMember(
           metadata: imageBackendAccount.metadata,
         })
         .from(imageBackendAccount)
-        .innerJoin(
-          imageBackendAccountGroup,
-          eq(imageBackendAccountGroup.accountId, imageBackendAccount.id)
+        .where(
+          and(
+            accountBaseWhere,
+            sql`EXISTS (
+              SELECT 1
+              FROM ${imageBackendAccountGroup}
+              WHERE ${accountMembershipWhere}
+            )`
+          )
         )
-        .where(and(accountBaseWhere, accountContextWhere))
         .orderBy(
           asc(imageBackendAccount.priority),
           asc(imageBackendAccount.lastUsedAt),
@@ -3113,13 +3150,24 @@ async function selectPoolMember(
       )
     )
   );
-  // groupIds 命中时经 imageBackendApiGroup join 取出该 API 所属的全部分组，
-  // matchedGroupId 为本次命中的分组（供下游分组上下文解析）；未指定分组时退回
-  // 主分组 groupId（matchedGroupId 直接取自 imageBackendApi.groupId）。
+  const apiMembershipWhere = and(
+    eq(imageBackendApiGroup.apiId, imageBackendApi.id),
+    inArray(imageBackendApiGroup.groupId, apiCandidateGroupIds)
+  );
+  const apiMatchedGroupId = sql<string | null>`(
+    SELECT ${imageBackendApiGroup.groupId}
+    FROM ${imageBackendApiGroup}
+    WHERE ${apiMembershipWhere}
+    ORDER BY ${matchedGroupOrder(imageBackendApiGroup.groupId, groupIds)}
+    LIMIT 1
+  )`;
+  // groupIds 命中时用相关 EXISTS 筛选成员，并按上下文顺序只取一个 matchedGroupId；
+  // 这样同一 API 属于多个父/子组时不会在 LIMIT 前重复占位。未指定分组时退回主分组
+  // groupId（matchedGroupId 直接取自 imageBackendApi.groupId）。
   const apiRowsPromise = groupIds.length
     ? db
         .select({
-          matchedGroupId: imageBackendApiGroup.groupId,
+          matchedGroupId: apiMatchedGroupId,
           id: imageBackendApi.id,
           alwaysActive: imageBackendApi.alwaysActive,
           groupId: imageBackendApi.groupId,
@@ -3146,14 +3194,14 @@ async function selectPoolMember(
           metadata: imageBackendApi.metadata,
         })
         .from(imageBackendApi)
-        .innerJoin(
-          imageBackendApiGroup,
-          eq(imageBackendApiGroup.apiId, imageBackendApi.id)
-        )
         .where(
           and(
             apiBaseWhere,
-            inArray(imageBackendApiGroup.groupId, apiCandidateGroupIds)
+            sql`EXISTS (
+              SELECT 1
+              FROM ${imageBackendApiGroup}
+              WHERE ${apiMembershipWhere}
+            )`
           )
         )
         .orderBy(
@@ -3264,23 +3312,34 @@ async function selectPoolMember(
     createdAt: imageBackendAdobe.createdAt,
     metadata: imageBackendAdobe.metadata,
   };
+  const adobeMembershipWhere = and(
+    eq(imageBackendAdobeGroup.adobeId, imageBackendAdobe.id),
+    inArray(imageBackendAdobeGroup.groupId, adobeCandidateGroupIds)
+  );
+  const adobeMatchedGroupId = sql<string | null>`(
+    SELECT ${imageBackendAdobeGroup.groupId}
+    FROM ${imageBackendAdobeGroup}
+    WHERE ${adobeMembershipWhere}
+    ORDER BY ${matchedGroupOrder(imageBackendAdobeGroup.groupId, groupIds)}
+    LIMIT 1
+  )`;
   // adobe 作为特殊 firefly account 成员，按分组归属参与调度（与 api/account 同源）：只从
   // 本次请求命中的分组拉取 adobe 后端，不再全局忽略分组。挂低优先级即天然成为兜底。
   const adobeRowsPromise = groupIds.length
     ? db
         .select({
           ...adobeSelection,
-          matchedGroupId: imageBackendAdobeGroup.groupId,
+          matchedGroupId: adobeMatchedGroupId,
         })
         .from(imageBackendAdobe)
-        .innerJoin(
-          imageBackendAdobeGroup,
-          eq(imageBackendAdobeGroup.adobeId, imageBackendAdobe.id)
-        )
         .where(
           and(
             adobeBaseWhere,
-            inArray(imageBackendAdobeGroup.groupId, adobeCandidateGroupIds)
+            sql`EXISTS (
+              SELECT 1
+              FROM ${imageBackendAdobeGroup}
+              WHERE ${adobeMembershipWhere}
+            )`
           )
         )
         .orderBy(

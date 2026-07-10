@@ -186,6 +186,7 @@ const dbMock = vi.hoisted(() => {
     leases: [] as Row[],
     lockedLastAcquiredAtById: new Map<string, Date | null>(),
     fromCalls: [] as string[],
+    joinCalls: [] as { fromTable: string; joinedTable: string }[],
     whereCalls: [] as { tableName: string; predicate: unknown }[],
     limitCalls: [] as { tableName: string; limit: number }[],
     updates: [] as { tableName: string; values: Row }[],
@@ -276,7 +277,13 @@ const dbMock = vi.hoisted(() => {
       state.fromCalls.push(tableName);
       return builder;
     });
-    builder.innerJoin = vi.fn(() => builder);
+    builder.innerJoin = vi.fn((table: unknown) => {
+      state.joinCalls.push({
+        fromTable: tableName,
+        joinedTable: tableNameOf(table),
+      });
+      return builder;
+    });
     builder.where = vi.fn((predicate: unknown) => {
       wherePredicate = predicate;
       state.whereCalls.push({ tableName, predicate });
@@ -597,6 +604,7 @@ describe("image backend pool scheduler selection", () => {
     dbMock.state.leases = [];
     dbMock.state.lockedLastAcquiredAtById.clear();
     dbMock.state.fromCalls = [];
+    dbMock.state.joinCalls = [];
     dbMock.state.whereCalls = [];
     dbMock.state.limitCalls = [];
     dbMock.state.updates = [];
@@ -648,6 +656,37 @@ describe("image backend pool scheduler selection", () => {
     expect(metricInsert?.values.metadata).toMatchObject({
       candidateRowsScannedTotal: 200,
     });
+  });
+
+  it("deduplicates multi-group members before applying candidate limits", async () => {
+    await resolveImageBackendPoolConfig({
+      userId: "user-a",
+      requestKind: "image_generation",
+    });
+
+    expect(
+      dbMock.state.joinCalls.filter((call) =>
+        [
+          "image_backend_account_group",
+          "image_backend_api_group",
+          "image_backend_adobe_group",
+        ].includes(call.joinedTable)
+      )
+    ).toEqual([]);
+    for (const [tableName, membershipColumn] of [
+      ["image_backend_account", "accountId"],
+      ["image_backend_api", "apiId"],
+      ["image_backend_adobe", "adobeId"],
+    ] as const) {
+      const candidateWhere = dbMock.state.whereCalls.find(
+        (call) =>
+          call.tableName === tableName &&
+          predicateIncludesColumn(call.predicate, "isEnabled")
+      )?.predicate;
+      expect(predicateIncludesColumn(candidateWhere, membershipColumn)).toBe(
+        true
+      );
+    }
   });
 
   it("caches static groups while querying members and acquisition order live", async () => {
