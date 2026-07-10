@@ -20,6 +20,7 @@ const imageServiceMock = vi.hoisted(() => ({
 
 const loggerMock = vi.hoisted(() => ({
   logError: vi.fn(),
+  createContextLogger: vi.fn(() => ({ warn: vi.fn() })),
 }));
 
 vi.mock("@repo/database", () => ({ db: {} }));
