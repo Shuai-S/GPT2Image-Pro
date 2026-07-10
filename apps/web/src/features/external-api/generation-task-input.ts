@@ -100,6 +100,7 @@ export const generationTaskInputReferenceSchema = z
 const imageGenerateTaskPayloadSchema = z
   .object({
     kind: z.literal("image_generate"),
+    relayOnly: z.boolean(),
     generationIds: generationIdsSchema,
     createdAtEpochSeconds: z.number().int().nonnegative(),
     responseFormat: responseFormatSchema,
@@ -110,6 +111,7 @@ const imageGenerateTaskPayloadSchema = z
 const imageEditTaskPayloadSchema = z
   .object({
     kind: z.literal("image_edit"),
+    relayOnly: z.boolean(),
     generationIds: generationIdsSchema,
     createdAtEpochSeconds: z.number().int().nonnegative(),
     responseFormat: responseFormatSchema,
@@ -139,6 +141,7 @@ const imageEditTaskPayloadSchema = z
 const videoTaskPayloadSchema = z
   .object({
     kind: z.literal("video"),
+    relayOnly: z.boolean(),
     generationId: generationIdSchema,
     createdAtEpochSeconds: z.number().int().nonnegative(),
     input: z
@@ -170,6 +173,15 @@ export const generationTaskRequestPayloadSchema = z.discriminatedUnion("kind", [
 
 export type GenerationTaskRequestPayload = z.infer<
   typeof generationTaskRequestPayloadSchema
+>;
+
+export const generationTaskResultPayloadSchema = z.union([
+  z.object({ generationIds: generationIdsSchema }).strict(),
+  z.object({ generationId: generationIdSchema }).strict(),
+]);
+
+export type GenerationTaskResultPayload = z.infer<
+  typeof generationTaskResultPayloadSchema
 >;
 
 /**
@@ -313,14 +325,21 @@ export async function loadGenerationTaskInputs(input: {
   taskId: string;
   references: readonly GenerationTaskInputReference[];
 }): Promise<LoadedGenerationTaskInput[]> {
-  const bucket = await getGenerationTaskInputBucket();
+  const references = generationTaskInputReferenceSchema
+    .array()
+    .max(MAX_INPUT_REFERENCES)
+    .parse(input.references);
+  const bucket = references[0]?.bucket;
+  if (!bucket) return [];
+  if (references.some((reference) => reference.bucket !== bucket)) {
+    throw new Error("Generation task input references span multiple buckets");
+  }
   const storage = await getStorageProvider();
   const prefix = taskInputPrefix(input.userId, input.taskId);
   const loaded: LoadedGenerationTaskInput[] = [];
   let totalBytes = 0;
 
-  for (const rawReference of input.references) {
-    const reference = generationTaskInputReferenceSchema.parse(rawReference);
+  for (const reference of references) {
     assertOwnedTaskReference(reference, bucket, prefix);
     const data = await storage.getObject(reference.key, reference.bucket, {
       maxBytes: Math.min(MAX_TASK_INPUT_BYTES, reference.size + 1),
@@ -351,19 +370,22 @@ export async function cleanupGenerationTaskInputs(input: {
   taskId: string;
   references: readonly GenerationTaskInputReference[];
 }): Promise<void> {
-  const bucket = await getGenerationTaskInputBucket();
+  const references = input.references.flatMap((rawReference) => {
+    const parsed = generationTaskInputReferenceSchema.safeParse(rawReference);
+    return parsed.success ? [parsed.data] : [];
+  });
+  const bucket = references[0]?.bucket;
+  if (!bucket) return;
   const storage = await getStorageProvider();
   const prefix = taskInputPrefix(input.userId, input.taskId);
   await Promise.allSettled(
-    input.references.map(async (rawReference) => {
-      const parsed = generationTaskInputReferenceSchema.safeParse(rawReference);
-      if (!parsed.success) return;
+    references.map(async (reference) => {
       try {
-        assertOwnedTaskReference(parsed.data, bucket, prefix);
+        assertOwnedTaskReference(reference, bucket, prefix);
       } catch {
         return;
       }
-      await storage.deleteObject(parsed.data.key, parsed.data.bucket);
+      await storage.deleteObject(reference.key, reference.bucket);
     })
   );
 }

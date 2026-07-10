@@ -24,6 +24,7 @@ vi.mock("@repo/shared/system-settings", () => ({
 import {
   cleanupGenerationTaskInputs,
   generationTaskRequestPayloadSchema,
+  generationTaskResultPayloadSchema,
   loadGenerationTaskInputs,
   storeGenerationTaskInputs,
 } from "./generation-task-input";
@@ -79,6 +80,7 @@ describe("generation task request payload", () => {
     const payloads = [
       {
         kind: "image_generate",
+        relayOnly: false,
         generationIds: ["gen-1", "gen-2"],
         createdAtEpochSeconds: 1_788_000_000,
         responseFormat: "b64_json",
@@ -91,6 +93,7 @@ describe("generation task request payload", () => {
       },
       {
         kind: "image_edit",
+        relayOnly: false,
         generationIds: ["gen-edit-1"],
         createdAtEpochSeconds: 1_788_000_001,
         responseFormat: "url",
@@ -103,6 +106,7 @@ describe("generation task request payload", () => {
       },
       {
         kind: "video",
+        relayOnly: false,
         generationId: "video-1",
         createdAtEpochSeconds: 1_788_000_002,
         input: {
@@ -125,10 +129,34 @@ describe("generation task request payload", () => {
     }
   });
 
+  it("终态 JSON 只接受稳定 generation 引用", () => {
+    const imageResult = generationTaskResultPayloadSchema.parse({
+      generationIds: ["gen-1", "gen-2"],
+    });
+    const videoResult = generationTaskResultPayloadSchema.parse({
+      generationId: "video-1",
+    });
+    expectMediaBodyFree(imageResult);
+    expectMediaBodyFree(videoResult);
+    expect(
+      generationTaskResultPayloadSchema.safeParse({
+        generationIds: ["gen-1"],
+        data: [{ b64_json: "aGVsbG8=" }],
+      }).success
+    ).toBe(false);
+    expect(
+      generationTaskResultPayloadSchema.safeParse({
+        generationId: "video-1",
+        video: Buffer.from("media"),
+      }).success
+    ).toBe(false);
+  });
+
   it("拒绝额外 base64、Buffer、非法 role 和额外身份字段", () => {
     expect(
       generationTaskRequestPayloadSchema.safeParse({
         kind: "image_generate",
+        relayOnly: false,
         generationIds: ["gen-1"],
         createdAtEpochSeconds: 1,
         responseFormat: "url",
@@ -142,6 +170,7 @@ describe("generation task request payload", () => {
     expect(
       generationTaskRequestPayloadSchema.safeParse({
         kind: "image_edit",
+        relayOnly: false,
         generationIds: ["gen-1"],
         createdAtEpochSeconds: 1,
         responseFormat: "url",
@@ -158,6 +187,7 @@ describe("generation task request payload", () => {
     expect(
       generationTaskRequestPayloadSchema.safeParse({
         kind: "video",
+        relayOnly: false,
         generationId: "video-1",
         createdAtEpochSeconds: 1,
         input: { prompt: "prompt", model: "firefly-sora2-8s-16x9" },
@@ -259,6 +289,34 @@ describe("generation task input storage", () => {
         references: [sourceReference],
       })
     ).rejects.toThrow("size does not match");
+  });
+
+  it("运行时切桶后仍按 enqueue 时的单 bucket 快照恢复旧任务", async () => {
+    const legacyReference = {
+      ...sourceReference,
+      bucket: "legacy-generations",
+    };
+
+    await expect(
+      loadGenerationTaskInputs({
+        userId: "user-1",
+        taskId: "task-1",
+        references: [legacyReference],
+      })
+    ).resolves.toEqual([{ ...legacyReference, data: Buffer.from("data") }]);
+    expect(storageMocks.getObject).toHaveBeenCalledWith(
+      legacyReference.key,
+      legacyReference.bucket,
+      { maxBytes: 5 }
+    );
+
+    await expect(
+      loadGenerationTaskInputs({
+        userId: "user-1",
+        taskId: "task-1",
+        references: [legacyReference, sourceReference],
+      })
+    ).rejects.toThrow("span multiple buckets");
   });
 
   it("清理只删除本任务合法引用且吞掉单对象删除失败", async () => {

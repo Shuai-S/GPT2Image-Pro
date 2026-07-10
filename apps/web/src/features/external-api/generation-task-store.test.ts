@@ -24,7 +24,7 @@ const databaseMocks = vi.hoisted(() => {
     return { where };
   });
   const update = vi.fn(() => ({ set }));
-  const execute = vi.fn(async () => state.executeRows);
+  const execute = vi.fn(async (_query: unknown) => state.executeRows);
   const transaction = vi.fn(
     async (
       run: (tx: { execute: typeof execute; update: typeof update }) => unknown
