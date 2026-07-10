@@ -12,9 +12,9 @@ export type GenerationErrorCategory =
 // quota exceeded/invalid or missing api key 等)匹配。
 // 用户输入超限类(提示词过长 / 参考图超数 / 输入图过大)。切后端也救不了 → 算用户错:不重试、
 // 直接报告;SLA 不计平台。这些码来自上游中转、未必稳定,故同时匹配中英文案兜底。由本文件
-// classifyGenerationError 与后端调度侧 isUserRequestBackendError(image-backend-pool/service.ts)
-// 共用同一份,避免两处分类器漂移。注意:勿混入 rate limit / concurrency / too many requests 等
-// 限流(那是瞬时、可切换的,要重试)。
+// classifyGenerationError 与后端调度侧 isUserRequestBackendError
+// (image-backend-pool/backend-error-classification.ts)共用同一份,避免两处分类器漂移。
+// 注意:勿混入 rate limit / concurrency / too many requests 等限流(那是瞬时、可切换的,要重试)。
 export const USER_INPUT_LIMIT_PATTERNS = [
   // 提示词 / 输入上下文过长
   "prompt_too_long",
@@ -268,8 +268,8 @@ export function classifyGenerationError(error: string | null | undefined) {
   // (上游拒绝的格式不支持如 mpo/avif、尺寸/分辨率/蒙版不符、坏图等)。这类既非平台
   // 可用性故障,也不应计入平台 SLA 分母、更不该在后台标成"平台"。必须放在审核判定
   // 之后:审核拒绝同样带该标签,需先归 moderation,否则会被这里误判成 user_request、
-  // 污染审核统计。与后端调度侧 isUserRequestBackendError(image-backend-pool/
-  // service.ts)保持同口径,避免两处分类再次漂移。
+  // 污染审核统计。与后端调度侧 isUserRequestBackendError
+  // (image-backend-pool/backend-error-classification.ts)保持同口径,避免两处分类再次漂移。
   if (
     normalized.includes("image_generation_user_error") ||
     normalized.includes("user_error")

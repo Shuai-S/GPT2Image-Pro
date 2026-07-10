@@ -1,21 +1,28 @@
-import { describe, expect, it, vi } from "vitest";
+/**
+ * 锁定生图后端错误分类、冷却时间与失败状态收敛语义。
+ *
+ * 测试直接导入 DB-free 分类模块，防止纯规则重新依赖数据库或 service 聚合层。
+ */
 
-// 让分类函数 DB-free:运行时设置一律返回默认值(避免 classifyFailure 经
-// isUnrecoverableBackendError 去查 system_setting 表)。只调纯函数的用例不受影响。
-vi.mock("@repo/shared/system-settings", () => ({
-  clearSystemSettingsCache: () => {},
-  getRuntimeSettingJson: async (_key: string, def?: unknown) => def ?? null,
-  getRuntimeSettingNumber: async (_key: string, def?: number) => def ?? 0,
-  getRuntimeSettingString: async (_key: string, def?: string) => def ?? "",
-}));
+import { describe, expect, it } from "vitest";
 
+/** 加载 DB-free 切换判定函数。 */
 async function loadClassifier() {
-  process.env.DATABASE_URL ||= "postgres://test:test@localhost:5432/test";
-  const service = await import("./service");
-  return service.isImageBackendSwitchableError;
+  const classification = await import("./backend-error-classification");
+  return classification.isImageBackendSwitchableError;
 }
 
+/** 加载 DB-free 分类模块，并为旧测试名称提供兼容别名。 */
 async function loadService() {
+  const classification = await import("./backend-error-classification");
+  return {
+    ...classification,
+    classifyFailure: classification.classifyBackendFailure,
+  };
+}
+
+/** 加载仍由聚合服务导出的调度阶段纯辅助函数。 */
+async function loadSchedulerService() {
   process.env.DATABASE_URL ||= "postgres://test:test@localhost:5432/test";
   return import("./service");
 }
@@ -419,6 +426,47 @@ describe("image backend error classification", () => {
     expect(failure.status).toBe("error");
     expect(failure.cooldownUntil).toBeNull();
   });
+
+  it("通过注入读取器应用自定义不可恢复错误关键字", async () => {
+    const svc = await loadService();
+    const failure = await svc.classifyBackendFailure(
+      "upstream returned tenant permanently blocked",
+      undefined,
+      {
+        readUnrecoverableKeywords: async () => "permanently blocked",
+      }
+    );
+
+    expect(failure).toEqual({ status: "error", cooldownUntil: null });
+  });
+
+  it("通过注入读取器应用自定义临时错误冷却时间", async () => {
+    const svc = await loadService();
+    const reads: string[] = [];
+    const startedAt = Date.now();
+    const failure = await svc.classifyBackendFailure(
+      "fetch failed",
+      undefined,
+      {
+        readCooldownMinutes: async (key, fallback) => {
+          reads.push(key);
+          return key === "IMAGE_BACKEND_TEMPORARY_ERROR_COOLDOWN_MINUTES"
+            ? 2
+            : fallback;
+        },
+      }
+    );
+
+    expect(reads).toEqual([
+      "IMAGE_BACKEND_DEFAULT_COOLDOWN_MINUTES",
+      "IMAGE_BACKEND_TEMPORARY_ERROR_COOLDOWN_MINUTES",
+    ]);
+    expect(failure.status).toBe("active");
+    expect(failure.cooldownUntil).toBeInstanceOf(Date);
+    const cooldownMs = (failure.cooldownUntil as Date).getTime() - startedAt;
+    expect(cooldownMs).toBeGreaterThanOrEqual(120_000);
+    expect(cooldownMs).toBeLessThan(121_000);
+  });
 });
 
 describe("always_active failure handling (resolveAlwaysActiveFailure)", () => {
@@ -450,20 +498,20 @@ describe("always_active failure handling (resolveAlwaysActiveFailure)", () => {
 // (见 service.ts 账号过滤注释);此处 memberAllowedForPhase 仅用于 api/adobe(无固有类型)。
 describe("memberAllowedForPhase (api/adobe 按分组车道隔离)", () => {
   it("mixed 分组不限车道，任何偏好都参与（谁都可请求）", async () => {
-    const svc = await loadService();
+    const svc = await loadSchedulerService();
     expect(svc.memberAllowedForPhase("mixed", "web", false)).toBe(true);
     expect(svc.memberAllowedForPhase("mixed", "responses", false)).toBe(true);
     expect(svc.memberAllowedForPhase("mixed", undefined, false)).toBe(true);
   });
 
   it("web 分组的 adobe 仅在 web 偏好阶段参与", async () => {
-    const svc = await loadService();
+    const svc = await loadSchedulerService();
     expect(svc.memberAllowedForPhase("web", "web", false)).toBe(true);
     expect(svc.memberAllowedForPhase("web", "responses", false)).toBe(false);
   });
 
   it("responses(codex)分组的 adobe 仅在 codex 阶段参与，web 偏求不再漏过来", async () => {
-    const svc = await loadService();
+    const svc = await loadSchedulerService();
     expect(svc.memberAllowedForPhase("responses", "responses", false)).toBe(
       true
     );
@@ -472,13 +520,13 @@ describe("memberAllowedForPhase (api/adobe 按分组车道隔离)", () => {
   });
 
   it("firefly 请求或请求无偏好时不受车道限制", async () => {
-    const svc = await loadService();
+    const svc = await loadSchedulerService();
     expect(svc.memberAllowedForPhase("responses", "web", true)).toBe(true);
     expect(svc.memberAllowedForPhase("web", undefined, false)).toBe(true);
   });
 
   it("codex 阶段 codex/mixed 分组的 API 参与——阶段只看车道,不再被 responses 端点能力卡掉(回归)", async () => {
-    const svc = await loadService();
+    const svc = await loadSchedulerService();
     // 修复前 codex 阶段用 requiresResponsesEndpoint 把 images 端点 API 挡在门外;现在阶段
     // 参与纯由车道决定(端点能力是 requestKind 维度的独立筛选,见 api-interface-mode.test)。
     expect(svc.memberAllowedForPhase("responses", "responses", false)).toBe(
@@ -492,7 +540,7 @@ describe("memberAllowedForPhase (api/adobe 按分组车道隔离)", () => {
 
 describe("isWebCapacityWaitCandidate (满并发短等候选判定)", () => {
   it("web 偏好下,非常驻 web 账号/API 满并发时值得短等", async () => {
-    const svc = await loadService();
+    const svc = await loadSchedulerService();
     expect(
       svc.isWebCapacityWaitCandidate(
         { type: "account", alwaysActive: false },
@@ -510,7 +558,7 @@ describe("isWebCapacityWaitCandidate (满并发短等候选判定)", () => {
   });
 
   it("常驻满并发不触发短等(常驻不计入 web 可用候选)", async () => {
-    const svc = await loadService();
+    const svc = await loadSchedulerService();
     expect(
       svc.isWebCapacityWaitCandidate(
         { type: "account", alwaysActive: true },
@@ -521,7 +569,7 @@ describe("isWebCapacityWaitCandidate (满并发短等候选判定)", () => {
   });
 
   it("adobe 不在短等集(短等仅针对 web 账号 / web API)", async () => {
-    const svc = await loadService();
+    const svc = await loadSchedulerService();
     expect(
       svc.isWebCapacityWaitCandidate(
         { type: "adobe", alwaysActive: false },
@@ -532,7 +580,7 @@ describe("isWebCapacityWaitCandidate (满并发短等候选判定)", () => {
   });
 
   it("未满并发(有空)则无需短等", async () => {
-    const svc = await loadService();
+    const svc = await loadSchedulerService();
     expect(
       svc.isWebCapacityWaitCandidate(
         { type: "account", alwaysActive: false },
@@ -543,7 +591,7 @@ describe("isWebCapacityWaitCandidate (满并发短等候选判定)", () => {
   });
 
   it("非 web 阶段(codex / 无偏好)不短等", async () => {
-    const svc = await loadService();
+    const svc = await loadSchedulerService();
     expect(
       svc.isWebCapacityWaitCandidate(
         { type: "account", alwaysActive: false },
