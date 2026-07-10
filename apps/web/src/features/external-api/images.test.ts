@@ -284,7 +284,8 @@ describe("external image base64 loading", () => {
     expect(storageMocks.getStorageProviderMock).toHaveBeenCalledTimes(1);
     expect(storageMocks.getObjectMock).toHaveBeenCalledWith(
       "user/out.png",
-      "generations"
+      "generations",
+      { maxBytes: 25 * 1024 * 1024 }
     );
   });
 
@@ -301,7 +302,8 @@ describe("external image base64 loading", () => {
 
     expect(storageMocks.getObjectMock).toHaveBeenCalledWith(
       "user/absolute.jpg",
-      "generations"
+      "generations",
+      { maxBytes: 25 * 1024 * 1024 }
     );
   });
 

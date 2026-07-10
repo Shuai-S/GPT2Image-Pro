@@ -1,11 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 
+const fetchPublicImageMock = vi.hoisted(() => vi.fn());
+
+vi.mock("../external-api/safe-image-fetch", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../external-api/safe-image-fetch")>();
+  return { ...actual, fetchPublicImage: fetchPublicImageMock };
+});
+
+import type { ChatHistoryMessage } from "./types";
 import {
   buildWebHistoryTranscript,
   downloadWebHistoryImageReference,
   getRecentWebHistoryImageReferences,
 } from "./web-history-references";
-import type { ChatHistoryMessage } from "./types";
 
 // 守护审计 S-H2：客户端提交的历史 storage 引用越权/IDOR 防护。
 describe("downloadWebHistoryImageReference storage 引用校验", () => {
@@ -45,9 +53,55 @@ describe("downloadWebHistoryImageReference storage 引用校验", () => {
       baseRef("/api/storage/generations/user-123/abc123.png"),
       { readStorageImage }
     );
-    expect(readStorageImage).toHaveBeenCalledTimes(1);
+    expect(readStorageImage).toHaveBeenCalledWith(
+      {
+        bucket: "generations",
+        key: "user-123/abc123.png",
+        extension: ".png",
+      },
+      25 * 1024 * 1024
+    );
     expect(file.type).toBe("image/png");
     expect(file.data.toString()).toBe("img-bytes");
+  });
+
+  it("拒绝注入读取器返回的超限对象", async () => {
+    const readStorageImage = vi.fn(async () =>
+      Buffer.alloc(25 * 1024 * 1024 + 1)
+    );
+    await expect(
+      downloadWebHistoryImageReference(
+        baseRef("/api/storage/generations/user-123/large.png"),
+        { readStorageImage }
+      )
+    ).rejects.toThrow("exceeds size limit");
+  });
+
+  it("公网响应按流式上限读取并在 25 MiB 后中止", async () => {
+    const oneMiB = new Uint8Array(1024 * 1024);
+    let emitted = 0;
+    fetchPublicImageMock.mockResolvedValueOnce(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (emitted >= 26) {
+              controller.close();
+              return;
+            }
+            emitted += 1;
+            controller.enqueue(oneMiB);
+          },
+        }),
+        { status: 200, headers: { "content-type": "image/png" } }
+      )
+    );
+
+    await expect(
+      downloadWebHistoryImageReference(
+        baseRef("https://images.example/large.png")
+      )
+    ).rejects.toThrow("exceeds size limit");
+    expect(emitted).toBeLessThanOrEqual(26);
   });
 });
 
@@ -104,9 +158,23 @@ describe("buildWebHistoryTranscript（换号兜底:历史文字转录 + 字数�
   it("转录用户/助手轮次并标注图片", () => {
     const t = buildWebHistoryTranscript(
       [
-        { role: "user", text: "这是什么", imageUrls: ["/api/storage/generations/u/a.png"] },
-        { role: "assistant", text: "", variants: [{ text: "这是一个苹果" }], activeVariant: 0 },
-        { role: "assistant", text: "", variants: [{ imageUrl: "https://x/gen.png" }], activeVariant: 0 },
+        {
+          role: "user",
+          text: "这是什么",
+          imageUrls: ["/api/storage/generations/u/a.png"],
+        },
+        {
+          role: "assistant",
+          text: "",
+          variants: [{ text: "这是一个苹果" }],
+          activeVariant: 0,
+        },
+        {
+          role: "assistant",
+          text: "",
+          variants: [{ imageUrl: "https://x/gen.png" }],
+          activeVariant: 0,
+        },
       ],
       6000
     );

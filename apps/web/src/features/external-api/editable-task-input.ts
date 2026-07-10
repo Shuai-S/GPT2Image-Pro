@@ -147,7 +147,9 @@ export async function loadEditableTaskImages(input: {
     ) {
       throw new Error("Invalid editable task input reference");
     }
-    const data = await storage.getObject(reference.key, reference.bucket);
+    const data = await storage.getObject(reference.key, reference.bucket, {
+      maxBytes: Math.min(MAX_EDITABLE_INPUT_IMAGE_BYTES, reference.size + 1),
+    });
     if (
       data.byteLength !== reference.size ||
       data.byteLength > MAX_EDITABLE_INPUT_IMAGE_BYTES
@@ -168,19 +170,18 @@ export async function loadEditableTaskImages(input: {
 }
 
 /** 尽力删除任务输入对象；单个删除失败不阻断其他对象清理。 */
-export async function cleanupEditableTaskInputs(
-  input: {
-    userId: string;
-    taskId: string;
-    references: readonly EditableTaskInputReference[];
-  }
-): Promise<void> {
+export async function cleanupEditableTaskInputs(input: {
+  userId: string;
+  taskId: string;
+  references: readonly EditableTaskInputReference[];
+}): Promise<void> {
   const storage = await getStorageProvider();
   const expectedPrefix = `${input.userId}/editable-task-inputs/${input.taskId}/`;
   await Promise.allSettled(
     input.references.map(async (rawReference) => {
       const parsed = editableTaskInputReferenceSchema.safeParse(rawReference);
-      if (!parsed.success || !parsed.data.key.startsWith(expectedPrefix)) return;
+      if (!parsed.success || !parsed.data.key.startsWith(expectedPrefix))
+        return;
       await storage.deleteObject(parsed.data.key, parsed.data.bucket);
     })
   );

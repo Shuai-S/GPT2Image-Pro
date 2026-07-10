@@ -1,4 +1,3 @@
-import { logWarn } from "@repo/shared/logger";
 import {
   DEFAULT_IMAGE_FETCH_TIMEOUT_MS,
   DEFAULT_IMAGE_RESPONSE_MAX_BYTES,
@@ -6,6 +5,7 @@ import {
   readResponseTextWithLimit,
   sanitizeForwardedClientHeaders,
 } from "@repo/shared/http/fetch";
+import { logWarn } from "@repo/shared/logger";
 import {
   buildPublicImageUrl,
   parseStorageImageUrl,
@@ -96,7 +96,8 @@ export async function getImageBase64(request: Request, imageUrl?: string) {
     const storage = await getStorageProvider();
     const data = await storage.getObject(
       storageReference.key,
-      storageReference.bucket
+      storageReference.bucket,
+      { maxBytes: DEFAULT_IMAGE_RESPONSE_MAX_BYTES }
     );
     return Buffer.from(data).toString("base64");
   }

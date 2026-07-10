@@ -1,5 +1,9 @@
 import path from "node:path";
-import { fetchPublicImage } from "../external-api/safe-image-fetch";
+import {
+  fetchPublicImage,
+  readResponseBytesWithLimit,
+  SafeImageFetchError,
+} from "../external-api/safe-image-fetch";
 import type { ChatHistoryMessage, ImageInputFile } from "./types";
 
 // 远程历史图片下载的正文大小上限（25MB），防止伪造 content-length 的 OOM DoS。
@@ -50,7 +54,10 @@ type StorageImageReference = {
 
 type DownloadWebHistoryImageReferenceOptions = {
   signal?: AbortSignal;
-  readStorageImage?: (reference: StorageImageReference) => Promise<Buffer>;
+  readStorageImage?: (
+    reference: StorageImageReference,
+    maxBytes: number
+  ) => Promise<Buffer>;
 };
 
 function isUsableHistoryImageUrl(url: string) {
@@ -69,7 +76,10 @@ function parseDataImageUrl(imageUrl: string) {
   const match = imageUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/);
   if (!match) return null;
   try {
-    return { type: match[1] || "image/png", data: Buffer.from(match[2] || "", "base64") };
+    return {
+      type: match[1] || "image/png",
+      data: Buffer.from(match[2] || "", "base64"),
+    };
   } catch {
     return null;
   }
@@ -231,7 +241,10 @@ export async function downloadWebHistoryImageReference(
   if (storageReference) {
     assertAllowedStorageReference(storageReference);
     const data = options?.readStorageImage
-      ? await options.readStorageImage(storageReference)
+      ? await options.readStorageImage(
+          storageReference,
+          MAX_HISTORY_IMAGE_BYTES
+        )
       : await (async () => {
           // 动态导入：getStorageProvider 会经 system-settings 间接拉入 @repo/database，
           // 改为按需导入可让本模块的纯校验逻辑保持 DB-free 可单测。
@@ -239,8 +252,15 @@ export async function downloadWebHistoryImageReference(
             "@repo/shared/storage/providers"
           );
           const storage = await getStorageProvider();
-          return storage.getObject(storageReference.key, storageReference.bucket);
+          return storage.getObject(
+            storageReference.key,
+            storageReference.bucket,
+            { maxBytes: MAX_HISTORY_IMAGE_BYTES }
+          );
         })();
+    if (data.byteLength > MAX_HISTORY_IMAGE_BYTES) {
+      throw new Error("ChatGPT Web history image exceeds size limit.");
+    }
     const type = mimeTypeFromExtension(storageReference.extension);
     const extension = type === "image/jpeg" ? "jpg" : type.slice(6);
     return {
@@ -271,13 +291,19 @@ export async function downloadWebHistoryImageReference(
   const extension =
     type === "image/jpeg" ? "jpg" : type === "image/webp" ? "webp" : "png";
 
-  const data = Buffer.from(await response.arrayBuffer());
-  if (data.byteLength > MAX_HISTORY_IMAGE_BYTES) {
-    throw new Error("ChatGPT Web history image exceeds size limit.");
-  }
+  const data = await readResponseBytesWithLimit(
+    response,
+    MAX_HISTORY_IMAGE_BYTES,
+    () => {
+      throw new SafeImageFetchError(
+        "ChatGPT Web history image exceeds size limit.",
+        413
+      );
+    }
+  );
 
   return {
-    data,
+    data: Buffer.from(data),
     name: reference.fileName.endsWith(`.${extension}`)
       ? reference.fileName
       : `${reference.fileName}.${extension}`,
