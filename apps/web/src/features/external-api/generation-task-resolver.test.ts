@@ -199,6 +199,10 @@ describe("generation task resolver", () => {
 
     expect(result).toMatchObject({ status: "completed" });
     expect(harness.loadInputs).toHaveBeenCalledOnce();
+    expect(harness.authorizeExecution).toHaveBeenCalledWith(
+      taskRow,
+      "externalApi.images.edit"
+    );
     expect(harness.runImage).toHaveBeenCalledWith(
       expect.objectContaining({
         generationId: "gen-1",
@@ -337,6 +341,10 @@ describe("generation task resolver", () => {
         executionToken: "lease-token-2",
         signal: controller.signal,
       })
+    );
+    expect(harness.authorizeExecution).toHaveBeenCalledWith(
+      { ...taskRow, taskType: "video" },
+      "externalApi.images.generate"
     );
     expect(result).toEqual({
       status: "completed",

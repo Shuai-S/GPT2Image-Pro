@@ -41,8 +41,10 @@ import {
   type LoadedGenerationTaskInput,
   loadGenerationTaskInputs,
 } from "./generation-task-input";
+import { getGenerationTaskAccessError } from "./generation-task-access";
 import {
   createGenerationTaskResolvers,
+  type GenerationTaskExecutionCapability,
   type GenerationTaskResolverDependencies,
 } from "./generation-task-resolver";
 import {
@@ -128,7 +130,10 @@ async function recoverVideo(input: {
  * @throws 数据库/设置读取异常向上抛，core 会保留 task 并消耗一次暂态重试预算。
  * @sideEffects 查询 API Key、用户、订阅与能力矩阵；不修改 lastUsedAt。
  */
-async function authorizeExecution(row: GenerationTaskWorkerRow) {
+async function authorizeExecution(
+  row: GenerationTaskWorkerRow,
+  capability: GenerationTaskExecutionCapability
+) {
   if (!row.apiKeyId) {
     return {
       ok: false as const,
@@ -153,23 +158,31 @@ async function authorizeExecution(row: GenerationTaskWorkerRow) {
       )
     )
     .limit(1);
-  if (!key?.isActive || key.userBanned) {
+  if (!key) {
     return {
       ok: false as const,
       message: "Generation task API key is no longer active",
     };
   }
-  if (key.relayOnly) {
-    return {
-      ok: false as const,
-      message: "Relay-only API keys cannot execute persisted generation tasks",
-    };
-  }
   const plan = await getUserPlan(row.userId);
-  if (!(await canUsePlanCapability(plan.plan, "externalApi.images.generate"))) {
+  const [canUseRelay, canExecute] = await Promise.all([
+    key.relayOnly
+      ? canUsePlanCapability(plan.plan, "externalApi.relay")
+      : Promise.resolve(false),
+    canUsePlanCapability(plan.plan, capability),
+  ]);
+  const accessError = getGenerationTaskAccessError({
+    isActive: key.isActive,
+    userBanned: key.userBanned,
+    rawRelayOnly: key.relayOnly,
+    canUseRelay,
+    canExecute,
+    capability,
+  });
+  if (accessError) {
     return {
       ok: false as const,
-      message: "External generation is no longer enabled for this plan",
+      message: accessError,
     };
   }
   const moderationBlockRiskLevel: ModerationBlockRiskLevel =

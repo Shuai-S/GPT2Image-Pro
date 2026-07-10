@@ -36,6 +36,10 @@ export type GenerationTaskAuthorization =
   | { ok: true; context: GenerationTaskExecutionContext }
   | { ok: false; message: string };
 
+export type GenerationTaskExecutionCapability =
+  | "externalApi.images.generate"
+  | "externalApi.images.edit";
+
 export type GenerationTaskResolverDependencies = {
   readImageRows: (generationIds: readonly string[]) => Promise<Generation[]>;
   expireStaleImages: (userId: string) => Promise<void>;
@@ -49,7 +53,8 @@ export type GenerationTaskResolverDependencies = {
     executionToken: string;
   }) => Promise<void>;
   authorizeExecution: (
-    row: GenerationTaskWorkerRow
+    row: GenerationTaskWorkerRow,
+    capability: GenerationTaskExecutionCapability
   ) => Promise<GenerationTaskAuthorization>;
   loadInputs: (input: {
     userId: string;
@@ -141,6 +146,21 @@ function executionRequeue(delayMs = 2_000): GenerationTaskResolution {
 }
 
 /**
+ * 返回持久任务在执行时必须重新具备的套餐能力。
+ *
+ * @param request 已由严格 schema 收窄的普通 generation 请求。
+ * @returns 编辑任务使用 edit 能力；文生图和视频使用 generate 能力。
+ * @sideEffects 无。
+ */
+function requiredExecutionCapability(
+  request: GenerationTaskRequestPayload
+): GenerationTaskExecutionCapability {
+  return request.kind === "image_edit"
+    ? "externalApi.images.edit"
+    : "externalApi.images.generate";
+}
+
+/**
  * 对账并按需执行一个图像任务。
  *
  * @param input task、严格请求或 legacy IDs、租约与执行模式。
@@ -197,7 +217,10 @@ async function resolveImageTask(
         );
   }
 
-  const authorization = await dependencies.authorizeExecution(input.row);
+  const authorization = await dependencies.authorizeExecution(
+    input.row,
+    requiredExecutionCapability(input.request)
+  );
   if (!authorization.ok) {
     return failedResolution(
       "image",
@@ -341,7 +364,10 @@ async function resolveVideoTask(
           dependencies
         );
   }
-  const authorization = await dependencies.authorizeExecution(input.row);
+  const authorization = await dependencies.authorizeExecution(
+    input.row,
+    requiredExecutionCapability(input.request)
+  );
   if (!authorization.ok) {
     return failedResolution(
       "video",
