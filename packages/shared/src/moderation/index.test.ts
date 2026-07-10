@@ -29,6 +29,23 @@ const loggerMock = vi.hoisted(() => ({
   logWarn: vi.fn(),
 }));
 
+// 编排测试不调用阿里云 SDK；隔离其 CommonJS 传递依赖，避免测试环境是否安装
+// 可选 debug 包影响审核 fail-closed 回归。
+vi.mock("@alicloud/green20220302", () => {
+  class GreenClient {}
+  return {
+    default: GreenClient,
+    ImageModerationRequest: class ImageModerationRequest {},
+    MultiModalAgentRequest: class MultiModalAgentRequest {},
+    TextModerationPlusRequest: class TextModerationPlusRequest {},
+  };
+});
+vi.mock("@alicloud/openapi-client", () => ({
+  Config: class Config {},
+}));
+vi.mock("@alicloud/tea-util", () => ({
+  RuntimeOptions: class RuntimeOptions {},
+}));
 vi.mock("../system-settings", () => runtimeSettingsMock);
 vi.mock("../logger", () => loggerMock);
 
@@ -134,14 +151,16 @@ describe("moderateContent orchestration", () => {
       "CONTENT_MODERATION_PROXY_URL",
       PROXY_URL
     );
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        decision: "block",
-        provider: "openai",
-        reason: "blocked",
-      }),
-    }));
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            decision: "block",
+            provider: "openai",
+            reason: "blocked",
+          })
+        )
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(moderateContent({ prompt: "bad" })).resolves.toMatchObject({
@@ -193,11 +212,9 @@ describe("moderateContent orchestration", () => {
       "CONTENT_MODERATION_PROXY_URL",
       PROXY_URL
     );
-    const fetchMock = vi.fn(async () => ({
-      ok: false,
-      status: 502,
-      json: async () => ({}),
-    }));
+    const fetchMock = vi.fn(
+      async () => new Response("upstream failed", { status: 502 })
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await moderateContent({ prompt: "hi" });
@@ -211,16 +228,39 @@ describe("moderateContent orchestration", () => {
       "CONTENT_MODERATION_PROXY_URL",
       PROXY_URL
     );
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ decision: "maybe" }),
-    }));
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ decision: "maybe" }))
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await moderateContent({ prompt: "hi" });
 
     expect(result.decision).toBe("error");
     expect(result.reason).toContain("invalid decision");
+  });
+
+  it("fails closed when the proxy JSON exceeds the shared limit", async () => {
+    runtimeSettingsMock.stringValues.set(
+      "CONTENT_MODERATION_PROXY_URL",
+      PROXY_URL
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              decision: "allow",
+              details: "x".repeat(1024 * 1024),
+            })
+          )
+      )
+    );
+
+    const result = await moderateContent({ prompt: "hi" });
+
+    expect(result.decision).toBe("error");
+    expect(result.reason).toContain("Response body exceeded");
   });
 
   it("sends the configured proxy secret on both auth headers", async () => {
@@ -233,10 +273,8 @@ describe("moderateContent orchestration", () => {
       "top-secret"
     );
     const fetchMock = vi.fn(
-      async (_url: string, _init: { headers: Record<string, string> }) => ({
-        ok: true,
-        json: async () => ({ decision: "allow" }),
-      })
+      async (_url: string, _init: { headers: Record<string, string> }) =>
+        new Response(JSON.stringify({ decision: "allow" }))
     );
     vi.stubGlobal("fetch", fetchMock);
 

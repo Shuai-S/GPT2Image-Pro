@@ -12,6 +12,15 @@
  * - FetchFireflyTransport：原生 fetch（无 TLS 伪装，用于产物下载/本地联调/未配代理回落）。
  */
 
+import {
+  DEFAULT_JSON_RESPONSE_MAX_BYTES,
+  fetchWithDeadline,
+  readResponseBytesWithLimit,
+  readResponseJsonWithLimit,
+  readResponseTextWithLimit,
+} from "../../http/fetch";
+import { z } from "zod";
+
 export type FireflyTransportRequest = {
   method: string;
   url: string;
@@ -19,6 +28,8 @@ export type FireflyTransportRequest = {
   body?: Buffer | Uint8Array | string | undefined;
   signal?: AbortSignal | undefined;
   timeoutMs?: number | undefined;
+  /** 响应正文上限；API JSON 默认 1 MiB，媒体下载必须由调用方显式放宽。 */
+  maxResponseBytes?: number | undefined;
 };
 
 export type FireflyTransportResponse = {
@@ -31,6 +42,21 @@ export type FireflyTransportResponse = {
 
 export interface FireflyTransport {
   request(req: FireflyTransportRequest): Promise<FireflyTransportResponse>;
+}
+
+/**
+ * 解析单次 Firefly 响应正文上限。
+ *
+ * @param req - 传输请求；媒体下载由调用方显式传入图片或视频上限。
+ * @returns 正安全整数，API JSON 默认 1 MiB。
+ * @throws 非法配置时拒绝请求，避免错误配置关闭保护。
+ */
+function getMaxResponseBytes(req: FireflyTransportRequest): number {
+  const maxBytes = req.maxResponseBytes ?? DEFAULT_JSON_RESPONSE_MAX_BYTES;
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+    throw new RangeError("maxResponseBytes must be a positive safe integer");
+  }
+  return maxBytes;
 }
 
 function buildResponse(
@@ -66,44 +92,38 @@ export class FetchFireflyTransport implements FireflyTransport {
   async request(
     req: FireflyTransportRequest
   ): Promise<FireflyTransportResponse> {
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    if (req.timeoutMs && req.timeoutMs > 0) {
-      timer = setTimeout(() => controller.abort(), req.timeoutMs);
-    }
-    const onAbort = () => controller.abort();
-    if (req.signal) {
-      if (req.signal.aborted) controller.abort();
-      else req.signal.addEventListener("abort", onAbort, { once: true });
-    }
-    try {
-      const init: RequestInit = {
-        method: req.method,
-        headers: req.headers,
-        redirect: "manual",
-        signal: controller.signal,
-      };
-      if (req.body !== undefined) init.body = req.body as BodyInit;
-      const resp = await fetch(req.url, init);
-      const headers: Record<string, string> = {};
-      resp.headers.forEach((value, key) => {
-        headers[key.toLowerCase()] = value;
-      });
-      return buildResponse(resp.status, headers, async () =>
-        Buffer.from(await resp.arrayBuffer())
-      );
-    } finally {
-      if (timer) clearTimeout(timer);
-      if (req.signal) req.signal.removeEventListener("abort", onAbort);
-    }
+    const maxResponseBytes = getMaxResponseBytes(req);
+    const init: RequestInit = {
+      method: req.method,
+      headers: req.headers,
+      redirect: "manual",
+      ...(req.signal ? { signal: req.signal } : {}),
+    };
+    if (req.body !== undefined) init.body = req.body as BodyInit;
+    const resp = await fetchWithDeadline(
+      req.url,
+      init,
+      req.timeoutMs ? { timeoutMs: req.timeoutMs } : {}
+    );
+    const headers: Record<string, string> = {};
+    resp.headers.forEach((value, key) => {
+      headers[key.toLowerCase()] = value;
+    });
+    const body = Buffer.from(
+      await readResponseBytesWithLimit(
+        resp,
+        maxResponseBytes
+      )
+    );
+    return buildResponse(resp.status, headers, async () => body);
   }
 }
 
-type ProxyResponsePayload = {
-  status: number;
-  headers?: Record<string, string[]>;
-  bodyBase64?: string;
-};
+const proxyResponsePayloadSchema = z.object({
+  status: z.number().int().min(100).max(599),
+  headers: z.record(z.string(), z.array(z.string())).optional(),
+  bodyBase64: z.string().optional(),
+});
 
 /** Go 旁路代理传输（TLS 伪装），协议与 chatgpt-web-proxy 一致。 */
 export class ProxyFireflyTransport implements FireflyTransport {
@@ -118,21 +138,13 @@ export class ProxyFireflyTransport implements FireflyTransport {
   async request(
     req: FireflyTransportRequest
   ): Promise<FireflyTransportResponse> {
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    if (req.timeoutMs && req.timeoutMs > 0) {
-      timer = setTimeout(() => controller.abort(), req.timeoutMs);
-    }
-    const onAbort = () => controller.abort();
-    if (req.signal) {
-      if (req.signal.aborted) controller.abort();
-      else req.signal.addEventListener("abort", onAbort, { once: true });
-    }
+    const maxResponseBytes = getMaxResponseBytes(req);
     const proxyUrl = this.opts.proxyUrl.replace(/\/+$/, "");
-    try {
-      const resp = await fetch(`${proxyUrl}/request`, {
+    const resp = await fetchWithDeadline(
+      `${proxyUrl}/request`,
+      {
         method: "POST",
-        signal: controller.signal,
+        ...(req.signal ? { signal: req.signal } : {}),
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
@@ -146,29 +158,34 @@ export class ProxyFireflyTransport implements FireflyTransport {
           headerOrder: Object.keys(req.headers),
           bodyBase64: encodeBodyBase64(req.body),
         }),
-      });
-      if (!resp.ok) {
-        const text = await resp.text().catch(() => "");
-        throw new Error(
-          `Firefly proxy failed: HTTP ${resp.status}${text ? ` ${text.slice(0, 300)}` : ""}`
-        );
-      }
-      const payload = (await resp.json()) as ProxyResponsePayload;
-      const headers: Record<string, string> = {};
-      for (const [key, values] of Object.entries(payload.headers || {})) {
-        if (key.toLowerCase() === "content-encoding") continue;
-        headers[key.toLowerCase()] = Array.isArray(values)
-          ? (values[0] ?? "")
-          : String(values ?? "");
-      }
-      return buildResponse(payload.status, headers, async () =>
-        payload.bodyBase64
-          ? Buffer.from(payload.bodyBase64, "base64")
-          : Buffer.alloc(0)
+      },
+      req.timeoutMs ? { timeoutMs: req.timeoutMs } : {}
+    );
+    if (!resp.ok) {
+      const text = await readResponseTextWithLimit(resp);
+      throw new Error(
+        `Firefly proxy failed: HTTP ${resp.status}${text ? ` ${text.slice(0, 300)}` : ""}`
       );
-    } finally {
-      if (timer) clearTimeout(timer);
-      if (req.signal) req.signal.removeEventListener("abort", onAbort);
     }
+    const payload = proxyResponsePayloadSchema.parse(
+      await readResponseJsonWithLimit(
+        resp,
+        Math.ceil(maxResponseBytes / 3) * 4 + 64 * 1024
+      )
+    );
+    const headers: Record<string, string> = {};
+    for (const [key, values] of Object.entries(payload.headers || {})) {
+      if (key.toLowerCase() === "content-encoding") continue;
+      headers[key.toLowerCase()] = values[0] ?? "";
+    }
+    const body = payload.bodyBase64
+      ? Buffer.from(payload.bodyBase64, "base64")
+      : Buffer.alloc(0);
+    if (body.byteLength > maxResponseBytes) {
+      throw new Error(
+        `Firefly proxy body exceeded ${maxResponseBytes} bytes`
+      );
+    }
+    return buildResponse(payload.status, headers, async () => body);
   }
 }

@@ -21,6 +21,11 @@ import {
   type SubscriptionPlan,
 } from "@repo/shared/config/subscription-plan";
 import { validateNestedGroupConfig } from "@repo/shared/image-backend/nested-groups";
+import {
+  fetchWithDeadline,
+  readResponseJsonWithLimit,
+  readResponseTextWithLimit,
+} from "@repo/shared/http/fetch";
 import { logWarn } from "@repo/shared/logger";
 import { canUsePlanCapability } from "@repo/shared/subscription/services/plan-capabilities";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
@@ -46,6 +51,7 @@ import {
 } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { Pool } from "pg";
+import { z } from "zod";
 
 import {
   type ChatGptWebAccountInfo,
@@ -6953,30 +6959,30 @@ export async function listSub2ApiSourceGroups() {
   }
 }
 
-type OpenAITokenRefreshResponse = {
-  access_token?: string;
-  refresh_token?: string;
-  token_type?: string;
-  expires_in?: number;
-  scope?: string;
-};
+const openAiTokenRefreshResponseSchema = z
+  .object({
+    access_token: z.string().optional(),
+    refresh_token: z.string().optional(),
+    token_type: z.string().optional(),
+    expires_in: z.number().optional(),
+    scope: z.string().optional(),
+  })
+  .passthrough();
 
 async function refreshOpenAIAccessToken(
   refreshToken: string,
   clientId: string
 ): Promise<{ accessToken: string; refreshToken: string | null } | null> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
-  try {
-    const form = new URLSearchParams();
-    form.set("grant_type", "refresh_token");
-    form.set("refresh_token", refreshToken);
-    form.set("client_id", clientId);
-    form.set("scope", OPENAI_REFRESH_SCOPES);
+  const form = new URLSearchParams();
+  form.set("grant_type", "refresh_token");
+  form.set("refresh_token", refreshToken);
+  form.set("client_id", clientId);
+  form.set("scope", OPENAI_REFRESH_SCOPES);
 
-    const response = await fetch(OPENAI_OAUTH_TOKEN_URL, {
+  const response = await fetchWithDeadline(
+    OPENAI_OAUTH_TOKEN_URL,
+    {
       method: "POST",
-      signal: controller.signal,
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         "User-Agent":
@@ -6986,24 +6992,25 @@ async function refreshOpenAIAccessToken(
             : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
       },
       body: form.toString(),
-    });
+    },
+    { timeoutMs: 30_000 }
+  );
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new Error(
-        `OpenAI token refresh failed: HTTP ${response.status}${text ? ` ${text.slice(0, 300)}` : ""}`
-      );
-    }
-    const payload = (await response.json()) as OpenAITokenRefreshResponse;
-    const accessToken = payload.access_token?.trim();
-    if (!accessToken) return null;
-    return {
-      accessToken,
-      refreshToken: payload.refresh_token?.trim() || null,
-    };
-  } finally {
-    clearTimeout(timeout);
+  if (!response.ok) {
+    const text = await readResponseTextWithLimit(response).catch(() => "");
+    throw new Error(
+      `OpenAI token refresh failed: HTTP ${response.status}${text ? ` ${text.slice(0, 300)}` : ""}`
+    );
   }
+  const payload = openAiTokenRefreshResponseSchema.parse(
+    await readResponseJsonWithLimit(response)
+  );
+  const accessToken = payload.access_token?.trim();
+  if (!accessToken) return null;
+  return {
+    accessToken,
+    refreshToken: payload.refresh_token?.trim() || null,
+  };
 }
 
 async function resolveSub2ApiAccessTokenForMode(

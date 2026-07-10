@@ -12,6 +12,10 @@
  */
 
 import {
+  DEFAULT_IMAGE_RESPONSE_MAX_BYTES,
+  DEFAULT_VIDEO_RESPONSE_MAX_BYTES,
+} from "../../http/fetch";
+import {
   AdobeRequestError,
   AuthError,
   isRetryableStatus,
@@ -320,7 +324,11 @@ export class AdobeFireflyClient {
         if (!imageUrl || typeof imageUrl !== "string") {
           throw new AdobeRequestError("job finished without image url");
         }
-        const bytes = await this.download(imageUrl, input.signal);
+        const bytes = await this.download(
+          imageUrl,
+          DEFAULT_IMAGE_RESPONSE_MAX_BYTES,
+          input.signal
+        );
         return { bytes, raw: latest };
       }
 
@@ -451,7 +459,11 @@ export class AdobeFireflyClient {
         if (!videoUrl || typeof videoUrl !== "string") {
           throw new AdobeRequestError("video job finished without video url");
         }
-        const bytes = await this.download(videoUrl, input.signal);
+        const bytes = await this.download(
+          videoUrl,
+          DEFAULT_VIDEO_RESPONSE_MAX_BYTES,
+          input.signal
+        );
         return { bytes, raw: latest };
       }
 
@@ -472,13 +484,18 @@ export class AdobeFireflyClient {
     }
   }
 
-  private async download(url: string, signal?: AbortSignal): Promise<Buffer> {
+  private async download(
+    url: string,
+    maxResponseBytes: number,
+    signal?: AbortSignal
+  ): Promise<Buffer> {
     const resp = await this.downloadTransport.request({
       method: "GET",
       url,
       headers: { accept: "*/*" },
       signal,
       timeoutMs: 60_000,
+      maxResponseBytes,
     });
     if (resp.status !== 200) {
       throw new AdobeRequestError(

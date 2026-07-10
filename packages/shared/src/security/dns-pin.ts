@@ -25,6 +25,7 @@ import { resolve4, resolve6 } from "node:dns/promises";
 import type { IncomingMessage, RequestOptions } from "node:http";
 import http from "node:http";
 import https from "node:https";
+import { Readable } from "node:stream";
 import { isBlockedIP } from "./ip-validation";
 
 /**
@@ -113,7 +114,7 @@ async function resolveAndValidate(hostname: string): Promise<string> {
  *
  * @param url 完整 URL（http:// 或 https://）
  * @param init 可选的请求配置
- * @returns 标准 Response 对象（Node.js 风格包装为 Web Response）
+ * @returns 标准流式 Response；调用方必须有界读取正文。
  * @throws SsrfBlockedError 若目标解析到内网地址
  * @throws Error 若请求超时或网络错误
  */
@@ -178,47 +179,37 @@ export async function fetchWithDnsPin(
   return new Promise<Response>((resolve, reject) => {
     // 处理外部 AbortSignal
     if (init?.signal?.aborted) {
-      reject(new Error("Request aborted"));
+      reject(init.signal.reason ?? new Error("Request aborted"));
       return;
     }
 
     const req = transport.request(
       requestOptions,
       (res: IncomingMessage) => {
-        const chunks: Buffer[] = [];
+        const responseHeaders = new Headers();
 
-        res.on("data", (chunk: Buffer) => {
-          chunks.push(chunk);
-        });
-
-        res.on("end", () => {
-          const body = Buffer.concat(chunks);
-          const responseHeaders = new Headers();
-
-          // 转换 Node.js 响应头到 Web Headers
-          for (const [key, value] of Object.entries(res.headers)) {
-            if (value === undefined) continue;
-            if (Array.isArray(value)) {
-              for (const v of value) {
-                responseHeaders.append(key, v);
-              }
-            } else {
-              responseHeaders.set(key, value);
+        // 转换 Node.js 响应头到 Web Headers
+        for (const [key, value] of Object.entries(res.headers)) {
+          if (value === undefined) continue;
+          if (Array.isArray(value)) {
+            for (const item of value) {
+              responseHeaders.append(key, item);
             }
+          } else {
+            responseHeaders.set(key, value);
           }
+        }
 
-          resolve(
-            new Response(body, {
-              status: res.statusCode ?? 200,
-              statusText: res.statusMessage ?? "",
-              headers: responseHeaders,
-            })
-          );
-        });
-
-        res.on("error", (err: Error) => {
-          reject(err);
-        });
+        // 不能先 Buffer.concat 整段正文：那会让上层大小限制在内存放大后才生效。
+        // 直接桥接 IncomingMessage，超限读取器 cancel 时也会销毁底层 Node 流。
+        const body = Readable.toWeb(res) as ReadableStream<Uint8Array>;
+        resolve(
+          new Response(body, {
+            status: res.statusCode ?? 200,
+            statusText: res.statusMessage ?? "",
+            headers: responseHeaders,
+          })
+        );
       }
     );
 
@@ -234,8 +225,9 @@ export async function fetchWithDnsPin(
     // 外部取消
     if (init?.signal) {
       const onAbort = () => {
-        req.destroy();
-        reject(new Error("Request aborted"));
+        const reason = init.signal?.reason ?? new Error("Request aborted");
+        req.destroy(reason instanceof Error ? reason : undefined);
+        reject(reason);
       };
       init.signal.addEventListener("abort", onAbort, { once: true });
       req.on("close", () => {

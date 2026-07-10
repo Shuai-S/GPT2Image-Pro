@@ -5,6 +5,11 @@ import {
   fetchWithDnsPin,
   SsrfBlockedError,
 } from "@repo/shared/security/dns-pin";
+import {
+  DEFAULT_IMAGE_FETCH_TIMEOUT_MS,
+  readResponseBytesWithLimit as readSharedResponseBytesWithLimit,
+  ResponseBodyTooLargeError,
+} from "@repo/shared/http/fetch";
 
 /**
  * 共享的图片 URL SSRF 防护。
@@ -188,10 +193,12 @@ export async function fetchPublicCallback(
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get("location");
       if (!location) {
+        await response.body?.cancel();
         throw new SafeImageFetchError(
           "callback_url redirect missing location."
         );
       }
+      await response.body?.cancel();
       // 解析为绝对地址后，下一轮循环会对其再次执行 SSRF + https 校验。
       currentUrl = new URL(location, parsed).toString();
       continue;
@@ -215,41 +222,15 @@ export async function readResponseBytesWithLimit(
   maxBytes: number,
   onExceeded: () => never
 ): Promise<Buffer<ArrayBuffer>> {
-  const reader = response.body?.getReader();
-  if (!reader) {
-    const arrayBuffer = await response.arrayBuffer();
-    if (arrayBuffer.byteLength > maxBytes) {
+  try {
+    const bytes = await readSharedResponseBytesWithLimit(response, maxBytes);
+    return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  } catch (error) {
+    if (error instanceof ResponseBodyTooLargeError) {
       onExceeded();
     }
-    return Buffer.from(arrayBuffer);
+    throw error;
   }
-
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-      total += value.byteLength;
-      if (total > maxBytes) {
-        await reader.cancel();
-        onExceeded();
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  // 复制到独立的 ArrayBuffer，保证返回值可直接用于 new File([...])
-  const merged = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return Buffer.from(merged.buffer);
 }
 
 /**
@@ -270,6 +251,12 @@ export async function fetchPublicImage(
   init: { headers?: Record<string, string>; signal?: AbortSignal } = {}
 ): Promise<Response> {
   let currentUrl = rawUrl;
+  // 同一个 signal 贯穿全部重试、重定向和返回后的正文读取，确保这里限制的是
+  // 整次外链拉取而非仅等待响应头的时间。调用方更早中止时仍优先生效。
+  const deadlineSignal = AbortSignal.timeout(DEFAULT_IMAGE_FETCH_TIMEOUT_MS);
+  const signal = init.signal
+    ? AbortSignal.any([init.signal, deadlineSignal])
+    : deadlineSignal;
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     let parsed: URL;
@@ -290,7 +277,8 @@ export async function fetchPublicImage(
         response = await fetchWithDnsPin(parsed.href, {
           method: "GET",
           headers: init.headers,
-          signal: init.signal,
+          signal,
+          timeoutMs: DEFAULT_IMAGE_FETCH_TIMEOUT_MS,
         });
       } catch (err) {
         if (err instanceof SsrfBlockedError) {
@@ -303,6 +291,7 @@ export async function fetchPublicImage(
         attempt < MAX_TRANSIENT_RETRIES &&
         isTransientFetchStatus(response.status)
       ) {
+        await response.body?.cancel();
         await sleep(RETRY_BASE_DELAY_MS * 2 ** attempt);
         continue;
       }
@@ -317,8 +306,10 @@ export async function fetchPublicImage(
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get("location");
       if (!location) {
+        await response.body?.cancel();
         throw new SafeImageFetchError("Image URL redirect missing location.");
       }
+      await response.body?.cancel();
       // 解析为绝对地址后，下一轮循环会对其再次执行 SSRF 校验。
       currentUrl = new URL(location, parsed).toString();
       continue;

@@ -1,11 +1,23 @@
 import { logWarn } from "@repo/shared/logger";
 import {
+  DEFAULT_IMAGE_FETCH_TIMEOUT_MS,
+  DEFAULT_IMAGE_RESPONSE_MAX_BYTES,
+  fetchWithDeadline,
+  readResponseTextWithLimit,
+  sanitizeForwardedClientHeaders,
+} from "@repo/shared/http/fetch";
+import {
   buildPublicImageUrl,
   parseStorageImageUrl,
 } from "@repo/shared/storage/signed-url";
 import type { ImageGenerationOperationResult } from "@/features/image-generation/operations";
 import { isContentSafetyRejection } from "@/features/image-generation/sla-classification";
 import type { GeneratedImageOutput } from "@/features/image-generation/types";
+import {
+  fetchPublicImage,
+  readResponseBytesWithLimit,
+  SafeImageFetchError,
+} from "./safe-image-fetch";
 
 type OpenAIImageData = {
   url?: string;
@@ -95,30 +107,41 @@ export async function getImageBase64(request: Request, imageUrl?: string) {
     ? imageUrl
     : new URL(imageUrl, getRequestBaseUrl(request)).toString();
 
-  // 仅在目标为第一方（相对路径或我方 origin）时转发客户端 Authorization。
-  // 纯中转模式下 imageUrl 可能是上游第三方 URL，绝不能把用户的 bearer token 外发。
-  let firstParty = !isAbsolute;
-  if (isAbsolute) {
-    try {
-      firstParty =
-        new URL(url).origin === new URL(getRequestBaseUrl(request)).origin;
-    } catch {
-      firstParty = false;
-    }
+  // 只选择确有业务需要的客户端凭据，再统一按 origin 剥离；不复制客户端的
+  // hop-by-hop 或伪造上游头。公网拉取继续使用 DNS pin 和逐跳 SSRF 复检。
+  const forwardedHeaders = sanitizeForwardedClientHeaders(
+    {
+      authorization: request.headers.get("authorization") ?? "",
+    },
+    getRequestBaseUrl(request),
+    url
+  );
+  for (const [name, value] of Array.from(forwardedHeaders.entries())) {
+    if (!value) forwardedHeaders.delete(name);
   }
-  const authorization = firstParty
-    ? request.headers.get("authorization")
-    : null;
-  // 仅在需要转发授权时附带 headers；否则用单参 fetch(url)，
-  // 避免向上游第三方传出任何（哪怕是 undefined 的）请求头。
-  const response = authorization
-    ? await fetch(url, { headers: { Authorization: authorization } })
-    : await fetch(url);
+  const requestHeaders = Object.fromEntries(forwardedHeaders.entries());
+  const firstParty =
+    new URL(url).origin === new URL(getRequestBaseUrl(request)).origin;
+  const response = firstParty
+    ? await fetchWithDeadline(
+        url,
+        { headers: requestHeaders },
+        { timeoutMs: DEFAULT_IMAGE_FETCH_TIMEOUT_MS }
+      )
+    : await fetchPublicImage(url, { headers: requestHeaders });
   if (!response.ok) {
+    await readResponseTextWithLimit(response).catch(() => undefined);
     throw new Error(`Failed to load generated image: ${response.status}`);
   }
 
-  return Buffer.from(await response.arrayBuffer()).toString("base64");
+  const bytes = await readResponseBytesWithLimit(
+    response,
+    DEFAULT_IMAGE_RESPONSE_MAX_BYTES,
+    () => {
+      throw new SafeImageFetchError("Generated image exceeds size limit.", 413);
+    }
+  );
+  return bytes.toString("base64");
 }
 
 export async function toOpenAIImageData(

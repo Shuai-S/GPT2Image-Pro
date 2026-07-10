@@ -89,6 +89,7 @@
     "./components/providers": "./src/components/providers.tsx",
     "./security/dns-pin": "./src/security/dns-pin.ts",
     "./security/ip-validation": "./src/security/ip-validation.ts",
+    "./http/fetch": "./src/http/fetch.ts",
     "./model-pricing": "./src/model-pricing/index.ts",
     "./uol": "./src/uol/index.ts",
     "./uol/operations": "./src/uol/operations/index.ts",

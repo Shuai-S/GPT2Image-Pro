@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // creem.ts 仅从 system-settings 引入 getRuntimeSettingString，
 // 而 system-settings 会拉起 @repo/database。被测纯逻辑不读取运行时设置，
@@ -14,11 +14,42 @@ import {
   buildReferralSubscriptionOrderId,
   buildSubscriptionPeriodKey,
   computeSubscriptionCreditsToGrant,
+  creem,
   getCreemPeriodDays,
   isYearlyCreemPeriod,
   parseCreemWebhookEvent,
   verifyCreemWebhookSignature,
 } from "./creem";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("creem API boundaries", () => {
+  it("fails closed when checkout JSON exceeds the shared limit", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              id: "checkout_1",
+              checkout_url: "https://checkout.example.com",
+              status: "pending",
+              padding: "x".repeat(1024 * 1024),
+            })
+          )
+      )
+    );
+
+    await expect(
+      creem.createCheckout({
+        product_id: "product_1",
+        success_url: "https://app.example.com/payment/success",
+      })
+    ).rejects.toThrow("Response body exceeded");
+  });
+});
 
 describe("buildSubscriptionPeriodKey", () => {
   it("拼接订阅 ID 与周期开始时间作为幂等键", () => {

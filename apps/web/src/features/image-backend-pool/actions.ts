@@ -4,6 +4,11 @@ import {
   isSubscriptionPlan,
   type SubscriptionPlan,
 } from "@repo/shared/config/subscription-plan";
+import {
+  fetchWithDeadline,
+  readResponseJsonWithLimit,
+  readResponseTextWithLimit,
+} from "@repo/shared/http/fetch";
 
 import {
   adminAction,
@@ -1008,16 +1013,19 @@ export const getMoemailDomainsAction = withImageBackendPoolAdminAction(
     }
     // Moemail 用 X-API-Key 头鉴权（非 Authorization: Bearer），/api/config 返回
     // emailDomains 为逗号分隔字符串（非 domains 数组）。
-    const resp = await fetch(`${baseUrl}/api/config`, {
-      headers: { "X-API-Key": apiKey },
-      signal: AbortSignal.timeout(10_000),
-    });
+    const resp = await fetchWithDeadline(
+      `${baseUrl}/api/config`,
+      { headers: { "X-API-Key": apiKey } },
+      { timeoutMs: 10_000 }
+    );
     if (!resp.ok) {
-      throw new Error(`Moemail 返回 ${resp.status}`);
+      const error = await readResponseTextWithLimit(resp);
+      throw new Error(`Moemail 返回 ${resp.status}: ${error}`);
     }
-    const data = (await resp.json()) as {
-      emailDomains?: string;
-    };
+    const data = z
+      .object({ emailDomains: z.string().optional() })
+      .passthrough()
+      .parse(await readResponseJsonWithLimit(resp));
     const domains = (data.emailDomains ?? "")
       .split(",")
       .map((d) => d.trim())

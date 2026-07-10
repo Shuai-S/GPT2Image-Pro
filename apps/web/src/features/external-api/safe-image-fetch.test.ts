@@ -11,6 +11,7 @@ vi.mock("@repo/shared/security/dns-pin", () => ({
 }));
 
 import { fetchWithDnsPin } from "@repo/shared/security/dns-pin";
+import { DEFAULT_IMAGE_FETCH_TIMEOUT_MS } from "@repo/shared/http/fetch";
 import {
   assertPublicCallbackUrl,
   assertPublicImageUrl,
@@ -97,6 +98,40 @@ describe("fetchPublicImage", () => {
 
     const response = await fetchPublicImage("https://1.1.1.1/image.png");
     expect(response.status).toBe(200);
+  });
+
+  it("uses one total deadline across the image request", async () => {
+    const deadlineController = new AbortController();
+    const timeoutSpy = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockReturnValue(deadlineController.signal);
+    try {
+      mockFetchWithDnsPin.mockImplementation(
+        async (_url, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            const signal = init?.signal;
+            if (signal?.aborted) {
+              reject(signal.reason);
+              return;
+            }
+            signal?.addEventListener(
+              "abort",
+              () => reject(signal.reason),
+              { once: true }
+            );
+          })
+      );
+
+      const request = fetchPublicImage("https://1.1.1.1/image.png");
+      const rejection = expect(request).rejects.toMatchObject({
+        name: "TimeoutError",
+      });
+      deadlineController.abort(new DOMException("deadline", "TimeoutError"));
+      await rejection;
+      expect(timeoutSpy).toHaveBeenCalledWith(DEFAULT_IMAGE_FETCH_TIMEOUT_MS);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
   });
 
   it("retries on 429 then succeeds", async () => {

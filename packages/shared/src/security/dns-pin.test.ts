@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import type { RequestOptions } from "node:http";
+import { PassThrough } from "node:stream";
 
 // mock node:dns/promises
 vi.mock("node:dns/promises", () => ({
@@ -59,7 +60,7 @@ function setupMockTransport(
       };
       req.write = vi.fn();
       req.end = vi.fn().mockImplementation(() => {
-        const res = new EventEmitter() as EventEmitter & {
+        const res = new PassThrough() as PassThrough & {
           statusCode: number;
           statusMessage: string;
           headers: Record<string, string>;
@@ -71,8 +72,7 @@ function setupMockTransport(
         callback(res);
 
         queueMicrotask(() => {
-          res.emit("data", Buffer.from(responseBody));
-          res.emit("end");
+          res.end(responseBody);
         });
       });
       req.destroy = vi.fn();
@@ -173,7 +173,7 @@ describe("fetchWithDnsPin", () => {
         };
         req.write = vi.fn();
         req.end = vi.fn().mockImplementation(() => {
-          const res = new EventEmitter() as EventEmitter & {
+          const res = new PassThrough() as PassThrough & {
             statusCode: number;
             statusMessage: string;
             headers: Record<string, string>;
@@ -183,8 +183,7 @@ describe("fetchWithDnsPin", () => {
           res.headers = {};
           callback(res);
           queueMicrotask(() => {
-            res.emit("data", Buffer.from("ok"));
-            res.emit("end");
+            res.end("ok");
           });
         });
         req.destroy = vi.fn();
@@ -222,7 +221,7 @@ describe("fetchWithDnsPin", () => {
         };
         req.write = vi.fn();
         req.end = vi.fn().mockImplementation(() => {
-          const res = new EventEmitter() as EventEmitter & {
+          const res = new PassThrough() as PassThrough & {
             statusCode: number;
             statusMessage: string;
             headers: Record<string, string>;
@@ -232,8 +231,7 @@ describe("fetchWithDnsPin", () => {
           res.headers = {};
           callback(res);
           queueMicrotask(() => {
-            res.emit("data", Buffer.from("ok"));
-            res.emit("end");
+            res.end("ok");
           });
         });
         req.destroy = vi.fn();

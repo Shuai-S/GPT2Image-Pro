@@ -23,9 +23,20 @@ const storageMocks = vi.hoisted(() => {
   return { getObjectMock, getStorageProviderMock };
 });
 
+const safeImageFetchMocks = vi.hoisted(() => ({
+  fetchPublicImageMock: vi.fn(),
+}));
+
 vi.mock("@repo/shared/storage/providers", () => ({
   getStorageProvider: storageMocks.getStorageProviderMock,
 }));
+vi.mock("./safe-image-fetch", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./safe-image-fetch")>();
+  return {
+    ...original,
+    fetchPublicImage: safeImageFetchMocks.fetchPublicImageMock,
+  };
+});
 
 async function readFirstChunk(response: Response) {
   const reader = response.body?.getReader();
@@ -38,6 +49,7 @@ async function readFirstChunk(response: Response) {
 beforeEach(() => {
   storageMocks.getObjectMock.mockReset();
   storageMocks.getStorageProviderMock.mockClear();
+  safeImageFetchMocks.fetchPublicImageMock.mockReset();
   vi.unstubAllGlobals();
   vi.stubEnv("BETTER_AUTH_SECRET", "test-storage-signing-secret");
 });
@@ -294,8 +306,9 @@ describe("external image base64 loading", () => {
   });
 
   it("does not forward external API authorization when fetching remote image URLs", async () => {
-    const fetchMock = vi.fn(async () => new Response("remote-image"));
-    vi.stubGlobal("fetch", fetchMock);
+    safeImageFetchMocks.fetchPublicImageMock.mockResolvedValue(
+      new Response("remote-image")
+    );
     const request = new Request("https://example.com/v1/images/generations", {
       headers: { Authorization: "Bearer external-key" },
     });
@@ -304,7 +317,33 @@ describe("external image base64 loading", () => {
       getImageBase64(request, "https://cdn.example.test/out.png")
     ).resolves.toBe(Buffer.from("remote-image").toString("base64"));
 
-    expect(fetchMock).toHaveBeenCalledWith("https://cdn.example.test/out.png");
+    expect(safeImageFetchMocks.fetchPublicImageMock).toHaveBeenCalledWith(
+      "https://cdn.example.test/out.png",
+      { headers: {} }
+    );
+  });
+
+  it("forwards selected client credentials only to the configured first-party origin", async () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://public.example.com");
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response("first-party-image")
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = new Request("http://internal:3000/v1/images/generations", {
+      headers: {
+        Authorization: "Bearer external-key",
+      },
+    });
+
+    await expect(
+      getImageBase64(request, "https://public.example.com/generated/out.png")
+    ).resolves.toBe(Buffer.from("first-party-image").toString("base64"));
+
+    const init = fetchMock.mock.calls[0]?.[1];
+    const headers = new Headers(init?.headers);
+    expect(headers.get("authorization")).toBe("Bearer external-key");
+    expect(headers.get("cookie")).toBeNull();
   });
 });
 

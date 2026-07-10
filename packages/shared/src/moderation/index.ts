@@ -6,12 +6,18 @@ import Green20220302Module, {
 import { Config as AliyunOpenApiConfig } from "@alicloud/openapi-client";
 import { RuntimeOptions as AliyunRuntimeOptions } from "@alicloud/tea-util";
 import OpenAI from "openai";
+import { z } from "zod";
 import type {
   ModerationBlockRiskLevel,
   SubscriptionPlan,
 } from "../config/subscription-plan";
 import { normalizePlanModerationBlockRiskLevel } from "../subscription/services/plan-capabilities";
 import { logError, logWarn } from "../logger";
+import {
+  fetchWithDeadline,
+  readResponseJsonWithLimit,
+  readResponseTextWithLimit,
+} from "../http/fetch";
 import {
   getRuntimeSettingBoolean,
   getRuntimeSettingNumber,
@@ -65,10 +71,19 @@ export interface ModerateContentInput {
 
 export interface ModerationResult {
   decision: ModerationDecision;
-  provider?: ModerationProvider;
-  reason?: string;
+  provider?: ModerationProvider | undefined;
+  reason?: string | undefined;
   details?: unknown;
 }
+
+const moderationProxyResultSchema = z
+  .object({
+    decision: z.enum(["allow", "block", "skipped", "error"]),
+    provider: z.enum(["aliyun", "openai"]).optional(),
+    reason: z.string().optional(),
+    details: z.unknown().optional(),
+  })
+  .passthrough();
 
 interface AliyunConfig {
   accessKeyId: string;
@@ -631,23 +646,18 @@ async function moderateWithProxy(
     return { decision: "skipped" };
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
-    await getProxyTimeoutMs()
-  );
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
+  const secret = await getProxySecret();
+  if (secret) {
+    headers.authorization = `Bearer ${secret}`;
+    headers["x-moderation-proxy-secret"] = secret;
+  }
 
-  try {
-    const headers: Record<string, string> = {
-      "content-type": "application/json",
-    };
-    const secret = await getProxySecret();
-    if (secret) {
-      headers.authorization = `Bearer ${secret}`;
-      headers["x-moderation-proxy-secret"] = secret;
-    }
-
-    const response = await fetch(proxyUrl, {
+  const response = await fetchWithDeadline(
+    proxyUrl,
+    {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -664,27 +674,22 @@ async function moderateWithProxy(
           data: image.url ? undefined : image.data.toString("base64"),
         })),
       }),
-      signal: controller.signal,
-    });
+    },
+    { timeoutMs: await getProxyTimeoutMs() }
+  );
 
-    if (!response.ok) {
-      throw new Error(`Moderation proxy failed: ${response.status}`);
-    }
-
-    const result = (await response.json()) as ModerationResult;
-    if (
-      result.decision === "allow" ||
-      result.decision === "block" ||
-      result.decision === "skipped" ||
-      result.decision === "error"
-    ) {
-      return result;
-    }
-
-    throw new Error("Moderation proxy returned an invalid decision");
-  } finally {
-    clearTimeout(timeout);
+  if (!response.ok) {
+    const error = await readResponseTextWithLimit(response);
+    throw new Error(`Moderation proxy failed: ${response.status} - ${error}`);
   }
+
+  const parsed = moderationProxyResultSchema.safeParse(
+    await readResponseJsonWithLimit(response)
+  );
+  if (!parsed.success) {
+    throw new Error("Moderation proxy returned an invalid decision");
+  }
+  return parsed.data;
 }
 
 export async function moderateContent(

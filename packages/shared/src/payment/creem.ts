@@ -7,6 +7,11 @@
 
 import crypto from "node:crypto";
 import { z } from "zod";
+import {
+  fetchWithDeadline,
+  readResponseJsonWithLimit,
+  readResponseTextWithLimit,
+} from "../http/fetch";
 import { getRuntimeSettingString } from "../system-settings";
 
 async function getRuntimeCreemApiKey() {
@@ -53,14 +58,20 @@ export interface CreemSubscription {
     | string
     | {
         id: string;
-        name?: string;
-        price?: number;
-        currency?: string;
-        billing_type?: string;
-        billing_period?: string;
+        name?: string | undefined;
+        price?: number | undefined;
+        currency?: string | undefined;
+        billing_type?: string | undefined;
+        billing_period?: string | undefined;
       };
   /** 客户（可能是 ID 字符串或完整对象） */
-  customer: string | { id: string; email?: string; name?: string };
+  customer:
+    | string
+    | {
+        id: string;
+        email?: string | undefined;
+        name?: string | undefined;
+      };
   /** 当前周期开始时间 (ISO 8601) */
   current_period_start_date: string;
   /** 当前周期结束时间 (ISO 8601) */
@@ -68,7 +79,7 @@ export interface CreemSubscription {
   /** 是否在周期结束时取消 */
   cancel_at_period_end: boolean;
   /** 元数据 */
-  metadata?: Record<string, string>;
+  metadata?: Record<string, string> | undefined;
 }
 
 export interface CreemCustomer {
@@ -77,10 +88,50 @@ export interface CreemCustomer {
   /** 邮箱 */
   email: string;
   /** 名称 */
-  name?: string;
+  name?: string | undefined;
   /** 元数据 */
-  metadata?: Record<string, string>;
+  metadata?: Record<string, string> | undefined;
 }
+
+const creemMetadataSchema = z.record(z.string(), z.string());
+const creemCustomerSchema = z.object({
+  id: z.string().min(1),
+  email: z.string().min(1),
+  name: z.string().optional(),
+  metadata: creemMetadataSchema.optional(),
+});
+const creemSubscriptionSchema = z.object({
+  id: z.string().min(1),
+  status: z.enum(["active", "canceled", "past_due", "trialing", "paused"]),
+  product: z.union([
+    z.string().min(1),
+    z.object({
+      id: z.string().min(1),
+      name: z.string().optional(),
+      price: z.number().optional(),
+      currency: z.string().optional(),
+      billing_type: z.string().optional(),
+      billing_period: z.string().optional(),
+    }),
+  ]),
+  customer: z.union([
+    z.string().min(1),
+    z.object({
+      id: z.string().min(1),
+      email: z.string().optional(),
+      name: z.string().optional(),
+    }),
+  ]),
+  current_period_start_date: z.string().min(1),
+  current_period_end_date: z.string().min(1),
+  cancel_at_period_end: z.boolean(),
+  metadata: creemMetadataSchema.optional(),
+});
+const creemCheckoutResponseSchema = z.object({
+  id: z.string().min(1),
+  checkout_url: z.url(),
+  status: z.string().min(1),
+});
 
 export interface CreemWebhookEvent {
   /** 事件 ID */
@@ -415,6 +466,34 @@ export function computeSubscriptionCreditsToGrant(
 // ============================================
 
 /**
+ * 请求 Creem 并有界读取未信任的 JSON 响应。
+ *
+ * @param path - Creem v1 API 相对路径。
+ * @param init - HTTP 方法、请求头和请求体。
+ * @returns 未信任 JSON，由各公开方法用对应 Zod schema 校验。
+ * @throws 网络、截止时间、正文超限、非 2xx 或非法 JSON 时抛错；支付路径 fail-closed。
+ * @sideEffects 发起带 Creem 服务端 API key 的第三方请求。
+ */
+async function requestCreemJson(
+  path: string,
+  init: RequestInit = {}
+): Promise<unknown> {
+  const headers = new Headers(init.headers);
+  headers.set("x-api-key", await getRuntimeCreemApiKey());
+  const response = await fetchWithDeadline(
+    `${await getRuntimeCreemApiBase()}${path}`,
+    { ...init, headers }
+  );
+
+  if (!response.ok) {
+    const error = await readResponseTextWithLimit(response);
+    throw new Error(`Creem API error: ${response.status} - ${error}`);
+  }
+
+  return readResponseJsonWithLimit(response);
+}
+
+/**
  * Creem API 客户端
  */
 export const creem = {
@@ -427,21 +506,14 @@ export const creem = {
   async createCheckout(
     params: CreemCheckoutParams
   ): Promise<CreemCheckoutResponse> {
-    const res = await fetch(`${await getRuntimeCreemApiBase()}/checkouts`, {
+    const payload = await requestCreemJson("/checkouts", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": await getRuntimeCreemApiKey(),
       },
       body: JSON.stringify(params),
     });
-
-    if (!res.ok) {
-      const error = await res.text();
-      throw new Error(`Creem API error: ${res.status} - ${error}`);
-    }
-
-    return res.json();
+    return creemCheckoutResponseSchema.parse(payload);
   },
 
   /**
@@ -451,21 +523,10 @@ export const creem = {
    * @returns 订阅信息
    */
   async getSubscription(subscriptionId: string): Promise<CreemSubscription> {
-    const res = await fetch(
-      `${await getRuntimeCreemApiBase()}/subscriptions/${subscriptionId}`,
-      {
-        headers: {
-          "x-api-key": await getRuntimeCreemApiKey(),
-        },
-      }
+    const payload = await requestCreemJson(
+      `/subscriptions/${encodeURIComponent(subscriptionId)}`
     );
-
-    if (!res.ok) {
-      const error = await res.text();
-      throw new Error(`Creem API error: ${res.status} - ${error}`);
-    }
-
-    return res.json();
+    return creemSubscriptionSchema.parse(payload);
   },
 
   /**
@@ -475,22 +536,13 @@ export const creem = {
    * @returns 更新后的订阅信息
    */
   async cancelSubscription(subscriptionId: string): Promise<CreemSubscription> {
-    const res = await fetch(
-      `${await getRuntimeCreemApiBase()}/subscriptions/${subscriptionId}/cancel`,
+    const payload = await requestCreemJson(
+      `/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`,
       {
         method: "POST",
-        headers: {
-          "x-api-key": await getRuntimeCreemApiKey(),
-        },
       }
     );
-
-    if (!res.ok) {
-      const error = await res.text();
-      throw new Error(`Creem API error: ${res.status} - ${error}`);
-    }
-
-    return res.json();
+    return creemSubscriptionSchema.parse(payload);
   },
 
   /**
@@ -500,21 +552,10 @@ export const creem = {
    * @returns 客户信息
    */
   async getCustomer(customerId: string): Promise<CreemCustomer> {
-    const res = await fetch(
-      `${await getRuntimeCreemApiBase()}/customers/${customerId}`,
-      {
-        headers: {
-          "x-api-key": await getRuntimeCreemApiKey(),
-        },
-      }
+    const payload = await requestCreemJson(
+      `/customers/${encodeURIComponent(customerId)}`
     );
-
-    if (!res.ok) {
-      const error = await res.text();
-      throw new Error(`Creem API error: ${res.status} - ${error}`);
-    }
-
-    return res.json();
+    return creemCustomerSchema.parse(payload);
   },
 };
 

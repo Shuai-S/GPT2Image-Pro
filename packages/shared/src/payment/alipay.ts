@@ -11,6 +11,11 @@ import crypto from "node:crypto";
 import { getBaseUrl } from "../config/payment";
 import { getRuntimeSiteUrl } from "../config/site-runtime";
 import {
+  fetchWithDeadline,
+  readResponseJsonWithLimit,
+  readResponseTextWithLimit,
+} from "../http/fetch";
+import {
   getRuntimeSettingSelect,
   getRuntimeSettingString,
 } from "../system-settings";
@@ -321,7 +326,7 @@ async function requestAlipayPrecreatePayment(input: {
     returnUrl: "",
     mode: "precreate",
   });
-  const response = await fetch(input.config.gatewayUrl, {
+  const response = await fetchWithDeadline(input.config.gatewayUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
@@ -329,10 +334,13 @@ async function requestAlipayPrecreatePayment(input: {
     body: new URLSearchParams(params).toString(),
   });
   if (!response.ok) {
-    throw new Error(`Alipay precreate request failed: ${response.status}`);
+    const error = await readResponseTextWithLimit(response);
+    throw new Error(
+      `Alipay precreate request failed: ${response.status} - ${error}`
+    );
   }
 
-  const payload: unknown = await response.json();
+  const payload = await readResponseJsonWithLimit(response);
   if (!isRecord(payload)) {
     throw new Error("Alipay precreate response must be an object");
   }
@@ -373,7 +381,7 @@ export async function queryRuntimeAlipayTrade(
 
   const config = await getRuntimeAlipayConfig();
   const params = createAlipayTradeQueryParams(config, outTradeNo);
-  const response = await fetch(config.gatewayUrl, {
+  const response = await fetchWithDeadline(config.gatewayUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
@@ -381,10 +389,13 @@ export async function queryRuntimeAlipayTrade(
     body: new URLSearchParams(params).toString(),
   });
   if (!response.ok) {
-    throw new Error(`Alipay trade query request failed: ${response.status}`);
+    const error = await readResponseTextWithLimit(response);
+    throw new Error(
+      `Alipay trade query request failed: ${response.status} - ${error}`
+    );
   }
 
-  const payload: unknown = await response.json();
+  const payload = await readResponseJsonWithLimit(response);
   if (!isRecord(payload)) {
     throw new Error("Alipay trade query response must be an object");
   }
