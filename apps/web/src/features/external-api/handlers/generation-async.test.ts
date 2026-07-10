@@ -465,6 +465,33 @@ describe("external generation async handlers", () => {
     expect(mocks.runBatchImageGeneration).toHaveBeenCalledOnce();
   });
 
+  it("同步视频复用鉴权阶段已解析套餐进入集群并发队列", async () => {
+    mocks.runAdobeVideoGenerationForUser.mockResolvedValue({
+      videoGenerationId: "video-1",
+      storageKey: "user-1/video-1.mp4",
+      creditsConsumed: 240,
+    });
+    const { postExternalVideoGenerations } = await import(
+      "./video-generations"
+    );
+
+    const response = await postExternalVideoGenerations(
+      jsonRequest("/v1/videos/generations", {
+        prompt: "animate",
+        model: "firefly-sora2-8s-16x9",
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.runAdobeVideoGenerationForUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        resolvedUserPlan: "ultra",
+      })
+    );
+    expect(mocks.enqueueGenerationTask).not.toHaveBeenCalled();
+  });
+
   it("三个 async handler 都在入队前拒绝非法 Idempotency-Key", async () => {
     const invalidKey = "x".repeat(256);
     const { postExternalImageGenerations } = await import(

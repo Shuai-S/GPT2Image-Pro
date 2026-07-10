@@ -183,6 +183,7 @@ export const postExternalVideoGenerations = withApiLogging(
 
     const runInput = {
       userId: auth.userId,
+      resolvedUserPlan: auth.plan,
       apiKeyId: auth.apiKeyId,
       prompt: parsed.data.prompt,
       model: parsed.data.model,
