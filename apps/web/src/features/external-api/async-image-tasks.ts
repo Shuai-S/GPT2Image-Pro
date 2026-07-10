@@ -43,12 +43,17 @@ export type AsyncImageTask = {
 };
 
 type CreateAsyncImageTaskParams = {
+  id?: string;
   userId: string;
   apiKeyId?: string;
   model?: string;
   generationIds?: string[];
   taskType?: "image" | "video";
   callbackUrl?: string;
+  status?: "queued" | "running";
+  priority?: number;
+  userConcurrency?: number;
+  maxAttempts?: number;
   requestPayload?: Record<string, unknown>;
 };
 
@@ -76,7 +81,7 @@ export async function validateCallbackUrl(value: string): Promise<string> {
 export async function createAsyncImageTask(
   params: CreateAsyncImageTaskParams
 ): Promise<AsyncImageTask> {
-  const id = `task_${randomUUID().replace(/-/g, "")}`;
+  const id = params.id ?? `task_${randomUUID().replace(/-/g, "")}`;
   const generationIds = params.generationIds?.filter(Boolean);
   const now = new Date();
   const task: AsyncImageTask = {
@@ -107,7 +112,10 @@ export async function createAsyncImageTask(
     userId: params.userId,
     apiKeyId: params.apiKeyId,
     model: params.model,
-    status: "running",
+    status: params.status ?? "running",
+    priority: params.priority,
+    userConcurrency: params.userConcurrency,
+    maxAttempts: params.maxAttempts,
     initialPayload: task,
     requestPayload: params.requestPayload,
     callbackUrl: params.callbackUrl,
