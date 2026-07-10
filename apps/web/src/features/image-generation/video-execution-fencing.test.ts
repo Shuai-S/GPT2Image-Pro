@@ -34,6 +34,23 @@ const serviceMock = vi.hoisted(() => ({
   getEffectiveConfig: vi.fn(),
   poolBackendMemberType: vi.fn(() => "adobe"),
 }));
+const planCapabilitiesMock = vi.hoisted(() => ({
+  getPlanQueueSettings: vi.fn(async () => ({
+    priority: "priority" as const,
+    userConcurrency: 2,
+  })),
+}));
+const userPlanMock = vi.hoisted(() => ({
+  getUserPlan: vi.fn(async () => ({ plan: "pro" as const })),
+}));
+const queueMock = vi.hoisted(() => ({
+  withImageGenerationQueue: vi.fn(
+    async (
+      _options: unknown,
+      run: (signal: AbortSignal) => Promise<unknown>
+    ) => await run(new AbortController().signal)
+  ),
+}));
 
 vi.mock("@repo/database", () => ({ db: databaseMock }));
 vi.mock("@repo/shared/credits/core", () => creditsMock);
@@ -42,6 +59,11 @@ vi.mock("@repo/shared/logger", () => ({ logError: vi.fn() }));
 vi.mock("@repo/shared/storage/providers", () => ({
   getStorageProvider: vi.fn(async () => storageMock),
 }));
+vi.mock(
+  "@repo/shared/subscription/services/plan-capabilities",
+  () => planCapabilitiesMock
+);
+vi.mock("@repo/shared/subscription/services/user-plan", () => userPlanMock);
 vi.mock("@repo/shared/system-settings", () => ({
   getRuntimeSettingJson: vi.fn(async () => ({})),
   getRuntimeSettingNumber: vi.fn(async () => 30),
@@ -54,6 +76,7 @@ vi.mock("./adobe-direct", () => directMock);
 vi.mock("./gallery-cache", () => ({
   invalidateGalleryCountsCache: vi.fn(),
 }));
+vi.mock("./queue", () => queueMock);
 vi.mock("./service", () => serviceMock);
 
 /** 构造一次可直接执行的 Adobe 后端配置，每项测试使用独立对象避免租约状态串扰。 */
@@ -137,6 +160,44 @@ describe("runAdobeVideoGenerationForUser fencing", () => {
       undefined
     );
     serviceMock.getEffectiveConfig.mockResolvedValue(createBackendConfig());
+  });
+
+  it("按已解析套餐获取集群许可并合并 semaphore fencing 信号", async () => {
+    const leaseError = new Error("image concurrency lease lost");
+    queueMock.withImageGenerationQueue.mockImplementationOnce(
+      async (_options, run) => {
+        const controller = new AbortController();
+        controller.abort(leaseError);
+        return await run(controller.signal);
+      }
+    );
+
+    const { runAdobeVideoGenerationForUser } = await import(
+      "./video-operations"
+    );
+    await expect(
+      runAdobeVideoGenerationForUser({
+        userId: "user-1",
+        resolvedUserPlan: "pro",
+        prompt: "test video",
+        model: "firefly-sora2-8s-16x9",
+      })
+    ).rejects.toThrow("image concurrency lease lost");
+
+    expect(planCapabilitiesMock.getPlanQueueSettings).toHaveBeenCalledWith(
+      "pro"
+    );
+    expect(queueMock.withImageGenerationQueue).toHaveBeenCalledWith(
+      {
+        userId: "user-1",
+        priority: "priority",
+        userConcurrency: 2,
+        signal: undefined,
+      },
+      expect.any(Function)
+    );
+    expect(userPlanMock.getUserPlan).not.toHaveBeenCalled();
+    expect(databaseMock.insert).not.toHaveBeenCalled();
   });
 
   it("租约丢失中止旧上游时不抢失败终态或退款", async () => {

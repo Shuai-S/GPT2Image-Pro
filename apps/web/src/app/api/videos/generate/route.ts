@@ -9,6 +9,7 @@
 import { withApiLogging } from "@repo/shared/api-logger";
 import { auth } from "@repo/shared/auth";
 import { buildSignedStorageImageUrl } from "@repo/shared/storage/signed-url";
+import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import { getRuntimeSettingString } from "@repo/shared/system-settings";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -78,13 +79,16 @@ export const POST = withApiLogging(async (request: NextRequest) => {
 
   const userId = session.user.id;
   const inputImages = parsed.data.inputImages?.map(decodeImageDataUrl);
-  const bucket =
-    (await getRuntimeSettingString("NEXT_PUBLIC_GENERATIONS_BUCKET_NAME")) ||
-    "generations";
+  const [resolvedUserPlan, bucketSetting] = await Promise.all([
+    getUserPlan(userId),
+    getRuntimeSettingString("NEXT_PUBLIC_GENERATIONS_BUCKET_NAME"),
+  ]);
+  const bucket = bucketSetting || "generations";
 
   return createImageStreamResponse(async (emit) => {
     const result = await runAdobeVideoGenerationForUser({
       userId,
+      resolvedUserPlan: resolvedUserPlan.plan,
       prompt: parsed.data.prompt,
       model: parsed.data.model,
       ...(parsed.data.negativePrompt

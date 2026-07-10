@@ -85,6 +85,7 @@ export async function runGenerationTaskVideo(
 ): Promise<void> {
   await runAdobeVideoGenerationForUser({
     userId: input.row.userId,
+    resolvedUserPlan: input.context.plan,
     apiKeyId: input.row.apiKeyId,
     executionToken: input.executionToken,
     videoGenerationId: input.request.generationId,

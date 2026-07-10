@@ -78,11 +78,11 @@ describe("generation task executor", () => {
         mode: "generate",
         backendRequestKind: "image_generation",
         userId: "user-1",
+        resolvedUserPlan: "pro",
         apiKeyId: "key-1",
         generationId: "gen-1",
         executionToken: "lease-token-1",
         signal: controller.signal,
-        resolvedUserPlan: "pro",
         relayOnly: false,
         moderationBlockRiskLevel: "low",
       })
@@ -181,6 +181,7 @@ describe("generation task executor", () => {
     expect(operationMocks.runVideo).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "user-1",
+        resolvedUserPlan: "pro",
         apiKeyId: "key-1",
         videoGenerationId: "video-1",
         executionToken: "lease-token-3",

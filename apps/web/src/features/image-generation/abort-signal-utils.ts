@@ -35,8 +35,13 @@ export function mergeAbortSignals(
     (signal): signal is AbortSignal => Boolean(signal)
   );
   const controller = new AbortController();
-  if (valid.length === 0 || valid.some((signal) => signal.aborted)) {
+  if (valid.length === 0) {
     controller.abort();
+    return controller.signal;
+  }
+  const alreadyAborted = valid.find((signal) => signal.aborted);
+  if (alreadyAborted) {
+    controller.abort(alreadyAborted.reason);
     return controller.signal;
   }
   if (typeof AbortSignal.any === "function") {

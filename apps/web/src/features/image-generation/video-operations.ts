@@ -22,10 +22,13 @@ import {
   resolveVideoModelPricing,
 } from "@repo/shared/adobe";
 import { resolveFireflyVideoModel } from "@repo/shared/adobe/firefly-direct";
+import type { SubscriptionPlan } from "@repo/shared/config/subscription-plan";
 import { consumeCredits } from "@repo/shared/credits/core";
 import { refundGenerationCredits } from "@repo/shared/generation-maintenance";
 import { logError } from "@repo/shared/logger";
 import { getStorageProvider } from "@repo/shared/storage/providers";
+import { getPlanQueueSettings } from "@repo/shared/subscription/services/plan-capabilities";
+import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import {
   getRuntimeSettingJson,
   getRuntimeSettingNumber,
@@ -39,16 +42,20 @@ import {
   reserveExternalApiKeyCredits,
 } from "@/features/external-api/quota";
 import { releaseImageBackendInflightLease } from "@/features/image-backend-pool/service";
+import { mergeAbortSignals } from "./abort-signal-utils";
 import { runAdobeDirectVideoRequest } from "./adobe-direct";
 import { invalidateGalleryCountsCache } from "./gallery-cache";
 import {
   recoverVideoGenerationResult,
   videoGenerationNeedsRecovery,
 } from "./generation-recovery";
+import { withImageGenerationQueue } from "./queue";
 import { getEffectiveConfig, poolBackendMemberType } from "./service";
 
 export type VideoGenerationInput = {
   userId: string;
+  /** 入口已解析的当前套餐；外部 API/worker 透传可避免同一请求重复查询。 */
+  resolvedUserPlan?: SubscriptionPlan;
   apiKeyId?: string | null;
   /** 持久任务本次租约 token；同步路径不传并只操作 NULL token 行。 */
   executionToken?: string;
@@ -543,9 +550,14 @@ async function markVideoFailed(
 }
 
 /**
- * 跑一次 Adobe Firefly 视频生成（含计费与持久化）。
+ * 在已经取得集群并发许可后跑一次 Adobe Firefly 视频生成。
+ *
+ * @param input 已合并调用方取消与 semaphore fencing 的执行输入。
+ * @returns 视频终态或可展示的业务错误。
+ * @throws 数据库、对象存储或租约中止异常向上抛，由公开入口/worker 统一处理。
+ * @sideEffects 调用 Adobe、扣费/退款、写 video_generation 与对象存储。
  */
-export async function runAdobeVideoGenerationForUser(
+async function runQueuedAdobeVideoGenerationForUser(
   input: VideoGenerationInput
 ): Promise<VideoGenerationResult> {
   const videoId = input.videoGenerationId || nanoid();
@@ -969,4 +981,38 @@ export async function runAdobeVideoGenerationForUser(
     storageKey,
     creditsConsumed: billedCost,
   };
+}
+
+/**
+ * 跑一次受 PostgreSQL 集群 semaphore 保护的 Adobe Firefly 视频生成。
+ *
+ * @param input 用户、模型、可选持久任务 fencing token 与调用方取消信号。
+ * @returns 视频终态或可展示的业务错误；等待超时和基础设施异常向上抛。
+ * @throws 套餐读取、semaphore、数据库、存储或上游无法安全收敛时抛出。
+ * @sideEffects 获取并续租集群并发槽，再执行完整视频财务与持久化闭环。
+ */
+export async function runAdobeVideoGenerationForUser(
+  input: VideoGenerationInput
+): Promise<VideoGenerationResult> {
+  const userPlan =
+    input.resolvedUserPlan ?? (await getUserPlan(input.userId)).plan;
+  const queueSettings = await getPlanQueueSettings(userPlan);
+
+  return await withImageGenerationQueue(
+    {
+      userId: input.userId,
+      priority: queueSettings.priority,
+      userConcurrency: queueSettings.userConcurrency,
+      signal: input.signal,
+    },
+    async (concurrencySignal) => {
+      const queuedInput = {
+        ...input,
+        resolvedUserPlan: userPlan,
+        signal: mergeAbortSignals(input.signal, concurrencySignal),
+      } satisfies VideoGenerationInput;
+      throwIfVideoExecutionAborted(queuedInput.signal);
+      return await runQueuedAdobeVideoGenerationForUser(queuedInput);
+    }
+  );
 }
