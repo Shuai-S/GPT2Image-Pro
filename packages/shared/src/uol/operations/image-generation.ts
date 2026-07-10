@@ -494,3 +494,26 @@ defineOperation({
     throw new Error("Not yet wired: image.exportPsd");
   },
 });
+
+// ---------------------------------------------------------------------------
+// 14. image.runMaintenance - 超时 pending 与生成图维护任务
+// ---------------------------------------------------------------------------
+defineOperation({
+  name: "image.runMaintenance",
+  domain: "image-generation",
+  title: "运行图像维护任务",
+  description:
+    "定时过期超时 pending 生成，并按系统保留策略清理已完成图片。" +
+    "底层使用条件更新和有界批处理收敛重复调用。",
+  input: z.object({}),
+  output: z.record(z.string(), z.unknown()),
+  access: { kind: "cron" },
+  readOnly: false,
+  destructive: false,
+  idempotency: { kind: "natural" },
+  sideEffects: ["billing", "storage"],
+  hasMaintenanceWrite: true,
+  execute: async () => {
+    throw new Error("Not yet wired: image.runMaintenance");
+  },
+});

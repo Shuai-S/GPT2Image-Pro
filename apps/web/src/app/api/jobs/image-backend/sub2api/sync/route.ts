@@ -3,7 +3,8 @@ import { withApiLogging } from "@repo/shared/api-logger";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { runSub2ApiSyncJob } from "@/server/scheduled-jobs";
+import { internalJobResponse } from "@/server/internal-job-http";
+import { runInternalJob } from "@/server/internal-job-runner";
 
 async function validateCronSecret(authHeader: string | null) {
   if (!authHeader) return false;
@@ -35,12 +36,12 @@ export const POST = withApiLogging(async (request: Request) => {
   const force = ["1", "true", "yes"].includes(
     (url.searchParams.get("force") || "").toLowerCase()
   );
-  const result = await runSub2ApiSyncJob({ force });
-
-  return NextResponse.json({
-    ...result,
-    timestamp: new Date().toISOString(),
-  });
+  return internalJobResponse(
+    await runInternalJob("sub2api-sync", {
+      mode: "manual",
+      input: { force },
+    })
+  );
 });
 
 export const GET = withApiLogging(async () =>

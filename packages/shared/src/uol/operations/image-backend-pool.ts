@@ -722,11 +722,10 @@ export const cronSub2ApiSync = defineOperation({
   description:
     "定时任务：遍历所有 enabled 的自动同步任务执行同步，" +
     "按 interval/force 策略跳过或执行。",
-  input: z.object({}),
-  output: z.object({
-    tasksExecuted: z.number(),
-    tasksSkipped: z.number(),
+  input: z.object({
+    force: z.boolean().default(false),
   }),
+  output: z.record(z.string(), z.unknown()),
   access: { kind: "cron" },
   readOnly: false,
   destructive: false,
@@ -747,10 +746,7 @@ export const cronRefreshStale = defineOperation({
   description:
     "定时任务：拉取远端信息刷新超过 staleMinutes 未更新的 Web 账号。",
   input: z.object({}),
-  output: z.object({
-    refreshedCount: z.number(),
-    failedCount: z.number(),
-  }),
+  output: z.record(z.string(), z.unknown()),
   access: { kind: "cron" },
   readOnly: false,
   destructive: false,
@@ -758,5 +754,27 @@ export const cronRefreshStale = defineOperation({
   sideEffects: ["external-call"],
   execute: async () => {
     throw new Error("Not yet wired: pool.cronRefreshStale");
+  },
+});
+
+// ---------------------------------------------------------------------------
+// 28. pool.cronWebAccountsReplenish - CRON 自动补充 Web 账号
+// ---------------------------------------------------------------------------
+export const cronWebAccountsReplenish = defineOperation({
+  name: "pool.cronWebAccountsReplenish",
+  domain: "image-backend-pool",
+  title: "CRON 补充 Web 账号",
+  description:
+    "定时任务：目标分组的可用 Web 账号低于配置值时，" +
+    "调用注册机补齐缺口并导入后端池。",
+  input: z.object({}),
+  output: z.record(z.string(), z.unknown()),
+  access: { kind: "cron" },
+  readOnly: false,
+  destructive: false,
+  idempotency: { kind: "none" },
+  sideEffects: ["external-call", "audit"],
+  execute: async () => {
+    throw new Error("Not yet wired: pool.cronWebAccountsReplenish");
   },
 });

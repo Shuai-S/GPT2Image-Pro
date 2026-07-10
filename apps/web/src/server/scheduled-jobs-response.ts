@@ -3,7 +3,7 @@
  *
  * 职责：把底层维护函数（processExpiredBatches / expireStalePendingGenerations）
  * 返回的结果数组，纯映射/聚合成各 cron 端点对外的响应负载。
- * 使用方：`scheduled-jobs.ts` 的 runCreditsExpireJob / runImageMaintenanceJob。
+ * 使用方：图像维护任务与积分 UOL operation 的响应契约测试。
  * 关键依赖：无。本模块刻意不 import @repo/database，以便 DB-free 单测覆盖
  * 这些财务/维护 cron 的对外契约（积分过期金额、退款汇总、过期计数）。
  *

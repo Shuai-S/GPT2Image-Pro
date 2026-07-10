@@ -1,33 +1,18 @@
-import { db, systemSetting } from "@repo/database";
-import {
-  getRuntimeSettingBoolean,
-  getRuntimeSettingNumber,
-} from "@repo/shared/system-settings";
-import { eq, sql } from "drizzle-orm";
+/**
+ * 内置后台任务定时器。
+ *
+ * 职责：在单个进程内安排任务 tick；跨副本互斥、恢复与 UOL 调用统一委托给
+ * internal-job-runner。定时器本身不持有数据库事务或连接。
+ */
+
+import { createContextLogger } from "@repo/shared/logger";
+import { getRuntimeSettingBoolean } from "@repo/shared/system-settings";
 
 import {
-  runCreditsExpireJob,
-  runImageMaintenanceJob,
-  runReferralThawJob,
-  runSub2ApiSyncJob,
-  runWebAccountsRefreshJob,
-  runWebAccountsReplenishJob,
-} from "./scheduled-jobs";
-
-type InternalJob = {
-  name: string;
-  lockKey: number;
-  intervalSettingKey:
-    | "INTERNAL_JOB_IMAGES_MAINTENANCE_INTERVAL_MINUTES"
-    | "INTERNAL_JOB_CREDITS_EXPIRE_INTERVAL_MINUTES"
-    | "INTERNAL_JOB_REFERRAL_THAW_INTERVAL_MINUTES"
-    | "INTERNAL_JOB_WEB_ACCOUNTS_REFRESH_INTERVAL_MINUTES"
-    | "INTERNAL_JOB_WEB_ACCOUNTS_REPLENISH_INTERVAL_MINUTES"
-    | "INTERNAL_JOB_SUB2API_SYNC_INTERVAL_MINUTES";
-  defaultIntervalMinutes: number;
-  initialDelayMs: number;
-  run: () => Promise<unknown>;
-};
+  getInternalJobIntervalMs,
+  INTERNAL_JOBS,
+  runInternalJob,
+} from "./internal-job-runner";
 
 type SchedulerState = {
   started: boolean;
@@ -37,235 +22,29 @@ type SchedulerGlobal = typeof globalThis & {
   __gpt2imageInternalJobScheduler?: SchedulerState;
 };
 
-const LOCK_NAMESPACE = 20_260_527;
-const MINUTE_MS = 60 * 1000;
 const schedulerGlobal = globalThis as SchedulerGlobal;
+const log = createContextLogger({ component: "internal-job-scheduler" });
 
-const jobs: InternalJob[] = [
-  {
-    name: "images-maintenance",
-    lockKey: 1,
-    intervalSettingKey: "INTERNAL_JOB_IMAGES_MAINTENANCE_INTERVAL_MINUTES",
-    defaultIntervalMinutes: 5,
-    initialDelayMs: 30_000,
-    run: runImageMaintenanceJob,
-  },
-  {
-    name: "credits-expire",
-    lockKey: 2,
-    intervalSettingKey: "INTERNAL_JOB_CREDITS_EXPIRE_INTERVAL_MINUTES",
-    defaultIntervalMinutes: 24 * 60,
-    initialDelayMs: 60_000,
-    run: runCreditsExpireJob,
-  },
-  {
-    name: "referral-thaw",
-    lockKey: 6,
-    intervalSettingKey: "INTERNAL_JOB_REFERRAL_THAW_INTERVAL_MINUTES",
-    defaultIntervalMinutes: 60,
-    initialDelayMs: 75_000,
-    run: runReferralThawJob,
-  },
-  {
-    name: "web-accounts-refresh",
-    lockKey: 3,
-    intervalSettingKey: "INTERNAL_JOB_WEB_ACCOUNTS_REFRESH_INTERVAL_MINUTES",
-    defaultIntervalMinutes: 10,
-    initialDelayMs: 90_000,
-    run: runWebAccountsRefreshJob,
-  },
-  {
-    name: "sub2api-sync",
-    lockKey: 4,
-    intervalSettingKey: "INTERNAL_JOB_SUB2API_SYNC_INTERVAL_MINUTES",
-    defaultIntervalMinutes: 10,
-    initialDelayMs: 120_000,
-    run: () => runSub2ApiSyncJob(),
-  },
-  {
-    name: "web-accounts-replenish",
-    lockKey: 5,
-    intervalSettingKey: "INTERNAL_JOB_WEB_ACCOUNTS_REPLENISH_INTERVAL_MINUTES",
-    defaultIntervalMinutes: 15,
-    initialDelayMs: 150_000,
-    run: runWebAccountsReplenishJob,
-  },
-];
-
-function getSchedulerState() {
+/**
+ * 获取进程级调度状态。
+ *
+ * globalThis 只防止开发热重载或重复 instrumentation 在同一进程安装重复定时器；
+ * 跨副本互斥由数据库租约负责。
+ */
+function getSchedulerState(): SchedulerState {
   if (!schedulerGlobal.__gpt2imageInternalJobScheduler) {
-    schedulerGlobal.__gpt2imageInternalJobScheduler = {
-      started: false,
-    };
+    schedulerGlobal.__gpt2imageInternalJobScheduler = { started: false };
   }
   return schedulerGlobal.__gpt2imageInternalJobScheduler;
 }
 
-function firstRow(result: unknown): Record<string, unknown> | undefined {
-  if (Array.isArray(result)) {
-    return result[0] as Record<string, unknown> | undefined;
-  }
-  const rows = (result as { rows?: unknown[] } | undefined)?.rows;
-  return Array.isArray(rows)
-    ? (rows[0] as Record<string, unknown> | undefined)
-    : undefined;
-}
-
-function readBooleanResult(result: unknown, key: string) {
-  return firstRow(result)?.[key] === true;
-}
-
-function getJobStateKey(job: InternalJob) {
-  return `__internal_job_scheduler:${job.name}`;
-}
-
-function readLastStartedAt(value: unknown) {
-  const candidate =
-    typeof value === "object" && value !== null
-      ? (value as Record<string, unknown>).lastStartedAt
-      : undefined;
-  if (typeof candidate !== "string") return undefined;
-  const timestamp = Date.parse(candidate);
-  return Number.isFinite(timestamp) ? timestamp : undefined;
-}
-
-async function withJobLock<T>(
-  job: InternalJob,
-  intervalMs: number,
-  run: () => Promise<T>
-) {
-  return await db.transaction(async (tx) => {
-    const lockResult = await tx.execute(
-      sql`select pg_try_advisory_xact_lock(${LOCK_NAMESPACE}, ${job.lockKey}) as locked`
-    );
-    if (!readBooleanResult(lockResult, "locked")) {
-      return { locked: false as const };
-    }
-
-    const stateKey = getJobStateKey(job);
-    const now = new Date();
-    const [state] = await tx
-      .select({ value: systemSetting.value })
-      .from(systemSetting)
-      .where(eq(systemSetting.key, stateKey))
-      .limit(1);
-    const lastStartedAt = readLastStartedAt(state?.value);
-    if (
-      lastStartedAt !== undefined &&
-      now.getTime() - lastStartedAt < intervalMs
-    ) {
-      return {
-        locked: true as const,
-        skipped: true as const,
-        reason: "interval_not_reached",
-      };
-    }
-
-    await tx
-      .insert(systemSetting)
-      .values({
-        key: stateKey,
-        value: {
-          job: job.name,
-          status: "running",
-          lastStartedAt: now.toISOString(),
-        },
-        isSecret: false,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: systemSetting.key,
-        set: {
-          value: {
-            job: job.name,
-            status: "running",
-            lastStartedAt: now.toISOString(),
-          },
-          isSecret: false,
-          updatedAt: now,
-        },
-      });
-
-    try {
-      const result = await run();
-      const finishedAt = new Date();
-      await tx
-        .insert(systemSetting)
-        .values({
-          key: stateKey,
-          value: {
-            job: job.name,
-            status: "success",
-            lastStartedAt: now.toISOString(),
-            lastFinishedAt: finishedAt.toISOString(),
-          },
-          isSecret: false,
-          updatedAt: finishedAt,
-        })
-        .onConflictDoUpdate({
-          target: systemSetting.key,
-          set: {
-            value: {
-              job: job.name,
-              status: "success",
-              lastStartedAt: now.toISOString(),
-              lastFinishedAt: finishedAt.toISOString(),
-            },
-            isSecret: false,
-            updatedAt: finishedAt,
-          },
-        });
-
-      return {
-        locked: true as const,
-        skipped: false as const,
-        result,
-      };
-    } catch (error) {
-      const finishedAt = new Date();
-      await tx
-        .insert(systemSetting)
-        .values({
-          key: stateKey,
-          value: {
-            job: job.name,
-            status: "error",
-            lastStartedAt: now.toISOString(),
-            lastFinishedAt: finishedAt.toISOString(),
-            error: error instanceof Error ? error.message : "Unknown error",
-          },
-          isSecret: false,
-          updatedAt: finishedAt,
-        })
-        .onConflictDoUpdate({
-          target: systemSetting.key,
-          set: {
-            value: {
-              job: job.name,
-              status: "error",
-              lastStartedAt: now.toISOString(),
-              lastFinishedAt: finishedAt.toISOString(),
-              error: error instanceof Error ? error.message : "Unknown error",
-            },
-            isSecret: false,
-            updatedAt: finishedAt,
-          },
-        });
-      throw error;
-    }
-  });
-}
-
-async function getIntervalMs(job: InternalJob) {
-  const minutes = await getRuntimeSettingNumber(
-    job.intervalSettingKey,
-    job.defaultIntervalMinutes,
-    { positive: true }
-  );
-  return Math.max(1, Math.trunc(minutes)) * MINUTE_MS;
-}
-
-async function runJob(job: InternalJob) {
+/**
+ * 执行一次已到时的任务 tick。
+ *
+ * 未获得租约或全局间隔未到均为正常跳过；任务错误被记录后留给下一 tick 重试，
+ * 不产生未处理 Promise。
+ */
+async function runJob(job: (typeof INTERNAL_JOBS)[number]): Promise<void> {
   const enabled = await getRuntimeSettingBoolean(
     "INTERNAL_JOB_SCHEDULER_ENABLED",
     true
@@ -274,19 +53,30 @@ async function runJob(job: InternalJob) {
 
   const startedAt = Date.now();
   try {
-    const intervalMs = await getIntervalMs(job);
-    const result = await withJobLock(job, intervalMs, job.run);
-    if (!result.locked) return;
-    if (result.skipped) return;
-    console.info(
-      `[internal-jobs] ${job.name} completed in ${Date.now() - startedAt}ms`
+    const execution = await runInternalJob(job.name, { mode: "scheduled" });
+    if (!execution.executed) return;
+    log.info(
+      {
+        job: job.name,
+        durationMs: Date.now() - startedAt,
+        leaseLost: execution.leaseLost,
+      },
+      "Internal job completed"
     );
   } catch (error) {
-    console.warn(`[internal-jobs] ${job.name} failed`, error);
+    log.warn({ err: error, job: job.name }, "Internal job failed");
   }
 }
 
-async function scheduleJob(job: InternalJob) {
+/**
+ * 为单个任务安装完成后再调度的递归定时器。
+ *
+ * running 防止同进程重入；跨进程竞争仍由数据库租约判定。读取间隔失败时回退任务
+ * 默认值，确保调度循环持续但不会形成紧循环。
+ */
+async function scheduleJob(
+  job: (typeof INTERNAL_JOBS)[number]
+): Promise<void> {
   let running = false;
 
   const scheduleNext = (delayMs: number) => {
@@ -297,29 +87,36 @@ async function scheduleJob(job: InternalJob) {
   };
 
   const tick = async () => {
-    if (running) {
-      scheduleNext(await getIntervalMs(job));
-      return;
-    }
-
-    running = true;
-    try {
-      await runJob(job);
-    } finally {
-      running = false;
+    if (!running) {
+      running = true;
+      try {
+        await runJob(job);
+      } finally {
+        running = false;
+      }
     }
 
     try {
-      scheduleNext(await getIntervalMs(job));
-    } catch {
-      scheduleNext(job.defaultIntervalMinutes * MINUTE_MS);
+      scheduleNext(await getInternalJobIntervalMs(job));
+    } catch (error) {
+      log.warn(
+        { err: error, job: job.name },
+        "Internal job interval lookup failed"
+      );
+      scheduleNext(job.defaultIntervalMinutes * 60 * 1000);
     }
   };
 
   scheduleNext(job.initialDelayMs);
 }
 
-export async function startInternalJobScheduler() {
+/**
+ * 启动所有内置后台任务定时器。
+ *
+ * 测试和生产构建阶段不启动；关闭开关或初始化失败时保持可重试状态。成功后同进程
+ * 重复调用无副作用。
+ */
+export async function startInternalJobScheduler(): Promise<void> {
   if (process.env.NODE_ENV === "test") return;
   if (process.env.NEXT_PHASE === "phase-production-build") return;
 
@@ -334,10 +131,10 @@ export async function startInternalJobScheduler() {
     if (!enabled) return;
 
     state.started = true;
-    await Promise.all(jobs.map((job) => scheduleJob(job)));
-    console.info("[internal-jobs] scheduler started");
+    await Promise.all(INTERNAL_JOBS.map((job) => scheduleJob(job)));
+    log.info("Internal job scheduler started");
   } catch (error) {
     state.started = false;
-    console.warn("[internal-jobs] scheduler failed to start", error);
+    log.warn({ err: error }, "Internal job scheduler failed to start");
   }
 }

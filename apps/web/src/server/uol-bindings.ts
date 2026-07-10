@@ -30,11 +30,17 @@ import {
   getUserImageBackendPreference,
   listAdminImageBackendPool,
   listSelectableImageBackendGroups,
+  refreshStaleWebBackendAccounts,
+  runAutoSub2ApiAccessTokenSync,
   setUserImageBackendPreference,
 } from "@/features/image-backend-pool/service";
 import { runEditableFileForUser } from "@/features/image-generation/editable-file-operations";
 import { runImageGenerationForUser } from "@/features/image-generation/operations";
 import type { ImageQuality } from "@/features/image-generation/types";
+import {
+  runImageMaintenanceJob,
+  runWebAccountsReplenishJob,
+} from "@/server/scheduled-jobs";
 
 // ---------------------------------------------------------------------------
 // image-generation 域
@@ -278,8 +284,77 @@ bindExecute(
 // TODO: pool.setSub2ApiTaskOverwrite - setSub2ApiAutoSyncTaskOverwriteLocalUnavailableStateAction
 // TODO: pool.updateSub2ApiTaskOptions - updateSub2ApiAutoSyncTaskOptionsAction
 // TODO: pool.deleteSub2ApiTask - deleteSub2ApiAutoSyncTaskAction
-// TODO: pool.cronSub2ApiSync - cron 调度逻辑
-// TODO: pool.cronRefreshStale - cron 调度逻辑
+
+/**
+ * pool.cronSub2ApiSync - Sub2API 自动同步任务。
+ * 源: image-backend-pool/service.ts runAutoSub2ApiAccessTokenSync
+ */
+bindExecute(
+  "pool.cronSub2ApiSync",
+  async (
+    input: { force: boolean },
+    _principal: Principal,
+    _ctx: OperationContext
+  ) => await runAutoSub2ApiAccessTokenSync({ force: input.force })
+);
+
+/**
+ * pool.cronRefreshStale - 刷新陈旧 Web 账号。
+ * 运行时设置在 scheduled-jobs 层解析，保持 operation 输入稳定。
+ */
+bindExecute(
+  "pool.cronRefreshStale",
+  async (
+    _input: Record<string, never>,
+    _principal: Principal,
+    _ctx: OperationContext
+  ) => {
+    const { getRuntimeSettingNumber } = await import(
+      "@repo/shared/system-settings"
+    );
+    const [staleMinutes, limit] = await Promise.all([
+      getRuntimeSettingNumber(
+        "CHATGPT_WEB_ACCOUNT_REFRESH_STALE_MINUTES",
+        30,
+        { positive: true }
+      ),
+      getRuntimeSettingNumber("CHATGPT_WEB_ACCOUNT_REFRESH_LIMIT", 20, {
+        positive: true,
+      }),
+    ]);
+    return await refreshStaleWebBackendAccounts({ staleMinutes, limit });
+  }
+);
+
+/**
+ * pool.cronWebAccountsReplenish - 号池自动补号。
+ * 源: server/scheduled-jobs.ts runWebAccountsReplenishJob
+ */
+bindExecute(
+  "pool.cronWebAccountsReplenish",
+  async (
+    _input: Record<string, never>,
+    _principal: Principal,
+    _ctx: OperationContext
+  ) => await runWebAccountsReplenishJob()
+);
+
+// ---------------------------------------------------------------------------
+// 图像维护域
+// ---------------------------------------------------------------------------
+
+/**
+ * image.runMaintenance - pending 过期与图片保留维护。
+ * 源: server/scheduled-jobs.ts runImageMaintenanceJob
+ */
+bindExecute(
+  "image.runMaintenance",
+  async (
+    _input: Record<string, never>,
+    _principal: Principal,
+    _ctx: OperationContext
+  ) => await runImageMaintenanceJob()
+);
 
 // ---------------------------------------------------------------------------
 // user-auth 域

@@ -579,8 +579,16 @@ export const runExpireJob = defineOperation({
     "通过 cron-secret Bearer token 鉴权（timingSafeEqual）。",
   input: z.object({}),
   output: z.object({
-    usersProcessed: z.number().describe("处理的用户数"),
-    batchesExpired: z.number().describe("过期的批次总数"),
+    success: z.literal(true),
+    processed: z.number().describe("过期的批次总数"),
+    details: z.array(
+      z.object({
+        batchId: z.string(),
+        userId: z.string(),
+        expiredAmount: z.number(),
+      })
+    ),
+    timestamp: z.string(),
   }),
   access: { kind: "cron" },
   readOnly: false,
@@ -589,12 +597,16 @@ export const runExpireJob = defineOperation({
   sideEffects: ["billing"],
   hasMaintenanceWrite: true,
   execute: async () => {
-    // 不传 userId 则处理所有用户的过期批次
     const results = await processExpiredBatches();
-    const uniqueUsers = new Set(results?.map((r) => r.userId) ?? []);
     return {
-      usersProcessed: uniqueUsers.size,
-      batchesExpired: results?.length ?? 0,
+      success: true as const,
+      processed: results.length,
+      details: results.map((result) => ({
+        batchId: result.batchId,
+        userId: result.userId,
+        expiredAmount: result.expiredAmount,
+      })),
+      timestamp: new Date().toISOString(),
     };
   },
 });

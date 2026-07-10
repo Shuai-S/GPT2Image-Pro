@@ -3,7 +3,8 @@ import { withApiLogging } from "@repo/shared/api-logger";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { runWebAccountsRefreshJob } from "@/server/scheduled-jobs";
+import { internalJobResponse } from "@/server/internal-job-http";
+import { runInternalJob } from "@/server/internal-job-runner";
 
 async function validateCronSecret(authHeader: string | null) {
   if (!authHeader) return false;
@@ -31,7 +32,9 @@ export const POST = withApiLogging(async () => {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  return NextResponse.json(await runWebAccountsRefreshJob());
+  return internalJobResponse(
+    await runInternalJob("web-accounts-refresh", { mode: "manual" })
+  );
 });
 
 export const GET = withApiLogging(async () =>

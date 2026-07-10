@@ -5,7 +5,8 @@ import { logWarn } from "@repo/shared/logger";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { runImageMaintenanceJob } from "@/server/scheduled-jobs";
+import { internalJobResponse } from "@/server/internal-job-http";
+import { runInternalJob } from "@/server/internal-job-runner";
 
 /** 超时 pending 生成的阈值（分钟），由共享常量推导以避免文案与真实阈值漂移 */
 const PENDING_TIMEOUT_MINUTES = Math.round(
@@ -47,7 +48,9 @@ export const POST = withApiLogging(async () => {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  return NextResponse.json(await runImageMaintenanceJob());
+  return internalJobResponse(
+    await runInternalJob("images-maintenance", { mode: "manual" })
+  );
 });
 
 export const GET = withApiLogging(async () => {

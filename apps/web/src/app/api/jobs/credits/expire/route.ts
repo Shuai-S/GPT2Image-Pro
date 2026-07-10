@@ -4,15 +4,16 @@ import { logError, logWarn } from "@repo/shared/logger";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { runCreditsExpireJob } from "@/server/scheduled-jobs";
+import { internalJobResponse } from "@/server/internal-job-http";
+import { runInternalJob } from "@/server/internal-job-runner";
 
 /**
  * 积分过期处理 Cron Job API
  *
  * 定期处理过期的积分批次，需通过 Bearer Token（CRON_SECRET）鉴权。
  *
- * 触发方式：生产以内置定时调度器为主（INTERNAL_JOB_SCHEDULER_ENABLED + PG
- * advisory lock）；外部 cron 以携带 Bearer CRON_SECRET 调用 POST 作为回退。
+ * 触发方式：生产以内置定时调度器为主；外部 cron 以携带 Bearer
+ * CRON_SECRET 调用 POST 作为回退。两者共用 PostgreSQL 可恢复租约。
  * 部署为 Docker Compose + Nginx，不使用 Vercel Cron。
  */
 
@@ -63,7 +64,9 @@ export const POST = withApiLogging(async () => {
   }
 
   try {
-    return NextResponse.json(await runCreditsExpireJob());
+    return internalJobResponse(
+      await runInternalJob("credits-expire", { mode: "manual" })
+    );
   } catch (error) {
     // 仅记日志，不向调用方回显内部异常 message（可能含 DB/约束细节）
     logError(error, { job: "credits-expire" });

@@ -289,7 +289,9 @@ export const thawCommissions = defineOperation({
     userId: z.string().optional(),
   }),
   output: z.object({
+    success: z.literal(true),
     thawedCount: z.number(),
+    timestamp: z.string(),
   }),
   access: { kind: "cron" },
   readOnly: false,
@@ -297,7 +299,11 @@ export const thawCommissions = defineOperation({
   idempotency: { kind: "natural" },
   sideEffects: ["billing"],
   hasMaintenanceWrite: true,
-  execute: async (input) => thawReferralCommissions(input.userId),
+  execute: async (input) => ({
+    success: true as const,
+    ...(await thawReferralCommissions(input.userId)),
+    timestamp: new Date().toISOString(),
+  }),
 });
 
 export const cancelCommissionForOrder = defineOperation({

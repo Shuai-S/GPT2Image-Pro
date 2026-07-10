@@ -4,7 +4,8 @@ import { logWarn } from "@repo/shared/logger";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { runReferralThawJob } from "@/server/scheduled-jobs";
+import { internalJobResponse } from "@/server/internal-job-http";
+import { runInternalJob } from "@/server/internal-job-runner";
 
 function validateCronSecret(authHeader: string | null): boolean {
   if (!authHeader) return false;
@@ -46,7 +47,9 @@ export const POST = withApiLogging(async () => {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  return NextResponse.json(await runReferralThawJob());
+  return internalJobResponse(
+    await runInternalJob("referral-thaw", { mode: "manual" })
+  );
 });
 
 /**

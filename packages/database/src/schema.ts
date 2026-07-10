@@ -281,6 +281,52 @@ export type Subscription = typeof subscription.$inferSelect;
 export type NewSubscription = typeof subscription.$inferInsert;
 
 // ============================================
+// 内部任务租约表 (Internal Job Lease)
+// ============================================
+/**
+ * 内部任务租约表 - 为内置调度器与外部 Cron 提供跨副本互斥和崩溃接管。
+ *
+ * ownerId + runId 共同构成 fencing token。旧执行者即使在租约过期后晚到，也不能
+ * 覆盖新执行者的心跳或终态。租约判定全部使用 PostgreSQL now()，避免副本时钟漂移。
+ *
+ * @field jobName - 稳定任务名，每个任务固定一行
+ * @field ownerId - 当前进程级执行者标识
+ * @field runId - 当前执行轮次标识
+ * @field status - running/success/error
+ * @field leaseExpiresAt - 心跳停止后允许其他副本接管的时间
+ * @field heartbeatAt - 最近一次成功续租时间
+ * @field lastStartedAt - 最近一次获得租约的时间
+ * @field lastFinishedAt - 最近一次写入成功或失败终态的时间
+ * @field lastSuccessAt - 最近一次成功时间
+ * @field lastError - 最近一次失败的截断错误信息
+ */
+export const internalJobLease = pgTable("internal_job_lease", {
+  jobName: text("job_name").primaryKey(),
+  ownerId: text("owner_id").notNull(),
+  runId: text("run_id").notNull(),
+  status: text("status").notNull(),
+  leaseExpiresAt: timestamp("lease_expires_at", {
+    withTimezone: true,
+  }).notNull(),
+  heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }).notNull(),
+  lastStartedAt: timestamp("last_started_at", {
+    withTimezone: true,
+  }).notNull(),
+  lastFinishedAt: timestamp("last_finished_at", { withTimezone: true }),
+  lastSuccessAt: timestamp("last_success_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type InternalJobLease = typeof internalJobLease.$inferSelect;
+export type NewInternalJobLease = typeof internalJobLease.$inferInsert;
+
+// ============================================
 // Epay 订单表
 // ============================================
 /**

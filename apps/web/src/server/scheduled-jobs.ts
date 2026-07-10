@@ -1,10 +1,8 @@
-import { processExpiredBatches } from "@repo/shared/credits/core";
 import {
   destroyExpiredGenerationPhotos,
   destroyGenerationPhotosByMaxCount,
   expireStalePendingGenerations,
 } from "@repo/shared/generation-maintenance";
-import { thawReferralCommissions } from "@repo/shared/referral";
 import {
   getRuntimeSettingBoolean,
   getRuntimeSettingNumber,
@@ -13,15 +11,8 @@ import {
 } from "@repo/shared/system-settings";
 
 import { runChatgptRegisterBatch } from "@/features/image-backend-pool/chatgpt-register-runner";
-import {
-  countAvailableWebAccountsInGroup,
-  refreshStaleWebBackendAccounts,
-  runAutoSub2ApiAccessTokenSync,
-} from "@/features/image-backend-pool/service";
-import {
-  buildCreditsExpireResponse,
-  summarizeExpiredPendingGenerations,
-} from "@/server/scheduled-jobs-response";
+import { countAvailableWebAccountsInGroup } from "@/features/image-backend-pool/service";
+import { summarizeExpiredPendingGenerations } from "@/server/scheduled-jobs-response";
 
 /**
  * 单次图像维护 cron 扫描的最大处理行数。
@@ -73,56 +64,6 @@ export async function runImageMaintenanceJob() {
   };
 }
 
-export async function runCreditsExpireJob() {
-  const results = await processExpiredBatches();
-
-  return {
-    ...buildCreditsExpireResponse(results),
-    timestamp: new Date().toISOString(),
-  };
-}
-
-export async function runReferralThawJob() {
-  const result = await thawReferralCommissions();
-
-  return {
-    success: true,
-    ...result,
-    timestamp: new Date().toISOString(),
-  };
-}
-
-export async function runWebAccountsRefreshJob() {
-  const staleMinutes = await getRuntimeSettingNumber(
-    "CHATGPT_WEB_ACCOUNT_REFRESH_STALE_MINUTES",
-    30,
-    { positive: true }
-  );
-  const limit = await getRuntimeSettingNumber(
-    "CHATGPT_WEB_ACCOUNT_REFRESH_LIMIT",
-    20,
-    { positive: true }
-  );
-  const result = await refreshStaleWebBackendAccounts({
-    staleMinutes,
-    limit,
-  });
-
-  return {
-    success: true,
-    ...result,
-    timestamp: new Date().toISOString(),
-  };
-}
-
-export async function runSub2ApiSyncJob(options?: { force?: boolean }) {
-  const result = await runAutoSub2ApiAccessTokenSync(options);
-  return {
-    ...result,
-    timestamp: new Date().toISOString(),
-  };
-}
-
 /**
  * 号池自动维持任务：目标分组可用 web 账号数低于目标值时，调注册机自动补号。
  *
@@ -131,8 +72,8 @@ export async function runSub2ApiSyncJob(options?: { force?: boolean }) {
  * 注册并导入目标分组。注册成功率受 OpenAI 机房 IP 检测影响（部分尝试会失败），
  * 故单轮可能补不满，靠多轮逼近目标；maxPerRun 限制单轮突发。
  *
- * 幂等/并发：本任务由内部调度器的 PG advisory 锁保证跨副本单飞；注册机 sidecar
- * 亦自带单飞，二者叠加确保不会并发跑多批。
+ * 幂等/并发：调用入口由 PostgreSQL 可恢复租约保证跨副本单飞；
+ * 注册机 sidecar 亦自带单飞，二者叠加防止并发跑多批。
  */
 export async function runWebAccountsReplenishJob() {
   const enabled = await getRuntimeSettingBoolean(
