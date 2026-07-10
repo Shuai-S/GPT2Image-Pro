@@ -19,6 +19,8 @@
 // 系统维护操作没有 apps/web 侧绑定需求，避免把 env-file 写入逻辑追进用户端。
 import "@repo/shared/uol/operations/admin";
 
+import { isSubscriptionPlan } from "@repo/shared/config/subscription-plan";
+import { getPlanQueueSettings } from "@repo/shared/subscription/services/plan-capabilities";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
 import type { OperationContext, Principal } from "@repo/shared/uol";
 import {
@@ -27,6 +29,11 @@ import {
   OperationError,
 } from "@repo/shared/uol";
 import {
+  getAsyncImageTask,
+  toAsyncImageTaskResponse,
+} from "@/features/external-api/async-image-tasks";
+import { enqueueEditableFileTask } from "@/features/external-api/editable-task-service";
+import {
   getUserImageBackendPreference,
   listAdminImageBackendPool,
   listSelectableImageBackendGroups,
@@ -34,7 +41,6 @@ import {
   runAutoSub2ApiAccessTokenSync,
   setUserImageBackendPreference,
 } from "@/features/image-backend-pool/service";
-import { runEditableFileForUser } from "@/features/image-generation/editable-file-operations";
 import { runImageGenerationForUser } from "@/features/image-generation/operations";
 import type { ImageQuality } from "@/features/image-generation/types";
 import {
@@ -133,8 +139,8 @@ bindExecute(
 );
 
 /**
- * file.generatePpt / file.generatePsd - 可编辑文件生成
- * 源: apps/web/src/features/image-generation/editable-file-operations.ts
+ * file.generatePpt / file.generatePsd - 可恢复可编辑文件任务入队
+ * 源: apps/web/src/features/external-api/editable-task-service.ts
  */
 function bindEditableFile(name: "file.generatePpt" | "file.generatePsd") {
   const kind = name === "file.generatePsd" ? "psd" : "ppt";
@@ -150,25 +156,61 @@ function bindEditableFile(name: "file.generatePpt" | "file.generatePsd") {
       _ctx: OperationContext
     ) => {
       const userId = requirePrincipalUserId(principal);
-      const result = await runEditableFileForUser({
+      const plan =
+        principal.type === "apiKey"
+          ? principal.plan
+          : (await getUserPlan(userId)).plan;
+      if (!isSubscriptionPlan(plan)) {
+        throw new OperationError(
+          "capability_required",
+          "A valid subscription plan is required for editable file generation"
+        );
+      }
+      const queueSettings = await getPlanQueueSettings(plan);
+      return await enqueueEditableFileTask({
         userId,
+        apiKeyId: principal.type === "apiKey" ? principal.apiKeyId : undefined,
         kind,
+        clientRequestId: input.clientRequestId,
         prompt: input.prompt,
         base64Images: input.base64Images ?? [],
-        taskId: input.clientRequestId,
+        priority: queueSettings.priority,
+        userConcurrency: queueSettings.userConcurrency,
       });
-      return {
-        taskId: input.clientRequestId,
-        kind,
-        primaryUrl: result.primaryUrl,
-        zipUrl: result.zipUrl,
-        creditsUsed: result.creditsCharged,
-      };
     }
   );
 }
 bindEditableFile("file.generatePpt");
 bindEditableFile("file.generatePsd");
+
+/**
+ * file.getEditableTask - 查询当前 Principal 拥有的持久可编辑文件任务。
+ *
+ * 会话用户可读取自己的任务；API Key 还必须与创建任务的 Key 完全一致。所有不匹配均
+ * 返回 not_found，避免通过错误差异探测其他资源。
+ */
+bindExecute(
+  "file.getEditableTask",
+  async (
+    input: { taskId: string },
+    principal: Principal,
+    ctx: OperationContext
+  ) => {
+    const userId = requirePrincipalUserId(principal);
+    const task = await getAsyncImageTask(input.taskId);
+    if (task?.object !== "editable_file_task") {
+      throw new OperationError("not_found", "Editable file task not found");
+    }
+    if (
+      task.userId !== userId ||
+      (principal.type === "apiKey" && task.apiKeyId !== principal.apiKeyId)
+    ) {
+      throw new OperationError("not_found", "Editable file task not found");
+    }
+    ctx.assertOwnership("editable file task", task.userId);
+    return toAsyncImageTaskResponse(task);
+  }
+);
 
 // TODO: image.generateAction - 委托 image.generate
 // TODO: image.delete - deleteGenerationAction 逻辑
@@ -313,11 +355,9 @@ bindExecute(
       "@repo/shared/system-settings"
     );
     const [staleMinutes, limit] = await Promise.all([
-      getRuntimeSettingNumber(
-        "CHATGPT_WEB_ACCOUNT_REFRESH_STALE_MINUTES",
-        30,
-        { positive: true }
-      ),
+      getRuntimeSettingNumber("CHATGPT_WEB_ACCOUNT_REFRESH_STALE_MINUTES", 30, {
+        positive: true,
+      }),
       getRuntimeSettingNumber("CHATGPT_WEB_ACCOUNT_REFRESH_LIMIT", 20, {
         positive: true,
       }),

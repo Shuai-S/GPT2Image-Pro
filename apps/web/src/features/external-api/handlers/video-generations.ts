@@ -20,7 +20,6 @@ import { z } from "zod";
 import {
   completeAsyncImageTask,
   createAsyncImageTask,
-  postAsyncImageCallback,
   toAsyncImageTaskResponse,
   validateCallbackUrl,
 } from "@/features/external-api/async-image-tasks";
@@ -144,11 +143,13 @@ export const postExternalVideoGenerations = withApiLogging(
     // generation_id 走 GET /v1/videos/{id} 轮询(后者 DB 持久,跨重启/多实例可查)。
     if (useAsync) {
       const videoId = nanoid();
-      const task = createAsyncImageTask({
+      const task = await createAsyncImageTask({
         userId: auth.userId,
         apiKeyId: auth.apiKeyId,
         model: parsed.data.model,
         generationIds: [videoId],
+        taskType: "video",
+        callbackUrl,
       });
 
       void (async () => {
@@ -157,10 +158,9 @@ export const postExternalVideoGenerations = withApiLogging(
             ...runInput,
             videoGenerationId: videoId,
           });
-          let completed: ReturnType<typeof completeAsyncImageTask>;
           if ("error" in result) {
             // 传 OpenAI 错误信封,使任务对象得到规范的 error:{message,...}（与图像异步一致）。
-            completed = completeAsyncImageTask(task.id, {
+            await completeAsyncImageTask(task.id, {
               error: toOpenAIErrorPayload(result.error),
             });
           } else {
@@ -169,7 +169,7 @@ export const postExternalVideoGenerations = withApiLogging(
                 result.storageKey,
                 await bucketName()
               ) ?? "";
-            completed = completeAsyncImageTask(task.id, {
+            await completeAsyncImageTask(task.id, {
               result: {
                 object: "video",
                 model: parsed.data.model,
@@ -179,22 +179,16 @@ export const postExternalVideoGenerations = withApiLogging(
               },
             });
           }
-          if (callbackUrl && completed) {
-            await postAsyncImageCallback(callbackUrl, completed);
-          }
         } catch (error) {
           logError(error, {
             source: "external-api-async-video",
             taskId: task.id,
           });
-          const failed = completeAsyncImageTask(task.id, {
+          await completeAsyncImageTask(task.id, {
             error: toOpenAIErrorPayload(
               error instanceof Error ? error.message : "Video generation failed"
             ),
           });
-          if (callbackUrl && failed) {
-            await postAsyncImageCallback(callbackUrl, failed).catch(() => {});
-          }
         }
       })();
 

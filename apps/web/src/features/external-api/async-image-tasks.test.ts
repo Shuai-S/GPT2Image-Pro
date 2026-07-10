@@ -1,4 +1,68 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+/**
+ * 外部异步任务公开契约测试。
+ *
+ * 使用内存 store mock 验证 PostgreSQL 持久任务的异步创建、终态映射与归属字段剥离，
+ * 同时覆盖 callback 的 HTTPS、SSRF、事件 ID 和重定向失败边界。
+ */
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const taskStoreState = vi.hoisted(() => ({
+  rows: new Map<string, Record<string, unknown>>(),
+}));
+
+vi.mock("./external-async-task-store", () => ({
+  createExternalAsyncTask: vi.fn(
+    async (input: {
+      id: string;
+      taskType: string;
+      objectType: string;
+      userId: string;
+      apiKeyId?: string;
+      model?: string;
+      status: string;
+      initialPayload: Record<string, unknown>;
+    }) => {
+      const now = new Date("2026-07-10T00:00:00.000Z");
+      const row = {
+        ...input,
+        apiKeyId: input.apiKeyId ?? null,
+        model: input.model ?? null,
+        initialPayload: input.initialPayload,
+        resultPayload: null,
+        errorPayload: null,
+        completedAt: null,
+        createdAt: now,
+      };
+      taskStoreState.rows.set(input.id, row);
+      return row;
+    }
+  ),
+  getExternalAsyncTask: vi.fn(async (id: string) =>
+    taskStoreState.rows.get(id)
+  ),
+  completeExternalAsyncTask: vi.fn(
+    async (input: {
+      id: string;
+      objectType: string;
+      resultPayload?: unknown;
+      errorPayload?: unknown;
+    }) => {
+      const existing = taskStoreState.rows.get(input.id);
+      if (!existing) return undefined;
+      const row = {
+        ...existing,
+        objectType: input.objectType,
+        status: input.errorPayload === undefined ? "completed" : "failed",
+        resultPayload: input.resultPayload ?? null,
+        errorPayload: input.errorPayload ?? null,
+        completedAt: new Date("2026-07-10T00:01:00.000Z"),
+      };
+      taskStoreState.rows.set(input.id, row);
+      return row;
+    }
+  ),
+}));
 
 vi.mock("@repo/shared/security/dns-pin", () => ({
   fetchWithDnsPin: vi.fn(),
@@ -13,10 +77,9 @@ vi.mock("@repo/shared/security/dns-pin", () => ({
 import { fetchWithDnsPin } from "@repo/shared/security/dns-pin";
 import {
   completeAsyncImageTask,
-  createAsyncEditableFileTask,
   createAsyncImageTask,
+  deliverAsyncImageCallback,
   type GenerationTaskRow,
-  postAsyncImageCallback,
   toAsyncImageTaskResponse,
   toGenerationImageTaskResponse,
   toVideoGenerationTaskResponse,
@@ -26,14 +89,18 @@ import {
 
 const mockFetchWithDnsPin = vi.mocked(fetchWithDnsPin);
 
+beforeEach(() => {
+  taskStoreState.rows.clear();
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
   mockFetchWithDnsPin.mockReset();
 });
 
 describe("external async image tasks", () => {
-  it("creates a public processing payload without owner fields", () => {
-    const task = createAsyncImageTask({
+  it("持久化创建公开 processing 响应且不泄露归属字段", async () => {
+    const task = await createAsyncImageTask({
       userId: "user_1",
       apiKeyId: "key_1",
       model: "gpt-image-2",
@@ -52,14 +119,14 @@ describe("external async image tasks", () => {
     expect(toAsyncImageTaskResponse(task)).not.toHaveProperty("apiKeyId");
   });
 
-  it("flattens completed image payload fields onto the task", () => {
-    const task = createAsyncImageTask({
+  it("把持久化完成结果平铺到任务响应", async () => {
+    const task = await createAsyncImageTask({
       userId: "user_1",
       model: "gpt-image-2",
       generationIds: ["gen_1", "gen_2"],
     });
 
-    const completed = completeAsyncImageTask(task.id, {
+    const completed = await completeAsyncImageTask(task.id, {
       result: {
         created: 123,
         data: [{ url: "https://cdn.example.com/image.png" }],
@@ -76,44 +143,6 @@ describe("external async image tasks", () => {
       credits_consumed: 1.2,
       generation_ids: ["gen_1", "gen_2"],
     });
-  });
-
-  it("creates + completes an editable file task keeping object=editable_file_task", () => {
-    const task = createAsyncEditableFileTask({
-      userId: "user_1",
-      apiKeyId: "key_1",
-      kind: "ppt",
-      clientTaskId: "ct_1",
-    });
-    expect(task).toMatchObject({
-      object: "editable_file_task",
-      status: "processing",
-      kind: "ppt",
-      client_task_id: "ct_1",
-    });
-    expect(task.id.startsWith("task_")).toBe(true);
-
-    const completed = completeAsyncImageTask(task.id, {
-      completedObject: "editable_file_task",
-      result: {
-        kind: "ppt",
-        result: { primary_url: "/api/storage/x.pptx", zip_url: null },
-        credits_charged: 25,
-      },
-    });
-    const publicTask = completed && toAsyncImageTaskResponse(completed);
-    expect(publicTask).toMatchObject({
-      id: task.id,
-      // 完成后仍是 editable_file_task(不被误标成 image)
-      object: "editable_file_task",
-      status: "completed",
-      kind: "ppt",
-      result: { primary_url: "/api/storage/x.pptx", zip_url: null },
-      credits_charged: 25,
-    });
-    // 归属字段被剥离,不外泄
-    expect(publicTask && "userId" in publicTask).toBe(false);
-    expect(publicTask && "apiKeyId" in publicTask).toBe(false);
   });
 
   it("maps a completed generation row to a task response with url + image_url", () => {
@@ -247,9 +276,9 @@ describe("external async image tasks", () => {
 
   it("posts callback payloads with the callback marker header", async () => {
     mockFetchWithDnsPin.mockResolvedValueOnce(new Response("ok"));
-    const task = createAsyncImageTask({ userId: "user_1" });
+    const task = await createAsyncImageTask({ userId: "user_1" });
 
-    await postAsyncImageCallback("https://example.com/callback", task);
+    await deliverAsyncImageCallback("https://example.com/callback", task);
 
     expect(mockFetchWithDnsPin).toHaveBeenCalledWith(
       expect.stringContaining("https://example.com/callback"),
@@ -258,6 +287,7 @@ describe("external async image tasks", () => {
         headers: expect.objectContaining({
           "Content-Type": "application/json",
           "X-Tokens-Callback": "true",
+          "X-Tokens-Callback-Event-Id": task.id,
         }),
       })
     );
@@ -270,9 +300,11 @@ describe("external async image tasks", () => {
         headers: { location: "http://169.254.169.254/latest/meta-data/" },
       })
     );
-    const task = createAsyncImageTask({ userId: "user_1" });
+    const task = await createAsyncImageTask({ userId: "user_1" });
 
-    await postAsyncImageCallback("https://example.com/callback", task);
+    await expect(
+      deliverAsyncImageCallback("https://example.com/callback", task)
+    ).rejects.toThrow("https");
 
     expect(mockFetchWithDnsPin).toHaveBeenCalledTimes(1);
   });

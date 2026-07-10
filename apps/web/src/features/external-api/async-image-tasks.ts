@@ -1,5 +1,20 @@
+/**
+ * 外部 API 异步任务公开契约。
+ *
+ * 职责：创建/读取/完成 PostgreSQL 持久 task_* 外壳，将内部任务行映射为兼容响应，
+ * 并提供经过 SSRF 防护、会显式抛错的 callback 投递函数。数据库状态机在
+ * external-async-task-store.ts，worker 重试在 editable-task-worker.ts 与
+ * async-callback-worker.ts。
+ */
+
 import { randomUUID } from "node:crypto";
-import { logError } from "@repo/shared/logger";
+import { materializeEditableTaskResult } from "./editable-task-result";
+import {
+  completeExternalAsyncTask,
+  createExternalAsyncTask,
+  type ExternalAsyncTaskRow,
+  getExternalAsyncTask,
+} from "./external-async-task-store";
 import {
   assertPublicCallbackUrl,
   fetchPublicCallback,
@@ -28,6 +43,9 @@ type CreateAsyncImageTaskParams = {
   apiKeyId?: string;
   model?: string;
   generationIds?: string[];
+  taskType?: "image" | "video";
+  callbackUrl?: string;
+  requestPayload?: Record<string, unknown>;
 };
 
 type CompleteAsyncImageTaskParams = {
@@ -38,17 +56,22 @@ type CompleteAsyncImageTaskParams = {
   completedObject?: AsyncImageTask["object"];
 };
 
-const TASK_TTL_MS = 30 * 60 * 1000;
 const CALLBACK_TIMEOUT_MS = 10_000;
-const asyncImageTasks = new Map<string, AsyncImageTask>();
 
-// 回调 URL 提交期校验：强制 https + 公网（内网黑名单复用 safe-image-fetch 单一来源）。
-export async function validateCallbackUrl(value: string) {
+/** 提交期校验 callback URL，强制 HTTPS 且目标为公网地址。 */
+export async function validateCallbackUrl(value: string): Promise<string> {
   const url = await assertPublicCallbackUrl(value);
   return url.toString();
 }
 
-export function createAsyncImageTask(params: CreateAsyncImageTaskParams) {
+/**
+ * 持久化一个 image/video 异步任务外壳。
+ *
+ * generationIds 指向底层产物真相；插入失败会向上传播，调用方不得启动后台闭包。
+ */
+export async function createAsyncImageTask(
+  params: CreateAsyncImageTaskParams
+): Promise<AsyncImageTask> {
   const id = `task_${randomUUID().replace(/-/g, "")}`;
   const generationIds = params.generationIds?.filter(Boolean);
   const now = new Date();
@@ -73,63 +96,95 @@ export function createAsyncImageTask(params: CreateAsyncImageTaskParams) {
           }
         : {}),
   };
-  asyncImageTasks.set(id, task);
-  const timeout = setTimeout(() => asyncImageTasks.delete(id), TASK_TTL_MS);
-  if (
-    typeof timeout === "object" &&
-    "unref" in timeout &&
-    typeof timeout.unref === "function"
-  ) {
-    timeout.unref();
-  }
-  return task;
-}
-
-type CreateAsyncEditableFileTaskParams = {
-  userId: string;
-  apiKeyId?: string;
-  kind: "ppt" | "psd";
-  clientTaskId?: string;
-};
-
-/**
- * 创建一个可编辑文件(PPT/PSD)异步任务(与图像任务同一内存存储/TTL/回调基础设施)。
- * object=editable_file_task;返回 task_<uuid> 立即回给客户端,后台跑完再 completeAsyncImageTask
- * (completedObject 传 editable_file_task 保持类型)。可编辑文件无 DB generation 行,故只走内存态。
- */
-export function createAsyncEditableFileTask(
-  params: CreateAsyncEditableFileTaskParams
-) {
-  const id = `task_${randomUUID().replace(/-/g, "")}`;
-  const now = new Date();
-  const task: AsyncImageTask = {
+  await createExternalAsyncTask({
     id,
-    object: "editable_file_task",
+    taskType: params.taskType ?? "image",
+    objectType: task.object,
     userId: params.userId,
     apiKeyId: params.apiKeyId,
-    kind: params.kind,
-    ...(params.clientTaskId ? { client_task_id: params.clientTaskId } : {}),
-    status: "processing",
-    created: Math.floor(now.getTime() / 1000),
-    created_at: now.toISOString(),
-  };
-  asyncImageTasks.set(id, task);
-  const timeout = setTimeout(() => asyncImageTasks.delete(id), TASK_TTL_MS);
-  if (
-    typeof timeout === "object" &&
-    "unref" in timeout &&
-    typeof timeout.unref === "function"
-  ) {
-    timeout.unref();
-  }
+    model: params.model,
+    status: "running",
+    initialPayload: task,
+    requestPayload: params.requestPayload,
+    callbackUrl: params.callbackUrl,
+  });
   return task;
 }
 
-export function getAsyncImageTask(id: string) {
-  return asyncImageTasks.get(id);
+/**
+ * 将持久任务行还原成对外兼容的 AsyncImageTask。
+ *
+ * initialPayload 保留创建响应；终态 result/error 字段覆盖其上，内部租约与回调字段
+ * 永不进入公开对象。
+ */
+export function toAsyncImageTask(row: ExternalAsyncTaskRow): AsyncImageTask {
+  const initialPayload =
+    row.initialPayload && typeof row.initialPayload === "object"
+      ? (row.initialPayload as Record<string, unknown>)
+      : {};
+  const materializedEditableResult =
+    row.taskType === "editable_file" && row.status === "completed"
+      ? materializeEditableTaskResult(row.resultPayload, row.userId)
+      : undefined;
+  const invalidEditableResult =
+    row.taskType === "editable_file" &&
+    row.status === "completed" &&
+    !materializedEditableResult;
+  const resultPayload = materializedEditableResult
+    ? materializedEditableResult
+    : row.taskType === "editable_file"
+      ? {}
+      : row.resultPayload && typeof row.resultPayload === "object"
+        ? (row.resultPayload as Record<string, unknown>)
+        : row.resultPayload === null
+          ? {}
+          : { result: row.resultPayload };
+  const errorPayload =
+    row.errorPayload && typeof row.errorPayload === "object"
+      ? (row.errorPayload as Record<string, unknown>)
+      : row.errorPayload === null
+        ? {}
+        : { error: row.errorPayload };
+  return {
+    ...initialPayload,
+    ...resultPayload,
+    ...(invalidEditableResult
+      ? { error: { message: "Editable file task result is unavailable." } }
+      : errorPayload),
+    id: row.id,
+    object: row.objectType as AsyncImageTask["object"],
+    userId: row.userId,
+    apiKeyId: row.apiKeyId ?? undefined,
+    model: row.model ?? undefined,
+    status: invalidEditableResult
+      ? "failed"
+      : row.status === "completed"
+        ? "completed"
+        : row.status === "failed"
+          ? "failed"
+          : "processing",
+    created_at: row.createdAt.toISOString(),
+    ...(row.completedAt
+      ? {
+          completed: Math.floor(row.completedAt.getTime() / 1000),
+          completed_at: row.completedAt.toISOString(),
+        }
+      : {}),
+  };
 }
 
-export function toAsyncImageTaskResponse(task: AsyncImageTask) {
+/** 按 task id 读取并物化公开任务；不存在时返回 undefined。 */
+export async function getAsyncImageTask(
+  id: string
+): Promise<AsyncImageTask | undefined> {
+  const row = await getExternalAsyncTask(id);
+  return row ? toAsyncImageTask(row) : undefined;
+}
+
+/** 删除内部 userId/apiKeyId 后生成可直接编码的公开任务对象。 */
+export function toAsyncImageTaskResponse(
+  task: AsyncImageTask
+): Omit<AsyncImageTask, "userId" | "apiKeyId"> {
   const { userId: _userId, apiKeyId: _apiKeyId, ...publicTask } = task;
   return publicTask;
 }
@@ -149,10 +204,8 @@ export type GenerationTaskRow = {
 /**
  * 把一条 generation 记录转成 /v1/images/{id} 的响应（DB 回退路径，纯函数 DB-free）。
  *
- * 内存异步任务存储是临时态（仅 async=true 创建、按 task_<uuid> 为键、进程内、30 分钟
- * TTL、多实例不共享、重启即清），同步请求拿到的是 generation_id 而非 task id。本函数让
- * 接口可按 generation_id 从 DB 持久取回，对同步/异步、跨实例/重启都稳。归属校验（userId）
- * 由调用方在查库后完成，本函数只做结构映射，不含权限判断。
+ * task_* 外壳与 generation 都已持久化；同步请求拿到的是 generation_id 而非 task id。
+ * 本函数让接口按 generation_id 从产物真相取回，归属校验由调用方完成。
  *
  * 结构对齐同步成功响应（data:[{url, revised_prompt}]）+ 任务状态字段；并额外给
  * image_url 顶层兜底，便于只取单一 URL 的客户端。
@@ -250,12 +303,15 @@ export function toVideoGenerationTaskResponse(
   };
 }
 
-export function completeAsyncImageTask(
+export async function completeAsyncImageTask(
   id: string,
   params: CompleteAsyncImageTaskParams
-) {
-  const existing = asyncImageTasks.get(id);
+): Promise<AsyncImageTask | undefined> {
+  const existing = await getAsyncImageTask(id);
   if (!existing) return undefined;
+  if (existing.status === "completed" || existing.status === "failed") {
+    return existing;
+  }
 
   const now = new Date();
   const completedAt = now.toISOString();
@@ -274,14 +330,26 @@ export function completeAsyncImageTask(
     completed: Math.floor(now.getTime() / 1000),
     completed_at: completedAt,
   };
-  asyncImageTasks.set(id, task);
-  return task;
+  const row = await completeExternalAsyncTask({
+    id,
+    objectType: task.object,
+    resultPayload: params.error ? undefined : payloadFields,
+    errorPayload: params.error ? payloadFields : undefined,
+  });
+  if (row) return toAsyncImageTask(row);
+  return await getAsyncImageTask(id);
 }
 
-export async function postAsyncImageCallback(
+/**
+ * 向已提交期校验的 callback URL 投递一个公开任务终态。
+ *
+ * 每次重试使用稳定 task id 作为事件 ID；逐跳网络校验阻断 DNS rebinding/重定向 SSRF。
+ * 超时、网络错误与非 2xx 响应都会抛出，由 outbox worker 安排指数退避。
+ */
+export async function deliverAsyncImageCallback(
   callbackUrl: string,
   payload: AsyncImageTask
-) {
+): Promise<void> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), CALLBACK_TIMEOUT_MS);
   try {
@@ -291,22 +359,14 @@ export async function postAsyncImageCallback(
       headers: {
         "Content-Type": "application/json",
         "X-Tokens-Callback": "true",
+        "X-Tokens-Callback-Event-Id": payload.id,
       },
       body: JSON.stringify(toAsyncImageTaskResponse(payload)),
     });
+    await response.body?.cancel();
     if (!response.ok) {
-      logError(new Error(`Callback returned HTTP ${response.status}`), {
-        source: "external-api-async-image-callback",
-        taskId: payload.id,
-        callbackUrl,
-      });
+      throw new Error(`Callback returned HTTP ${response.status}`);
     }
-  } catch (error) {
-    logError(error, {
-      source: "external-api-async-image-callback",
-      taskId: payload.id,
-      callbackUrl,
-    });
   } finally {
     clearTimeout(timeout);
   }

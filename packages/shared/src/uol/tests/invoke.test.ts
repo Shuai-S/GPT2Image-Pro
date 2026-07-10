@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 const capabilityMock = vi.hoisted(() => ({
@@ -14,10 +14,10 @@ vi.mock("../../subscription/services/plan-capabilities", () => ({
   canUsePlanCapability: capabilityMock.canUsePlanCapability,
 }));
 
-import { invokeOperation } from "../invoke";
-import { defineOperation, clearRegistry } from "../registry";
 import { OperationError } from "../errors";
+import { invokeOperation } from "../invoke";
 import type { Principal } from "../principal";
+import { clearRegistry, defineOperation } from "../registry";
 import type { OperationContext } from "../types";
 
 const userPrincipal: Principal = {
@@ -102,7 +102,7 @@ describe("UOL Invoke Gateway", () => {
   describe("operation lookup", () => {
     it("throws not_found for unknown operation", async () => {
       await expect(
-        invokeOperation("nonexistent.op", {}, userPrincipal),
+        invokeOperation("nonexistent.op", {}, userPrincipal)
       ).rejects.toThrow(OperationError);
 
       try {
@@ -123,7 +123,7 @@ describe("UOL Invoke Gateway", () => {
         await invokeOperation(
           "math.add",
           { a: "not-a-number", b: 2 },
-          userPrincipal,
+          userPrincipal
         );
         expect.fail("Should have thrown");
       } catch (e) {
@@ -139,7 +139,7 @@ describe("UOL Invoke Gateway", () => {
       const result = await invokeOperation<{ sum: number }>(
         "math.add",
         { a: 3, b: 4 },
-        userPrincipal,
+        userPrincipal
       );
       expect(result.sum).toBe(7);
     });
@@ -150,11 +150,7 @@ describe("UOL Invoke Gateway", () => {
       registerIdempotentOp();
 
       try {
-        await invokeOperation(
-          "credits.consume",
-          { amount: 10 },
-          userPrincipal,
-        );
+        await invokeOperation("credits.consume", { amount: 10 }, userPrincipal);
         expect.fail("Should have thrown");
       } catch (e) {
         expect(e).toBeInstanceOf(OperationError);
@@ -169,7 +165,7 @@ describe("UOL Invoke Gateway", () => {
         await invokeOperation(
           "credits.consume",
           { amount: 10, sourceRef: "   " },
-          userPrincipal,
+          userPrincipal
         );
         expect.fail("Should have thrown");
       } catch (e) {
@@ -185,7 +181,7 @@ describe("UOL Invoke Gateway", () => {
       const result = await invokeOperation<{ remaining: number }>(
         "credits.consume",
         { amount: 10, sourceRef: "gen-123" },
-        userPrincipal,
+        userPrincipal
       );
       expect(result.remaining).toBe(90);
     });
@@ -240,14 +236,14 @@ describe("UOL Invoke Gateway", () => {
       });
 
       await expect(
-        invokeOperation("image.batch", { count: 2 }, apiKeyPrincipal),
+        invokeOperation("image.batch", { count: 2 }, apiKeyPrincipal)
       ).rejects.toMatchObject({
         code: "capability_required",
       });
       expect(execute).not.toHaveBeenCalled();
       expect(capabilityMock.canUsePlanCapability).toHaveBeenCalledWith(
         "free",
-        "imageGeneration.batch",
+        "imageGeneration.batch"
       );
     });
 
@@ -269,7 +265,7 @@ describe("UOL Invoke Gateway", () => {
       });
 
       await expect(
-        invokeOperation("external.responses", {}, apiKeyPrincipal),
+        invokeOperation("external.responses", {}, apiKeyPrincipal)
       ).resolves.toEqual({ ok: true });
     });
 
@@ -298,16 +294,16 @@ describe("UOL Invoke Gateway", () => {
       });
 
       await expect(
-        invokeOperation("image.dynamic", { count: 1 }, apiKeyPrincipal),
+        invokeOperation("image.dynamic", { count: 1 }, apiKeyPrincipal)
       ).resolves.toEqual({ ok: true });
       expect(capabilityMock.canUsePlanCapability).not.toHaveBeenCalled();
 
       await expect(
-        invokeOperation("image.dynamic", { count: 2 }, apiKeyPrincipal),
+        invokeOperation("image.dynamic", { count: 2 }, apiKeyPrincipal)
       ).resolves.toEqual({ ok: true });
       expect(capabilityMock.canUsePlanCapability).toHaveBeenCalledWith(
         "free",
-        "imageGeneration.batch",
+        "imageGeneration.batch"
       );
     });
 
@@ -331,7 +327,7 @@ describe("UOL Invoke Gateway", () => {
       });
 
       await expect(
-        invokeOperation("cap.unknown", {}, apiKeyPrincipal),
+        invokeOperation("cap.unknown", {}, apiKeyPrincipal)
       ).rejects.toMatchObject({
         code: "capability_required",
       });
@@ -356,7 +352,7 @@ describe("UOL Invoke Gateway", () => {
       });
 
       await expect(
-        invokeOperation("system.cap", {}, systemPrincipal),
+        invokeOperation("system.cap", {}, systemPrincipal)
       ).resolves.toEqual({ ok: true });
       expect(capabilityMock.canUsePlanCapability).not.toHaveBeenCalled();
     });
@@ -369,7 +365,7 @@ describe("UOL Invoke Gateway", () => {
       const result = await invokeOperation<{ sum: number }>(
         "math.add",
         { a: 10, b: 20 },
-        userPrincipal,
+        userPrincipal
       );
       expect(result).toEqual({ sum: 30 });
     });
@@ -399,7 +395,7 @@ describe("UOL Invoke Gateway", () => {
         "ctx.capture",
         {},
         userPrincipal,
-        { requestId: "custom-req-id" },
+        { requestId: "custom-req-id" }
       );
       expect(result.requestId).toBe("custom-req-id");
       expect(capturedCtx?.requestId).toBe("custom-req-id");
@@ -426,7 +422,7 @@ describe("UOL Invoke Gateway", () => {
       const result = await invokeOperation<{ requestId: string }>(
         "ctx.autoid",
         {},
-        userPrincipal,
+        userPrincipal
       );
       expect(result.requestId).toBeTruthy();
       expect(typeof result.requestId).toBe("string");
@@ -451,7 +447,7 @@ describe("UOL Invoke Gateway", () => {
           throw new OperationError(
             "quota_exceeded",
             "You have reached your limit",
-            { limit: 100 },
+            { limit: 100 }
           );
         },
       });
@@ -463,7 +459,7 @@ describe("UOL Invoke Gateway", () => {
         expect(e).toBeInstanceOf(OperationError);
         expect((e as OperationError).code).toBe("quota_exceeded");
         expect((e as OperationError).message).toBe(
-          "You have reached your limit",
+          "You have reached your limit"
         );
         expect((e as OperationError).details).toEqual({ limit: 100 });
         expect((e as OperationError).httpStatus).toBe(429);
@@ -577,10 +573,35 @@ describe("UOL Invoke Gateway", () => {
         expect((e as OperationError).code).toBe("internal_error");
         // 不泄露内部错误细节
         expect((e as OperationError).message).toBe(
-          "An unexpected error occurred",
+          "An unexpected error occurred"
         );
         expect((e as OperationError).httpStatus).toBe(500);
       }
+    });
+
+    it("rejects execute output that violates the declared schema", async () => {
+      defineOperation({
+        name: "err.invalid-output",
+        domain: "credits",
+        title: "Invalid Output",
+        description: "Returns an undeclared response shape",
+        input: z.object({}),
+        output: z.object({ count: z.number().int().nonnegative() }),
+        access: { kind: "public" },
+        readOnly: true,
+        destructive: false,
+        idempotency: { kind: "natural" },
+        sideEffects: [],
+        execute: async () => ({ count: "not-a-number" }),
+      });
+
+      await expect(
+        invokeOperation("err.invalid-output", {}, userPrincipal)
+      ).rejects.toMatchObject({
+        code: "internal_error",
+        httpStatus: 500,
+        message: "Operation returned an invalid response",
+      });
     });
   });
 
@@ -607,7 +628,7 @@ describe("UOL Invoke Gateway", () => {
       const result = await invokeOperation<{ ok: boolean }>(
         "owner.pass",
         {},
-        userPrincipal,
+        userPrincipal
       );
       expect(result.ok).toBe(true);
     });
@@ -663,7 +684,7 @@ describe("UOL Invoke Gateway", () => {
       const result = await invokeOperation<{ ok: boolean }>(
         "owner.system",
         {},
-        systemPrincipal,
+        systemPrincipal
       );
       expect(result.ok).toBe(true);
     });

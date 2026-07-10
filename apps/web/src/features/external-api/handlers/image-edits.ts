@@ -12,7 +12,6 @@ import type { NextRequest } from "next/server";
 import {
   completeAsyncImageTask,
   createAsyncImageTask,
-  postAsyncImageCallback,
   toAsyncImageTaskResponse,
   validateCallbackUrl,
 } from "@/features/external-api/async-image-tasks";
@@ -879,11 +878,12 @@ export const postExternalImageEdits = withApiLogging(
       if (useAsync) {
         const created = Math.floor(Date.now() / 1000);
         const generationIds = Array.from({ length: count }, () => randomUUID());
-        const task = createAsyncImageTask({
+        const task = await createAsyncImageTask({
           userId: auth.userId,
           apiKeyId: auth.apiKeyId,
           model,
           generationIds,
+          callbackUrl,
         });
 
         void (async () => {
@@ -905,7 +905,7 @@ export const postExternalImageEdits = withApiLogging(
               size,
             }
           );
-          const completedTask = completeAsyncImageTask(task.id, {
+          await completeAsyncImageTask(task.id, {
             error:
               resultPayload &&
               typeof resultPayload === "object" &&
@@ -914,19 +914,13 @@ export const postExternalImageEdits = withApiLogging(
                 : undefined,
             result: resultPayload,
           });
-          if (completedTask && callbackUrl) {
-            await postAsyncImageCallback(callbackUrl, completedTask);
-          }
         })().catch(async (error) => {
           const errorPayload = toOpenAIErrorPayload(
             error instanceof Error ? error.message : "Async image edit failed"
           );
-          const completedTask = completeAsyncImageTask(task.id, {
+          await completeAsyncImageTask(task.id, {
             error: errorPayload,
           });
-          if (completedTask && callbackUrl) {
-            await postAsyncImageCallback(callbackUrl, completedTask);
-          }
         });
 
         return Response.json(toAsyncImageTaskResponse(task));

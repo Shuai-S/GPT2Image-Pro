@@ -29,20 +29,20 @@ export const getExternalImageTask = withApiLogging(
       return openAIImageError("Invalid task_id.");
     }
 
-    // 1. 先查内存异步任务存储(async=true 创建,按 task_<uuid> 为键)。
-    const task = getAsyncImageTask(taskId);
+    // 1. 先查 PostgreSQL 持久异步任务外壳(async=true 创建,按 task_<uuid> 为键)。
+    const task = await getAsyncImageTask(taskId);
     if (
       task &&
       task.userId === auth.userId &&
-      (!task.apiKeyId || task.apiKeyId === auth.apiKeyId)
+      task.apiKeyId === auth.apiKeyId
     ) {
       return Response.json(toAsyncImageTaskResponse(task), {
         headers: { "Cache-Control": "no-store" },
       });
     }
 
-    // 2. 未命中(同步请求拿到的是 generation_id 而非 task id;或多实例/重启/30 分钟
-    // TTL 已清)→ 把 taskId 当 generation_id 从 DB 持久取回。getGenerationById 不带
+    // 2. 未命中时把 taskId 当 generation_id 从 DB 产物真相取回。同步请求返回的是
+    // generation_id 而非 task id；getGenerationById 不带
     // 归属过滤,必须在此显式校验 userId 防越权(IDOR):只返回归属本人的记录。
     const row = await getGenerationById(taskId);
     if (row && row.userId === auth.userId) {
@@ -57,3 +57,9 @@ export const getExternalImageTask = withApiLogging(
     return openAIImageError("Image task not found or expired.", 404);
   }
 );
+/**
+ * 外部 API 图像任务查询 handler。
+ *
+ * 优先读取持久 task_* 外壳；同步 generation id 则回退产物表。两条路径都校验用户归属，
+ * task_* 还要求创建它的 API Key 完全一致，避免同用户不同 Key 越权读取。
+ */

@@ -1,23 +1,117 @@
 /**
- * 可编辑文件(PPT/PSD)编排的纯函数(DB-free,便于单测):base64/data URL 解码、扩展名、服务名。
- * 使用方:editable-file-operations.ts。无 @repo 依赖。
+ * 可编辑文件(PPT/PSD)编排的纯函数。
+ *
+ * 职责：严格解码并限制外部图片输入，提供产物扩展名和计费服务名。该文件保持
+ * DB-free，供同步 handler、持久 worker 与单元测试共同复用。
  */
 
-/** 解码 base64 或 data URL(data:<mime>;base64,<data>)→ 输入图文件(供 chatgpt-web 上传)。 */
+export const MAX_EDITABLE_INPUT_IMAGES = 4;
+export const MAX_EDITABLE_INPUT_IMAGE_BYTES = 25 * 1024 * 1024;
+export const MAX_EDITABLE_INPUT_TOTAL_BYTES = 50 * 1024 * 1024;
+export const MAX_EDITABLE_INPUT_BASE64_CHARACTERS =
+  Math.ceil(MAX_EDITABLE_INPUT_IMAGE_BYTES / 3) * 4 + 256;
+
+export type EditableInputImage = {
+  data: Buffer;
+  name: string;
+  type: string;
+};
+
+/**
+ * 从裸 base64 或 data URL 中提取 MIME 与编码正文。
+ *
+ * 在移除空白和分配 Buffer 前先检查字符串长度；data URL 必须明确使用 base64，MIME
+ * 必须是 image/*。非法字符、错误 padding 与空正文都会抛错。
+ */
+function parseBase64ImageInput(input: string): {
+  base64: string;
+  mime: string;
+} {
+  if (input.length > MAX_EDITABLE_INPUT_BASE64_CHARACTERS) {
+    throw new Error("editable image input exceeds 25 MiB");
+  }
+
+  const trimmed = input.trim();
+  const dataUrl = trimmed.match(/^data:([^;,]+);base64,([\s\S]*)$/i);
+  if (trimmed.startsWith("data:") && !dataUrl) {
+    throw new Error("editable image data URL must use base64 encoding");
+  }
+
+  const mime = (dataUrl?.[1] ?? "image/png").trim().toLowerCase();
+  if (!mime.startsWith("image/") || mime.length > 128) {
+    throw new Error("editable image MIME type is invalid");
+  }
+
+  const unpadded = (dataUrl?.[2] ?? trimmed).replace(/\s/g, "");
+  if (
+    unpadded.length === 0 ||
+    unpadded.length % 4 === 1 ||
+    !/^[A-Za-z0-9+/]*={0,2}$/.test(unpadded)
+  ) {
+    throw new Error("editable image base64 is invalid");
+  }
+  const base64 = unpadded.padEnd(
+    unpadded.length + ((4 - (unpadded.length % 4)) % 4),
+    "="
+  );
+  return { base64, mime };
+}
+
+/**
+ * 解码一张 base64 图片供 ChatGPT Web 上传。
+ *
+ * @param input 裸 base64 或 data:image/*;base64 URL。
+ * @param index 生成稳定文件名所用的 1-based 序号。
+ * @returns 受大小限制的图片 Buffer、文件名与 MIME。
+ * @throws 输入非法、为空或解码后超过 25 MiB。
+ */
 export function decodeBase64DataUrl(
   input: string,
   index: number
-): { data: Buffer; name: string; type: string } {
-  const trimmed = input.trim();
-  const match = trimmed.match(/^data:([^;,]+)?(?:;base64)?,(.*)$/s);
-  const mime = (match?.[1] || "image/png").trim();
-  const base64 = (match ? match[2] || "" : trimmed).replace(/\s/g, "");
+): EditableInputImage {
+  const { base64, mime } = parseBase64ImageInput(input);
   const data = Buffer.from(base64, "base64");
+  if (data.byteLength === 0) {
+    throw new Error("editable image input is empty");
+  }
+  if (data.byteLength > MAX_EDITABLE_INPUT_IMAGE_BYTES) {
+    throw new Error("editable image input exceeds 25 MiB");
+  }
   const ext = mime.split("/")[1]?.split("+")[0] || "png";
   return { data, name: `input_${index}.${ext}`, type: mime };
 }
 
-/** 产物落地扩展名:zip 恒 zip;主文件 psd→psd、ppt→pptx。 */
+/**
+ * 校验并解码一次可编辑文件请求的全部图片。
+ *
+ * PSD 至少一张，所有类型最多四张；累计解码字节不能超过 50 MiB。函数只分配受控
+ * Buffer，不访问数据库、网络或对象存储。
+ */
+export function decodeEditableInputImages(input: {
+  kind: "ppt" | "psd";
+  base64Images: readonly string[];
+}): EditableInputImage[] {
+  if (input.kind === "psd" && input.base64Images.length === 0) {
+    throw new Error("base64_images is empty");
+  }
+  if (input.base64Images.length > MAX_EDITABLE_INPUT_IMAGES) {
+    throw new Error(
+      `base64_images must contain at most ${MAX_EDITABLE_INPUT_IMAGES} images`
+    );
+  }
+
+  let totalBytes = 0;
+  return input.base64Images.map((raw, index) => {
+    const image = decodeBase64DataUrl(raw, index + 1);
+    totalBytes += image.data.byteLength;
+    if (totalBytes > MAX_EDITABLE_INPUT_TOTAL_BYTES) {
+      throw new Error("base64_images total size exceeds 50 MiB");
+    }
+    return image;
+  });
+}
+
+/** 计算产物扩展名；zip 恒为 zip，主文件按 kind 返回 pptx 或 psd。 */
 export function editableFileExtension(
   kind: "ppt" | "psd",
   isZip: boolean
@@ -26,7 +120,7 @@ export function editableFileExtension(
   return kind === "psd" ? "psd" : "pptx";
 }
 
-/** 扣费/审计用的服务名(区分 ppt/psd)。 */
+/** 返回区分 PPT/PSD 的扣费与审计服务名。 */
 export function editableFileServiceName(kind: "ppt" | "psd"): string {
   return `editable_file_${kind}`;
 }

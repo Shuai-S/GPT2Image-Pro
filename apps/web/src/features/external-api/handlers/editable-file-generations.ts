@@ -9,38 +9,46 @@
  * 两种返回(与图像/视频 API 一致):
  * - 同步(默认):keep-alive JSON 撑住长任务,跑完返回 editable_file_task 结果。
  * - 异步(async:true 或 ?async=true):立即返回 task_<uuid>,后台跑完更新任务;可轮询
- *   GET /v1/editable-file-tasks/{task_id} 或用 callback_url 完成回调。任务为进程内内存态、
- *   30 分钟 TTL、多实例不共享(可编辑文件无 DB generation 行,故不作持久回退)。
- * client_task_id 作计费 sourceRef 幂等键(防重复扣;任务级幂等为后续迭代)。
+ *   GET /v1/editable-file-tasks/{task_id} 或用 callback_url 完成回调。任务、worker 租约和
+ *   callback outbox 持久化到 PostgreSQL，可跨重启与多副本接管。
+ * client_task_id 同时作为任务和计费幂等键；同键不同内容返回 409。
  */
 import { randomUUID } from "node:crypto";
 import { withApiLogging } from "@repo/shared/api-logger";
-import { canUsePlanCapability } from "@repo/shared/subscription/services/plan-capabilities";
+import {
+  canUsePlanCapability,
+  getPlanQueueSettings,
+} from "@repo/shared/subscription/services/plan-capabilities";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 
 import {
-  completeAsyncImageTask,
-  createAsyncEditableFileTask,
-  postAsyncImageCallback,
+  getAsyncImageTask,
   toAsyncImageTaskResponse,
   validateCallbackUrl,
 } from "@/features/external-api/async-image-tasks";
 import { authenticateExternalApiRequest } from "@/features/external-api/auth";
 import {
+  EditableTaskConflictError,
+  enqueueEditableFileTask,
+} from "@/features/external-api/editable-task-service";
+import {
   createJsonKeepAliveResponse,
   openAIImageError,
-  toOpenAIErrorPayload,
 } from "@/features/external-api/images";
 import type { EditableFileKind } from "@/features/image-generation/chatgpt-web";
 import { runEditableFileForUser } from "@/features/image-generation/editable-file-operations";
+import { MAX_EDITABLE_INPUT_BASE64_CHARACTERS } from "@/features/image-generation/editable-file-util";
 
 const editableFileSchema = z.object({
   client_task_id: z.string().max(200).optional(),
   prompt: z.string().min(1, "prompt is required").max(8000),
-  base64_images: z.array(z.string()).default([]),
+  base64_images: z
+    .array(z.string().max(MAX_EDITABLE_INPUT_BASE64_CHARACTERS))
+    .max(4)
+    .default([]),
   async: z.boolean().optional(),
-  callback_url: z.string().url().optional(),
+  callback_url: z.string().url().max(2048).optional(),
 });
 
 function makeEditableFileHandler(
@@ -127,42 +135,30 @@ function makeEditableFileHandler(
     };
 
     if (useAsync) {
-      const task = createAsyncEditableFileTask({
-        userId: auth.userId,
-        apiKeyId: auth.apiKeyId,
-        kind,
-        clientTaskId,
-      });
-      // 后台跑完更新内存任务 + 可选回调;fire-and-forget(常驻进程,promise 随进程存活)。
-      void (async () => {
-        try {
-          const payload = await runOnce();
-          const completed = completeAsyncImageTask(task.id, {
-            completedObject: "editable_file_task",
-            result: {
-              taskId: payload.taskId,
-              kind: payload.kind,
-              result: payload.result,
-              credits_charged: payload.credits_charged,
-            },
-          });
-          if (completed && callbackUrl) {
-            await postAsyncImageCallback(callbackUrl, completed);
-          }
-        } catch (error) {
-          const errorPayload = toOpenAIErrorPayload(
-            error instanceof Error ? error.message : `${label} generation failed`
-          );
-          const completed = completeAsyncImageTask(task.id, {
-            completedObject: "editable_file_task",
-            error: errorPayload,
-          });
-          if (completed && callbackUrl) {
-            await postAsyncImageCallback(callbackUrl, completed);
-          }
+      try {
+        const queueSettings = await getPlanQueueSettings(auth.plan);
+        const enqueued = await enqueueEditableFileTask({
+          userId: auth.userId,
+          apiKeyId: auth.apiKeyId,
+          kind,
+          clientRequestId: taskId,
+          prompt: parsed.data.prompt,
+          base64Images: parsed.data.base64_images,
+          callbackUrl,
+          priority: queueSettings.priority,
+          userConcurrency: queueSettings.userConcurrency,
+        });
+        const task = await getAsyncImageTask(enqueued.taskId);
+        if (!task) throw new Error("Failed to load persisted editable task");
+        return Response.json(toAsyncImageTaskResponse(task), {
+          headers: { "Cache-Control": "no-store" },
+        });
+      } catch (error) {
+        if (error instanceof EditableTaskConflictError) {
+          return openAIImageError(error.message, 409, "idempotency_conflict");
         }
-      })();
-      return Response.json(toAsyncImageTaskResponse(task));
+        throw error;
+      }
     }
 
     return createJsonKeepAliveResponse(runOnce);

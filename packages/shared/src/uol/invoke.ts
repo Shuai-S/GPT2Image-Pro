@@ -232,7 +232,21 @@ export async function invokeOperation<TOutput = unknown>(
   // 7. 执行业务逻辑
   try {
     const output = await def.execute(input, principal, ctx);
-    return output as TOutput;
+    const outputResult = def.output.safeParse(output);
+    if (!outputResult.success) {
+      logError(outputResult.error, {
+        source: "uol-output-validation",
+        operation: name,
+        requestId: ctx.requestId,
+      });
+      throw new OperationError(
+        "internal_error",
+        "Operation returned an invalid response",
+        undefined,
+        500
+      );
+    }
+    return outputResult.data as TOutput;
   } catch (e) {
     // OperationError 直接透传
     if (e instanceof OperationError) throw e;

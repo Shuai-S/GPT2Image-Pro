@@ -11,7 +11,6 @@ import { z } from "zod";
 import {
   completeAsyncImageTask,
   createAsyncImageTask,
-  postAsyncImageCallback,
   toAsyncImageTaskResponse,
   validateCallbackUrl,
 } from "@/features/external-api/async-image-tasks";
@@ -345,11 +344,12 @@ export const postExternalImageGenerations = withApiLogging(
     if (useAsync) {
       const created = Math.floor(Date.now() / 1000);
       const generationIds = Array.from({ length: count }, () => randomUUID());
-      const task = createAsyncImageTask({
+      const task = await createAsyncImageTask({
         userId: auth.userId,
         apiKeyId: auth.apiKeyId,
         model: imageModel,
         generationIds,
+        callbackUrl,
       });
 
       void (async () => {
@@ -372,7 +372,7 @@ export const postExternalImageGenerations = withApiLogging(
             size: input.size,
           }
         );
-        const completedTask = completeAsyncImageTask(task.id, {
+        await completeAsyncImageTask(task.id, {
           error:
             resultPayload &&
             typeof resultPayload === "object" &&
@@ -381,21 +381,15 @@ export const postExternalImageGenerations = withApiLogging(
               : undefined,
           result: resultPayload,
         });
-        if (completedTask && callbackUrl) {
-          await postAsyncImageCallback(callbackUrl, completedTask);
-        }
       })().catch(async (error) => {
         const errorPayload = toOpenAIErrorPayload(
           error instanceof Error
             ? error.message
             : "Async image generation failed"
         );
-        const completedTask = completeAsyncImageTask(task.id, {
+        await completeAsyncImageTask(task.id, {
           error: errorPayload,
         });
-        if (completedTask && callbackUrl) {
-          await postAsyncImageCallback(callbackUrl, completedTask);
-        }
       });
 
       return Response.json(toAsyncImageTaskResponse(task));

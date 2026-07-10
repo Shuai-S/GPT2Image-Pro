@@ -1,11 +1,17 @@
 /**
- * Next.js Instrumentation Hook
+ * Next.js 服务端 instrumentation 入口。
  *
- * 用于在服务器启动时执行初始化逻辑
- * https://nextjs.org/docs/app/building-your-application/optimizing/instrumentation
+ * 职责：按 Node/Edge runtime 初始化系统设置、超级管理员、内部调度器、持久异步 worker
+ * 与 Sentry。生产构建阶段不会安装后台循环。
  */
 
-export async function register() {
+/**
+ * 初始化当前 Next.js runtime。
+ *
+ * Node 副本各自启动 worker，跨副本互斥由 PostgreSQL 租约保证；初始化错误向上抛，
+ * 避免服务在关键启动步骤失败后悄悄进入部分可用状态。
+ */
+export async function register(): Promise<void> {
   // 服务端初始化
   if (process.env.NEXT_RUNTIME === "nodejs") {
     const { bootstrapSystemSettingsEnv } = await import(
@@ -20,6 +26,17 @@ export async function register() {
       "./server/internal-job-scheduler"
     );
     await startInternalJobScheduler();
+    if (process.env.NEXT_PHASE !== "phase-production-build") {
+      const [{ startEditableTaskWorker }, { startAsyncCallbackWorker }] =
+        await Promise.all([
+          import("./features/external-api/editable-task-worker"),
+          import("./features/external-api/async-callback-worker"),
+        ]);
+      await Promise.all([
+        startEditableTaskWorker(),
+        startAsyncCallbackWorker(),
+      ]);
+    }
     // Sentry 服务端初始化
     await import("../sentry.server.config");
   }

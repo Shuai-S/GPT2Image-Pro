@@ -1,8 +1,8 @@
 /**
  * Web UOL 延迟绑定的身份边界测试。
  *
- * 覆盖会产生扣费的图像与可编辑文件操作，确保业务层只使用 Principal 中
- * 已鉴权的用户身份，忽略传输参数中伪造的 userId，并强制 API Key 中转约束。
+ * 覆盖会产生扣费或查询持久任务的图像与可编辑文件操作，确保业务层只使用
+ * Principal 中已鉴权的身份，忽略传输参数中伪造的 userId，并隐藏跨用户资源。
  */
 
 import {
@@ -22,15 +22,25 @@ import {
 
 const mocks = vi.hoisted(() => ({
   runImageGenerationForUser: vi.fn(),
-  runEditableFileForUser: vi.fn(),
+  enqueueEditableFileTask: vi.fn(),
+  getAsyncImageTask: vi.fn(),
+  getUserPlan: vi.fn(),
 }));
 
 vi.mock("@/features/image-generation/operations", () => ({
   runImageGenerationForUser: mocks.runImageGenerationForUser,
 }));
 
-vi.mock("@/features/image-generation/editable-file-operations", () => ({
-  runEditableFileForUser: mocks.runEditableFileForUser,
+vi.mock("@/features/external-api/editable-task-service", () => ({
+  enqueueEditableFileTask: mocks.enqueueEditableFileTask,
+}));
+
+vi.mock("@/features/external-api/async-image-tasks", () => ({
+  getAsyncImageTask: mocks.getAsyncImageTask,
+  toAsyncImageTaskResponse: vi.fn((task) => {
+    const { userId: _userId, apiKeyId: _apiKeyId, ...publicTask } = task;
+    return publicTask;
+  }),
 }));
 
 vi.mock("@/features/image-backend-pool/service", () => ({
@@ -41,7 +51,16 @@ vi.mock("@/features/image-backend-pool/service", () => ({
 }));
 
 vi.mock("@repo/shared/subscription/services/user-plan", () => ({
-  getUserPlan: vi.fn(),
+  getUserPlan: mocks.getUserPlan,
+}));
+
+vi.mock("@repo/shared/subscription/services/plan-capabilities", () => ({
+  PLAN_CAPABILITY_KEYS: ["export.ppt", "export.psd"],
+  canUsePlanCapability: vi.fn(async () => true),
+  getPlanQueueSettings: vi.fn(async () => ({
+    priority: "priority",
+    userConcurrency: 3,
+  })),
 }));
 
 const USER_PRINCIPAL: Principal = {
@@ -74,11 +93,14 @@ beforeEach(() => {
     imageUrl: "https://cdn.example/image.png",
     creditsConsumed: 1,
   });
-  mocks.runEditableFileForUser.mockResolvedValue({
-    primaryUrl: "https://cdn.example/file.pptx",
-    zipUrl: null,
-    creditsCharged: 10,
+  mocks.getUserPlan.mockResolvedValue({ plan: "pro" });
+  mocks.enqueueEditableFileTask.mockResolvedValue({
+    taskId: "task-1",
+    status: "queued",
+    kind: "ppt",
+    createdAt: "2026-07-10T00:00:00.000Z",
   });
+  mocks.getAsyncImageTask.mockResolvedValue(undefined);
 });
 
 describe("UOL billed operation identity", () => {
@@ -130,7 +152,7 @@ describe("UOL billed operation identity", () => {
     );
   });
 
-  it("derives editable file billing ownership from the user principal", async () => {
+  it("从用户 Principal 派生可编辑文件入队归属", async () => {
     await invokeOperation(
       "file.generatePpt",
       {
@@ -141,11 +163,62 @@ describe("UOL billed operation identity", () => {
       USER_PRINCIPAL
     );
 
-    expect(mocks.runEditableFileForUser).toHaveBeenCalledWith(
+    expect(mocks.enqueueEditableFileTask).toHaveBeenCalledWith({
+      userId: "user-a",
+      apiKeyId: undefined,
+      kind: "ppt",
+      clientRequestId: "request-1",
+      prompt: "quarterly report",
+      base64Images: [],
+      priority: "priority",
+      userConcurrency: 3,
+    });
+  });
+
+  it("API Key 入队时从 Principal 绑定用户、Key 与套餐", async () => {
+    const principal: Principal = {
+      type: "apiKey",
+      userId: "user-a",
+      apiKeyId: "key-1",
+      plan: "ultra",
+      relayOnly: false,
+    };
+
+    await invokeOperation(
+      "file.generatePsd",
+      {
+        clientRequestId: "request-2",
+        prompt: "layered poster",
+        base64Images: ["aW1hZ2U="],
+      },
+      principal
+    );
+
+    expect(mocks.getUserPlan).not.toHaveBeenCalled();
+    expect(mocks.enqueueEditableFileTask).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "user-a",
-        taskId: "request-1",
+        apiKeyId: "key-1",
+        kind: "psd",
       })
     );
+  });
+
+  it("跨用户查询持久任务统一返回 not_found", async () => {
+    mocks.getAsyncImageTask.mockResolvedValue({
+      id: "task-other",
+      object: "editable_file_task",
+      userId: "user-b",
+      status: "processing",
+      created_at: "2026-07-10T00:00:00.000Z",
+    });
+
+    await expect(
+      invokeOperation(
+        "file.getEditableTask",
+        { taskId: "task-other" },
+        USER_PRINCIPAL
+      )
+    ).rejects.toMatchObject({ code: "not_found", httpStatus: 404 });
   });
 });

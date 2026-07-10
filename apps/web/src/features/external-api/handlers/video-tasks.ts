@@ -1,9 +1,8 @@
 /**
  * GET /v1/videos/{id} —— 按 id 查询一次视频生成（外部 API）。
  *
- * 先查进程内异步任务存储（async=true 返回的 task_...,临时态);未命中再按 generation_id
- * 从 DB 持久取回 video_generation（同步请求也可用此方式复查,跨重启/多实例都稳)。
- * getVideoGenerationById 不带归属过滤,handler 内显式校验 userId 防越权(IDOR)。
+ * 先查 PostgreSQL 持久 task_* 外壳；未命中再按 generation_id 从 video_generation 取回。
+ * task_* 校验 userId + apiKeyId，generation 回退校验 userId，阻断 IDOR。
  */
 
 import { withApiLogging } from "@repo/shared/api-logger";
@@ -38,12 +37,12 @@ export const getExternalVideoTask = withApiLogging(
       return openAIImageError("Invalid task_id.");
     }
 
-    // 1. 内存异步任务(async=true 创建,按 task_<uuid> 为键)。
-    const task = getAsyncImageTask(taskId);
+    // 1. PostgreSQL 持久异步任务(async=true 创建,按 task_<uuid> 为键)。
+    const task = await getAsyncImageTask(taskId);
     if (
       task &&
       task.userId === auth.userId &&
-      (!task.apiKeyId || task.apiKeyId === auth.apiKeyId)
+      task.apiKeyId === auth.apiKeyId
     ) {
       return Response.json(toAsyncImageTaskResponse(task), {
         headers: { "Cache-Control": "no-store" },
