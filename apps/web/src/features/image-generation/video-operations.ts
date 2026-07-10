@@ -28,7 +28,7 @@ import {
   getRuntimeSettingString,
   isOperationFeatureEnabled,
 } from "@repo/shared/system-settings";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import {
   refundExternalApiKeyCredits,
@@ -37,6 +37,7 @@ import {
 import { releaseImageBackendInflightLease } from "@/features/image-backend-pool/service";
 import { runAdobeDirectVideoRequest } from "./adobe-direct";
 import { invalidateGalleryCountsCache } from "./gallery-cache";
+import { recoverVideoGenerationResult } from "./generation-recovery";
 import { getEffectiveConfig, poolBackendMemberType } from "./service";
 
 export type VideoGenerationInput = {
@@ -189,7 +190,12 @@ async function markVideoFailed(id: string, error: string): Promise<void> {
       error: error.slice(0, 1000),
       updatedAt: new Date(),
     })
-    .where(eq(videoGeneration.id, id))
+    .where(
+      and(
+        eq(videoGeneration.id, id),
+        inArray(videoGeneration.status, ["pending", "running"])
+      )
+    )
     .catch(() => {});
 }
 
@@ -199,6 +205,24 @@ async function markVideoFailed(id: string, error: string): Promise<void> {
 export async function runAdobeVideoGenerationForUser(
   input: VideoGenerationInput
 ): Promise<VideoGenerationResult> {
+  const videoId = input.videoGenerationId || nanoid();
+  if (input.videoGenerationId) {
+    const existing = await getVideoGenerationById(videoId);
+    if (existing) {
+      const recovered = recoverVideoGenerationResult(existing, {
+        expectedUserId: input.userId,
+        ...(input.apiKeyId !== undefined
+          ? { expectedApiKeyId: input.apiKeyId }
+          : {}),
+      });
+      return (
+        recovered ?? {
+          error: "Video generation is already processing.",
+          videoGenerationId: videoId,
+        }
+      );
+    }
+  }
   if (!(await isOperationFeatureEnabled("video"))) {
     return { error: "Video generation is disabled by the operator." };
   }
@@ -218,7 +242,6 @@ export async function runAdobeVideoGenerationForUser(
   );
   const modelMultiplier = resolveVideoModelMultiplier(conf.family, multipliers);
 
-  const videoId = input.videoGenerationId || nanoid();
   // 扣费/退款幂等键：派生自服务端 videoId，全局唯一。
   const sourceRef = `adobe-video:${videoId}`;
   const now = new Date();
@@ -377,7 +400,12 @@ export async function runAdobeVideoGenerationForUser(
       },
       updatedAt: new Date(),
     })
-    .where(eq(videoGeneration.id, videoId));
+    .where(
+      and(
+        eq(videoGeneration.id, videoId),
+        inArray(videoGeneration.status, ["pending", "running"])
+      )
+    );
 
   // 失败统一退款 + 标记。退款幂等（同一 sourceRef 只退一次）。
   const failAndRefund = async (
@@ -411,7 +439,12 @@ export async function runAdobeVideoGenerationForUser(
         creditsConsumed: 0,
         updatedAt: new Date(),
       })
-      .where(eq(videoGeneration.id, videoId));
+      .where(
+        and(
+          eq(videoGeneration.id, videoId),
+          inArray(videoGeneration.status, ["pending", "running"])
+        )
+      );
     return { error: message, videoGenerationId: videoId };
   };
 
@@ -448,7 +481,7 @@ export async function runAdobeVideoGenerationForUser(
   }
 
   const completedAt = new Date();
-  await db
+  const [completed] = await db
     .update(videoGeneration)
     .set({
       status: "completed",
@@ -456,7 +489,35 @@ export async function runAdobeVideoGenerationForUser(
       completedAt,
       updatedAt: completedAt,
     })
-    .where(eq(videoGeneration.id, videoId));
+    .where(
+      and(
+        eq(videoGeneration.id, videoId),
+        inArray(videoGeneration.status, ["pending", "running"])
+      )
+    )
+    .returning({ id: videoGeneration.id });
+  if (!completed) {
+    await getStorageProvider()
+      .then((storage) => storage.deleteObject(storageKey, bucket))
+      .catch((error: unknown) =>
+        logError(error, { source: "adobe-video-stale-output-cleanup", videoId })
+      );
+    await releaseInflightLease();
+    const existing = await getVideoGenerationById(videoId);
+    const recovered = existing
+      ? recoverVideoGenerationResult(existing, {
+          expectedUserId: input.userId,
+          ...(input.apiKeyId !== undefined
+            ? { expectedApiKeyId: input.apiKeyId }
+            : {}),
+        })
+      : undefined;
+    if (recovered) return recovered;
+    return {
+      error: "Video generation execution was superseded.",
+      videoGenerationId: videoId,
+    };
+  }
 
   invalidateGalleryCountsCache(input.userId);
   await releaseInflightLease();

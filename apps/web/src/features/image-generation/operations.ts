@@ -67,6 +67,7 @@ import { dispatchConcurrentChannels } from "./dispatch";
 import { toClientErrorMessage } from "./error-sanitize";
 import { invalidateGalleryCountsCache } from "./gallery-cache";
 import { buildInputImagesMetadata } from "./generation-metadata";
+import { recoverImageGenerationResult } from "./generation-recovery";
 import { generativeRepairImage } from "./generative-repair";
 import { restoreImage } from "./image-restoration";
 import { maskedOutpaintImage } from "./masked-outpaint";
@@ -1321,11 +1322,58 @@ async function getUserModerationBlockRiskLevel(
   );
 }
 
+/**
+ * 对账调用方显式提供的 generation ID。
+ *
+ * @param input 已校验的统一管线输入。
+ * @param generationId 服务端幂等 ID。
+ * @returns 无历史行时返回 null；终态返回恢复结果；pending 返回处理中错误结果。
+ * @throws generation 归属不一致时 fail-closed。
+ * @sideEffects 读取一条 generation；不触发过期扫描或任何财务写入。
+ */
+async function reconcileExplicitGeneration(
+  input: RunImageGenerationInput,
+  generationId: string
+): Promise<ImageGenerationOperationResult | null> {
+  if (!input.generationId || input.relayOnly) return null;
+  const [existing] = await db
+    .select({
+      id: generation.id,
+      userId: generation.userId,
+      status: generation.status,
+      model: generation.model,
+      size: generation.size,
+      storageKey: generation.storageKey,
+      storageBucket: generation.storageBucket,
+      revisedPrompt: generation.revisedPrompt,
+      creditsConsumed: generation.creditsConsumed,
+      error: generation.error,
+      metadata: generation.metadata,
+    })
+    .from(generation)
+    .where(eq(generation.id, generationId))
+    .limit(1);
+  if (!existing) return null;
+
+  const recovered = recoverImageGenerationResult(existing, {
+    expectedUserId: input.userId,
+    buildImageUrl: buildSignedStorageImageUrl,
+  });
+  return (
+    recovered ?? {
+      error: "Image generation is already processing.",
+      generationId,
+    }
+  );
+}
+
 export async function runImageGenerationForUser(
   input: RunImageGenerationInput,
   callbacks?: ImageGenerationCallbacks
 ): Promise<ImageGenerationOperationResult> {
   const generationId = input.generationId || nanoid();
+  const reconciled = await reconcileExplicitGeneration(input, generationId);
+  if (reconciled) return reconciled;
   const operationFlags = await getRuntimeOperationFeatureFlags();
   if (input.mode === "generate" && !operationFlags.textToImage) {
     return {
