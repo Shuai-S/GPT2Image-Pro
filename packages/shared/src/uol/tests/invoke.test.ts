@@ -592,7 +592,9 @@ describe("UOL Invoke Gateway", () => {
         destructive: false,
         idempotency: { kind: "natural" },
         sideEffects: [],
-        execute: async () => ({ count: "not-a-number" }),
+        // 用 unknown 显式越过编译期，验证网关仍会拒绝不可信实现的非法输出。
+        execute: async () =>
+          ({ count: "not-a-number" }) as unknown as { count: number },
       });
 
       await expect(
