@@ -17,3 +17,8 @@ export {
   type PrivilegeCheckResult,
   type UserPlanInfo,
 } from "./services/user-plan";
+export {
+  type SubscriptionPeriodConflictPolicy,
+  type UpsertUserSubscriptionInput,
+  upsertUserSubscription,
+} from "./services/upsert-user-subscription";

@@ -414,6 +414,13 @@
       "when": 1783684800000,
       "tag": "0058_credits_expiration_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1783688400000,
+      "tag": "0059_subscription_user_unique",
+      "breakpoints": true
     }
   ]
 }

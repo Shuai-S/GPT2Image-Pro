@@ -22,12 +22,10 @@ const schemaMock = vi.hoisted(() => ({
     status: "subscription.status",
     currentPeriodEnd: "subscription.current_period_end",
     cancelAtPeriodEnd: "subscription.cancel_at_period_end",
-    updatedAt: "subscription.updated_at",
   },
 }));
 
-// 订阅查询链多了 orderBy（确定性排序，见 user-plan.ts），用户查询链没有；
-// 两者都以 limit(count) 收尾，按表返回对应的预置行。
+// 两类查询都以 limit(count) 收尾，按表返回对应的预置行。
 const dbMock = vi.hoisted(() => ({
   select: vi.fn(() => ({
     from: vi.fn((table: unknown) => {
@@ -36,9 +34,8 @@ const dbMock = vi.hoisted(() => ({
           table === schemaMock.user ? state.userRows : state.subscriptionRows;
         return rows.slice(0, count);
       });
-      const orderBy = vi.fn(() => ({ limit }));
       return {
-        where: vi.fn(() => ({ orderBy, limit })),
+        where: vi.fn(() => ({ limit })),
       };
     }),
   })),
@@ -52,7 +49,6 @@ vi.mock("@repo/database/schema", () => schemaMock);
 
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn(() => ({})),
-  desc: vi.fn(() => ({})),
 }));
 
 vi.mock("../../auth/self-use-mode", () => ({

@@ -56,6 +56,7 @@
     "./subscription/actions/get-user-plan": "./src/subscription/actions/get-user-plan.ts",
     "./subscription/components/plan-badge": "./src/subscription/components/plan-badge.tsx",
     "./subscription/services/plan-capabilities": "./src/subscription/services/plan-capabilities.ts",
+    "./subscription/services/upsert-user-subscription": "./src/subscription/services/upsert-user-subscription.ts",
     "./subscription/services/user-plan": "./src/subscription/services/user-plan.ts",
     "./subscription/services/upload-limits": "./src/subscription/services/upload-limits.ts",
     "./mail/*": "./src/mail/*",

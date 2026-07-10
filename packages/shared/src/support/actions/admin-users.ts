@@ -51,6 +51,7 @@ import {
   superAdminAction,
 } from "../../safe-action";
 import { buildSignedStorageImageUrl } from "../../storage/signed-url";
+import { upsertUserSubscription } from "../../subscription/services/upsert-user-subscription";
 import { getUserPlan } from "../../subscription/services/user-plan";
 import { randomUUID } from "node:crypto";
 // 密码哈希链路：与 bootstrap-super-admin.ts 完全一致，写入 account.password，禁止明文/自造哈希
@@ -919,21 +920,12 @@ export const setUserPlanAction = withSuperAdminUsersAction("setUserPlan")
         currentPeriodStart: now,
         currentPeriodEnd: null,
         cancelAtPeriodEnd: false,
-        updatedAt: now,
       };
 
-      if (before) {
-        await db
-          .update(subscription)
-          .set(subscriptionData)
-          .where(eq(subscription.userId, data.userId));
-      } else {
-        await db.insert(subscription).values({
-          id: crypto.randomUUID(),
-          userId: data.userId,
-          ...subscriptionData,
-        });
-      }
+      await upsertUserSubscription({
+        userId: data.userId,
+        ...subscriptionData,
+      });
     }
 
     const [after] = await db

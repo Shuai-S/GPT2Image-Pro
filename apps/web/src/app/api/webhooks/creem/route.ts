@@ -35,6 +35,7 @@ import {
   evaluateCreemAmountMatch,
   shouldGrantAfterAmountCheck,
 } from "@repo/shared/payment/creem-amount";
+import { upsertUserSubscription } from "@repo/shared/subscription/services/upsert-user-subscription";
 import { getRuntimeSettingNumber } from "@repo/shared/system-settings";
 import { invokeOperation } from "@repo/shared/uol";
 import "@repo/shared/uol/operations/referral";
@@ -728,34 +729,15 @@ async function createOrUpdateSubscription(
   userId: string,
   sub: CreemSubscription
 ) {
-  const [existingSub] = await db
-    .select()
-    .from(subscription)
-    .where(eq(subscription.userId, userId))
-    .limit(1);
-
-  const subscriptionData = {
+  await upsertUserSubscription({
+    userId,
     subscriptionId: sub.id,
     priceId: getProductId(sub),
     status: sub.status,
     currentPeriodStart: new Date(sub.current_period_start_date),
     currentPeriodEnd: new Date(sub.current_period_end_date),
     cancelAtPeriodEnd: sub.cancel_at_period_end,
-    updatedAt: new Date(),
-  };
-
-  if (existingSub) {
-    await db
-      .update(subscription)
-      .set(subscriptionData)
-      .where(eq(subscription.userId, userId));
-  } else {
-    await db.insert(subscription).values({
-      id: crypto.randomUUID(),
-      userId,
-      ...subscriptionData,
-    });
-  }
+  });
 
   logger.info({ userId }, "Subscription created/updated");
 }

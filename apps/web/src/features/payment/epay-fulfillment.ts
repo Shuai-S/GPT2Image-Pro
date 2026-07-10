@@ -32,6 +32,7 @@ import {
   moneyToCents,
   updateEpayOrderStatus,
 } from "@repo/shared/payment/epay";
+import { upsertUserSubscription } from "@repo/shared/subscription/services/upsert-user-subscription";
 import { getUserPlanType } from "@repo/shared/subscription/services/user-plan";
 import { getRuntimeSettingNumber } from "@repo/shared/system-settings";
 import { invokeOperation } from "@repo/shared/uol";
@@ -115,6 +116,20 @@ export function resolveExpectedLocalPaymentAmount(params: {
     Number.isFinite(params.metadata.expectedAmount)
     ? params.metadata.expectedAmount
     : params.fallbackAmount;
+}
+
+/**
+ * 判断本地支付订阅记录是否属于当前履约用户。
+ *
+ * @param existingUserId - 已占用该 subscriptionId 的用户 ID；未找到记录时为空。
+ * @param fulfillmentUserId - 当前订单元数据声明的履约用户 ID。
+ * @returns 未找到既有记录或既有记录属于当前用户时返回 true。
+ */
+export function isSubscriptionOwnedByFulfillmentUser(
+  existingUserId: string | undefined,
+  fulfillmentUserId: string
+): boolean {
+  return existingUserId === undefined || existingUserId === fulfillmentUserId;
 }
 
 export async function fulfillSuccessfulEpayPayment(
@@ -359,41 +374,37 @@ async function handleSubscription(
 
   const subscriptionId = `${provider}_${verifyInfo.outTradeNo}`;
   const [existingBySubscriptionId] = await db
-    .select({ id: subscription.id })
+    .select({
+      id: subscription.id,
+      userId: subscription.userId,
+    })
     .from(subscription)
     .where(eq(subscription.subscriptionId, subscriptionId))
     .limit(1);
 
-  if (!existingBySubscriptionId) {
-    const [existingByUser] = await db
-      .select({ id: subscription.id })
-      .from(subscription)
-      .where(eq(subscription.userId, userId))
-      .limit(1);
-
-    const values = {
-      subscriptionId,
-      priceId,
-      status: "canceled",
-      currentPeriodStart: now,
-      currentPeriodEnd: periodEnd,
-      cancelAtPeriodEnd: true,
-      updatedAt: new Date(),
-    };
-
-    if (existingByUser) {
-      await db
-        .update(subscription)
-        .set(values)
-        .where(eq(subscription.userId, userId));
-    } else {
-      await db.insert(subscription).values({
-        id: crypto.randomUUID(),
-        userId,
-        ...values,
-      });
-    }
+  // subscriptionId 代表不可转移的支付订单身份。重放只能命中原用户；
+  // 若历史脏数据或伪造元数据把同一订单指向其他用户，必须在发放积分前失败。
+  if (
+    !isSubscriptionOwnedByFulfillmentUser(
+      existingBySubscriptionId?.userId,
+      userId
+    )
+  ) {
+    throw new Error("Subscription ID belongs to another user");
   }
+
+  // 即使预查未命中，另一副本也可能在随后 INSERT 前先落库。helper 会在
+  // 同 subscriptionId 冲突时保留胜出副本写入的首次周期。
+  await upsertUserSubscription({
+    userId,
+    subscriptionId,
+    priceId,
+    status: "canceled",
+    currentPeriodStart: now,
+    currentPeriodEnd: periodEnd,
+    cancelAtPeriodEnd: true,
+    periodConflictPolicy: "preserve_same_subscription",
+  });
 
   await grantSubscriptionCredits({
     userId,

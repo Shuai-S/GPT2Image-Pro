@@ -22,6 +22,7 @@ import type { EpayVerifyResult } from "@repo/shared/payment/epay";
 import {
   isExpectedEpayAmount,
   isMatchingPaymentProvider,
+  isSubscriptionOwnedByFulfillmentUser,
   resolveExpectedLocalPaymentAmount,
 } from "./epay-fulfillment";
 
@@ -124,5 +125,20 @@ describe("resolveExpectedLocalPaymentAmount", () => {
         fallbackAmount: 30,
       })
     ).toBe(30);
+  });
+});
+
+describe("isSubscriptionOwnedByFulfillmentUser", () => {
+  it("allows first fulfillment and same-user replay", () => {
+    expect(isSubscriptionOwnedByFulfillmentUser(undefined, "user-1")).toBe(
+      true
+    );
+    expect(isSubscriptionOwnedByFulfillmentUser("user-1", "user-1")).toBe(true);
+  });
+
+  it("rejects replaying one subscription ID for another user", () => {
+    expect(isSubscriptionOwnedByFulfillmentUser("user-1", "user-2")).toBe(
+      false
+    );
   });
 });
