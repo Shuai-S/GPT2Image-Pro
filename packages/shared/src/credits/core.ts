@@ -40,6 +40,7 @@ import {
   summarizeExpiredCreditsByUser,
 } from "./expiration";
 import {
+  assertIdempotentCreditAmount,
   isUniqueConstraintViolation,
   readConsumedBatchesFromMetadata,
 } from "./idempotency";
@@ -469,7 +470,11 @@ export async function grantCredits(params: GrantCreditsParams) {
     if (insertedBatch.length === 0) {
       const [existingBatch] = sourceRef
         ? await tx
-            .select({ id: creditsBatch.id })
+            .select({
+              id: creditsBatch.id,
+              userId: creditsBatch.userId,
+              amount: creditsBatch.amount,
+            })
             .from(creditsBatch)
             .where(
               and(
@@ -479,6 +484,12 @@ export async function grantCredits(params: GrantCreditsParams) {
             )
             .limit(1)
         : [];
+      if (existingBatch) {
+        if (existingBatch.userId !== userId) {
+          throw new Error("积分幂等键已被其他用户占用");
+        }
+        assertIdempotentCreditAmount(existingBatch.amount, amount);
+      }
       const [existingTransaction] = sourceRef
         ? await tx
             .select({ id: creditsTransaction.id })
@@ -590,6 +601,7 @@ export async function consumeCredits(
           )
           .limit(1);
         if (existing) {
+          assertIdempotentCreditAmount(existing.amount, amount);
           const [balance] = await tx
             .select({ balance: creditsBalance.balance })
             .from(creditsBalance)
@@ -775,6 +787,7 @@ export async function consumeCredits(
         )
         .limit(1);
       if (existing) {
+        assertIdempotentCreditAmount(existing.amount, amount);
         const [balance] = await db
           .select({ balance: creditsBalance.balance })
           .from(creditsBalance)

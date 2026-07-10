@@ -1,9 +1,26 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  assertIdempotentCreditAmount,
   isUniqueConstraintViolation,
   readConsumedBatchesFromMetadata,
 } from "./idempotency";
+
+describe("assertIdempotentCreditAmount", () => {
+  it("允许等价的两位小数金额", () => {
+    expect(() => assertIdempotentCreditAmount(12.3, 12.3)).not.toThrow();
+    expect(() => assertIdempotentCreditAmount(12.304, 12.3)).not.toThrow();
+  });
+
+  it("拒绝同一幂等键的金额漂移与非法金额", () => {
+    expect(() => assertIdempotentCreditAmount(12.3, 12.31)).toThrow(
+      "同一积分幂等键的金额不一致"
+    );
+    expect(() => assertIdempotentCreditAmount(Number.NaN, 12.3)).toThrow(
+      "同一积分幂等键的金额不一致"
+    );
+  });
+});
 
 describe("readConsumedBatchesFromMetadata", () => {
   it("returns batches from valid metadata", () => {

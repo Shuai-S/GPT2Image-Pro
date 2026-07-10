@@ -34,3 +34,26 @@ export function isUniqueConstraintViolation(error: unknown): boolean {
       (error as { code?: unknown }).code === "23505"
   );
 }
+
+/**
+ * 校验同一财务幂等键的金额没有漂移。
+ *
+ * @param existingAmount 首次落账金额。
+ * @param requestedAmount 本次重放请求金额。
+ * @throws 两者按积分两位小数规范化后不一致时 fail-closed。
+ * @sideEffects 无。
+ */
+export function assertIdempotentCreditAmount(
+  existingAmount: number,
+  requestedAmount: number
+): void {
+  const normalizedExisting = Math.round(existingAmount * 100) / 100;
+  const normalizedRequested = Math.round(requestedAmount * 100) / 100;
+  if (
+    !Number.isFinite(normalizedExisting) ||
+    !Number.isFinite(normalizedRequested) ||
+    normalizedExisting !== normalizedRequested
+  ) {
+    throw new Error("同一积分幂等键的金额不一致");
+  }
+}

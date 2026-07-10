@@ -1,19 +1,21 @@
-import { and, desc, eq, isNotNull, lt, sql } from "drizzle-orm";
-
 import { db } from "@repo/database";
 import { creditsBatch, generation } from "@repo/database/schema";
+import { and, desc, eq, isNotNull, lt, sql } from "drizzle-orm";
 import { grantCredits } from "./credits/core";
+import { assertIdempotentCreditAmount } from "./credits/idempotency";
 import { getFailedGenerationTargetCreditsFromMetadata } from "./generation-settlement";
 import { logError } from "./logger";
 import { getStorageProvider } from "./storage/providers";
 import { getRuntimeSettingNumber } from "./system-settings";
 
 export const IMAGE_GENERATION_PENDING_TIMEOUT_MS = 20 * 60 * 1000;
+
 // 超时文案/标记/选择器抽到 db-free 的 ./generation-timeout（纯分类器 sla-classification
 // 也要用，不能经本模块的 `import { db }` 把数据库连接拖进纯路径）。本模块 pending 清扫
 // 用 resolveImageGenerationTimeoutError，同时重导出以保持
 // `@repo/shared/generation-maintenance` 的既有公开面不变。
 import { resolveImageGenerationTimeoutError } from "./generation-timeout";
+
 export {
   IMAGE_GENERATION_TIMEOUT_ERROR,
   IMAGE_GENERATION_WEB_TIMEOUT_ERROR,
@@ -247,7 +249,7 @@ export function stripDestroyedGenerationImageReferences(
 
 async function refundAlreadyGranted(userId: string, sourceRef: string) {
   const [existing] = await db
-    .select({ id: creditsBatch.id })
+    .select({ amount: creditsBatch.amount })
     .from(creditsBatch)
     .where(
       and(
@@ -258,7 +260,7 @@ async function refundAlreadyGranted(userId: string, sourceRef: string) {
     )
     .limit(1);
 
-  return Boolean(existing);
+  return existing?.amount ?? null;
 }
 
 export async function refundGenerationCredits(params: {
@@ -273,7 +275,12 @@ export async function refundGenerationCredits(params: {
     return { refunded: false, amount: 0 };
   }
 
-  if (await refundAlreadyGranted(params.userId, params.sourceRef)) {
+  const existingRefundAmount = await refundAlreadyGranted(
+    params.userId,
+    params.sourceRef
+  );
+  if (existingRefundAmount !== null) {
+    assertIdempotentCreditAmount(existingRefundAmount, params.amount);
     return { refunded: false, amount: params.amount };
   }
 
