@@ -1,94 +1,98 @@
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+/**
+ * 用户对象存储直传的 HTTP 薄适配器。
+ *
+ * 职责：解析会话与 JSON，构造 UOL Principal，调用 storage.createDirectUpload 后编码
+ * HTTP 响应。套餐、用途/MIME、用户 key、provider 能力和错误语义均由操作层负责；
+ * 该路由不直接构造 S3Client，也不接收客户端指定的 bucket/key。
+ */
+
 import { withApiLogging } from "@repo/shared/api-logger";
 import { auth } from "@repo/shared/auth";
-import { nanoid } from "nanoid";
+import { normalizeUserRole } from "@repo/shared/auth/roles";
+import type { DirectUploadAuthorization } from "@repo/shared/storage/direct-upload";
+import {
+  invokeOperation,
+  OperationError,
+  type Principal,
+} from "@repo/shared/uol";
+import "@repo/shared/uol/operations/storage";
 import { type NextRequest, NextResponse } from "next/server";
-import { validateUploadRequest } from "./validation";
+
+/** 判断 JSON 值是否为可读取字段的普通对象。 */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
 
 /**
- * S3/R2 客户端配置
- */
-const s3Client = new S3Client({
-  region: process.env.STORAGE_REGION || "auto",
-  ...(process.env.STORAGE_ENDPOINT && {
-    endpoint: process.env.STORAGE_ENDPOINT,
-  }),
-  credentials: {
-    accessKeyId: process.env.STORAGE_ACCESS_KEY_ID || "",
-    secretAccessKey: process.env.STORAGE_SECRET_ACCESS_KEY || "",
-  },
-});
-
-const BUCKET_NAME = process.env.STORAGE_BUCKET_NAME || "gpt2image-uploads";
-
-/**
- * 获取预签名上传 URL
+ * 把新旧 HTTP 字段归一为 UOL 原始输入。
  *
- * POST /api/upload/presigned
- * Body: { filename: string, contentType: string, fileSize: number }
+ * @param body request.json() 返回的不可信值。
+ * @returns 保留 unknown 字段值的操作输入，由 invokeOperation 的 Zod schema 最终校验。
+ */
+function toOperationInput(body: unknown): Record<string, unknown> {
+  if (!isRecord(body)) return {};
+  return {
+    purpose: body.purpose ?? "document",
+    filename: body.filename,
+    contentType: body.contentType ?? "",
+    contentLength: body.contentLength ?? body.fileSize,
+  };
+}
+
+/**
+ * 创建当前登录用户的短期 PUT URL。
+ *
+ * @param request 含会话 Cookie 与 JSON 文件元数据的请求。
+ * @returns 成功时返回稳定 reference；认证、校验、provider 错误沿用 UOL HTTP 状态。
+ * @sideEffects 读取会话/套餐/运行时设置并调用对象存储签名器，不接收文件正文。
  */
 export const POST = withApiLogging(async (request: NextRequest) => {
+  const session = await auth.api.getSession({ headers: request.headers });
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  let body: unknown;
   try {
-    // 验证用户登录
-    const session = await auth.api.getSession({
-      headers: request.headers,
-    });
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { error: "Invalid request body" },
+      { status: 400 }
+    );
+  }
 
-    if (!session?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const body: unknown = await request.json();
-    if (!body || typeof body !== "object" || Array.isArray(body)) {
-      return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
-    }
-
-    // 校验文件名、文件类型与大小（纯逻辑在 validation.ts，便于单测）。
-    // 失败时返回 400；成功时拿到服务端派生的安全 Content-Type。
-    const validation = validateUploadRequest(body);
-    if (!validation.ok) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
-    }
-    const { safeContentType } = validation;
-    const { filename } = body as { filename: string };
-    const storageEndpoint = process.env.STORAGE_ENDPOINT;
-    if (!storageEndpoint) {
-      return NextResponse.json(
-        { error: "Upload storage is not configured" },
-        { status: 503 }
-      );
-    }
-
-    // 生成唯一的文件 key
-    const fileExtension = filename.match(/\.[^.]+$/)?.[0] || "";
-    const fileKey = `uploads/${session.user.id}/${nanoid()}${fileExtension}`;
-
-    // 创建预签名 URL
-    const command = new PutObjectCommand({
-      Bucket: BUCKET_NAME,
-      Key: fileKey,
-      ContentType: safeContentType,
-    });
-
-    const presignedUrl = await getSignedUrl(s3Client, command, {
-      expiresIn: 3600, // 1 hour
-    });
-
-    // 构建文件访问 URL
-    const fileUrl = `${storageEndpoint}/${BUCKET_NAME}/${fileKey}`;
-
+  const principal: Principal = {
+    type: "user",
+    userId: session.user.id,
+    role: normalizeUserRole(session.user.role),
+  };
+  try {
+    const authorization = await invokeOperation<DirectUploadAuthorization>(
+      "storage.createDirectUpload",
+      toOperationInput(body),
+      principal,
+      { requestId: request.headers.get("x-request-id") || undefined }
+    );
     return NextResponse.json({
-      presignedUrl,
-      fileKey,
-      fileUrl,
-      contentType: safeContentType,
-      expiresIn: 3600,
+      uploadUrl: authorization.uploadUrl,
+      // 兼容旧调用方字段；新代码只使用 uploadUrl + reference。
+      presignedUrl: authorization.uploadUrl,
+      uploadContentType: authorization.uploadContentType,
+      contentType: authorization.reference.contentType,
+      expiresIn: authorization.expiresIn,
+      fileKey: authorization.reference.key,
+      reference: authorization.reference,
     });
   } catch (error) {
-    console.error("Error creating presigned URL:", error);
+    if (error instanceof OperationError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code, details: error.details },
+        { status: error.httpStatus }
+      );
+    }
     return NextResponse.json(
-      { error: "Failed to create upload URL" },
+      { error: "Failed to create upload authorization" },
       { status: 500 }
     );
   }

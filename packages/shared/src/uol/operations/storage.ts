@@ -12,10 +12,167 @@
  * - local provider 下 getSignedUploadUrl 返回的是 GET 路由（不可 PUT），
  *   预签名直传仅 S3 可用。
  */
+import { isSubscriptionPlan } from "../../config/subscription-plan";
+import {
+  createDirectUploadKey,
+  directUploadAuthorizationSchema,
+  DIRECT_UPLOAD_PURPOSES,
+  DirectUploadInputError,
+  resolveDirectUploadMetadata,
+} from "../../storage/direct-upload";
+import { getStorageProvider } from "../../storage/providers/index";
+import { getPlanUploadLimits } from "../../subscription/services/upload-limits";
+import { getUserPlan } from "../../subscription/services/user-plan";
+import { getRuntimeSettingString } from "../../system-settings";
+import { OperationError } from "../errors";
+import { getPrincipalUserId, type Principal } from "../principal";
+import { defineOperation } from "../registry";
 import { z } from "zod";
 
-import { defineOperation } from "../registry";
-import { getStorageProvider } from "../../storage/providers/index";
+const DIRECT_UPLOAD_URL_EXPIRES_SECONDS = 10 * 60;
+
+const createDirectUploadInputSchema = z.object({
+  purpose: z.enum(DIRECT_UPLOAD_PURPOSES),
+  filename: z.string().min(1).max(512),
+  contentType: z.string().max(128),
+  contentLength: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+});
+
+type CreateDirectUploadInput = z.infer<typeof createDirectUploadInputSchema>;
+
+/**
+ * 解析直传调用者的用户与套餐。
+ *
+ * @param principal UOL 网关已鉴权身份。
+ * @returns 用户 ID 与唯一能力来源中的套餐。
+ * @throws OperationError 非用户身份或 API Key 套餐非法时 fail-closed。
+ */
+async function resolveDirectUploadPrincipal(principal: Principal) {
+  const userId = getPrincipalUserId(principal);
+  if (!userId) {
+    throw new OperationError(
+      "unauthenticated",
+      "Direct upload requires a user identity"
+    );
+  }
+  if (principal.type === "apiKey") {
+    if (!isSubscriptionPlan(principal.plan)) {
+      throw new OperationError(
+        "capability_required",
+        "A valid subscription plan is required for direct upload"
+      );
+    }
+    return { userId, plan: principal.plan };
+  }
+  return { userId, plan: (await getUserPlan(userId)).plan };
+}
+
+/**
+ * 创建绑定当前 Principal 的对象存储直传授权。
+ *
+ * @param input 已通过 Zod 校验的用途、文件名、MIME 与声明大小。
+ * @param principal UOL 调用身份，用户 ID 不从 input 接收。
+ * @returns 短期 PUT URL 和供后续控制面请求使用的稳定引用。
+ * @sideEffects 读取套餐/运行时设置并调用 S3 签名器，不写数据库或对象正文。
+ * @throws OperationError local 存储、超套餐上限、类型非法或签名失败时显式失败。
+ */
+async function createDirectUploadAuthorization(
+  input: CreateDirectUploadInput,
+  principal: Principal
+) {
+  const { userId, plan } = await resolveDirectUploadPrincipal(principal);
+  const limits = await getPlanUploadLimits(plan);
+  if (input.contentLength > limits.maxFileSizeBytes) {
+    throw new OperationError(
+      "validation_error",
+      "File exceeds the current plan upload limit",
+      { maxFileSizeBytes: limits.maxFileSizeBytes },
+      413
+    );
+  }
+
+  const storageEndpoint = await getRuntimeSettingString("STORAGE_ENDPOINT");
+  if (!storageEndpoint) {
+    throw new OperationError(
+      "not_implemented",
+      "Direct upload requires S3-compatible storage",
+      undefined,
+      501
+    );
+  }
+  const bucket =
+    (await getRuntimeSettingString("NEXT_PUBLIC_GENERATIONS_BUCKET_NAME")) ||
+    "generations";
+
+  let metadata: ReturnType<typeof resolveDirectUploadMetadata>;
+  try {
+    metadata = resolveDirectUploadMetadata(input);
+  } catch (error) {
+    if (error instanceof DirectUploadInputError) {
+      throw new OperationError("validation_error", error.message);
+    }
+    throw error;
+  }
+
+  const key = createDirectUploadKey(
+    userId,
+    input.purpose,
+    metadata.storageExtension
+  );
+  try {
+    const provider = await getStorageProvider();
+    const uploadUrl = await provider.getSignedUploadUrl(
+      key,
+      bucket,
+      metadata.uploadContentType,
+      DIRECT_UPLOAD_URL_EXPIRES_SECONDS
+    );
+    return {
+      uploadUrl,
+      uploadContentType: metadata.uploadContentType,
+      expiresIn: DIRECT_UPLOAD_URL_EXPIRES_SECONDS,
+      reference: {
+        bucket,
+        key,
+        filename: metadata.filename,
+        contentType: metadata.contentType,
+        contentLength: input.contentLength,
+        purpose: input.purpose,
+      },
+    };
+  } catch (error) {
+    if (error instanceof OperationError) throw error;
+    throw new OperationError(
+      "upstream_error",
+      "Failed to create direct upload authorization",
+      undefined,
+      503
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 0. storage.createDirectUpload
+//    套餐感知、用户隔离且传输无关的 S3 直传授权
+// ---------------------------------------------------------------------------
+export const createDirectUpload = defineOperation({
+  name: "storage.createDirectUpload",
+  domain: "storage",
+  title: "创建用户直传授权",
+  description:
+    "按已鉴权 Principal、套餐上传上限和业务用途生成短期 S3 PUT URL。" +
+    "对象 key 由服务端随机生成并绑定用户前缀；后续业务请求只提交稳定 bucket/key 引用，" +
+    "服务端仍会重新校验归属与实际对象大小。local 存储明确不支持该能力。",
+  input: createDirectUploadInputSchema,
+  output: directUploadAuthorizationSchema,
+  access: { kind: "protected" },
+  readOnly: false,
+  destructive: false,
+  idempotency: { kind: "none" },
+  sideEffects: ["storage", "external-call"],
+  execute: async (input, principal, _ctx) =>
+    await createDirectUploadAuthorization(input, principal),
+});
 
 // ---------------------------------------------------------------------------
 // 1. storage.getSignedUploadUrl
@@ -119,20 +276,19 @@ export const readObject = defineOperation({
 
 // ---------------------------------------------------------------------------
 // 4. storage.createPresignedUpload
-//    创建预签名上传 URL（文档上传，独立于 shared storage provider）
+//    兼容旧文档上传调用，内部复用统一直传授权
 // ---------------------------------------------------------------------------
 export const createPresignedUpload = defineOperation({
   name: "storage.createPresignedUpload",
   domain: "storage",
   title: "创建预签名上传 URL（文档上传）",
   description:
-    "为已认证用户创建文档上传的预签名 URL。独立于 shared storage provider，" +
-    "直接使用 S3Client。Content-Type 由服务端派生以防 XSS。" +
-    "fileKey 含随机部分，操作天然幂等。",
+    "兼容旧文档上传操作；内部委托统一直传授权，按 Principal 和套餐限制生成" +
+    "用户隔离 key，Content-Type 仅由服务端按扩展名派生。",
   input: z.object({
     filename: z.string().min(1),
     contentType: z.string().min(1),
-    contentLength: z.number().positive(),
+    contentLength: z.number().int().positive(),
   }),
   output: z.object({
     url: z.string(),
@@ -141,19 +297,22 @@ export const createPresignedUpload = defineOperation({
   access: { kind: "protected" },
   readOnly: false,
   destructive: false,
-  idempotency: { kind: "natural" },
-  sideEffects: ["storage"],
-  execute: async (input, _principal, _ctx) => {
-    // 文档上传预签名 URL，使用通用存储提供者的 getSignedUploadUrl
-    const provider = await getStorageProvider();
-    const bucket = "documents";
-    const fileKey = `uploads/${Date.now()}-${input.filename}`;
-    const url = await provider.getSignedUploadUrl(
-      fileKey,
-      bucket,
-      input.contentType
+  idempotency: { kind: "none" },
+  sideEffects: ["storage", "external-call"],
+  execute: async (input, principal, _ctx) => {
+    const authorization = await createDirectUploadAuthorization(
+      {
+        purpose: "document",
+        filename: input.filename,
+        contentType: input.contentType,
+        contentLength: input.contentLength,
+      },
+      principal
     );
-    return { url, fileKey };
+    return {
+      url: authorization.uploadUrl,
+      fileKey: authorization.reference.key,
+    };
   },
 });
 
