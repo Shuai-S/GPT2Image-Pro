@@ -66,10 +66,11 @@ export async function proxy(request: NextRequest) {
   // API 路由限流
   // ============================================
   if (pathname.startsWith("/api/")) {
-    // 跳过健康检查和 webhook（webhook 需要验证签名，不应被限流阻断）
+    // 跳过健康检查、受独立密钥保护的指标和 webhook，避免探针被通用限流阻断。
     if (
       pathname === "/api/health" ||
       pathname.startsWith("/api/health/") ||
+      pathname === "/api/metrics" ||
       pathname.startsWith("/api/webhooks/")
     ) {
       return NextResponse.next();
