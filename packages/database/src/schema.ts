@@ -8,6 +8,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -326,6 +327,47 @@ export const internalJobLease = pgTable("internal_job_lease", {
 
 export type InternalJobLease = typeof internalJobLease.$inferSelect;
 export type NewInternalJobLease = typeof internalJobLease.$inferInsert;
+
+// ============================================
+// 图像生成集群并发槽位 (Image Generation Concurrency Slot)
+// ============================================
+/**
+ * 图像生成并发槽位表 - 为不可序列化的同步/流式请求提供跨副本 semaphore。
+ *
+ * user scope 按用户限制套餐并发，global scope 限制全站并发。每次任务以同一 leaseId
+ * 原子领取一对槽位，闭包在事务外运行并心跳续租；进程崩溃后槽位自动过期可复用。
+ */
+export const imageGenerationConcurrencySlot = pgTable(
+  "image_generation_concurrency_slot",
+  {
+    scope: text("scope").notNull(),
+    scopeKey: text("scope_key").notNull(),
+    slotNo: integer("slot_no").notNull(),
+    leaseId: text("lease_id"),
+    ownerId: text("owner_id"),
+    taskId: text("task_id"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.scope, table.scopeKey, table.slotNo] }),
+    index("image_generation_concurrency_slot_lease_idx").on(table.leaseId),
+    index("image_generation_concurrency_slot_expiry_idx").on(
+      table.leaseExpiresAt
+    ),
+  ]
+);
+
+export type ImageGenerationConcurrencySlot =
+  typeof imageGenerationConcurrencySlot.$inferSelect;
+export type NewImageGenerationConcurrencySlot =
+  typeof imageGenerationConcurrencySlot.$inferInsert;
 
 // ============================================
 // Epay 订单表
@@ -1639,6 +1681,134 @@ export const externalApiKeyUsage = pgTable(
 
 export type ExternalApiKeyUsage = typeof externalApiKeyUsage.$inferSelect;
 export type NewExternalApiKeyUsage = typeof externalApiKeyUsage.$inferInsert;
+
+// ============================================
+// External Async Tasks
+// ============================================
+/**
+ * 外部 API 异步任务表 - 持久化 task_* 外壳、可恢复 worker 租约与 callback outbox。
+ *
+ * image/video 当前持久化轮询外壳与终态，底层 generation 表仍是产物真相；
+ * editable_file 额外保存可恢复请求引用，由 PostgreSQL SKIP LOCKED worker 执行。
+ */
+export const externalAsyncTask = pgTable(
+  "external_async_task",
+  {
+    id: text("id").primaryKey(),
+    taskType: text("task_type")
+      .$type<"image" | "video" | "editable_file">()
+      .notNull(),
+    objectType: text("object_type").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // API Key 删除后任务与 callback outbox 仍需保留，故只保存审计 ID，不建级联外键。
+    apiKeyId: text("api_key_id"),
+    kind: text("kind").$type<"ppt" | "psd">(),
+    model: text("model"),
+    clientRequestId: text("client_request_id"),
+    requestHash: text("request_hash"),
+    status: text("status")
+      .$type<"queued" | "running" | "completed" | "failed">()
+      .notNull(),
+    priority: integer("priority").notNull().default(0),
+    userConcurrency: integer("user_concurrency").notNull().default(1),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(3),
+    availableAt: timestamp("available_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    leaseOwner: text("lease_owner"),
+    leaseToken: text("lease_token"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
+    initialPayload: json("initial_payload")
+      .$type<Record<string, unknown>>()
+      .notNull(),
+    requestPayload: json("request_payload").$type<Record<string, unknown>>(),
+    resultPayload: json("result_payload").$type<unknown>(),
+    errorPayload: json("error_payload").$type<unknown>(),
+    callbackUrl: text("callback_url"),
+    callbackStatus: text("callback_status")
+      .$type<
+        | "none"
+        | "waiting"
+        | "sending"
+        | "retry"
+        | "sent"
+        | "permanent_failed"
+      >()
+      .notNull()
+      .default("none"),
+    callbackAttempts: integer("callback_attempts").notNull().default(0),
+    callbackNextAt: timestamp("callback_next_at", { withTimezone: true }),
+    callbackLeaseOwner: text("callback_lease_owner"),
+    callbackLeaseToken: text("callback_lease_token"),
+    callbackLeaseExpiresAt: timestamp("callback_lease_expires_at", {
+      withTimezone: true,
+    }),
+    callbackDeliveredAt: timestamp("callback_delivered_at", {
+      withTimezone: true,
+    }),
+    callbackError: text("callback_error"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("external_async_task_editable_client_unique")
+      .on(table.userId, table.kind, table.clientRequestId)
+      .where(
+        sql`${table.taskType} = 'editable_file' AND ${table.clientRequestId} IS NOT NULL`
+      ),
+    index("external_async_task_editable_claim_idx").on(
+      table.taskType,
+      table.status,
+      table.priority,
+      table.availableAt,
+      table.createdAt
+    ),
+    index("external_async_task_lease_expiry_idx").on(table.leaseExpiresAt),
+    index("external_async_task_callback_claim_idx").on(
+      table.callbackStatus,
+      table.callbackNextAt,
+      table.callbackLeaseExpiresAt
+    ),
+    index("external_async_task_owner_idx").on(
+      table.userId,
+      table.apiKeyId,
+      table.createdAt
+    ),
+    check(
+      "external_async_task_type_check",
+      sql`${table.taskType} IN ('image', 'video', 'editable_file')`
+    ),
+    check(
+      "external_async_task_status_check",
+      sql`${table.status} IN ('queued', 'running', 'completed', 'failed')`
+    ),
+    check(
+      "external_async_task_callback_status_check",
+      sql`${table.callbackStatus} IN ('none', 'waiting', 'sending', 'retry', 'sent', 'permanent_failed')`
+    ),
+    check(
+      "external_async_task_attempts_check",
+      sql`${table.attemptCount} >= 0 AND ${table.maxAttempts} > 0`
+    ),
+    check(
+      "external_async_task_concurrency_check",
+      sql`${table.userConcurrency} > 0`
+    ),
+  ]
+);
+
+export type ExternalAsyncTask = typeof externalAsyncTask.$inferSelect;
+export type NewExternalAsyncTask = typeof externalAsyncTask.$inferInsert;
 
 // ============================================
 // Image Generation

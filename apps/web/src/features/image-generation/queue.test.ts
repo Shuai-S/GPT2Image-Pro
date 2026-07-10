@@ -1,22 +1,19 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+/**
+ * 图像生成本地等待队列测试。
+ *
+ * 注入共享内存协调器模拟多副本共用的用户/全局 semaphore，验证集群上限、本地
+ * 优先级、许可释放、等待超时与协调器故障 fail-closed；不连接数据库。
+ */
 
-const runtimeSettings = vi.hoisted(() => ({
-  globalConcurrency: 500,
-}));
+import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@repo/shared/system-settings", () => ({
-  getRuntimeSettingNumber: vi.fn(async () => runtimeSettings.globalConcurrency),
-}));
+import {
+  createImageGenerationQueue,
+  type ImageGenerationConcurrencyCoordinator,
+  type ImageGenerationConcurrencyLease,
+} from "./queue-core";
 
-import { withImageGenerationQueue } from "./queue";
-
-// 队列模块持有进程级单例状态（running/queue/runningByUser）。为避免用例之间互相
-// 污染调度状态，需要新鲜实例的用例通过 vi.resetModules + 动态 import 取得隔离副本。
-async function importFreshQueue() {
-  vi.resetModules();
-  return await import("./queue");
-}
-
+/** 创建可从测试侧完成的 Promise。 */
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -27,123 +24,173 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+/** 等待当前宏任务中的队列调度与 Promise 回调推进。 */
 async function flushTasks() {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-describe("withImageGenerationQueue", () => {
-  beforeEach(() => {
-    runtimeSettings.globalConcurrency = 500;
+/**
+ * 创建跨多个 queue 实例共享的内存 semaphore。
+ *
+ * acquire 原子检查用户和全局计数，runWithLease 在 finally 释放，模拟生产协调器契约。
+ */
+function createMemoryCoordinator(options?: { failAcquire?: boolean }) {
+  let running = 0;
+  let sequence = 0;
+  const runningByUser = new Map<string, number>();
+
+  const coordinator: ImageGenerationConcurrencyCoordinator = {
+    async acquire(input) {
+      if (options?.failAcquire) throw new Error("database unavailable");
+      if ((runningByUser.get(input.userId) ?? 0) >= input.userConcurrency) {
+        return { acquired: false, reason: "user_limit" };
+      }
+      if (running >= input.globalConcurrency) {
+        return { acquired: false, reason: "global_limit" };
+      }
+      running += 1;
+      runningByUser.set(
+        input.userId,
+        (runningByUser.get(input.userId) ?? 0) + 1
+      );
+      return {
+        acquired: true,
+        lease: {
+          leaseId: `lease-${++sequence}`,
+          taskId: input.taskId,
+          userId: input.userId,
+        },
+      };
+    },
+    async runWithLease<T>(
+      lease: ImageGenerationConcurrencyLease,
+      run: () => Promise<T>
+    ) {
+      try {
+        return await run();
+      } finally {
+        running -= 1;
+        const userRunning = (runningByUser.get(lease.userId) ?? 1) - 1;
+        if (userRunning > 0) {
+          runningByUser.set(lease.userId, userRunning);
+        } else {
+          runningByUser.delete(lease.userId);
+        }
+      }
+    },
+  };
+
+  return coordinator;
+}
+
+/** 创建使用指定共享协调器的独立副本队列。 */
+function createQueue(
+  coordinator: ImageGenerationConcurrencyCoordinator,
+  options?: { globalConcurrency?: number; taskPrefix?: string }
+) {
+  let taskSequence = 0;
+  return createImageGenerationQueue({
+    coordinator,
+    getGlobalConcurrency: async () => options?.globalConcurrency ?? 500,
+    getQueueTimeoutMs: () => 20 * 60_000,
+    createTaskId: () =>
+      `${options?.taskPrefix ?? "task"}-${++taskSequence}`,
+    pollIntervalMs: 5,
   });
+}
 
-  it("limits running tasks by the configured global concurrency", async () => {
-    runtimeSettings.globalConcurrency = 1;
-    const first = deferred<string>();
-    const started: string[] = [];
-
-    const firstRun = withImageGenerationQueue(
-      {
-        userId: "user-a",
-        priority: "normal",
-        userConcurrency: 10,
-      },
-      async () => {
-        started.push("first");
-        return await first.promise;
-      }
-    );
-    const secondRun = withImageGenerationQueue(
-      {
-        userId: "user-b",
-        priority: "normal",
-        userConcurrency: 10,
-      },
-      async () => {
-        started.push("second");
-        return "second";
-      }
-    );
-
-    await flushTasks();
-    expect(started).toEqual(["first"]);
-
-    first.resolve("first");
-    await firstRun;
-    await flushTasks();
-
-    expect(started).toEqual(["first", "second"]);
-    await expect(secondRun).resolves.toBe("second");
-  });
-
-  it("limits per-user concurrency independent of global", async () => {
-    const { withImageGenerationQueue: queue } = await importFreshQueue();
-    const first = deferred<string>();
-    const started: string[] = [];
-
-    // 同一用户的两个任务，userConcurrency=1：第二个必须等到第一个完成。
-    const firstRun = queue(
-      { userId: "user-a", priority: "normal", userConcurrency: 1 },
-      async () => {
-        started.push("a1");
-        return await first.promise;
-      }
-    );
-    const secondRun = queue(
-      { userId: "user-a", priority: "normal", userConcurrency: 1 },
-      async () => {
-        started.push("a2");
-        return "a2";
-      }
-    );
-    // 另一用户不受前者占用影响，应当立即起跑（全局并发充足）。
-    const otherRun = queue(
-      { userId: "user-b", priority: "normal", userConcurrency: 1 },
-      async () => {
-        started.push("b1");
-        return "b1";
-      }
-    );
-
-    await flushTasks();
-    expect(started).toEqual(["a1", "b1"]);
-    await expect(otherRun).resolves.toBe("b1");
-
-    first.resolve("a1");
-    await firstRun;
-    await flushTasks();
-
-    expect(started).toEqual(["a1", "b1", "a2"]);
-    await expect(secondRun).resolves.toBe("a2");
-  });
-
-  it("runs higher priority before normal", async () => {
-    runtimeSettings.globalConcurrency = 1;
-    const { withImageGenerationQueue: queue } = await importFreshQueue();
+describe("createImageGenerationQueue", () => {
+  it("两个副本共用同一全局并发上限", async () => {
+    const coordinator = createMemoryCoordinator();
+    const queueA = createQueue(coordinator, {
+      globalConcurrency: 1,
+      taskPrefix: "a",
+    });
+    const queueB = createQueue(coordinator, {
+      globalConcurrency: 1,
+      taskPrefix: "b",
+    });
     const blocker = deferred<string>();
     const started: string[] = [];
 
-    // 先占满唯一的全局槽位，使后续任务全部排队等待调度。
-    const blockerRun = queue(
+    const first = queueA(
+      { userId: "user-a", priority: "normal", userConcurrency: 10 },
+      async () => {
+        started.push("a");
+        return await blocker.promise;
+      }
+    );
+    const second = queueB(
+      { userId: "user-b", priority: "normal", userConcurrency: 10 },
+      async () => {
+        started.push("b");
+        return "b";
+      }
+    );
+
+    await flushTasks();
+    expect(started).toEqual(["a"]);
+
+    blocker.resolve("a");
+    await first;
+    await second;
+    expect(started).toEqual(["a", "b"]);
+  });
+
+  it("两个副本共用同一用户并发上限", async () => {
+    const coordinator = createMemoryCoordinator();
+    const queueA = createQueue(coordinator, { taskPrefix: "a" });
+    const queueB = createQueue(coordinator, { taskPrefix: "b" });
+    const blocker = deferred<string>();
+    const started: string[] = [];
+
+    const first = queueA(
+      { userId: "shared", priority: "normal", userConcurrency: 1 },
+      async () => {
+        started.push("a");
+        return await blocker.promise;
+      }
+    );
+    const second = queueB(
+      { userId: "shared", priority: "normal", userConcurrency: 1 },
+      async () => {
+        started.push("b");
+        return "b";
+      }
+    );
+
+    await flushTasks();
+    expect(started).toEqual(["a"]);
+    blocker.resolve("a");
+    await first;
+    await second;
+    expect(started).toEqual(["a", "b"]);
+  });
+
+  it("单副本内高优先级早于先入队的普通任务", async () => {
+    const coordinator = createMemoryCoordinator();
+    const queue = createQueue(coordinator, { globalConcurrency: 1 });
+    const blocker = deferred<string>();
+    const started: string[] = [];
+
+    const blockingRun = queue(
       { userId: "blocker", priority: "normal", userConcurrency: 10 },
       async () => {
         started.push("blocker");
         return await blocker.promise;
       }
     );
-
     await flushTasks();
-    expect(started).toEqual(["blocker"]);
 
-    // 先入队 normal，再入队 highest；释放槽位后应优先调度 highest（优先级加权）。
-    const normalRun = queue(
-      { userId: "normal-user", priority: "normal", userConcurrency: 10 },
+    const normal = queue(
+      { userId: "normal", priority: "normal", userConcurrency: 10 },
       async () => {
         started.push("normal");
         return "normal";
       }
     );
-    const highestRun = queue(
-      { userId: "highest-user", priority: "highest", userConcurrency: 10 },
+    const highest = queue(
+      { userId: "highest", priority: "highest", userConcurrency: 10 },
       async () => {
         started.push("highest");
         return "highest";
@@ -151,92 +198,95 @@ describe("withImageGenerationQueue", () => {
     );
 
     blocker.resolve("blocker");
-    await blockerRun;
-    await flushTasks();
-
+    await blockingRun;
+    await Promise.all([highest, normal]);
     expect(started).toEqual(["blocker", "highest", "normal"]);
-    await expect(highestRun).resolves.toBe("highest");
-    await expect(normalRun).resolves.toBe("normal");
   });
 
-  it("frees user slot after completion", async () => {
-    const { withImageGenerationQueue: queue } = await importFreshQueue();
+  it("任务完成后释放许可供后续任务使用", async () => {
+    const queue = createQueue(createMemoryCoordinator());
     const started: string[] = [];
 
-    // 串行跑两个同用户任务（userConcurrency=1），第二个能起跑即证明第一个完成后
-    // runningByUser 计数被正确清理、槽位已释放。
     await queue(
-      { userId: "user-a", priority: "normal", userConcurrency: 1 },
+      { userId: "user", priority: "normal", userConcurrency: 1 },
       async () => {
-        started.push("a1");
-        return "a1";
+        started.push("first");
+        return "first";
       }
     );
     await queue(
-      { userId: "user-a", priority: "normal", userConcurrency: 1 },
+      { userId: "user", priority: "normal", userConcurrency: 1 },
       async () => {
-        started.push("a2");
-        return "a2";
+        started.push("second");
+        return "second";
       }
     );
 
-    expect(started).toEqual(["a1", "a2"]);
+    expect(started).toEqual(["first", "second"]);
   });
 
-  it("rejects queued task after timeout with concurrency-limit message when user at limit", async () => {
-    const { withImageGenerationQueue: queue } = await importFreshQueue();
+  it("用户槽持续不可用时返回套餐并发错误", async () => {
+    const queue = createQueue(createMemoryCoordinator());
     const blocker = deferred<string>();
-
-    // 占满该用户的唯一并发槽位，使下一个同用户任务排队并最终超时。
-    const blockerRun = queue(
-      { userId: "user-a", priority: "normal", userConcurrency: 1 },
+    const first = queue(
+      { userId: "user", priority: "normal", userConcurrency: 1 },
       async () => await blocker.promise
     );
-
     await flushTasks();
 
-    const queuedRun = queue(
+    const queued = queue(
       {
-        userId: "user-a",
+        userId: "user",
         priority: "normal",
         userConcurrency: 1,
-        timeoutMs: 5,
+        timeoutMs: 20,
       },
       async () => "never"
     );
+    await expect(queued).rejects.toThrow(/concurrency limit reached/i);
 
-    await expect(queuedRun).rejects.toThrow(/concurrency limit reached/i);
-
-    blocker.resolve("blocker");
-    await blockerRun;
+    blocker.resolve("done");
+    await first;
   });
 
-  it("rejects with busy message when global slots exhausted", async () => {
-    runtimeSettings.globalConcurrency = 1;
-    const { withImageGenerationQueue: queue } = await importFreshQueue();
+  it("全局槽持续不可用时返回队列繁忙错误", async () => {
+    const queue = createQueue(createMemoryCoordinator(), {
+      globalConcurrency: 1,
+    });
     const blocker = deferred<string>();
-
-    // 用 user-a 占满唯一的全局槽位；user-b 仍在自身并发额度内，却因全局繁忙超时。
-    const blockerRun = queue(
-      { userId: "user-a", priority: "normal", userConcurrency: 10 },
+    const first = queue(
+      { userId: "a", priority: "normal", userConcurrency: 10 },
       async () => await blocker.promise
     );
-
     await flushTasks();
 
-    const queuedRun = queue(
+    const queued = queue(
       {
-        userId: "user-b",
+        userId: "b",
         priority: "normal",
         userConcurrency: 10,
-        timeoutMs: 5,
+        timeoutMs: 20,
       },
       async () => "never"
     );
+    await expect(queued).rejects.toThrow(/queue is busy/i);
 
-    await expect(queuedRun).rejects.toThrow(/queue is busy/i);
+    blocker.resolve("done");
+    await first;
+  });
 
-    blocker.resolve("blocker");
-    await blockerRun;
+  it("协调器故障时 fail-closed 而不运行闭包", async () => {
+    const queue = createQueue(
+      createMemoryCoordinator({ failAcquire: true })
+    );
+    const run = vi.fn(async () => "unexpected");
+
+    await expect(
+      queue(
+        { userId: "user", priority: "normal", userConcurrency: 1 },
+        run
+      )
+    ).rejects.toThrow("temporarily unavailable");
+    expect(run).not.toHaveBeenCalled();
   });
 });
