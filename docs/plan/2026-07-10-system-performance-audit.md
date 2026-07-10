@@ -121,6 +121,11 @@ Authorization/Cookie。
 
 ## 验收命令
 
+2026-07-10 本地终验：四包 lint/typecheck 全绿；Shared 745、Web 809 项测试通过；
+Next 生产构建生成 123/123 页面；五个客户端入口均满足 gzip 预算，创作页最高为
+512.7/525.0 KiB。离线 frozen lockfile、Drizzle schema check 和 Docker promote
+故障注入脚本通过。`pnpm audit --prod` 仅保留已记录的 esbuild 1 moderate、2 low。
+
 ```bash
 turbo lint
 turbo typecheck

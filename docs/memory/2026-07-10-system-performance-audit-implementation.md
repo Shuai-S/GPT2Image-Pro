@@ -65,10 +65,11 @@
 
 ## 五、验证边界与残余
 
-本轮通过了相关 DB-free 单测、TypeScript typecheck、Biome 和 Drizzle schema check；完整质量门
-以根目录 `turbo lint/typecheck/test/build` 为准。开发机没有 PostgreSQL、Chrome、Docker
-Buildx，因此真实迁移、登录态 Lighthouse、跨架构镜像和 OCI descriptor 只能由 CI 验证，
-不能把静态配置检查写成真实环境已通过。
+2026-07-10 本地终验通过：四包 lint/typecheck 全绿，Shared 745、Web 809 项测试通过，
+Next 生产构建生成 123/123 页面；五个客户端入口均满足 gzip 预算，创作页最高为
+512.7/525.0 KiB。离线 frozen lockfile、Drizzle schema check 与 Docker promote 故障注入
+脚本通过。开发机没有 PostgreSQL、Chrome、Docker Buildx，因此真实迁移、登录态 Lighthouse、
+跨架构镜像和 OCI descriptor 只能由 CI 验证，不能把静态配置检查写成真实环境已通过。
 
 仍有两类明确残余：
 
