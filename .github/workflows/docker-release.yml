@@ -39,6 +39,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5（钉 SHA；dependabot 维护）
 
+      - name: Verify atomic release promotion
+        shell: bash
+        run: |
+          bash -n scripts/promote-docker-release.sh
+          bash -n scripts/promote-docker-release.test.sh
+          bash scripts/promote-docker-release.test.sh
+
       - uses: ./.github/actions/setup
 
       - name: Generate Fumadocs source
@@ -154,7 +161,7 @@ jobs:
       contents: read
       packages: write
     concurrency:
-      # 不同版本也只能串行移动 latest，避免较早版本后完成并覆盖较新版本。
+      # 所有版本串行移动 release descriptor channel，避免旧流程后完成并回退指针。
       group: docker-promote-${{ github.repository }}
       cancel-in-progress: false
     steps:
@@ -189,9 +196,15 @@ jobs:
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5（钉 SHA；dependabot 维护）
 
       - name: Prepare compose bundle
+        shell: bash
         run: |
           mkdir -p dist
           cp docker-compose.yml docker-compose.build.yml .env.docker.example README.md dist/
+          release_namespace="${REGISTRY_GHCR}/${GITHUB_REPOSITORY_OWNER,,}"
+          sed -i \
+            -e "s|^GPT2IMAGE_IMAGE_NAMESPACE=.*|GPT2IMAGE_IMAGE_NAMESPACE=${release_namespace}|" \
+            -e "s|^GPT2IMAGE_IMAGE_TAG=.*|GPT2IMAGE_IMAGE_TAG=${GITHUB_REF_NAME}|" \
+            dist/.env.docker.example
           tar -czf gpt2image-pro-${GITHUB_REF_NAME}.compose.tar.gz -C dist .
           zip -r gpt2image-pro-${GITHUB_REF_NAME}.compose.zip dist
 

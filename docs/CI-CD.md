@@ -8,7 +8,7 @@
 | 文件 | 触发 | 作用 |
 |---|---|---|
 | `.github/workflows/ci.yml` | PR / push → `main`，手动 | 提交门禁：文档镜像、风格、类型、测试、构建、容器可构建性 |
-| `.github/workflows/docker-release.yml` | push → `my-main` / tag `v*`，手动 | 镜像 CI：构建并推送 4 个镜像到当前仓库 owner 的 GHCR；tag 额外起草 GitHub Release |
+| `.github/workflows/docker-release.yml` | push → `main` / tag `v*`，手动 | 镜像 CI：构建 4 个组件；合法版本 tag 原子移动 release descriptor channel 并起草 GitHub Release |
 | `.github/actions/setup/action.yml` | 被 ci.yml 复用 | 统一 Node 22 + pnpm + frozen-lockfile 安装 |
 | `.github/dependabot.yml` | 每周 | 依赖 / Action 安全更新自动开 PR |
 
@@ -32,30 +32,41 @@
 
 ## docker-release.yml —— 镜像 CI 与发布
 
-- 触发：推送到 `my-main`、推送形如 `v*` 的 tag、或手动触发。
-- 镜像命名空间：运行时从 `GITHUB_REPOSITORY_OWNER` 小写化得到，例如 fork `Shuai-S/GPT2Image-Pro` 会推送到 `ghcr.io/shuai-s/*`。
-- 构建 + 推送到 GHCR（`ghcr.io`）4 个镜像：`web`、`migrate`、`chatgpt-web-proxy`、`chatgpt-register`。
-- 每次镜像发布都会写入 `latest` 标签，并统一生成 UTC 时间戳标签
-  `YYYYMMDDHHMMSS`；同一次 workflow 的 4 个镜像共用同一个时间戳，
-  便于保留可回滚的历史镜像。
-- 分支推送生成 `my-main`、`latest`、`YYYYMMDDHHMMSS`、`sha-<sha>`
-  标签；版本 tag 额外生成 `vX.Y.Z`、`X.Y.Z`、`X.Y`、`X`、`latest`、
-  `YYYYMMDDHHMMSS`、`sha-<sha>` 标签；手动触发至少生成 `latest`、
-  `YYYYMMDDHHMMSS`、`sha-<sha>` 标签。
-- `my-main` 分支构建 `linux/amd64`；版本 tag 为 `web`、`migrate`、`chatgpt-web-proxy` 构建 `linux/amd64,linux/arm64`，`chatgpt-register` 因 Wine/x86 依赖仅构建 `linux/amd64`。
-- tag 触发时起草（draft）一份 GitHub Release，附 docker-compose 部署包（`.tar.gz` / `.zip`）。
+- 触发：推送到 `main`、推送形如 `v*` 的 tag、或手动触发。
+- 镜像命名空间：运行时从 `GITHUB_REPOSITORY_OWNER` 小写化得到，例如 fork
+  `Shuai-S/GPT2Image-Pro` 会推送到 `ghcr.io/shuai-s/*`。
+- 矩阵构建向 GHCR 推送 `web`、`migrate`、`chatgpt-web-proxy`、
+  `chatgpt-register` 四个组件。构建阶段只写本次 workflow 唯一的
+  `sha-<commit>-<run-id>-<run-attempt>` 源标签。
+- `main` 分支构建 `linux/amd64`，不产生消费者 channel。版本 tag 为 `web`、
+  `migrate`、`chatgpt-web-proxy` 构建 `linux/amd64,linux/arm64`；
+  `chatgpt-register` 因 Wine/x86 依赖仅构建 `linux/amd64`。
+- promotion 只接受完整的 `vX.Y.Z-(alpha|beta|rc).N`（正式版无后缀）。四组件仅发布不可变
+  `vX.Y.Z[-prerelease]` 与 `X.Y.Z[-prerelease]`，不再写组件 major、minor、
+  `latest`。任一 exact 已存在但 digest 不同，整次 promotion 在写入前失败。
+- 单独的 `gpt2image-pro-release` 仓库存放 OCI descriptor。descriptor 顶层注解
+  记录发布版本和四组件的完整 `repository@sha256:digest`，自身也发布两种
+  exact semver 标签。
+- 所有组件 exact 与 descriptor exact 都成功后，工作流才执行一次 registry
+  操作移动 descriptor channel：正式版移动 `latest`，预发布只移动
+  `prerelease`，绝不触碰 stable `latest`。
+- OCI registry 不提供跨仓库事务。故障时可能留下已写入的不可变 exact 标签，
+  但消费者唯一的可变发现入口不会移动，不会观察到半套发布。
+- quality gate 使用 fake Docker 故障注入验证组件失败、exact 冲突、单次 channel
+  移动和预发布隔离；tag 触发时起草 GitHub Release，并附带已钉 owner 命名空间
+  与当前 exact tag 的 compose 部署包（`.tar.gz` / `.zip`）。
 
 ## 版本与发布流程（对齐 §0.2）
 
 版本格式：`v<MAJOR>.<MINOR>.<PATCH>-<alpha|beta|rc>.<N>`（正式版去后缀）。
 
 ```bash
-# 推送 my-main 会构建并推送 latest / my-main / YYYYMMDDHHMMSS / sha-<sha> 镜像：
-git push origin my-main
+# 推送 main 只构建 run-scoped 源镜像，不移动发布 channel：
+git push origin main
 
-# 在目标提交上打 tag 会触发版本镜像与 Release 草稿：
+# 在目标提交上打完整版本 tag 才会提升 exact 与 descriptor channel：
 git tag v0.2.0-rc.1
-git push origin v0.2.0-rc.1   # → 触发 docker-release.yml
+git push origin v0.2.0-rc.1
 ```
 
 ## 分支保护（已启用）
