@@ -12,24 +12,45 @@
  * - local provider 下 getSignedUploadUrl 返回的是 GET 路由（不可 PUT），
  *   预签名直传仅 S3 可用。
  */
+
+import { z } from "zod";
 import { isSubscriptionPlan } from "../../config/subscription-plan";
+import { DEFAULT_IMAGE_RESPONSE_MAX_BYTES } from "../../http/fetch";
 import {
   createDirectUploadKey,
-  directUploadAuthorizationSchema,
   DIRECT_UPLOAD_PURPOSES,
   DirectUploadInputError,
+  directUploadAuthorizationSchema,
   resolveDirectUploadMetadata,
 } from "../../storage/direct-upload";
 import { getStorageProvider } from "../../storage/providers/index";
+import { ALLOWED_IMAGE_TYPES } from "../../storage/types";
+import { isBucketAllowed, keyBelongsToUser } from "../../storage/utils";
 import { getPlanUploadLimits } from "../../subscription/services/upload-limits";
 import { getUserPlan } from "../../subscription/services/user-plan";
 import { getRuntimeSettingString } from "../../system-settings";
 import { OperationError } from "../errors";
 import { getPrincipalUserId, type Principal } from "../principal";
 import { defineOperation } from "../registry";
-import { z } from "zod";
 
 const DIRECT_UPLOAD_URL_EXPIRES_SECONDS = 10 * 60;
+const DEFAULT_AVATARS_BUCKET = "avatars";
+const DEFAULT_GENERATIONS_BUCKET = "generations";
+const USER_STORAGE_READ_MAX_BYTES = DEFAULT_IMAGE_RESPONSE_MAX_BYTES;
+const STORAGE_BUCKET_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+const STORAGE_KEY_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._/-]*$/;
+
+const storageBucketSchema = z.string().min(1).max(128);
+const storageKeySchema = z.string().min(1).max(1024);
+const storageReferenceSchema = z.object({
+  bucket: storageBucketSchema,
+  key: storageKeySchema,
+});
+
+type UserStorageBuckets = {
+  avatars: string;
+  generations: string;
+};
 
 const createDirectUploadInputSchema = z.object({
   purpose: z.enum(DIRECT_UPLOAD_PURPOSES),
@@ -39,6 +60,115 @@ const createDirectUploadInputSchema = z.object({
 });
 
 type CreateDirectUploadInput = z.infer<typeof createDirectUploadInputSchema>;
+
+/**
+ * 读取用户面操作允许使用的头像与生成桶。
+ *
+ * @returns 经过格式与歧义检查的两个桶名。
+ * @throws 桶配置非法或两类数据共用同一桶时 fail-closed。
+ * @sideEffects 并行读取两项运行时设置。
+ */
+async function resolveUserStorageBuckets(): Promise<UserStorageBuckets> {
+  const [configuredAvatars, configuredGenerations] = await Promise.all([
+    getRuntimeSettingString("NEXT_PUBLIC_AVATARS_BUCKET_NAME"),
+    getRuntimeSettingString("NEXT_PUBLIC_GENERATIONS_BUCKET_NAME"),
+  ]);
+  const buckets = {
+    avatars: configuredAvatars || DEFAULT_AVATARS_BUCKET,
+    generations: configuredGenerations || DEFAULT_GENERATIONS_BUCKET,
+  };
+  if (
+    !STORAGE_BUCKET_PATTERN.test(buckets.avatars) ||
+    !STORAGE_BUCKET_PATTERN.test(buckets.generations) ||
+    buckets.avatars === buckets.generations
+  ) {
+    throw new OperationError(
+      "internal_error",
+      "Storage bucket configuration is invalid"
+    );
+  }
+  return buckets;
+}
+
+/**
+ * 从用户面 Principal 提取不可伪造的用户 ID。
+ *
+ * @param principal UOL 网关已鉴权身份。
+ * @returns 会话或 API Key 绑定的用户 ID。
+ * @throws system 等无用户身份不能调用用户存储操作。
+ */
+function requireStorageUserId(principal: Principal): string {
+  const userId = getPrincipalUserId(principal);
+  if (!userId) {
+    throw new OperationError(
+      "unauthenticated",
+      "User storage operations require a user identity"
+    );
+  }
+  return userId;
+}
+
+/**
+ * 校验对象 key 不含路径穿越、编码绕过或非业务字符。
+ *
+ * @param key 未信任的对象 key。
+ * @returns 校验成功时无返回值。
+ * @throws 非法 key 在触达 provider 前按 validation_error 拒绝。
+ */
+function assertSafeStorageKey(key: string): void {
+  const segments = key.split("/");
+  if (
+    !STORAGE_KEY_PATTERN.test(key) ||
+    key.includes("..") ||
+    key.includes("\\") ||
+    key.includes("\0") ||
+    segments.some((segment) => !segment || segment === "." || segment === "..")
+  ) {
+    throw new OperationError("validation_error", "Storage key is invalid");
+  }
+}
+
+/**
+ * 校验用户请求的桶属于操作声明的白名单。
+ *
+ * @param bucket 未信任桶名。
+ * @param allowedBuckets 当前操作允许的精确桶名。
+ * @returns 校验成功时无返回值。
+ * @throws 未配置或跨桶访问按 forbidden 拒绝。
+ */
+function assertAllowedStorageBucket(
+  bucket: string,
+  allowedBuckets: readonly string[]
+): void {
+  if (!isBucketAllowed(bucket, allowedBuckets)) {
+    throw new OperationError("forbidden", "Storage bucket is not allowed");
+  }
+}
+
+/**
+ * 校验对象 key 位于当前用户的命名空间。
+ *
+ * @param key 已通过路径安全校验的对象 key。
+ * @param userId Principal 派生的用户 ID。
+ * @param requireDirectoryPrefix 生成桶为 true，只接受 `${userId}/` 前缀。
+ * @returns 校验成功时无返回值。
+ * @throws 跨用户 key 按 ownership_violation 拒绝。
+ */
+function assertUserOwnedStorageKey(
+  key: string,
+  userId: string,
+  requireDirectoryPrefix: boolean
+): void {
+  const owned = requireDirectoryPrefix
+    ? key.startsWith(`${userId}/`)
+    : keyBelongsToUser(key, userId);
+  if (!owned) {
+    throw new OperationError(
+      "ownership_violation",
+      "Storage object does not belong to the current user"
+    );
+  }
+}
 
 /**
  * 解析直传调用者的用户与套餐。
@@ -183,24 +313,28 @@ export const getSignedUploadUrl = defineOperation({
   domain: "storage",
   title: "获取预签名上传 URL",
   description:
-    "为已认证用户生成预签名的对象存储上传 URL（头像/用户文件）。" +
+    "为已认证用户生成预签名的头像上传 URL。" +
     "S3 后端返回可直传的 PUT URL；local 后端返回 GET 路由地址（不可 PUT）。" +
-    "需验证桶白名单与套餐能力。",
-  input: z.object({
-    bucket: z.string().min(1),
-    key: z.string().min(1),
-    contentType: z.string().min(1),
+    "只允许头像桶、当前用户 key 与图片 MIME；生成文件必须走统一直传授权。",
+  input: storageReferenceSchema.extend({
+    contentType: z.enum(ALLOWED_IMAGE_TYPES),
   }),
   output: z.object({
     url: z.string(),
     key: z.string(),
   }),
-  access: { kind: "protected" },
+  access: { kind: "owner", resource: "storage-file" },
   readOnly: false,
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: ["storage"],
-  execute: async (input, _principal, _ctx) => {
+  execute: async (input, principal, ctx) => {
+    const userId = requireStorageUserId(principal);
+    const buckets = await resolveUserStorageBuckets();
+    assertAllowedStorageBucket(input.bucket, [buckets.avatars]);
+    assertSafeStorageKey(input.key);
+    assertUserOwnedStorageKey(input.key, userId, false);
+    ctx.assertOwnership("storage-file", userId);
     const provider = await getStorageProvider();
     const url = await provider.getSignedUploadUrl(
       input.key,
@@ -220,12 +354,10 @@ export const deleteFile = defineOperation({
   domain: "storage",
   title: "删除用户文件",
   description:
-    "删除用户拥有的存储文件。需验证桶白名单与文件归属（owner）。" +
+    "删除用户拥有的头像文件；生成产物只能由业务管线或维护任务删除。" +
+    "需验证头像桶白名单与文件归属（owner）。" +
     "操作幂等：删除不存在的 key 不报错。",
-  input: z.object({
-    bucket: z.string().min(1),
-    key: z.string().min(1),
-  }),
+  input: storageReferenceSchema,
   output: z.object({
     success: z.boolean(),
   }),
@@ -234,7 +366,13 @@ export const deleteFile = defineOperation({
   destructive: true,
   idempotency: { kind: "natural" },
   sideEffects: ["storage"],
-  execute: async (input, _principal, _ctx) => {
+  execute: async (input, principal, ctx) => {
+    const userId = requireStorageUserId(principal);
+    const buckets = await resolveUserStorageBuckets();
+    assertAllowedStorageBucket(input.bucket, [buckets.avatars]);
+    assertSafeStorageKey(input.key);
+    assertUserOwnedStorageKey(input.key, userId, false);
+    ctx.assertOwnership("storage-file", userId);
     const provider = await getStorageProvider();
     await provider.deleteObject(input.key, input.bucket);
     return { success: true };
@@ -250,12 +388,16 @@ export const readObject = defineOperation({
   domain: "storage",
   title: "读取存储对象",
   description:
-    "通过 GET 代理读取对象存储中的文件。权限因桶而异：" +
+    "有限读取用户面对象存储文件。权限因桶而异：" +
     "avatars 桶公开访问；generations 桶需已认证 + 属主校验。" +
-    "执行桶白名单与路径防穿越校验。",
-  input: z.object({
-    bucket: z.string().min(1),
-    key: z.string().min(1),
+    "执行桶白名单、路径防穿越与 25 MiB 服务端硬上限。",
+  input: storageReferenceSchema.extend({
+    maxBytes: z
+      .number()
+      .int()
+      .positive()
+      .max(USER_STORAGE_READ_MAX_BYTES)
+      .optional(),
   }),
   output: z.object({
     data: z.instanceof(Uint8Array).or(z.unknown()),
@@ -267,9 +409,32 @@ export const readObject = defineOperation({
   destructive: false,
   idempotency: { kind: "natural" },
   sideEffects: [],
-  execute: async (input, _principal, _ctx) => {
+  execute: async (input, principal, ctx) => {
+    const userId = requireStorageUserId(principal);
+    const buckets = await resolveUserStorageBuckets();
+    assertAllowedStorageBucket(input.bucket, [
+      buckets.avatars,
+      buckets.generations,
+    ]);
+    assertSafeStorageKey(input.key);
+    if (input.bucket === buckets.generations) {
+      assertUserOwnedStorageKey(input.key, userId, true);
+      ctx.assertOwnership("storage-file", userId);
+    }
+    const maxBytes = Math.min(
+      input.maxBytes ?? USER_STORAGE_READ_MAX_BYTES,
+      USER_STORAGE_READ_MAX_BYTES
+    );
     const provider = await getStorageProvider();
-    const data = await provider.getObject(input.key, input.bucket);
+    const data = await provider.getObject(input.key, input.bucket, {
+      maxBytes,
+    });
+    if (data.length > maxBytes) {
+      throw new OperationError(
+        "upstream_error",
+        "Storage provider returned an object above the read limit"
+      );
+    }
     return { data, contentType: undefined, contentLength: data.length };
   },
 });
