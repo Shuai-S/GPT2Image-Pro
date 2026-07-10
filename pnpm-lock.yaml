@@ -11,6 +11,8 @@ overrides:
   vite: 7.3.5
   yaml: 2.8.3
 
+packageExtensionsChecksum: sha256-EjUmSALokDlPOnsPm+f3hK4GGOgY7ZJlFzmMFeqOKTQ=
+
 importers:
 
   .:
@@ -6562,6 +6564,7 @@ snapshots:
   '@alicloud/credentials@2.4.4':
     dependencies:
       '@alicloud/tea-typescript': 1.8.0
+      debug: 4.4.3
       httpx: 2.3.3
       ini: 1.3.8
       kitx: 2.2.0
