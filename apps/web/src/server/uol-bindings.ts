@@ -33,6 +33,7 @@ import {
   toAsyncImageTaskResponse,
 } from "@/features/external-api/async-image-tasks";
 import { enqueueEditableFileTask } from "@/features/external-api/editable-task-service";
+import { runExternalAsyncTaskRetention } from "@/features/external-api/external-async-task-retention";
 import {
   getUserImageBackendPreference,
   listAdminImageBackendPool,
@@ -416,6 +417,19 @@ bindExecute(
 // ---------------------------------------------------------------------------
 // external-api 域
 // ---------------------------------------------------------------------------
+
+/**
+ * externalApi.runAsyncTaskRetention - 清理 callback 已结束的持久异步任务终态。
+ * 源: external-api/external-async-task-retention.ts
+ */
+bindExecute(
+  "externalApi.runAsyncTaskRetention",
+  async (
+    _input: Record<string, never>,
+    _principal: Principal,
+    _ctx: OperationContext
+  ) => await runExternalAsyncTaskRetention()
+);
 
 // TODO: externalApi.handleImageGenerations - image-generations handler 逻辑
 // TODO: externalApi.handleImageEdits - image-edits handler 逻辑

@@ -428,6 +428,13 @@
       "when": 1783692000000,
       "tag": "0060_generation_execution_fencing",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1783695600000,
+      "tag": "0061_external_async_task_retention",
+      "breakpoints": true
     }
   ]
 }

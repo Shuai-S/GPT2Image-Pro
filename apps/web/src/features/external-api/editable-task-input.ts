@@ -169,20 +169,75 @@ export async function loadEditableTaskImages(input: {
   return results;
 }
 
-/** 尽力删除任务输入对象；单个删除失败不阻断其他对象清理。 */
+/**
+ * 删除任务输入对象并返回每个合法对象的执行结果。
+ *
+ * @param input 已鉴权用户、任务 ID 和数据库中的未知引用集合。
+ * @returns 所有合法且属于该任务前缀的对象删除结果；非法引用被安全忽略。
+ * @sideEffects 并行调用对象存储删除；单个失败不阻断其他删除尝试。
+ */
+async function settleEditableTaskInputCleanup(input: {
+  userId: string;
+  taskId: string;
+  references: readonly EditableTaskInputReference[];
+}): Promise<PromiseSettledResult<void>[]> {
+  const storage = await getStorageProvider();
+  const expectedPrefix = `${input.userId}/editable-task-inputs/${input.taskId}/`;
+  const references = input.references.flatMap((rawReference) => {
+    const parsed = editableTaskInputReferenceSchema.safeParse(rawReference);
+    if (
+      !parsed.success ||
+      !parsed.data.key.startsWith(expectedPrefix) ||
+      parsed.data.key.slice(expectedPrefix.length).includes("/")
+    ) {
+      return [];
+    }
+    return [parsed.data];
+  });
+  return await Promise.allSettled(
+    references.map(async (reference) => {
+      await storage.deleteObject(reference.key, reference.bucket);
+    })
+  );
+}
+
+/**
+ * 尽力删除任务输入对象。
+ *
+ * @param input 用户、任务和受控对象引用。
+ * @returns 所有删除尝试结束后完成。
+ * @sideEffects 并行删除合法对象；保留既有语义，单个删除失败不会向调用方抛出。
+ */
 export async function cleanupEditableTaskInputs(input: {
   userId: string;
   taskId: string;
   references: readonly EditableTaskInputReference[];
 }): Promise<void> {
-  const storage = await getStorageProvider();
-  const expectedPrefix = `${input.userId}/editable-task-inputs/${input.taskId}/`;
-  await Promise.allSettled(
-    input.references.map(async (rawReference) => {
-      const parsed = editableTaskInputReferenceSchema.safeParse(rawReference);
-      if (!parsed.success || !parsed.data.key.startsWith(expectedPrefix))
-        return;
-      await storage.deleteObject(parsed.data.key, parsed.data.bucket);
-    })
+  await settleEditableTaskInputCleanup(input);
+}
+
+/**
+ * 严格删除任务输入对象并汇总报告失败。
+ *
+ * @param input 用户、任务和经严格 payload 提取的受控对象引用。
+ * @returns 所有合法对象均删除成功时完成；非法引用被安全忽略。
+ * @throws 存储初始化或任一合法对象删除失败时抛出，供 retention 保留任务行重试。
+ * @sideEffects 并行删除对象存储中的任务输入。
+ */
+export async function cleanupEditableTaskInputsStrict(input: {
+  userId: string;
+  taskId: string;
+  references: readonly EditableTaskInputReference[];
+}): Promise<void> {
+  const deletions = await settleEditableTaskInputCleanup(input);
+  const failed = deletions.filter(
+    (deletion): deletion is PromiseRejectedResult =>
+      deletion.status === "rejected"
   );
+  if (failed.length > 0) {
+    throw new AggregateError(
+      failed.map((deletion) => deletion.reason),
+      `Failed to delete ${failed.length} editable task input object(s)`
+    );
+  }
 }

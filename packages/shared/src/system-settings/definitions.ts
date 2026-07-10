@@ -222,6 +222,9 @@ export type SettingKey =
   | "INTERNAL_JOB_WEB_ACCOUNTS_REFRESH_INTERVAL_MINUTES"
   | "INTERNAL_JOB_WEB_ACCOUNTS_REPLENISH_INTERVAL_MINUTES"
   | "INTERNAL_JOB_SUB2API_SYNC_INTERVAL_MINUTES"
+  | "INTERNAL_JOB_EXTERNAL_ASYNC_TASK_RETENTION_INTERVAL_MINUTES"
+  | "EXTERNAL_ASYNC_TASK_RETENTION_DAYS"
+  | "EXTERNAL_ASYNC_TASK_RETENTION_BATCH_SIZE"
   | "UPSTASH_REDIS_REST_URL"
   | "UPSTASH_REDIS_REST_TOKEN"
   | "RATE_LIMIT_GLOBAL_REQUESTS_PER_MINUTE"
@@ -1886,7 +1889,7 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     key: "INTERNAL_JOB_SCHEDULER_ENABLED",
     label: "内置定时任务",
     description:
-      "启用后 Web 进程会自动执行 pending 超时、照片清理、积分过期、Web 账号刷新和 Sub2API 同步任务；多实例会用数据库锁避免重复执行。",
+      "启用后 Web 进程会自动执行 pending 超时、照片与异步任务清理、积分过期、Web 账号刷新和 Sub2API 同步任务；多实例会用数据库锁避免重复执行。",
     category: "general",
     valueType: "boolean",
     defaultValue: true,
@@ -1931,6 +1934,38 @@ export const SYSTEM_SETTING_DEFINITIONS = [
     category: "general",
     valueType: "number",
     defaultValue: 10,
+  },
+  {
+    key: "INTERNAL_JOB_EXTERNAL_ASYNC_TASK_RETENTION_INTERVAL_MINUTES",
+    label: "异步任务清理间隔（分钟）",
+    description: "外部 API 持久异步任务终态清理的内置执行间隔。",
+    category: "general",
+    valueType: "number",
+    defaultValue: 1440,
+    min: 1,
+    max: 10080,
+  },
+  {
+    key: "EXTERNAL_ASYNC_TASK_RETENTION_DAYS",
+    label: "异步任务终态保留天数",
+    description:
+      "仅 callback 已送达、永久失败或无需 callback 的 completed/failed 任务可在到期后清理。",
+    category: "performance",
+    valueType: "number",
+    defaultValue: 30,
+    min: 1,
+    max: 3650,
+  },
+  {
+    key: "EXTERNAL_ASYNC_TASK_RETENTION_BATCH_SIZE",
+    label: "异步任务单批清理量",
+    description:
+      "每轮最多清理的持久异步任务数；对象输入清理失败的任务会保留到下轮重试。",
+    category: "performance",
+    valueType: "number",
+    defaultValue: 500,
+    min: 1,
+    max: 5000,
   },
   {
     key: "UPSTASH_REDIS_REST_URL",

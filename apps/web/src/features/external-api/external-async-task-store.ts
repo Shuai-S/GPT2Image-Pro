@@ -11,12 +11,180 @@ import { hostname } from "node:os";
 import { db, externalAsyncTask } from "@repo/database";
 import { and, eq, inArray, sql } from "drizzle-orm";
 
+import { MAX_EXTERNAL_ASYNC_TASK_RETENTION_BATCH_SIZE } from "./external-async-task-retention-core";
+
 export type ExternalAsyncTaskRow = typeof externalAsyncTask.$inferSelect;
+
+export type ExternalAsyncTaskRetentionCandidate = {
+  id: string;
+  taskType: "image" | "video" | "editable_file";
+  userId: string;
+  requestPayload: unknown;
+};
 
 const CALLBACK_LEASE_TTL_MS = 60 * 1000;
 const TASK_LEASE_TTL_MS = 2 * 60 * 1000;
 const LEGACY_NULL_LEASE_GRACE_MS = 20 * 60 * 1000;
 const PROCESS_OWNER_ID = `${hostname()}:${process.pid}:${randomUUID()}`;
+
+/**
+ * 从不同 PostgreSQL 驱动返回形态中提取原始行数组。
+ *
+ * @param result Drizzle execute 的数组或带 rows 的驱动结果。
+ * @returns 可安全逐项收窄的未知行数组；异常形态返回空数组。
+ * @sideEffects 无；不信任数据库驱动边界的运行时形态。
+ */
+function extractExecuteRows(result: unknown): unknown[] {
+  if (Array.isArray(result)) return result;
+  if (typeof result !== "object" || result === null) return [];
+  const rows = (result as { rows?: unknown }).rows;
+  return Array.isArray(rows) ? rows : [];
+}
+
+/**
+ * 从原始查询结果中提取字符串任务 ID。
+ *
+ * @param result PostgreSQL 查询结果。
+ * @returns 忽略非法行后的任务 ID 列表。
+ * @sideEffects 无。
+ */
+function extractExecuteIds(result: unknown): string[] {
+  return extractExecuteRows(result).flatMap((row) => {
+    if (typeof row !== "object" || row === null) return [];
+    const id = (row as Record<string, unknown>).id;
+    return typeof id === "string" ? [id] : [];
+  });
+}
+
+/**
+ * 校验终态清理存储边界，防止绕过运行时配置硬上限。
+ *
+ * @param cutoff 已计算的清理截止时间。
+ * @param batchSize SQL LIMIT 使用的固定批次大小。
+ * @throws RangeError 当时间无效或批次不在 1..5000 时抛出。
+ * @sideEffects 无。
+ */
+function assertExternalAsyncTaskRetentionStoreInput(
+  cutoff: Date,
+  batchSize: number
+): void {
+  if (
+    !Number.isFinite(cutoff.getTime()) ||
+    !Number.isSafeInteger(batchSize) ||
+    batchSize < 1 ||
+    batchSize > MAX_EXTERNAL_ASYNC_TASK_RETENTION_BATCH_SIZE
+  ) {
+    throw new RangeError("Invalid external async task retention store input");
+  }
+}
+
+/**
+ * 读取一个到期终态任务候选批次。
+ *
+ * @param input 稳定截止时间和有硬上限的固定批次大小。
+ * @returns 仅包含清理输入对象所需最小字段的已校验候选列表。
+ * @sideEffects 短事务内用 SKIP LOCKED 读取候选；事务结束后不持有行锁，调用方必须在
+ * 对象清理成功后通过 deleteExternalAsyncTaskTerminalBatch 重新锁定并复核。
+ * @throws 数据库失败或输入越界时抛出。
+ */
+export async function listExternalAsyncTaskTerminalRetentionCandidates(input: {
+  cutoff: Date;
+  batchSize: number;
+}): Promise<ExternalAsyncTaskRetentionCandidate[]> {
+  assertExternalAsyncTaskRetentionStoreInput(input.cutoff, input.batchSize);
+  return await db.transaction(async (tx) => {
+    const result = await tx.execute(sql`
+      SELECT
+        "id",
+        "task_type" AS "taskType",
+        "user_id" AS "userId",
+        "request_payload" AS "requestPayload"
+      FROM "external_async_task"
+      WHERE "status" IN ('completed', 'failed')
+        AND "callback_status" IN ('none', 'sent', 'permanent_failed')
+        AND "completed_at" IS NOT NULL
+        AND "completed_at" <= ${input.cutoff}
+      ORDER BY "completed_at", "id"
+      FOR UPDATE SKIP LOCKED
+      LIMIT ${input.batchSize}
+    `);
+
+    return extractExecuteRows(result).flatMap((rawRow) => {
+      if (typeof rawRow !== "object" || rawRow === null) return [];
+      const row = rawRow as Record<string, unknown>;
+      if (
+        typeof row.id !== "string" ||
+        typeof row.userId !== "string" ||
+        (row.taskType !== "image" &&
+          row.taskType !== "video" &&
+          row.taskType !== "editable_file")
+      ) {
+        return [];
+      }
+      return [
+        {
+          id: row.id,
+          taskType: row.taskType,
+          userId: row.userId,
+          requestPayload: row.requestPayload,
+        },
+      ];
+    });
+  });
+}
+
+/**
+ * 删除已完成输入对象清理的一批终态任务。
+ *
+ * @param input 候选 ID、稳定截止时间和固定批次大小；ID 必须来自同轮候选读取。
+ * @returns 重新锁定且仍满足全部终态条件的实际删除行数。
+ * @sideEffects 在一个短事务中 SKIP LOCKED 选中候选，再以相同状态、callback 和截止
+ * 谓词执行 DELETE；并发状态变化或被其他事务锁定的行会保留。
+ * @throws 数据库失败、输入越界或候选数超过批次时抛出。
+ */
+export async function deleteExternalAsyncTaskTerminalBatch(input: {
+  candidateIds: readonly string[];
+  cutoff: Date;
+  batchSize: number;
+}): Promise<number> {
+  assertExternalAsyncTaskRetentionStoreInput(input.cutoff, input.batchSize);
+  const candidateIds = [...new Set(input.candidateIds)];
+  if (
+    candidateIds.length > input.batchSize ||
+    candidateIds.some((id) => id.length === 0)
+  ) {
+    throw new RangeError("Invalid external async task retention candidate IDs");
+  }
+  if (candidateIds.length === 0) return 0;
+
+  return await db.transaction(async (tx) => {
+    const selection = await tx.execute(sql`
+      SELECT "id"
+      FROM "external_async_task"
+      WHERE "id" = ANY(${candidateIds}::text[])
+        AND "status" IN ('completed', 'failed')
+        AND "callback_status" IN ('none', 'sent', 'permanent_failed')
+        AND "completed_at" IS NOT NULL
+        AND "completed_at" <= ${input.cutoff}
+      ORDER BY "completed_at", "id"
+      FOR UPDATE SKIP LOCKED
+      LIMIT ${input.batchSize}
+    `);
+    const lockedIds = extractExecuteIds(selection);
+    if (lockedIds.length === 0) return 0;
+
+    const deletion = await tx.execute(sql`
+      DELETE FROM "external_async_task"
+      WHERE "id" = ANY(${lockedIds}::text[])
+        AND "status" IN ('completed', 'failed')
+        AND "callback_status" IN ('none', 'sent', 'permanent_failed')
+        AND "completed_at" IS NOT NULL
+        AND "completed_at" <= ${input.cutoff}
+      RETURNING "id"
+    `);
+    return extractExecuteIds(deletion).length;
+  });
+}
 
 /**
  * 插入一个外部异步任务外壳。

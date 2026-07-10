@@ -633,3 +633,34 @@ export const adminSetKeyStatus = defineOperation({
     throw new Error("Not yet wired: externalApi.adminSetKeyStatus");
   },
 });
+
+// ---------------------------------------------------------------------------
+// 18. externalApi.runAsyncTaskRetention - CRON 清理持久异步任务终态
+// ---------------------------------------------------------------------------
+export const runAsyncTaskRetention = defineOperation({
+  name: "externalApi.runAsyncTaskRetention",
+  domain: "external-api",
+  title: "清理外部 API 异步任务终态",
+  description:
+    "按有界保留策略清理 callback 已结束的 completed/failed 任务；" +
+    "删除任务行前先重试受控临时输入对象清理。",
+  input: z.object({}),
+  output: z.object({
+    candidateCount: z.number().int().nonnegative(),
+    cleanupFailedCount: z.number().int().nonnegative(),
+    deletedCount: z.number().int().nonnegative(),
+    retentionDays: z.number().int().positive(),
+    batchSize: z.number().int().positive(),
+    cutoff: z.string().datetime(),
+    batchLimitReached: z.boolean(),
+  }),
+  access: { kind: "cron" },
+  readOnly: false,
+  destructive: true,
+  idempotency: { kind: "natural" },
+  sideEffects: ["storage", "queue", "audit"],
+  hasMaintenanceWrite: true,
+  async execute() {
+    throw new Error("Not yet wired: externalApi.runAsyncTaskRetention");
+  },
+});

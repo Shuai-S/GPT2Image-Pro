@@ -1795,6 +1795,11 @@ export const externalAsyncTask = pgTable(
       table.apiKeyId,
       table.createdAt
     ),
+    index("external_async_task_terminal_retention_idx")
+      .on(table.completedAt, table.id)
+      .where(
+        sql`${table.status} IN ('completed', 'failed') AND ${table.callbackStatus} IN ('none', 'sent', 'permanent_failed') AND ${table.completedAt} IS NOT NULL`
+      ),
     check(
       "external_async_task_type_check",
       sql`${table.taskType} IN ('image', 'video', 'editable_file')`

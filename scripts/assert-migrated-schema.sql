@@ -56,7 +56,8 @@ BEGIN
     'generation_gallery_final_idx',
     'generation_gallery_status_cursor_idx',
     'external_api_key_usage_source_unique',
-    'external_async_task_editable_client_unique'
+    'external_async_task_editable_client_unique',
+    'external_async_task_terminal_retention_idx'
   ] LOOP
     IF to_regclass(format('public.%I', required_index)) IS NULL THEN
       RAISE EXCEPTION 'missing required index: %', required_index;

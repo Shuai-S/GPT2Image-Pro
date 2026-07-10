@@ -19,7 +19,8 @@ export type InternalJobName =
   | "referral-thaw"
   | "web-accounts-refresh"
   | "web-accounts-replenish"
-  | "sub2api-sync";
+  | "sub2api-sync"
+  | "external-async-task-retention";
 
 type InternalJobDefinition = {
   name: InternalJobName;
@@ -29,14 +30,16 @@ type InternalJobDefinition = {
     | "referral.thawCommissions"
     | "pool.cronRefreshStale"
     | "pool.cronWebAccountsReplenish"
-    | "pool.cronSub2ApiSync";
+    | "pool.cronSub2ApiSync"
+    | "externalApi.runAsyncTaskRetention";
   intervalSettingKey:
     | "INTERNAL_JOB_IMAGES_MAINTENANCE_INTERVAL_MINUTES"
     | "INTERNAL_JOB_CREDITS_EXPIRE_INTERVAL_MINUTES"
     | "INTERNAL_JOB_REFERRAL_THAW_INTERVAL_MINUTES"
     | "INTERNAL_JOB_WEB_ACCOUNTS_REFRESH_INTERVAL_MINUTES"
     | "INTERNAL_JOB_WEB_ACCOUNTS_REPLENISH_INTERVAL_MINUTES"
-    | "INTERNAL_JOB_SUB2API_SYNC_INTERVAL_MINUTES";
+    | "INTERNAL_JOB_SUB2API_SYNC_INTERVAL_MINUTES"
+    | "INTERNAL_JOB_EXTERNAL_ASYNC_TASK_RETENTION_INTERVAL_MINUTES";
   defaultIntervalMinutes: number;
   initialDelayMs: number;
 };
@@ -85,6 +88,14 @@ export const INTERNAL_JOBS: readonly InternalJobDefinition[] = [
     intervalSettingKey: "INTERNAL_JOB_WEB_ACCOUNTS_REPLENISH_INTERVAL_MINUTES",
     defaultIntervalMinutes: 15,
     initialDelayMs: 150_000,
+  },
+  {
+    name: "external-async-task-retention",
+    operationName: "externalApi.runAsyncTaskRetention",
+    intervalSettingKey:
+      "INTERNAL_JOB_EXTERNAL_ASYNC_TASK_RETENTION_INTERVAL_MINUTES",
+    defaultIntervalMinutes: 24 * 60,
+    initialDelayMs: 180_000,
   },
 ] as const;
 
