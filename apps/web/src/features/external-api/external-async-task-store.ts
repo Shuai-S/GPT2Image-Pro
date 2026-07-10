@@ -15,6 +15,7 @@ export type ExternalAsyncTaskRow = typeof externalAsyncTask.$inferSelect;
 
 const CALLBACK_LEASE_TTL_MS = 60 * 1000;
 const TASK_LEASE_TTL_MS = 2 * 60 * 1000;
+const LEGACY_NULL_LEASE_GRACE_MS = 20 * 60 * 1000;
 const PROCESS_OWNER_ID = `${hostname()}:${process.pid}:${randomUUID()}`;
 
 /**
@@ -510,71 +511,72 @@ export async function requeueEditableTask(
 }
 
 /**
- * 把过期且耗尽尝试次数的普通 image/video 任务收敛为失败终态。
+ * 领取一条耗尽执行次数、只能继续对账/补偿的普通 generation 任务。
  *
- * @returns 本批被收敛的完整任务行，最多 100 条，供 worker 尽力清理输入对象。
- * @sideEffects 在短事务内 SKIP LOCKED 领取并更新任务，同时唤醒 callback outbox。
+ * @returns 任务行与本次 fencing token；无候选时返回 undefined。
+ * @sideEffects 短事务内 SKIP LOCKED 领取，不再递增 attemptCount，也不直接发布失败；
+ * adapter 必须先对账 generation/video 与财务真相后再决定终态。
  */
-export async function failExhaustedGenerationTasks(): Promise<
-  ExternalAsyncTaskRow[]
+export async function claimExhaustedGenerationTask(): Promise<
+  { row: ExternalAsyncTaskRow; leaseToken: string } | undefined
 > {
+  const leaseToken = randomUUID();
   return await db.transaction(async (tx) => {
     const result = await tx.execute(sql`
       SELECT "id"
       FROM "external_async_task"
       WHERE "task_type" IN ('image', 'video')
-        AND "status" = 'running'
-        AND "lease_expires_at" <= now()
         AND "attempt_count" >= "max_attempts"
-      ORDER BY "lease_expires_at", "id"
+        AND (
+          (
+            "status" = 'queued'
+            AND "available_at" <= now()
+          ) OR (
+            "status" = 'running'
+            AND (
+              "lease_expires_at" <= now()
+              OR (
+                "lease_expires_at" IS NULL
+                AND "created_at" <= now() - (${LEGACY_NULL_LEASE_GRACE_MS} * interval '1 millisecond')
+              )
+            )
+          )
+        )
+      ORDER BY "available_at", "created_at", "id"
       FOR UPDATE SKIP LOCKED
-      LIMIT 100
+      LIMIT 1
     `);
-    const rawRows = Array.isArray(result)
+    const rows = Array.isArray(result)
       ? result
       : (result as { rows?: unknown[] }).rows;
-    const ids = (Array.isArray(rawRows) ? rawRows : []).flatMap((row) => {
-      if (typeof row !== "object" || row === null) return [];
-      const id = (row as Record<string, unknown>).id;
-      return typeof id === "string" ? [id] : [];
-    });
-    if (ids.length === 0) return [];
+    const id =
+      Array.isArray(rows) &&
+      typeof rows[0] === "object" &&
+      rows[0] !== null &&
+      typeof (rows[0] as Record<string, unknown>).id === "string"
+        ? ((rows[0] as Record<string, unknown>).id as string)
+        : undefined;
+    if (!id) return undefined;
 
-    return await tx
+    const [row] = await tx
       .update(externalAsyncTask)
       .set({
-        status: "failed",
-        resultPayload: null,
-        errorPayload: {
-          error: {
-            message: "Generation task could not be recovered after retries.",
-          },
-        },
-        completedAt: sql`now()`,
+        status: "running",
+        leaseOwner: PROCESS_OWNER_ID,
+        leaseToken,
+        leaseExpiresAt: sql`now() + (${TASK_LEASE_TTL_MS} * interval '1 millisecond')`,
+        heartbeatAt: sql`now()`,
+        startedAt: sql`coalesce(${externalAsyncTask.startedAt}, now())`,
         updatedAt: sql`now()`,
-        leaseOwner: null,
-        leaseToken: null,
-        leaseExpiresAt: null,
-        heartbeatAt: null,
-        callbackStatus: sql`CASE
-          WHEN ${externalAsyncTask.callbackUrl} IS NULL THEN 'none'
-          ELSE 'waiting'
-        END`,
-        callbackNextAt: sql`CASE
-          WHEN ${externalAsyncTask.callbackUrl} IS NULL THEN NULL
-          ELSE now()
-        END`,
       })
       .where(
         and(
-          inArray(externalAsyncTask.id, ids),
-          inArray(externalAsyncTask.taskType, ["image", "video"]),
-          eq(externalAsyncTask.status, "running"),
-          sql`${externalAsyncTask.leaseExpiresAt} <= now()`,
-          sql`${externalAsyncTask.attemptCount} >= ${externalAsyncTask.maxAttempts}`
+          eq(externalAsyncTask.id, id),
+          inArray(externalAsyncTask.taskType, ["image", "video"])
         )
       )
       .returning();
+    return row ? { row, leaseToken } : undefined;
   });
 }
 
@@ -600,7 +602,13 @@ export async function claimGenerationTask(): Promise<
             AND "available_at" <= now()
           ) OR (
             "status" = 'running'
-            AND "lease_expires_at" <= now()
+            AND (
+              "lease_expires_at" <= now()
+              OR (
+                "lease_expires_at" IS NULL
+                AND "created_at" <= now() - (${LEGACY_NULL_LEASE_GRACE_MS} * interval '1 millisecond')
+              )
+            )
           )
         )
       ORDER BY "priority" DESC, "created_at", "id"
@@ -735,7 +743,7 @@ export async function finalizeGenerationTask(input: {
  * @returns 当前 lease 成功重排时为 true；已失效时为 false。
  * @sideEffects attemptCount 回退一次并清空租约，不消耗崩溃重试预算。
  */
-export async function requeueGenerationTask(
+export async function releaseUnstartedGenerationTask(
   id: string,
   leaseToken: string,
   delayMs = 500
@@ -760,6 +768,87 @@ export async function requeueGenerationTask(
         eq(externalAsyncTask.leaseOwner, PROCESS_OWNER_ID),
         eq(externalAsyncTask.leaseToken, leaseToken),
         sql`${externalAsyncTask.leaseExpiresAt} > now()`
+      )
+    )
+    .returning({ id: externalAsyncTask.id });
+  return Boolean(row);
+}
+
+/**
+ * 延后一条已经实际消耗本次执行机会的普通 generation 任务。
+ *
+ * @param id task ID。
+ * @param leaseToken 当前 fencing token。
+ * @param delayMs 再次可领取前的非负延迟，默认 500ms。
+ * @returns 当前 lease 成功释放时为 true；已失效时为 false。
+ * @sideEffects 保留 claim 已递增的 attemptCount，清空 lease 并写 queued/availableAt，
+ * 使连续暂态失败最终进入 exhausted reconciliation，而非无限重试。
+ */
+export async function deferGenerationTask(
+  id: string,
+  leaseToken: string,
+  delayMs = 500
+): Promise<boolean> {
+  const [row] = await db
+    .update(externalAsyncTask)
+    .set({
+      status: "queued",
+      availableAt: sql`now() + (${Math.max(0, delayMs)} * interval '1 millisecond')`,
+      leaseOwner: null,
+      leaseToken: null,
+      leaseExpiresAt: null,
+      heartbeatAt: null,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(externalAsyncTask.id, id),
+        inArray(externalAsyncTask.taskType, ["image", "video"]),
+        eq(externalAsyncTask.status, "running"),
+        eq(externalAsyncTask.leaseOwner, PROCESS_OWNER_ID),
+        eq(externalAsyncTask.leaseToken, leaseToken),
+        sql`${externalAsyncTask.leaseExpiresAt} > now()`
+      )
+    )
+    .returning({ id: externalAsyncTask.id });
+  return Boolean(row);
+}
+
+/**
+ * 延后再次对账一条已耗尽尝试次数的 generation 任务。
+ *
+ * @param id task ID。
+ * @param leaseToken 当前 reconciliation fencing token。
+ * @param delayMs 下一次对账前的非负延迟，默认 5 秒。
+ * @returns 当前 lease 成功释放时为 true；过期或被接管时为 false。
+ * @sideEffects 保留 attemptCount，清空 lease 并写 queued/availableAt；普通领取仍会因
+ * attemptCount 达上限而跳过，只能由 claimExhaustedGenerationTask 再次对账。
+ */
+export async function deferExhaustedGenerationTask(
+  id: string,
+  leaseToken: string,
+  delayMs = 5_000
+): Promise<boolean> {
+  const [row] = await db
+    .update(externalAsyncTask)
+    .set({
+      status: "queued",
+      availableAt: sql`now() + (${Math.max(0, delayMs)} * interval '1 millisecond')`,
+      leaseOwner: null,
+      leaseToken: null,
+      leaseExpiresAt: null,
+      heartbeatAt: null,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(externalAsyncTask.id, id),
+        inArray(externalAsyncTask.taskType, ["image", "video"]),
+        eq(externalAsyncTask.status, "running"),
+        eq(externalAsyncTask.leaseOwner, PROCESS_OWNER_ID),
+        eq(externalAsyncTask.leaseToken, leaseToken),
+        sql`${externalAsyncTask.leaseExpiresAt} > now()`,
+        sql`${externalAsyncTask.attemptCount} >= ${externalAsyncTask.maxAttempts}`
       )
     )
     .returning({ id: externalAsyncTask.id });

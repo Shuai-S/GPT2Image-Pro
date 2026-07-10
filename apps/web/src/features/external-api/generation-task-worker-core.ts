@@ -37,7 +37,7 @@ export type GenerationTaskResolution =
       objectType: "image" | "video";
       errorPayload: Record<string, unknown>;
     }
-  | { status: "requeue"; delayMs?: number };
+  | { status: "requeue"; consumeAttempt: boolean; delayMs?: number };
 
 export type GenerationTaskWorkerResult =
   | { status: "completed" }
@@ -47,7 +47,12 @@ export type GenerationTaskWorkerResult =
 
 export type GenerationTaskWorkerDependencies = {
   heartbeatTask: (id: string, leaseToken: string) => Promise<boolean>;
-  requeueTask: (
+  releaseUnstartedTask: (
+    id: string,
+    leaseToken: string,
+    delayMs?: number
+  ) => Promise<boolean>;
+  deferTask: (
     id: string,
     leaseToken: string,
     delayMs?: number
@@ -62,6 +67,7 @@ export type GenerationTaskWorkerDependencies = {
   resolveTask: (input: {
     row: GenerationTaskWorkerRow;
     request: GenerationTaskRequestPayload;
+    leaseToken: string;
     signal: AbortSignal;
   }) => Promise<GenerationTaskResolution>;
   cleanupInputs: (input: {
@@ -72,6 +78,7 @@ export type GenerationTaskWorkerDependencies = {
   toErrorPayload: (error: unknown) => Record<string, unknown>;
   heartbeatIntervalMs?: number;
   onHeartbeatError?: (error: unknown) => void;
+  onResolveError?: (error: unknown) => void;
   onCleanupError?: (error: unknown) => void;
 };
 
@@ -248,20 +255,24 @@ export async function processGenerationTaskClaim(
     resolution = await dependencies.resolveTask({
       row: claim.row,
       request: request.data,
+      leaseToken: claim.leaseToken,
       signal: heartbeat.signal,
     });
   } catch (error) {
+    dependencies.onResolveError?.(error);
     resolution = {
-      status: "failed",
-      objectType: claim.row.taskType === "video" ? "video" : "image",
-      errorPayload: dependencies.toErrorPayload(error),
+      status: "requeue",
+      consumeAttempt: true,
     };
   }
   await heartbeat.stop();
   if (heartbeat.lost()) return { status: "lease_lost" };
 
   if (resolution.status === "requeue") {
-    const requeued = await dependencies.requeueTask(
+    const requeue = resolution.consumeAttempt
+      ? dependencies.deferTask
+      : dependencies.releaseUnstartedTask;
+    const requeued = await requeue(
       claim.row.id,
       claim.leaseToken,
       resolution.delayMs

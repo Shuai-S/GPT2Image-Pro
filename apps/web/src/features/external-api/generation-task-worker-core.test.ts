@@ -1,8 +1,8 @@
 /**
  * 普通 generation worker 单任务状态机测试。
  *
- * 使用 DB-free 依赖覆盖严格请求、成功/失败、重排、心跳丢租、旧 token 和清理降级，
- * 证明媒体输入只会由成功提交终态的当前执行者删除。
+ * 使用 DB-free 依赖覆盖严格请求、成功/失败、两类重排、心跳丢租、旧 token 和清理
+ * 降级，证明媒体输入只会由成功提交终态的当前执行者删除。
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -60,7 +60,8 @@ function makeDependencies(options?: {
   resolution?: GenerationTaskResolution;
   resolveError?: Error;
   finalizeResult?: boolean;
-  requeueResult?: boolean;
+  releaseResult?: boolean;
+  deferResult?: boolean;
   heartbeat?: (id: string, token: string) => Promise<boolean>;
   cleanupError?: Error;
 }) {
@@ -80,14 +81,18 @@ function makeDependencies(options?: {
     }
   );
   const finalizeTask = vi.fn(async () => options?.finalizeResult ?? true);
-  const requeueTask = vi.fn(async () => options?.requeueResult ?? true);
+  const releaseUnstartedTask = vi.fn(
+    async () => options?.releaseResult ?? true
+  );
+  const deferTask = vi.fn(async () => options?.deferResult ?? true);
   const cleanupInputs = vi.fn(async () => {
     if (options?.cleanupError) throw options.cleanupError;
   });
   const onCleanupError = vi.fn();
   const dependencies: GenerationTaskWorkerDependencies = {
     heartbeatTask: options?.heartbeat ?? (async () => true),
-    requeueTask,
+    releaseUnstartedTask,
+    deferTask,
     finalizeTask,
     resolveTask,
     cleanupInputs,
@@ -103,7 +108,8 @@ function makeDependencies(options?: {
     dependencies,
     resolveTask,
     finalizeTask,
-    requeueTask,
+    releaseUnstartedTask,
+    deferTask,
     cleanupInputs,
     onCleanupError,
   };
@@ -168,7 +174,8 @@ describe("processGenerationTaskClaim", () => {
   });
 
   it("成功决议以紧凑 generationIds 终态并清理受控引用", async () => {
-    const { dependencies, finalizeTask, cleanupInputs } = makeDependencies();
+    const { dependencies, resolveTask, finalizeTask, cleanupInputs } =
+      makeDependencies();
 
     await expect(
       processGenerationTaskClaim(
@@ -182,6 +189,9 @@ describe("processGenerationTaskClaim", () => {
       objectType: "image",
       resultPayload: { generationIds: ["gen-1"] },
     });
+    expect(resolveTask).toHaveBeenCalledWith(
+      expect.objectContaining({ leaseToken: "lease-token-1" })
+    );
     expect(cleanupInputs).toHaveBeenCalledWith({
       userId: validRow.userId,
       taskId: validRow.id,
@@ -189,10 +199,14 @@ describe("processGenerationTaskClaim", () => {
     });
   });
 
-  it("业务异常映射为失败终态，清理失败不改变已提交结果", async () => {
+  it("业务明确失败终态后，清理失败不改变已提交结果", async () => {
     const { dependencies, finalizeTask, cleanupInputs, onCleanupError } =
       makeDependencies({
-        resolveError: new Error("upstream failed"),
+        resolution: {
+          status: "failed",
+          objectType: "image",
+          errorPayload: { error: { message: "upstream failed" } },
+        },
         cleanupError: new Error("delete failed"),
       });
 
@@ -212,9 +226,20 @@ describe("processGenerationTaskClaim", () => {
     expect(onCleanupError).toHaveBeenCalledWith(expect.any(Error));
   });
 
-  it("处理中决议只重排，不写终态也不清理输入", async () => {
-    const { dependencies, finalizeTask, requeueTask, cleanupInputs } =
-      makeDependencies({ resolution: { status: "requeue", delayMs: 5_000 } });
+  it("纯对账 pending 释放未执行租约并回退 claim 计数", async () => {
+    const {
+      dependencies,
+      finalizeTask,
+      releaseUnstartedTask,
+      deferTask,
+      cleanupInputs,
+    } = makeDependencies({
+      resolution: {
+        status: "requeue",
+        consumeAttempt: false,
+        delayMs: 5_000,
+      },
+    });
 
     await expect(
       processGenerationTaskClaim(
@@ -222,13 +247,42 @@ describe("processGenerationTaskClaim", () => {
         dependencies
       )
     ).resolves.toEqual({ status: "requeued" });
-    expect(requeueTask).toHaveBeenCalledWith(
+    expect(releaseUnstartedTask).toHaveBeenCalledWith(
       validRow.id,
       "lease-token-1",
       5_000
     );
+    expect(deferTask).not.toHaveBeenCalled();
     expect(finalizeTask).not.toHaveBeenCalled();
     expect(cleanupInputs).not.toHaveBeenCalled();
+  });
+
+  it("实际执行的暂态异常保留 claim 计数并延后重试", async () => {
+    const onResolveError = vi.fn();
+    const {
+      dependencies,
+      finalizeTask,
+      releaseUnstartedTask,
+      deferTask,
+      cleanupInputs,
+    } = makeDependencies({ resolveError: new Error("database unavailable") });
+    dependencies.onResolveError = onResolveError;
+
+    await expect(
+      processGenerationTaskClaim(
+        { row: validRow, leaseToken: "lease-token-1" },
+        dependencies
+      )
+    ).resolves.toEqual({ status: "requeued" });
+    expect(deferTask).toHaveBeenCalledWith(
+      validRow.id,
+      "lease-token-1",
+      undefined
+    );
+    expect(releaseUnstartedTask).not.toHaveBeenCalled();
+    expect(finalizeTask).not.toHaveBeenCalled();
+    expect(cleanupInputs).not.toHaveBeenCalled();
+    expect(onResolveError).toHaveBeenCalledWith(expect.any(Error));
   });
 
   it("业务适配返回媒体正文时改写为失败而不落 resultPayload", async () => {

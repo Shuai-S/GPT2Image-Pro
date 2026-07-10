@@ -359,11 +359,12 @@ export async function loadGenerationTaskInputs(input: {
 }
 
 /**
- * 尽力删除任务专属输入对象。
+ * 删除任务专属输入对象并汇总报告失败。
  *
  * @param input 用户、任务和待清理引用；非法引用会被忽略而非用于任意删除。
- * @returns 所有合法引用均完成删除尝试后结束。
- * @sideEffects 删除对象存储；单个删除失败不会阻断其他对象或改变任务终态。
+ * @returns 所有合法引用均完成删除尝试且成功时结束。
+ * @throws 一个或多个合法对象删除失败时抛 AggregateError；非法引用仍被忽略。
+ * @sideEffects 并行删除对象存储；单个失败不会阻断其他删除尝试。
  */
 export async function cleanupGenerationTaskInputs(input: {
   userId: string;
@@ -378,7 +379,7 @@ export async function cleanupGenerationTaskInputs(input: {
   if (!bucket) return;
   const storage = await getStorageProvider();
   const prefix = taskInputPrefix(input.userId, input.taskId);
-  await Promise.allSettled(
+  const deletions = await Promise.allSettled(
     references.map(async (reference) => {
       try {
         assertOwnedTaskReference(reference, bucket, prefix);
@@ -388,4 +389,14 @@ export async function cleanupGenerationTaskInputs(input: {
       await storage.deleteObject(reference.key, reference.bucket);
     })
   );
+  const failed = deletions.filter(
+    (deletion): deletion is PromiseRejectedResult =>
+      deletion.status === "rejected"
+  );
+  if (failed.length > 0) {
+    throw new AggregateError(
+      failed.map((deletion) => deletion.reason),
+      `Failed to delete ${failed.length} generation task input object(s)`
+    );
+  }
 }

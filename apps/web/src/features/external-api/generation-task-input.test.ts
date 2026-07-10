@@ -319,7 +319,7 @@ describe("generation task input storage", () => {
     ).rejects.toThrow("span multiple buckets");
   });
 
-  it("清理只删除本任务合法引用且吞掉单对象删除失败", async () => {
+  it("清理只删除本任务合法引用并汇总报告删除失败", async () => {
     storageMocks.deleteObject.mockRejectedValueOnce(new Error("delete failed"));
     await expect(
       cleanupGenerationTaskInputs({
@@ -329,12 +329,16 @@ describe("generation task input storage", () => {
           sourceReference,
           {
             ...sourceReference,
+            key: "user-1/async-task-inputs/task-1/2.png",
+          },
+          {
+            ...sourceReference,
             key: "user-2/async-task-inputs/task-1/1.png",
           },
         ],
       })
-    ).resolves.toBeUndefined();
-    expect(storageMocks.deleteObject).toHaveBeenCalledTimes(1);
+    ).rejects.toThrow("Failed to delete 1 generation task input object(s)");
+    expect(storageMocks.deleteObject).toHaveBeenCalledTimes(2);
     expect(storageMocks.deleteObject).toHaveBeenCalledWith(
       sourceReference.key,
       sourceReference.bucket
