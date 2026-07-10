@@ -198,13 +198,13 @@ const sections = {
           "Async image task",
           "/v1/images/{task_id}",
           "image_generation",
-          "查询 async=true 创建的内存异步任务，任务 30 分钟后自动过期。",
+          "查询 async=true 创建的 PostgreSQL 持久任务，可跨重启和多副本轮询。",
         ],
         [
           "Async video task",
           "/v1/videos/{id}",
           "video",
-          "查询视频任务：先查 async=true 返回的内存 task_...（30 分钟过期），未命中再按响应里的 generation_id 从库持久取回。",
+          "按持久 task_... 或 generation_id 查询视频任务，两者均从数据库真相动态物化。",
         ],
         [
           "OpenAI chat completions",
@@ -325,7 +325,7 @@ const sections = {
         "/v1/agents/images 和需要 Codex/Responses 能力的页面功能会忽略用户自接 API，按平台后端池或外接后端池结算本站积分。",
         "image 接口的 web_first / webFirst / force_web / forceWeb（chat 对应 mix_web_first）是 Web-first 优先路由，不是硬性只走 Web，且默认开启。开启时（不传或显式 true）按 Web-first 像素区间（IMAGE_FORCE_WEB_MIN_PIXELS / IMAGE_FORCE_WEB_MAX_PIXELS，默认 0.66MP-2MP）判定：尺寸落在区间内才优先 Web、失败则回到正常调度，超出区间（如 4K）则走正常调度；auto 或无法解析的尺寸视为可优先 Web。显式传 false 则不优先 Web。该路由只对 mixed 后端分组生效（纯 Web / 纯 Codex-Responses 分组无此概念），不会覆盖用户自接 API；agent 不受此项影响。",
         "Adobe（Firefly）后端：作为特殊成员按 priority 挂入分组同池调度——firefly-* 模型或 force_firefly=true 会把候选收敛到仅 Adobe；普通请求则只有当组内 web/codex/api 限流/耗尽/可切换失败时才兜底到 Adobe（取决于 Adobe 是否在该组及其优先级，priority 越大越靠后）。是否进 Adobe、计费倍率均随 admin「Adobe 后端」tab 配置变化。图像计费 = 尺寸基础积分 × 模型族倍率 × Adobe 后端倍率 × 分组倍率；视频计费见 /v1/videos/generations。路由兜底详见 /docs/adobe-firefly-routing，兼容转换（站内参数→Adobe 字段、被忽略参数、算例）详见 /docs/adobe-firefly-compat。",
-        "异步任务（async）：body async:true 或 URL ?async=true（等价、不能与 stream 同用）会立即返回 task_... 任务，需用 GET /v1/images/{task_id} 轮询；task_... 为进程内内存对象，30 分钟后过期，服务重启或多实例切换即无法再查询。若需持久查询，改用响应里的 generation_id（gen_...）作为 GET /v1/images/{id} 的路径参数——它从数据库取回，跨重启/多实例都可查（同步请求也可用此方式按 generation_id 复查）。callback_url 是可选的完成回调 webhook——任务结束时服务端把任务对象 POST 到该公网地址，已发出的回调不受过期/重启影响。视频同理：/v1/videos/generations 传 async:true（或 ?async=true）即立即返回 task_...，用 GET /v1/videos/{id} 轮询（task_... 30 分钟过期，或用响应里的 generation_id 持久查），或用 callback_url 完成回调——视频是长任务，强烈建议异步，以免同步连接被中途掐断丢产物。",
+        "异步任务（async）：body async:true 或 URL ?async=true（等价、不能与 stream 同用）会立即返回 task_...。任务、重试预算、执行租约和 callback outbox 均持久化到 PostgreSQL，可跨服务重启和多副本继续轮询；worker 崩溃后由租约过期接管。图片用 GET /v1/images/{task_id}，视频用 GET /v1/videos/{id}；响应里的 generation_id 也可用于查询底层产物。callback_url 由持久 outbox 投递并重试。纯中转 API Key 不允许 async，因为持久任务会产生存储副作用。",
       ],
       officialRefsTitle: "官方参考",
       officialRefs: [
@@ -546,7 +546,7 @@ const sections = {
           ],
           notes: [
             "需付费级 Web 账号（代码解释器）；账号池无可用付费 Web 账号时返回 503 no_available_image_backend。",
-            "同步（默认）用 keep-alive JSON 撑到出结果；异步（async:true）立即返回 task_...，任务为进程内内存态（30 分钟 TTL、多实例不共享、重启即清；可编辑文件无 DB generation 行，故不作持久回退）。client_task_id 为计费层幂等（防重复扣），任务级幂等为后续迭代。",
+            "同步（默认）用 keep-alive JSON 撑到出结果；异步（async:true）立即返回持久 task_...，由 PostgreSQL SKIP LOCKED worker 按租约执行，重启和多副本下仍可查询与接管。client_task_id 同时约束任务内容与计费幂等：相同内容重放返回原任务，内容漂移返回 409。",
             "/api/v1/ppts、/api/v1/psds 为同一 handler 别名；站内 chat(web) tab 走 session 版 /api/editable-file/generate（同一 service）。",
           ],
         },
@@ -597,7 +597,7 @@ const sections = {
             },
           ],
           notes: [
-            "内存任务 30 分钟 TTL、多实例不共享、重启即清；过期或跨实例即 404。",
+            "任务持久化在 PostgreSQL；任一副本都可查询，执行租约过期后可由其他 worker 接管。",
             "只返回 object=editable_file_task 的任务（与 /v1/images/{id}、/v1/videos/{id} 隔离）。",
           ],
         },
@@ -1138,7 +1138,7 @@ curl https://gpt2image.superapi.buzz/v1/images/task_... \\
               requirement: "可选",
               custom: true,
               description:
-                "完成回调 webhook（不是给你轮询的地址）。仅异步任务可用：任务完成或失败时，服务端会把最终任务对象 POST 到该 URL，请求头含 X-Tokens-Callback: true、Content-Type: application/json。该 URL 须公网可达且为 http/https。即使任务因 30 分钟过期或服务重启而无法再轮询，已发出的回调不受影响。",
+                "完成回调 webhook（不是给你轮询的地址）。仅异步任务可用：任务完成或失败时，服务端会把最终任务对象 POST 到该 URL，请求头含 X-Tokens-Callback: true、Content-Type: application/json。该 URL 须公网可达且为 http/https；投递状态、租约与重试时间持久化在 callback outbox。",
             },
             {
               name: "promptOptimization / prompt_optimization",
@@ -1216,11 +1216,11 @@ curl https://gpt2image.superapi.buzz/v1/images/task_... \\
             "该接口不会调用页面 /api/images/generate，而是直接进入共享 service 层。",
             "如果命中 Responses 账号池，内部会把图片请求转换成 Responses image_generation tool 请求。",
             "n/count 批量张数属于一次 HTTP 请求；一次 10 张会创建 10 条生成记录并按 10 张计费。运行时按套餐的生图并发受限并行，超过并发上限的图片会在本批次内排队等待。",
-            "并发与排队：底层只有一条进程内生图队列，任务按套餐队列优先级排序，同优先级先进先出；队列同时受全局并发和单用户生图并发限制。全局并发可在后台「系统设置 > 模型 > 全局生图并发」配置，环境变量 IMAGE_GENERATION_GLOBAL_CONCURRENCY 只作为兜底默认值。批量请求额外有请求内 runner，只启动套餐允许的并发数，剩余图片留在本批次内等待，不会一次性塞满底层队列。",
+            "并发与排队：async 任务由 PostgreSQL 按套餐优先级与创建时间领取，使用 SKIP LOCKED、执行租约和 fencing token；同步请求仍有请求内公平队列。两条路径在真正执行前都必须获得 PostgreSQL 集群并发槽，因此全局和单用户上限不会按副本放大。全局并发可在后台「系统设置 > 模型 > 全局生图并发」配置，IMAGE_GENERATION_GLOBAL_CONCURRENCY 仅为兜底默认值。批量任务按持久 userConcurrency 有界并行。",
             "排队等待阶段不会创建 generation，也不会扣图像生成积分；底层队列排队超过 IMAGE_GENERATION_QUEUE_TIMEOUT_MS 会返回 429 类错误。单张任务开始执行后才进入 20 分钟运行超时，运行超时按失败结算规则处理积分。",
             "Web 后端无法严格控制输出尺寸和输出格式；本站保存时会按实际图片头识别扩展名和 MIME。",
             "background=transparent 并非所有模型都支持；OpenAI 官方文档当前列出 gpt-image-1.5、gpt-image-1、gpt-image-1-mini 支持透明背景，且通常还要求 png 或 webp 输出。不支持的上游可能直接返回 HTTP 400，而不是自动降级。",
-            "async 任务当前为进程内状态，30 分钟后过期；服务重启或多实例切换会导致未完成任务无法继续查询，callback 已发送的结果不受影响。",
+            "async 任务与 callback 投递状态均持久化；服务重启、多实例切换或 worker 崩溃不会丢失任务，过期租约可被接管。",
             "如果实际生成尺寸与请求尺寸不一致，本站会按检测到的实际尺寸修正记录和计费。",
             "官方 Images API 可能返回 usage；本站当前 usage 通常为 null，但会通过顶层 credits_consumed、错误对象或流式完成事件返回本站结算积分。命中用户自接 API 时不扣本站积分。",
           ],
@@ -1474,7 +1474,7 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
               requirement: "可选",
               custom: true,
               description:
-                "完成回调 webhook（不是给你轮询的地址）。仅异步任务可用：任务完成或失败时，服务端会把最终任务对象 POST 到该 URL，请求头含 X-Tokens-Callback: true、Content-Type: application/json。该 URL 须公网可达且为 http/https。即使任务因 30 分钟过期或服务重启而无法再轮询，已发出的回调不受影响。",
+                "完成回调 webhook（不是给你轮询的地址）。仅异步任务可用：任务完成或失败时，服务端会把最终任务对象 POST 到该 URL，请求头含 X-Tokens-Callback: true、Content-Type: application/json。该 URL 须公网可达且为 http/https；投递状态、租约与重试时间持久化在 callback outbox。",
             },
             {
               name: "image_url / image_urls",
@@ -1557,7 +1557,7 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
             "不支持私网、localhost、metadata/internal 域名或带用户名密码的 URL。",
             "官方 JSON file_id 图片引用当前未实现，请使用公网 image_url 或 multipart 上传。",
             "background=transparent 并非所有模型都支持；OpenAI 官方文档当前列出 gpt-image-1.5、gpt-image-1、gpt-image-1-mini 支持透明背景，且通常还要求 png 或 webp 输出。不支持的上游可能直接返回 HTTP 400，而不是自动降级。",
-            "async 任务当前为进程内状态，30 分钟后过期；服务重启或多实例切换会导致未完成任务无法继续查询，callback 已发送的结果不受影响。",
+            "async 编辑任务先把已校验媒体写入任务专属对象前缀，再持久化严格标量与对象引用；worker 终态后清理输入。任务可跨重启、多副本继续查询和接管。",
           ],
         },
         {
@@ -1566,7 +1566,7 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
           path: "/v1/images/{task_id}",
           contentType: "无请求体",
           description:
-            "本站扩展：按 ID 查询一次图片生成。路径参数可传两类 ID：（1）async=true 创建的 task_...（进程内内存任务对象，30 分钟后过期、服务重启或多实例切换即查不到）；（2）任意同步/异步响应返回的 generation_id（gen_...，从数据库持久取回，跨重启/多实例都可查）。先查内存任务，未命中再按 generation_id 查库。仅返回归属本人的记录。",
+            "本站扩展：按 ID 查询一次图片生成。路径参数可传两类持久 ID：（1）async=true 创建并保存在 PostgreSQL 的 task_...；（2）任意同步/异步响应返回的 generation_id（gen_...）。task 会按 generation 真相动态物化结果，两类 ID 均可跨重启和多副本查询；仅返回归属本人的记录。",
           example: `curl https://gpt2image.superapi.buzz/v1/images/task_... \\
   -H "Authorization: Bearer $GPT2IMAGE_API_KEY"`,
           responseExample: `{
@@ -1606,7 +1606,7 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
               requirement: "必填路径参数",
               custom: true,
               description:
-                "ID（路径参数）。可传 async=true 返回的 task_...（内存任务，30 分钟过期、重启/多实例后查不到），或任意响应返回的 generation_id（gen_...，从数据库持久取回，跨重启/多实例可查）。长度上限 128 字符，缺失/超长返回 400 Invalid task_id.，未找到/已过期返回 404。均按归属用户隔离，只返回本人的记录。",
+                "ID（路径参数）。可传 async=true 返回的持久 task_...，或任意响应返回的 generation_id（gen_...）。长度上限 128 字符，缺失/超长返回 400 Invalid task_id.，未找到返回 404。均按归属用户隔离，只返回本人的记录。",
             },
           ],
           responses: [
@@ -1645,7 +1645,7 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
             },
           ],
           notes: [
-            "任务为进程内内存对象，30 分钟后过期；服务重启或多实例切换会导致未完成任务返回 404 无法继续查询，但 callback_url 已发送的回调不受影响。",
+            "任务、执行租约和 callback outbox 均持久化；服务重启或多实例切换后仍可轮询，worker 丢失租约后不能覆盖新 owner 的终态。",
             "只能查询属于当前 API Key 所属用户自己创建的任务。",
             "返回结构与 callback_url 回调 POST 的任务对象完全一致。",
           ],
@@ -1735,7 +1735,7 @@ curl https://gpt2image.superapi.buzz/v1/videos/task_... \\
               requirement: "可选",
               custom: true,
               description:
-                "完成回调 webhook（仅异步任务）。任务完成 / 失败时服务端把任务对象 POST 到该公网 http(s) 地址，无需轮询；已发出的回调不受任务过期 / 重启影响。",
+                "完成回调 webhook（仅异步任务）。任务完成 / 失败时服务端把任务对象 POST 到该公网 http(s) 地址；callback outbox 持久化投递状态并按租约重试。",
             },
           ],
           responses: [
@@ -1759,7 +1759,7 @@ curl https://gpt2image.superapi.buzz/v1/videos/task_... \\
           ],
           notes: [
             "该接口是本站扩展，不是 OpenAI 官方接口；/api/v1/videos/generations 是同一 handler 的别名。",
-            "视频生成是长任务：同步模式用 keep-alive 撑住连接直到出片或失败（请把客户端读超时设足够长）；长视频强烈建议异步（async:true）——立即拿 task_...，用 GET /v1/videos/{id} 轮询（task_... 为内存态、30 分钟过期，或用响应里的 generation_id 持久查），或用 callback_url 完成回调，避免连接被中途掐断丢产物。",
+            "视频生成是长任务：同步模式用 keep-alive 撑住连接直到出片或失败（请把客户端读超时设足够长）；长视频强烈建议异步（async:true）——立即拿持久 task_...，用 GET /v1/videos/{id} 轮询，或用 callback_url 的持久 outbox 完成回调，避免连接被中途掐断丢产物。",
             "计费 = 每秒基础积分（默认 30）× 时长（秒）× 模型族倍率 × Adobe 后端倍率（分组倍率已合入 billingMultiplier），最终结果向上取整为整数积分；时长由 model id 中的 <dur> 决定，倍率随 admin『Adobe 后端』tab 配置变化。",
             "默认需要 externalApi.images.generate 能力（入门版及以上），可在套餐能力矩阵中调整。",
           ],
@@ -1770,7 +1770,7 @@ curl https://gpt2image.superapi.buzz/v1/videos/task_... \\
           path: "/v1/videos/{id}",
           contentType: "无请求体",
           description:
-            "本站扩展：按 ID 查询一次视频生成。路径参数可传两类 ID：（1）async=true 创建的 task_...（进程内内存任务对象，30 分钟后过期、服务重启或多实例切换即查不到）；（2）任意同步/异步响应返回的 generation_id（gen_...，从数据库持久取回，跨重启/多实例都可查）。先查内存任务，未命中再按 generation_id 查库。仅返回归属本人的记录；仅需有效 API Key，无套餐门槛。",
+            "本站扩展：按 ID 查询一次视频生成。路径参数可传两类持久 ID：（1）async=true 创建的 task_...；（2）任意同步/异步响应返回的 generation_id。task 会按 video_generation 真相动态物化结果，两类 ID 均可跨重启和多副本查询。仅返回归属本人的记录；仅需有效 API Key，无套餐门槛。",
           example: `curl https://gpt2image.superapi.buzz/v1/videos/task_... \\
   -H "Authorization: Bearer $GPT2IMAGE_API_KEY"`,
           responseExample: `{
@@ -1809,7 +1809,7 @@ curl https://gpt2image.superapi.buzz/v1/videos/task_... \\
               requirement: "必填路径参数",
               custom: true,
               description:
-                "ID（路径参数）。可传 async=true 返回的 task_...（内存任务，30 分钟过期、重启/多实例后查不到），或任意响应返回的 generation_id（gen_...，从数据库持久取回，跨重启/多实例可查）。长度上限 128 字符，缺失/超长返回 400 Invalid task_id.；均按归属用户隔离，只返回本人的记录。",
+                "ID（路径参数）。可传 async=true 返回的持久 task_...，或任意响应返回的 generation_id。长度上限 128 字符，缺失/超长返回 400 Invalid task_id.；均按归属用户隔离，只返回本人的记录。",
             },
           ],
           responses: [
@@ -1820,7 +1820,7 @@ curl https://gpt2image.superapi.buzz/v1/videos/task_... \\
             {
               name: "object",
               description:
-                "按 generation_id 持久查询时：执行中为 video.generation、完成后为 video。注意：刚用 async 返回的 task_... 查内存任务时，object 暂沿用 image.generation/image（内存任务存储与图片任务共用、未区分视频），其余字段一致；建议用 generation_id 查询以获得稳定的 video* 语义。",
+                "无论用 task_... 还是 generation_id 查询，排队或执行中为 video.generation，完成后为 video。",
             },
             {
               name: "status",
@@ -1855,7 +1855,7 @@ curl https://gpt2image.superapi.buzz/v1/videos/task_... \\
           ],
           notes: [
             "该接口是本站扩展，不是 OpenAI 官方接口；/api/v1/videos/{id} 是同一 handler 的别名。",
-            "内存任务 30 分钟后过期；服务重启或多实例切换会使未完成任务返回 404 Video task not found or expired.，但 callback_url 已发送的回调不受影响。需持久查询请用 generation_id。",
+            "视频 task、业务行、执行租约与 callback outbox 均持久化；服务重启或多实例切换后可继续轮询，过期执行租约由 worker 对账后接管。",
             "只能查询属于当前 API Key 所属用户自己创建的任务；响应 Cache-Control: no-store。",
             "返回结构与 callback_url 回调 POST 的任务对象完全一致。",
           ],
@@ -2659,13 +2659,13 @@ data: {"type":"response.completed","response":{"id":"resp_...","object":"respons
           "Async image task",
           "/v1/images/{task_id}",
           "image_generation",
-          "Returns the in-memory task created with async=true. Tasks expire after 30 minutes.",
+          "Returns the PostgreSQL-backed task created with async=true. Tasks remain queryable across restarts and replicas.",
         ],
         [
           "Async video task",
           "/v1/videos/{id}",
           "video",
-          "Returns a video task: first the in-memory task_... created with async=true (expires after 30 minutes), otherwise looked up persistently by the generation_id from the response.",
+          "Returns a video task by its persistent task_... or generation_id; both remain queryable across restarts and replicas.",
         ],
         [
           "OpenAI chat completions",
@@ -2786,7 +2786,7 @@ data: {"type":"response.completed","response":{"id":"resp_...","object":"respons
         "/v1/agents/images and page features that require Codex/Responses capability ignore user custom API and are billed through the platform or external backend pool.",
         "Image endpoint web_first / webFirst / force_web / forceWeb (chat: mix_web_first) is a Web-first preference route, not hard Web-only, and is on by default. When on (omitted or explicit true) it uses the Web-first pixel range (IMAGE_FORCE_WEB_MIN_PIXELS / IMAGE_FORCE_WEB_MAX_PIXELS, default 0.66MP-2MP): only sizes inside the range prefer Web and return to normal scheduling on failure, sizes outside (e.g. 4K) use normal scheduling, auto or unparseable sizes may prefer Web; explicit false disables it. It only applies to mixed backend groups (no effect for Web-only / Codex-Responses-only groups) and never overrides user custom API; agent is unaffected.",
         "Adobe (Firefly) backend: it joins the group as a special pool member ranked by priority. A firefly-* model or force_firefly=true narrows candidates to Adobe only; ordinary requests only fall back to Adobe once the group's web/codex/api members are rate-limited, exhausted, or fail with a switchable error (and only if Adobe is in that group — the larger its priority, the later it is tried). Whether a request reaches Adobe and its billing multiplier follow the admin 'Adobe backend' tab config. Image billing = size base credits × model-family multiplier × Adobe backend multiplier × group multiplier; see /v1/videos/generations for video billing. Routing/fallback: /docs/adobe-firefly-routing; compatibility conversion (in-app params → Adobe fields, ignored params, worked example): /docs/adobe-firefly-compat.",
-        "Async tasks (async): body async:true or URL ?async=true (equivalent, and cannot be combined with stream) returns a task_... object immediately; poll GET /v1/images/{task_id} for the result. Tasks are in-memory objects that expire after 30 minutes and become unavailable after a restart or multi-instance switch. For persistent lookups, use the generation_id (gen_...) from the response as the GET /v1/images/{id} path parameter — it is read from the DB and survives restarts / multi-instance switches (sync requests can re-query by generation_id this way too). callback_url is an optional completion webhook — when the task finishes the server POSTs the task object to that public URL, and an already-sent callback is unaffected by expiry or restart. Video works the same way: POST /v1/videos/generations with async:true (or ?async=true) returns a task_... immediately; poll GET /v1/videos/{id} (task_... expires after 30 minutes, or use the generation_id for persistent lookups) or rely on callback_url — video is long-running, so async is strongly recommended to avoid a synchronous connection being cut mid-way and losing the output.",
+        "Async tasks (async): body async:true or URL ?async=true (equivalent, and cannot be combined with stream) returns a task_... immediately. Task state, retry budget, execution lease, and callback outbox are persisted in PostgreSQL, so polling survives restarts and multiple replicas; an expired worker lease can be taken over. Poll GET /v1/images/{task_id} for images or GET /v1/videos/{id} for videos. The generation_id also addresses the underlying persisted result. callback_url delivery is leased and retried from the persistent outbox. Relay-only API keys cannot use async because persisted tasks have storage side effects.",
       ],
       officialRefsTitle: "Official References",
       officialRefs: [
@@ -3431,7 +3431,7 @@ curl https://gpt2image.superapi.buzz/v1/images/task_... \\
               requirement: "Optional",
               custom: true,
               description:
-                "Completion-callback webhook (not a URL you poll). Async only: when the task completes or fails, the server POSTs the final task object to this URL with headers X-Tokens-Callback: true and Content-Type: application/json. The URL must be publicly reachable over http/https. An already-sent callback is unaffected even if the task later expires (30 min) or is lost on restart.",
+                "Completion-callback webhook (not a URL you poll). Async only: when the task completes or fails, the server POSTs the final task object to this public http(s) URL with X-Tokens-Callback: true and Content-Type: application/json. Delivery status, lease, and retry time are stored in the persistent callback outbox.",
             },
             {
               name: "promptOptimization / prompt_optimization",
@@ -3510,11 +3510,11 @@ curl https://gpt2image.superapi.buzz/v1/images/task_... \\
             "This endpoint does not call page /api/images/generate; it directly enters the shared service layer.",
             "When routed to a Responses account, the image request is converted into a Responses image_generation tool request.",
             "n/count is one HTTP request. A 4-image request creates 4 generation records and bills 4 outputs. GPT2IMAGE runs batch items with bounded parallelism based on the plan image-generation concurrency; items beyond that concurrency wait inside the same batch.",
-            "Concurrency and queueing: the runtime uses one in-process image queue. Tasks are sorted by plan queue priority, then FIFO within the same priority, and are started only when both the global concurrency and per-user image-generation concurrency allow it. Global concurrency is configurable in Admin System Settings > Models > Global image generation concurrency; IMAGE_GENERATION_GLOBAL_CONCURRENCY is only the fallback default. Batch requests add a request-local bounded runner, so only the allowed number of batch items are started and the rest wait inside that batch instead of flooding the shared queue.",
+            "Concurrency and queueing: async tasks are claimed from PostgreSQL by plan priority and creation time using SKIP LOCKED, execution leases, and fencing tokens; synchronous requests retain a request-local fair queue. Both paths must acquire PostgreSQL cluster slots before execution, so global and per-user limits do not multiply with replica count. Global concurrency is configurable in Admin System Settings > Models; IMAGE_GENERATION_GLOBAL_CONCURRENCY is only the fallback. Persisted batches run with their stored userConcurrency bound.",
             "Waiting in a queue does not create a generation record or charge image credits. If the shared queue wait exceeds IMAGE_GENERATION_QUEUE_TIMEOUT_MS, the API returns a 429-style error. The 20-minute runtime timeout starts only after an individual image task begins execution, and timeout settlement follows the failed-generation credit rules.",
             "Web backends cannot strictly control output dimensions or output format. GPT2IMAGE labels stored files by the detected image header and MIME.",
             "background=transparent is not universally supported. OpenAI's official docs currently list gpt-image-1.5, gpt-image-1, and gpt-image-1-mini as supporting transparent backgrounds, and png or webp output is usually required. Unsupported upstream models may reject the request with HTTP 400 instead of silently falling back.",
-            "async tasks are process-local and expire after 30 minutes. A restart or multi-instance switch can make unfinished tasks unavailable for polling; already-sent callbacks are unaffected.",
+            "Async tasks and callback delivery state are persistent. Restarts, replica switches, and worker crashes do not lose the task; expired leases can be taken over.",
             "If the actual generated dimensions differ from the requested size, GPT2IMAGE records and bills using the detected actual size.",
             "The official Images API may return usage. GPT2IMAGE usually returns usage: null, but GPT2IMAGE-billed credits are returned through top-level credits_consumed, error payloads, or streaming completion events. When a user custom upstream API wins, GPT2IMAGE does not charge credits.",
           ],
@@ -3747,7 +3747,7 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
               requirement: "Optional",
               custom: true,
               description:
-                "Completion-callback webhook (not a URL you poll). Async only: when the task completes or fails, the server POSTs the final task object to this URL with headers X-Tokens-Callback: true and Content-Type: application/json. The URL must be publicly reachable over http/https. An already-sent callback is unaffected even if the task later expires (30 min) or is lost on restart.",
+                "Completion-callback webhook (not a URL you poll). Async only: when the task completes or fails, the server POSTs the final task object to this public http(s) URL with X-Tokens-Callback: true and Content-Type: application/json. Delivery status, lease, and retry time are stored in the persistent callback outbox.",
             },
             {
               name: "image_url / image_urls",
@@ -3830,7 +3830,7 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
             "Private networks, localhost, metadata/internal hosts, and URLs with credentials are rejected.",
             "Official JSON file_id image references are not implemented. Use public image_url or multipart uploads.",
             "background=transparent is not universally supported. OpenAI's official docs currently list gpt-image-1.5, gpt-image-1, and gpt-image-1-mini as supporting transparent backgrounds, and png or webp output is usually required. Unsupported upstream models may reject the request with HTTP 400 instead of silently falling back.",
-            "async tasks are process-local and expire after 30 minutes. A restart or multi-instance switch can make unfinished tasks unavailable for polling; already-sent callbacks are unaffected.",
+            "Async edits store validated media under a task-owned object prefix and persist only strict scalars plus object references. The worker cleans inputs after a fenced terminal transition, and tasks remain queryable across restarts and replicas.",
           ],
         },
         {
@@ -3839,7 +3839,7 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
           path: "/v1/images/{task_id}",
           contentType: "No request body",
           description:
-            "Extension: look up a single image generation by ID. The {task_id} path parameter accepts two kinds of ID: (1) the task_... created with async=true (an in-process in-memory task object that expires after 30 minutes and becomes unavailable after a restart or multi-instance switch); (2) the generation_id (gen_...) from any sync/async response, read persistently from the DB and available across restarts / multi-instance switches. It checks the in-memory task first, then looks up by generation_id. Only the caller's own records are returned.",
+            "Extension: look up one image generation by either persistent ID: (1) the PostgreSQL task_... created with async=true; or (2) the generation_id from any sync/async response. A task dynamically materializes its response from generation records, and both forms work across restarts and replicas. Only the caller's own records are returned.",
           example: `curl https://gpt2image.superapi.buzz/v1/images/task_... \\
   -H "Authorization: Bearer $GPT2IMAGE_API_KEY"`,
           responseExample: `{
@@ -3879,7 +3879,7 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
               requirement: "Required path parameter",
               custom: true,
               description:
-                "ID (path parameter). Either the task_... returned with async=true (in-memory task; expires after 30 minutes, unavailable after restart / multi-instance switch), or the generation_id (gen_...) from any response (read persistently from the DB, available across restarts / multi-instance switches). Max length 128 chars; missing/over-length returns 400 Invalid task_id, not found / expired returns 404. Scoped to the owning user; only your own records are returned.",
+                "ID (path parameter). Either the persistent task_... returned with async=true or the generation_id from any response. Max length 128 chars; missing/over-length returns 400 Invalid task_id and not found returns 404. Scoped to the owning user; only your own records are returned.",
             },
           ],
           responses: [
@@ -3920,7 +3920,7 @@ data: {"type":"image_edit.completed","index":0,"generation_id":"...","generation
             },
           ],
           notes: [
-            "Tasks are in-memory objects that expire after 30 minutes; a restart or multi-instance switch makes unfinished tasks return 404, but a callback_url webhook that already fired is unaffected.",
+            "Task state, execution lease, and callback outbox are persisted. Polling survives restarts and replica switches, and a worker that lost its lease cannot overwrite the new owner's terminal state.",
             "You can only query tasks created by the user that owns the current API Key.",
             "The response matches exactly the task object POSTed to callback_url.",
           ],
@@ -4010,7 +4010,7 @@ curl https://gpt2image.superapi.buzz/v1/videos/task_... \\
               requirement: "Optional",
               custom: true,
               description:
-                "Completion webhook (async tasks only). When the task finishes or fails the server POSTs the task object to this public http(s) URL, so no polling is needed; an already-sent callback is unaffected by task expiry or restart.",
+                "Completion webhook (async tasks only). When the task finishes or fails the server POSTs the task object to this public http(s) URL; delivery state and retry leases are persisted in the callback outbox.",
             },
           ],
           responses: [
@@ -4034,7 +4034,7 @@ curl https://gpt2image.superapi.buzz/v1/videos/task_... \\
           ],
           notes: [
             "This endpoint is a GPT2IMAGE extension, not an official OpenAI endpoint. /api/v1/videos/generations is an alias.",
-            "Video generation is long-running: in sync mode GPT2IMAGE holds the connection with keep-alive until the video is ready or fails (set a generous client read timeout); for long videos prefer async (async:true) — get a task_... immediately and poll GET /v1/videos/{id} (task_... is in-memory and expires after 30 minutes, or use the generation_id from the response for persistent lookups) or rely on callback_url, to avoid the connection being cut mid-way and losing the output.",
+            "Video generation is long-running: in sync mode GPT2IMAGE holds the connection with keep-alive until the video is ready or fails. Prefer async to receive a persistent task_... immediately, poll GET /v1/videos/{id}, or rely on the leased callback outbox; a worker crash is reconciled from the video row and financial ledger before takeover.",
             "Billing = base credits per second (default 30) × duration in seconds × model-family multiplier × Adobe backend multiplier (group multiplier folded into billingMultiplier), with the final amount rounded up to an integer. The duration comes from <dur> in the model id; multipliers follow the admin Adobe-backend tab.",
             "Requires externalApi.images.generate by default (Starter or higher); admins can change it in the Plan Capability Matrix.",
           ],
@@ -4045,7 +4045,7 @@ curl https://gpt2image.superapi.buzz/v1/videos/task_... \\
           path: "/v1/videos/{id}",
           contentType: "No request body",
           description:
-            "GPT2IMAGE extension: look up a single video generation by ID. The path parameter accepts two kinds of ID: (1) the task_... returned with async=true (an in-process in-memory task object that expires after 30 minutes and becomes unavailable after a restart or multi-instance switch); (2) the generation_id (gen_...) from any sync/async response, read persistently from the DB and available across restarts / multi-instance switches. It checks the in-memory task first, then looks up by generation_id. Only the caller's own records are returned; only a valid API key is required, with no plan gate.",
+            "GPT2IMAGE extension: look up one video generation by either persistent ID: (1) the PostgreSQL task_... returned with async=true; or (2) the generation_id from any sync/async response. A task dynamically materializes its response from video_generation, and both forms work across restarts and replicas. Only the caller's own records are returned; only a valid API key is required.",
           example: `curl https://gpt2image.superapi.buzz/v1/videos/task_... \\
   -H "Authorization: Bearer $GPT2IMAGE_API_KEY"`,
           responseExample: `{
@@ -4084,7 +4084,7 @@ curl https://gpt2image.superapi.buzz/v1/videos/task_... \\
               requirement: "Required path parameter",
               custom: true,
               description:
-                "ID (path parameter). Either the task_... returned with async=true (in-memory task; expires after 30 minutes, unavailable after restart / multi-instance switch), or the generation_id (gen_...) from any response (read persistently from the DB, available across restarts / multi-instance switches). Max length 128 chars; missing/over-length returns 400 Invalid task_id. Scoped to the owning user; only your own records are returned.",
+                "ID (path parameter). Either the persistent task_... returned with async=true or the generation_id from any response. Max length 128 chars; missing/over-length returns 400 Invalid task_id. Scoped to the owning user; only your own records are returned.",
             },
           ],
           responses: [
@@ -4096,7 +4096,7 @@ curl https://gpt2image.superapi.buzz/v1/videos/task_... \\
             {
               name: "object",
               description:
-                "When polling by generation_id: video.generation while running, video once completed. Note: when polling a fresh async task_... in-memory, object temporarily reuses image.generation/image (the in-memory task store is shared with image tasks and does not distinguish video); other fields are the same. Poll by generation_id for stable video* semantics.",
+                "video.generation while queued/running and video after completion, whether the request uses task_... or generation_id.",
             },
             {
               name: "status",
@@ -4132,7 +4132,7 @@ curl https://gpt2image.superapi.buzz/v1/videos/task_... \\
           ],
           notes: [
             "This endpoint is a GPT2IMAGE extension, not an official OpenAI endpoint; /api/v1/videos/{id} is an alias.",
-            'In-memory tasks expire after 30 minutes; a restart or multi-instance switch makes an unfinished task return 404 "Video task not found or expired.", but an already-sent callback_url callback is unaffected. Use the generation_id for persistent lookups.',
+            "Video tasks, business rows, execution leases, and callback outbox state are persistent. Polling survives restarts and replica switches; expired leases are reconciled before another worker takes over.",
             "Only tasks created by the user that owns the current API key are queryable; the response is Cache-Control: no-store.",
             "The shape is identical to the task object POSTed to callback_url.",
           ],
