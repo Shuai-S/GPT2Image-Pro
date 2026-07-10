@@ -35,6 +35,7 @@ const validRow: GenerationTaskWorkerRow = {
   userId: "user-1",
   apiKeyId: "key-1",
   taskType: "image",
+  initialPayload: { generationId: "gen-1" },
   requestPayload: {
     kind: "image_edit",
     relayOnly: false,
@@ -130,7 +131,8 @@ describe("processGenerationTaskClaim", () => {
           row: { ...validRow, taskType: "video" },
           leaseToken: "lease-token-1",
         },
-        dependencies
+        dependencies,
+        { reconcileOnly: false }
       )
     ).resolves.toEqual({ status: "failed" });
     expect(resolveTask).not.toHaveBeenCalled();
@@ -160,7 +162,8 @@ describe("processGenerationTaskClaim", () => {
           },
           leaseToken: "lease-token-1",
         },
-        dependencies
+        dependencies,
+        { reconcileOnly: false }
       )
     ).resolves.toEqual({ status: "failed" });
     expect(resolveTask).not.toHaveBeenCalled();
@@ -173,6 +176,39 @@ describe("processGenerationTaskClaim", () => {
     );
   });
 
+  it("legacy 请求只调用专用对账 resolver，不进入严格执行 resolver", async () => {
+    const { dependencies, resolveTask, finalizeTask } = makeDependencies();
+    const resolveLegacyTask = vi.fn(async () => ({
+      status: "completed" as const,
+      objectType: "image" as const,
+      resultPayload: { generationIds: ["gen-1"] },
+    }));
+    dependencies.resolveLegacyTask = resolveLegacyTask;
+
+    await expect(
+      processGenerationTaskClaim(
+        {
+          row: { ...validRow, requestPayload: null },
+          leaseToken: "lease-token-1",
+        },
+        dependencies,
+        { reconcileOnly: false }
+      )
+    ).resolves.toEqual({ status: "completed" });
+    expect(resolveTask).not.toHaveBeenCalled();
+    expect(resolveLegacyTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        row: expect.objectContaining({
+          initialPayload: validRow.initialPayload,
+        }),
+        leaseToken: "lease-token-1",
+      })
+    );
+    expect(finalizeTask).toHaveBeenCalledWith(
+      expect.objectContaining({ resultPayload: { generationIds: ["gen-1"] } })
+    );
+  });
+
   it("成功决议以紧凑 generationIds 终态并清理受控引用", async () => {
     const { dependencies, resolveTask, finalizeTask, cleanupInputs } =
       makeDependencies();
@@ -180,7 +216,8 @@ describe("processGenerationTaskClaim", () => {
     await expect(
       processGenerationTaskClaim(
         { row: validRow, leaseToken: "lease-token-1" },
-        dependencies
+        dependencies,
+        { reconcileOnly: false }
       )
     ).resolves.toEqual({ status: "completed" });
     expect(finalizeTask).toHaveBeenCalledWith({
@@ -213,7 +250,8 @@ describe("processGenerationTaskClaim", () => {
     await expect(
       processGenerationTaskClaim(
         { row: validRow, leaseToken: "lease-token-1" },
-        dependencies
+        dependencies,
+        { reconcileOnly: false }
       )
     ).resolves.toEqual({ status: "failed" });
     expect(finalizeTask).toHaveBeenCalledWith({
@@ -244,7 +282,8 @@ describe("processGenerationTaskClaim", () => {
     await expect(
       processGenerationTaskClaim(
         { row: validRow, leaseToken: "lease-token-1" },
-        dependencies
+        dependencies,
+        { reconcileOnly: false }
       )
     ).resolves.toEqual({ status: "requeued" });
     expect(releaseUnstartedTask).toHaveBeenCalledWith(
@@ -271,7 +310,8 @@ describe("processGenerationTaskClaim", () => {
     await expect(
       processGenerationTaskClaim(
         { row: validRow, leaseToken: "lease-token-1" },
-        dependencies
+        dependencies,
+        { reconcileOnly: false }
       )
     ).resolves.toEqual({ status: "requeued" });
     expect(deferTask).toHaveBeenCalledWith(
@@ -301,7 +341,8 @@ describe("processGenerationTaskClaim", () => {
     await expect(
       processGenerationTaskClaim(
         { row: validRow, leaseToken: "lease-token-1" },
-        dependencies
+        dependencies,
+        { reconcileOnly: false }
       )
     ).resolves.toEqual({ status: "failed" });
     expect(finalizeTask).toHaveBeenCalledWith({
@@ -324,7 +365,8 @@ describe("processGenerationTaskClaim", () => {
     await expect(
       processGenerationTaskClaim(
         { row: validRow, leaseToken: "stale-token" },
-        dependencies
+        dependencies,
+        { reconcileOnly: false }
       )
     ).resolves.toEqual({ status: "lease_lost" });
     expect(cleanupInputs).not.toHaveBeenCalled();
@@ -355,7 +397,8 @@ describe("processGenerationTaskClaim", () => {
 
     const result = processGenerationTaskClaim(
       { row: validRow, leaseToken: "lease-token-1" },
-      dependencies
+      dependencies,
+      { reconcileOnly: false }
     );
     await vi.advanceTimersByTimeAsync(10);
 

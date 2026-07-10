@@ -25,6 +25,9 @@ const generationIdsSchema = z
     (generationIds) => new Set(generationIds).size === generationIds.length,
     "Generation IDs must be unique"
   );
+const legacyGenerationIdsSchema = z
+  .array(generationIdSchema)
+  .max(MAX_GENERATION_IDS);
 const responseFormatSchema = z.enum(["url", "b64_json"]);
 const thinkingSchema = z.enum([
   "minimal",
@@ -183,6 +186,40 @@ export const generationTaskResultPayloadSchema = z.union([
 export type GenerationTaskResultPayload = z.infer<
   typeof generationTaskResultPayloadSchema
 >;
+
+/** 判断未知值是否为可逐字段读取的普通对象。 */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+/**
+ * 从旧任务 initialPayload 有界读取 generation ID。
+ *
+ * @param initialPayload 未经信任的历史 JSON。
+ * @returns trim、非空、最长 128 且去重后的 ID；原数组超过 10,000 或任一项非法时
+ * 返回空数组，调用方不得形成无界 IN 查询。
+ * @sideEffects 无。
+ */
+export function parseLegacyGenerationTaskIds(
+  initialPayload: unknown
+): string[] {
+  const initial = isRecord(initialPayload) ? initialPayload : {};
+  const singular =
+    typeof initial.generation_id === "string"
+      ? initial.generation_id
+      : typeof initial.generationId === "string"
+        ? initial.generationId
+        : undefined;
+  const plural = Array.isArray(initial.generation_ids)
+    ? initial.generation_ids
+    : Array.isArray(initial.generationIds)
+      ? initial.generationIds
+      : [];
+  const parsed = legacyGenerationIdsSchema.safeParse(
+    singular ? [singular] : plural
+  );
+  return parsed.success ? Array.from(new Set(parsed.data)) : [];
+}
 
 /**
  * 获取普通 generation 任务输入使用的存储桶。

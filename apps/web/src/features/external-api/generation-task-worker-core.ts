@@ -18,6 +18,7 @@ export type GenerationTaskWorkerRow = {
   userId: string;
   apiKeyId: string | null;
   taskType: "image" | "video";
+  initialPayload: Record<string, unknown>;
   requestPayload: Record<string, unknown> | null;
 };
 
@@ -67,6 +68,12 @@ export type GenerationTaskWorkerDependencies = {
   resolveTask: (input: {
     row: GenerationTaskWorkerRow;
     request: GenerationTaskRequestPayload;
+    leaseToken: string;
+    reconcileOnly: boolean;
+    signal: AbortSignal;
+  }) => Promise<GenerationTaskResolution>;
+  resolveLegacyTask?: (input: {
+    row: GenerationTaskWorkerRow;
     leaseToken: string;
     signal: AbortSignal;
   }) => Promise<GenerationTaskResolution>;
@@ -222,26 +229,35 @@ async function finalizeInvalidTask(
  *
  * @param claim 任务行与本次 fencing token。
  * @param dependencies 业务对账、心跳、终态、重排和对象清理适配。
+ * @param options reconcileOnly 为 true 时 adapter 只能对账/补偿，不得调用上游。
  * @returns completed/failed/requeued/lease_lost，不泄露业务结果正文。
  * @sideEffects 调用注入业务；只有当前 token 成功终态后才清理输入。明确丢租会 abort
  * 业务，旧 worker 不得终态、重排或删除新 worker 仍需的输入。
  */
 export async function processGenerationTaskClaim(
   claim: GenerationTaskWorkerClaim,
-  dependencies: GenerationTaskWorkerDependencies
+  dependencies: GenerationTaskWorkerDependencies,
+  options: { reconcileOnly: boolean }
 ): Promise<GenerationTaskWorkerResult> {
   const request = generationTaskRequestPayloadSchema.safeParse(
     claim.row.requestPayload
   );
+  if (request.success && request.data.relayOnly !== false) {
+    return await finalizeInvalidTask(claim, dependencies);
+  }
   if (
-    !request.success ||
-    request.data.relayOnly !== false ||
+    request.success &&
     !matchesPersistedTaskType(claim.row.taskType, request.data)
   ) {
     return await finalizeInvalidTask(claim, dependencies);
   }
+  if (!request.success && !dependencies.resolveLegacyTask) {
+    return await finalizeInvalidTask(claim, dependencies);
+  }
 
-  const references = getTaskInputReferences(request.data);
+  const references = request.success
+    ? getTaskInputReferences(request.data)
+    : [];
   const heartbeat = startTaskHeartbeat({
     id: claim.row.id,
     leaseToken: claim.leaseToken,
@@ -252,17 +268,30 @@ export async function processGenerationTaskClaim(
 
   let resolution: GenerationTaskResolution;
   try {
-    resolution = await dependencies.resolveTask({
-      row: claim.row,
-      request: request.data,
-      leaseToken: claim.leaseToken,
-      signal: heartbeat.signal,
-    });
+    resolution = request.success
+      ? await dependencies.resolveTask({
+          row: claim.row,
+          request: request.data,
+          leaseToken: claim.leaseToken,
+          reconcileOnly: options.reconcileOnly,
+          signal: heartbeat.signal,
+        })
+      : ((await dependencies.resolveLegacyTask?.({
+          row: claim.row,
+          leaseToken: claim.leaseToken,
+          signal: heartbeat.signal,
+        })) ?? {
+          status: "failed",
+          objectType: claim.row.taskType,
+          errorPayload: dependencies.toErrorPayload(
+            new Error("Persisted generation task request is invalid")
+          ),
+        });
   } catch (error) {
     dependencies.onResolveError?.(error);
     resolution = {
       status: "requeue",
-      consumeAttempt: true,
+      consumeAttempt: request.success && !options.reconcileOnly,
     };
   }
   await heartbeat.stop();

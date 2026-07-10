@@ -12,12 +12,12 @@ import {
   buildSignedStorageImageUrl,
   parseStorageImageUrl,
 } from "@repo/shared/storage/signed-url";
-import { z } from "zod";
 import { recoverImageGenerationResult } from "@/features/image-generation/generation-recovery";
 import type { ExternalAsyncTaskRow } from "./external-async-task-store";
 import {
   type GenerationTaskRequestPayload,
   generationTaskRequestPayloadSchema,
+  parseLegacyGenerationTaskIds,
 } from "./generation-task-input";
 import {
   getExternalFinalImageOutputs,
@@ -26,10 +26,6 @@ import {
 } from "./images";
 
 const MAX_MATERIALIZED_IMAGE_BYTES = 100 * 1024 * 1024;
-const MAX_LEGACY_GENERATION_IDS = 10_000;
-const legacyGenerationIdsSchema = z
-  .array(z.string().trim().min(1).max(128))
-  .max(MAX_LEGACY_GENERATION_IDS);
 
 type VideoGenerationTaskRow = {
   id: string;
@@ -61,11 +57,6 @@ export type GenerationTaskMaterializerDependencies = {
   ) => Promise<Buffer>;
   getRuntimeSiteUrl: () => Promise<string>;
 };
-
-/** 判断未知值是否为可逐字段读取的普通对象。 */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
 
 /** 把 metadata 中的非空字符串安全取出。 */
 function metadataString(
@@ -102,26 +93,9 @@ function readTaskIdentity(row: ExternalAsyncTaskRow):
     };
   }
 
-  const initial = isRecord(row.initialPayload) ? row.initialPayload : {};
-  const singular =
-    typeof initial.generation_id === "string"
-      ? initial.generation_id
-      : typeof initial.generationId === "string"
-        ? initial.generationId
-        : undefined;
-  const plural = Array.isArray(initial.generation_ids)
-    ? initial.generation_ids
-    : Array.isArray(initial.generationIds)
-      ? initial.generationIds
-      : [];
-  const parsedLegacyIds = legacyGenerationIdsSchema.safeParse(
-    singular ? [singular] : plural
-  );
   return {
     request: null,
-    generationIds: parsedLegacyIds.success
-      ? Array.from(new Set(parsedLegacyIds.data))
-      : [],
+    generationIds: parseLegacyGenerationTaskIds(row.initialPayload),
   };
 }
 
