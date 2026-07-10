@@ -94,6 +94,12 @@ import type {
 const MANUAL_TOKEN_IMPORT_LIMIT = 10_000;
 const IMAGE_BACKEND_INFLIGHT_LEASE_TTL_MS = 30 * 60_000;
 const MAX_BACKEND_STALE_SELECTION_RETRIES = 100;
+// 每类候选只取排序最靠前的一批。排除成员会下推 SQL，因此重试不会因前 N 行
+// 已排除而误判无候选；200 对正常池规模足够宽松，同时阻止异常大池放大内存。
+const RUNTIME_BACKEND_CANDIDATE_LIMIT = 200;
+// 分组定义属于低频管理配置，缓存 45 秒减少请求热路径重复查询。成员状态、冷却、
+// lastUsedAt 与租约仍逐次实时读取，不进入此缓存。
+const BACKEND_GROUP_CACHE_TTL_MS = 45_000;
 // 满并发短等(仅 web 偏好阶段):真·web 成员(非常驻 web 账号/API)仅因并发占满而暂不可用
 // 时,短延迟后重选、给它让出并发槽再试的机会,避免 web 车道尚未轮询完就回退 codex。两参数
 // 经 env 覆盖(默认 3 次 ×300ms ≈ 0.9s 上限)。
@@ -127,6 +133,14 @@ type BackendLeaseTx = Pick<
 >;
 
 type BackendLeaseAcquireResult = "acquired" | "full" | "stale";
+
+type SchedulerSelectionDiagnostics = {
+  startedAtMs: number;
+  sqlQueryCount: number;
+  candidateRowsScanned: number;
+  eligibleCandidateCount: number;
+  leaseConflictCount: number;
+};
 
 type ResolveBackendOptions = {
   userId: string;
@@ -333,6 +347,16 @@ type SelectableGroupContext = {
   contentSafetyEnabled: boolean | null;
 };
 
+type BackendGroupSnapshotRow = typeof imageBackendGroup.$inferSelect;
+
+let backendGroupSnapshotCache: {
+  expiresAtMs: number;
+  rows: BackendGroupSnapshotRow[];
+} | null = null;
+let backendGroupSnapshotPromise: Promise<BackendGroupSnapshotRow[]> | null =
+  null;
+let backendGroupSnapshotRevision = 0;
+
 const CHATGPT_CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex";
 const CODEX_CLI_VERSION = "0.125.0";
 const CODEX_CLI_USER_AGENT = `codex_cli_rs/${CODEX_CLI_VERSION}`;
@@ -388,9 +412,90 @@ const DEFAULT_UNRECOVERABLE_BACKEND_ERROR_KEYWORDS = [
 ];
 const backendInflight = new Map<string, number>();
 
+/**
+ * 创建一次端到端调度选择的诊断上下文。
+ *
+ * 同一上下文会贯穿分组解析、候选查询、过期重选和租约竞争，避免递归重试把
+ * SQL 次数与耗时重新归零。
+ */
+function createSchedulerSelectionDiagnostics(): SchedulerSelectionDiagnostics {
+  return {
+    startedAtMs: Date.now(),
+    sqlQueryCount: 0,
+    candidateRowsScanned: 0,
+    eligibleCandidateCount: 0,
+    leaseConflictCount: 0,
+  };
+}
+
+/** 记录调度热路径发起的数据库语句数，不包含指标自身的写入。 */
+function recordSchedulerSql(
+  diagnostics: SchedulerSelectionDiagnostics | undefined,
+  count = 1
+) {
+  if (diagnostics) diagnostics.sqlQueryCount += count;
+}
+
+/** 清空静态分组快照；管理端修改分组后调用以立即生效。 */
+function invalidateBackendGroupSnapshot() {
+  backendGroupSnapshotRevision += 1;
+  backendGroupSnapshotCache = null;
+  backendGroupSnapshotPromise = null;
+}
+
+/**
+ * 读取完整分组静态快照，并在进程内缓存 45 秒。
+ *
+ * @param diagnostics - 可选的当前调度诊断上下文，用于统计实际发起的 SQL。
+ * @returns 按优先级和创建时间稳定排序的分组行。
+ * @sideeffect 缓存仅包含低频分组定义；后端成员和租约不经过本函数。
+ * @throws 数据库查询失败时原样上抛，且不会缓存失败结果。
+ */
+async function getBackendGroupSnapshot(
+  diagnostics?: SchedulerSelectionDiagnostics
+): Promise<BackendGroupSnapshotRow[]> {
+  const now = Date.now();
+  if (backendGroupSnapshotCache?.expiresAtMs) {
+    if (backendGroupSnapshotCache.expiresAtMs > now) {
+      return backendGroupSnapshotCache.rows;
+    }
+    backendGroupSnapshotCache = null;
+  }
+
+  if (!backendGroupSnapshotPromise) {
+    const revision = backendGroupSnapshotRevision;
+    recordSchedulerSql(diagnostics);
+    backendGroupSnapshotPromise = db
+      .select()
+      .from(imageBackendGroup)
+      .orderBy(
+        asc(imageBackendGroup.priority),
+        asc(imageBackendGroup.createdAt)
+      );
+
+    try {
+      const rows = await backendGroupSnapshotPromise;
+      if (revision === backendGroupSnapshotRevision) {
+        backendGroupSnapshotCache = {
+          expiresAtMs: Date.now() + BACKEND_GROUP_CACHE_TTL_MS,
+          rows,
+        };
+      }
+      return rows;
+    } finally {
+      if (revision === backendGroupSnapshotRevision) {
+        backendGroupSnapshotPromise = null;
+      }
+    }
+  }
+
+  return await backendGroupSnapshotPromise;
+}
+
 export function resetImageBackendInflightForTests() {
   if (process.env.NODE_ENV === "test") {
     backendInflight.clear();
+    invalidateBackendGroupSnapshot();
   }
 }
 
@@ -639,6 +744,81 @@ function backendCanServeRequestedModel(input: {
   return fireflyFamilyModelIds(normalized).some((model) =>
     enabled.includes(model)
   );
+}
+
+type EnabledModelsColumn =
+  | typeof imageBackendApi.enabledModels
+  | typeof imageBackendAdobe.enabledModels;
+
+/**
+ * 生成 JSON 模型白名单的 SQL 谓词。
+ *
+ * 空白名单沿用“不限制”语义；非空白名单按小写模型族匹配。调用方仍保留内存
+ * 判定作为防御，但大多数不匹配行会在 PostgreSQL 中被剔除。
+ */
+function enabledModelsAllowCandidates(
+  column: EnabledModelsColumn,
+  candidates: string[]
+) {
+  const normalizedCandidates = Array.from(
+    new Set(candidates.map((candidate) => candidate.trim().toLowerCase()))
+  ).filter(Boolean);
+  if (!normalizedCandidates.length) return sql`true`;
+  const candidateSql = sql.join(
+    normalizedCandidates.map((candidate) => sql`${candidate}`),
+    sql`, `
+  );
+  return sql`(
+    ${column} IS NULL
+    OR jsonb_typeof(${column}::jsonb) <> 'array'
+    OR jsonb_array_length(${column}::jsonb) = 0
+    OR EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements_text(${column}::jsonb) AS enabled_model(value)
+      WHERE lower(enabled_model.value) IN (${candidateSql})
+    )
+  )`;
+}
+
+/** 显式请求模型时下推 API 白名单；无请求模型时保留既有动态 model 兼容语义。 */
+function apiEnabledModelsWhere(requestedModel?: string) {
+  const normalizedRequestedModel = requestedModel?.trim();
+  if (!normalizedRequestedModel) return sql`true`;
+  return enabledModelsAllowCandidates(
+    imageBackendApi.enabledModels,
+    fireflyFamilyModelIds(normalizedRequestedModel)
+  );
+}
+
+/** 把 API 接口模式与请求类型兼容判定下推 SQL。 */
+function apiInterfaceAllowsRequestWhere(requestKind: ImageBackendRequestKind) {
+  if (requestKind === "image_generation" || requestKind === "image_edit") {
+    return or(
+      eq(imageBackendApi.interfaceMode, "task"),
+      and(
+        eq(imageBackendApi.imageUpstreamMode, "responses"),
+        inArray(imageBackendApi.interfaceMode, ["responses", "mixed"])
+      ),
+      and(
+        sql`${imageBackendApi.imageUpstreamMode} <> 'responses'`,
+        notInArray(imageBackendApi.interfaceMode, ["responses", "task"])
+      )
+    );
+  }
+  return inArray(imageBackendApi.interfaceMode, ["responses", "mixed"]);
+}
+
+/** 从统一排除键中提取某类成员 ID，供 notInArray 下推。 */
+function excludedMemberIds(
+  excluded: Set<string> | undefined,
+  memberType: PoolMember["type"]
+) {
+  if (!excluded?.size) return [];
+  const prefix = `${memberType}:`;
+  return Array.from(excluded)
+    .filter((key) => key.startsWith(prefix))
+    .map((key) => key.slice(prefix.length))
+    .filter(Boolean);
 }
 
 function stripTrailingSlash(value: string) {
@@ -934,11 +1114,13 @@ export async function bindImageBackendStickyMember(input: {
 async function resolveStickyBinding(input: {
   layer: "previous_response_id" | "session_hash";
   key?: string | null;
+  diagnostics?: SchedulerSelectionDiagnostics;
 }): Promise<StickyBindingMember | null> {
   const key = input.key?.trim();
   if (!key) return null;
   const now = new Date();
   try {
+    recordSchedulerSql(input.diagnostics);
     const [row] = await db
       .select({
         memberType: imageBackendStickyBinding.memberType,
@@ -966,6 +1148,7 @@ async function resolveStickyBinding(input: {
           : undefined,
     });
     if (!member) return null;
+    recordSchedulerSql(input.diagnostics);
     await db
       .update(imageBackendStickyBinding)
       .set({
@@ -1005,6 +1188,7 @@ async function recordSchedulerMetric(input: {
   candidateCount?: number;
   latencyMs?: number;
   switchCount?: number;
+  diagnostics?: SchedulerSelectionDiagnostics;
 }) {
   const now = new Date();
   const requestKind = input.requestKind || "image_generation";
@@ -1017,6 +1201,18 @@ async function recordSchedulerMetric(input: {
   const selectCount = selectedLayer === "switch" ? 0 : 1;
   const candidateCount = Math.max(0, Math.trunc(input.candidateCount || 0));
   const latencyMs = Math.max(0, Math.trunc(input.latencyMs || 0));
+  const sqlQueryCount = Math.max(
+    0,
+    Math.trunc(input.diagnostics?.sqlQueryCount || 0)
+  );
+  const candidateRowsScanned = Math.max(
+    0,
+    Math.trunc(input.diagnostics?.candidateRowsScanned || 0)
+  );
+  const leaseConflictCount = Math.max(
+    0,
+    Math.trunc(input.diagnostics?.leaseConflictCount || 0)
+  );
   const memberType = input.memberType ?? "";
   const memberId = input.memberId ?? "";
   const groupId = input.groupId ?? "";
@@ -1038,6 +1234,11 @@ async function recordSchedulerMetric(input: {
         switchCount,
         candidateCountTotal: candidateCount,
         latencyMsTotal: latencyMs,
+        metadata: {
+          sqlQueryCountTotal: sqlQueryCount,
+          candidateRowsScannedTotal: candidateRowsScanned,
+          leaseConflictCountTotal: leaseConflictCount,
+        },
         createdAt: now,
         updatedAt: now,
       })
@@ -1058,6 +1259,11 @@ async function recordSchedulerMetric(input: {
           switchCount: sql`${imageBackendSchedulerMetric.switchCount} + ${switchCount}`,
           candidateCountTotal: sql`${imageBackendSchedulerMetric.candidateCountTotal} + ${candidateCount}`,
           latencyMsTotal: sql`${imageBackendSchedulerMetric.latencyMsTotal} + ${latencyMs}`,
+          metadata: sql`json_build_object(
+            'sqlQueryCountTotal', COALESCE((${imageBackendSchedulerMetric.metadata}->>'sqlQueryCountTotal')::integer, 0) + ${sqlQueryCount},
+            'candidateRowsScannedTotal', COALESCE((${imageBackendSchedulerMetric.metadata}->>'candidateRowsScannedTotal')::integer, 0) + ${candidateRowsScanned},
+            'leaseConflictCountTotal', COALESCE((${imageBackendSchedulerMetric.metadata}->>'leaseConflictCountTotal')::integer, 0) + ${leaseConflictCount}
+          )`,
           updatedAt: now,
         },
       });
@@ -1205,8 +1411,10 @@ function sameMemberTimestamp(
 async function pruneExpiredBackendLeases(
   tx: BackendLeaseTx,
   member: Pick<PoolMember, "type" | "id">,
-  now: Date
+  now: Date,
+  diagnostics?: SchedulerSelectionDiagnostics
 ) {
+  recordSchedulerSql(diagnostics);
   await tx
     .delete(imageBackendInflightLease)
     .where(
@@ -1220,9 +1428,15 @@ async function pruneExpiredBackendLeases(
 
 async function acquirePoolMemberInflightLease(
   member: PoolMember,
-  options?: { enforceLastAcquiredSnapshot?: boolean }
+  options?: {
+    enforceLastAcquiredSnapshot?: boolean;
+    diagnostics?: SchedulerSelectionDiagnostics;
+  }
 ): Promise<BackendLeaseAcquireResult> {
-  if (!hasBackendCapacity(member)) return "full";
+  if (!hasBackendCapacity(member)) {
+    if (options?.diagnostics) options.diagnostics.leaseConflictCount += 1;
+    return "full";
+  }
   const leaseId = nanoid();
   let persisted = false;
   let touchedMember = false;
@@ -1245,6 +1459,7 @@ async function acquirePoolMemberInflightLease(
     const acquired = await db.transaction(async (tx) => {
       let lockedLastAcquiredAt: Date | string | null | undefined;
       if (member.type === "api") {
+        recordSchedulerSql(options?.diagnostics);
         const [locked] = await tx
           .select({ lastAcquiredAt: imageBackendApi.lastAcquiredAt })
           .from(imageBackendApi)
@@ -1259,6 +1474,7 @@ async function acquirePoolMemberInflightLease(
           return "stale";
         }
       } else if (member.type === "adobe") {
+        recordSchedulerSql(options?.diagnostics);
         const [locked] = await tx
           .select({ lastAcquiredAt: imageBackendAdobe.lastAcquiredAt })
           .from(imageBackendAdobe)
@@ -1273,6 +1489,7 @@ async function acquirePoolMemberInflightLease(
           return "stale";
         }
       } else {
+        recordSchedulerSql(options?.diagnostics);
         const [locked] = await tx
           .select({ lastAcquiredAt: imageBackendAccount.lastAcquiredAt })
           .from(imageBackendAccount)
@@ -1287,7 +1504,8 @@ async function acquirePoolMemberInflightLease(
           return "stale";
         }
       }
-      await pruneExpiredBackendLeases(tx, member, now);
+      await pruneExpiredBackendLeases(tx, member, now, options?.diagnostics);
+      recordSchedulerSql(options?.diagnostics);
       const [activeLeaseCount] = await tx
         .select({ value: count() })
         .from(imageBackendInflightLease)
@@ -1300,6 +1518,7 @@ async function acquirePoolMemberInflightLease(
         );
       const activeCount = Number(activeLeaseCount?.value || 0);
       if (activeCount >= backendConcurrency(member)) return "full";
+      recordSchedulerSql(options?.diagnostics);
       await tx.insert(imageBackendInflightLease).values({
         id: leaseId,
         memberType: member.type,
@@ -1307,6 +1526,7 @@ async function acquirePoolMemberInflightLease(
         expiresAt,
         createdAt: now,
       });
+      recordSchedulerSql(options?.diagnostics);
       if (member.type === "api") {
         await tx
           .update(imageBackendApi)
@@ -1355,6 +1575,8 @@ async function acquirePoolMemberInflightLease(
       member.leaseTouchedMember = touchedMember;
       member.lastAcquiredAt = now;
       member.lastUsedAt = now;
+    } else if (options?.diagnostics) {
+      options.diagnostics.leaseConflictCount += 1;
     }
     return acquired;
   } catch (error) {
@@ -2485,29 +2707,14 @@ function nextWebAccountMetadataAfterSuccess(
   };
 }
 
-async function getDefaultGroupId() {
-  const [defaultGroup] = await db
-    .select({ id: imageBackendGroup.id })
-    .from(imageBackendGroup)
-    .where(
-      and(
-        eq(imageBackendGroup.isEnabled, true),
-        eq(imageBackendGroup.isDefault, true)
-      )
-    )
-    .orderBy(asc(imageBackendGroup.priority), asc(imageBackendGroup.createdAt))
-    .limit(1);
-
-  if (defaultGroup) return defaultGroup.id;
-
-  const [firstGroup] = await db
-    .select({ id: imageBackendGroup.id })
-    .from(imageBackendGroup)
-    .where(eq(imageBackendGroup.isEnabled, true))
-    .orderBy(asc(imageBackendGroup.priority), asc(imageBackendGroup.createdAt))
-    .limit(1);
-
-  return firstGroup?.id ?? null;
+async function getDefaultGroupId(diagnostics?: SchedulerSelectionDiagnostics) {
+  const groups = await getBackendGroupSnapshot(diagnostics);
+  const enabledGroups = groups.filter((group) => group.isEnabled);
+  return (
+    enabledGroups.find((group) => group.isDefault)?.id ??
+    enabledGroups[0]?.id ??
+    null
+  );
 }
 
 // 分组解析统一入口。优先级:请求级显式分组 > API Key 绑定 > 用户偏好 > 默认分组。
@@ -2516,11 +2723,13 @@ async function getDefaultGroupId() {
 // 失效(禁用/降套餐)时静默回退默认分组。
 async function resolveRequestedGroup(
   options: ResolveBackendOptions,
-  plan: SubscriptionPlan
+  plan: SubscriptionPlan,
+  diagnostics?: SchedulerSelectionDiagnostics
 ): Promise<{ groupId: string | null; explicit: boolean }> {
   const requestGroupId = options.requestGroupId?.trim();
 
   if (options.apiKeyId) {
+    recordSchedulerSql(diagnostics);
     const [key] = await db
       .select({ groupId: externalApiKey.generationGroupId })
       .from(externalApiKey)
@@ -2536,29 +2745,44 @@ async function resolveRequestedGroup(
     }
     if (requestGroupId) {
       return {
-        groupId: await assertRequestGroupSelectable(requestGroupId, plan),
+        groupId: await assertRequestGroupSelectable(
+          requestGroupId,
+          plan,
+          diagnostics
+        ),
         explicit: true,
       };
     }
-    return { groupId: await getDefaultGroupId(), explicit: false };
+    return {
+      groupId: await getDefaultGroupId(diagnostics),
+      explicit: false,
+    };
   }
 
   if (requestGroupId) {
     return {
-      groupId: await assertRequestGroupSelectable(requestGroupId, plan),
+      groupId: await assertRequestGroupSelectable(
+        requestGroupId,
+        plan,
+        diagnostics
+      ),
       explicit: true,
     };
   }
 
   const preferenceGroupId = await getUserImageBackendPreference(
     options.userId,
-    plan
+    plan,
+    diagnostics
   );
   if (preferenceGroupId) {
     return { groupId: preferenceGroupId, explicit: true };
   }
 
-  return { groupId: await getDefaultGroupId(), explicit: false };
+  return {
+    groupId: await getDefaultGroupId(diagnostics),
+    explicit: false,
+  };
 }
 
 // 请求级显式分组的 fail-closed 校验:isEnabled + isUserSelectable + minPlan +
@@ -2566,18 +2790,12 @@ async function resolveRequestedGroup(
 // 判定逻辑在 group-selection.ts 纯函数,此处只负责取数与能力位查询。
 async function assertRequestGroupSelectable(
   groupId: string,
-  plan: SubscriptionPlan
+  plan: SubscriptionPlan,
+  diagnostics?: SchedulerSelectionDiagnostics
 ): Promise<string> {
-  const [group] = await db
-    .select({
-      id: imageBackendGroup.id,
-      isEnabled: imageBackendGroup.isEnabled,
-      isUserSelectable: imageBackendGroup.isUserSelectable,
-      metadata: imageBackendGroup.metadata,
-    })
-    .from(imageBackendGroup)
-    .where(eq(imageBackendGroup.id, groupId))
-    .limit(1);
+  const group = (await getBackendGroupSnapshot(diagnostics)).find(
+    (candidate) => candidate.id === groupId
+  );
   const verdict = checkGroupSelectable({
     group: group ?? null,
     plan,
@@ -2592,19 +2810,13 @@ async function assertRequestGroupSelectable(
 
 async function ensureGroupUsable(
   groupId: string | null,
-  plan: SubscriptionPlan
+  plan: SubscriptionPlan,
+  diagnostics?: SchedulerSelectionDiagnostics
 ) {
   if (!groupId) return null;
-  const [group] = await db
-    .select()
-    .from(imageBackendGroup)
-    .where(
-      and(
-        eq(imageBackendGroup.id, groupId),
-        eq(imageBackendGroup.isEnabled, true)
-      )
-    )
-    .limit(1);
+  const group = (await getBackendGroupSnapshot(diagnostics)).find(
+    (candidate) => candidate.id === groupId && candidate.isEnabled
+  );
   if (group && !canUseBackendGroupForPlan(group.metadata, plan)) {
     return null;
   }
@@ -2618,7 +2830,8 @@ async function listSelectableGroupContexts(
     contentSafetyEnabled: boolean | null;
   },
   plan: SubscriptionPlan,
-  requestKind: ImageBackendRequestKind
+  requestKind: ImageBackendRequestKind,
+  diagnostics?: SchedulerSelectionDiagnostics
 ): Promise<SelectableGroupContext[]> {
   const contexts: SelectableGroupContext[] = [
     {
@@ -2634,19 +2847,10 @@ async function listSelectableGroupContexts(
   );
   if (!childGroupIds.length) return contexts;
 
-  const childGroups = await db
-    .select({
-      id: imageBackendGroup.id,
-      metadata: imageBackendGroup.metadata,
-      contentSafetyEnabled: imageBackendGroup.contentSafetyEnabled,
-    })
-    .from(imageBackendGroup)
-    .where(
-      and(
-        inArray(imageBackendGroup.id, childGroupIds),
-        eq(imageBackendGroup.isEnabled, true)
-      )
-    );
+  const childGroupIdSet = new Set(childGroupIds);
+  const childGroups = (await getBackendGroupSnapshot(diagnostics)).filter(
+    (child) => child.isEnabled && childGroupIdSet.has(child.id)
+  );
   const childGroupMap = new Map(childGroups.map((child) => [child.id, child]));
 
   for (const childGroupId of childGroupIds) {
@@ -2683,12 +2887,12 @@ async function selectPoolMember(
   forceFirefly = false,
   staleRetryCount = 0,
   capacityWaitCount = 0,
-  accountPlanFilter: ImageBackendAccountPlanFilter = "any"
+  accountPlanFilter: ImageBackendAccountPlanFilter = "any",
+  diagnostics: SchedulerSelectionDiagnostics = createSchedulerSelectionDiagnostics()
 ): Promise<PoolMember | null> {
   // fireflyOnly：候选收敛到仅 adobe 的两种触发——显式 force_firefly 标志，或请求模型
   // 本身就是 firefly-* 前缀。两者语义一致：本次只调度 adobe 后端，不混入 api/account。
   const fireflyOnly = forceFirefly || isAdobeFireflyModelId(requestedModel);
-  const selectionStartedAt = Date.now();
   const contexts = groupContexts?.length
     ? groupContexts
     : groupId
@@ -2739,10 +2943,60 @@ async function selectPoolMember(
         )`
       : sql`true`;
   const now = new Date();
+  const effectiveRequestKind = requestKind || "image_generation";
+  const excludedAccountIds = excludedMemberIds(excluded, "account");
+  const excludedApiIds = excludedMemberIds(excluded, "api");
+  const excludedAdobeIds = excludedMemberIds(excluded, "adobe");
+  const accountContextPredicates = contexts.flatMap((context) => {
+    const contextPreference = effectiveContextPreferences.get(context.id);
+    const allowedBackends = (["web", "responses"] as const).filter(
+      (backend) =>
+        !fireflyOnly &&
+        (!contextPreference || contextPreference === backend) &&
+        groupBackendAllowsAccount(context.metadata, backend) &&
+        accountBackendAllowsRequest(backend, effectiveRequestKind)
+    );
+    if (!allowedBackends.length) return [];
+    return [
+      and(
+        eq(imageBackendAccountGroup.groupId, context.id),
+        inArray(imageBackendAccount.implementationMode, allowedBackends)
+      ),
+    ];
+  });
+  const accountContextWhere = accountContextPredicates.length
+    ? or(...accountContextPredicates)
+    : sql`false`;
+  const apiCandidateGroupIds = contexts
+    .filter(
+      (context) =>
+        memberAllowedForPhase(
+          getGroupBackendType(context.metadata),
+          effectiveAccountBackendPreference,
+          fireflyOnly
+        ) && groupBackendAllowsRequest(context.metadata, effectiveRequestKind)
+    )
+    .map((context) => context.id);
+  const adobeCandidateGroupIds = contexts
+    .filter(
+      (context) =>
+        (effectiveRequestKind === "image_generation" ||
+          effectiveRequestKind === "image_edit") &&
+        groupBackendAllowsRequest(context.metadata, effectiveRequestKind) &&
+        memberAllowedForPhase(
+          getGroupBackendType(context.metadata),
+          effectiveAccountBackendPreference,
+          fireflyOnly
+        )
+    )
+    .map((context) => context.id);
   const accountBaseWhere = and(
     eq(imageBackendAccount.isEnabled, true),
     accountBackendFilter,
     accountPlanWhere,
+    excludedAccountIds.length
+      ? notInArray(imageBackendAccount.id, excludedAccountIds)
+      : sql`true`,
     // always_active 的账号无视 cooldown 与临时故障始终入选,但 status="error"（终态/鉴权类:
     // 死号/封号/凭据失效）仍踢出轮换——避免死号常驻形成黑洞。其余维持原"健康且未冷却"判定。
     or(
@@ -2787,17 +3041,13 @@ async function selectPoolMember(
           imageBackendAccountGroup,
           eq(imageBackendAccountGroup.accountId, imageBackendAccount.id)
         )
-        .where(
-          and(
-            accountBaseWhere,
-            inArray(imageBackendAccountGroup.groupId, groupIds)
-          )
-        )
+        .where(and(accountBaseWhere, accountContextWhere))
         .orderBy(
           asc(imageBackendAccount.priority),
           asc(imageBackendAccount.lastUsedAt),
           asc(imageBackendAccount.createdAt)
         )
+        .limit(RUNTIME_BACKEND_CANDIDATE_LIMIT)
     : db
         .select({
           matchedGroupId: imageBackendAccount.groupId,
@@ -2827,9 +3077,16 @@ async function selectPoolMember(
           asc(imageBackendAccount.priority),
           asc(imageBackendAccount.lastUsedAt),
           asc(imageBackendAccount.createdAt)
-        );
+        )
+        .limit(RUNTIME_BACKEND_CANDIDATE_LIMIT);
   const apiBaseWhere = and(
     eq(imageBackendApi.isEnabled, true),
+    excludedApiIds.length
+      ? notInArray(imageBackendApi.id, excludedApiIds)
+      : sql`true`,
+    fireflyOnly ? eq(imageBackendApi.adobeSourced, true) : sql`true`,
+    apiEnabledModelsWhere(requestedModel),
+    apiInterfaceAllowsRequestWhere(effectiveRequestKind),
     // always_active 的 API 无视 cooldown 与临时故障始终入选,但 status="error"（终态）仍踢出
     // 轮换。其余维持原"健康且未冷却"判定。
     or(
@@ -2888,13 +3145,17 @@ async function selectPoolMember(
           eq(imageBackendApiGroup.apiId, imageBackendApi.id)
         )
         .where(
-          and(apiBaseWhere, inArray(imageBackendApiGroup.groupId, groupIds))
+          and(
+            apiBaseWhere,
+            inArray(imageBackendApiGroup.groupId, apiCandidateGroupIds)
+          )
         )
         .orderBy(
           asc(imageBackendApi.priority),
           asc(imageBackendApi.lastUsedAt),
           asc(imageBackendApi.createdAt)
         )
+        .limit(RUNTIME_BACKEND_CANDIDATE_LIMIT)
     : db
         .select({
           matchedGroupId: imageBackendApi.groupId,
@@ -2934,12 +3195,28 @@ async function selectPoolMember(
           asc(imageBackendApi.priority),
           asc(imageBackendApi.lastUsedAt),
           asc(imageBackendApi.createdAt)
-        );
+        )
+        .limit(RUNTIME_BACKEND_CANDIDATE_LIMIT);
 
   // adobe（Firefly）候选：与 api 同构的入选条件（always_active 仅豁免临时故障，
   // status="error" 终态仍踢出）。
   const adobeBaseWhere = and(
     eq(imageBackendAdobe.isEnabled, true),
+    excludedAdobeIds.length
+      ? notInArray(imageBackendAdobe.id, excludedAdobeIds)
+      : sql`true`,
+    effectiveRequestKind === "image_generation" ||
+      effectiveRequestKind === "image_edit"
+      ? sql`true`
+      : sql`false`,
+    enabledModelsAllowCandidates(
+      imageBackendAdobe.enabledModels,
+      fireflyFamilyModelIds(
+        isAdobeFireflyModelId(requestedModel)
+          ? requestedModel || ""
+          : "firefly-gpt-image-2"
+      )
+    ),
     or(
       and(
         eq(imageBackendAdobe.alwaysActive, true),
@@ -2995,13 +3272,17 @@ async function selectPoolMember(
           eq(imageBackendAdobeGroup.adobeId, imageBackendAdobe.id)
         )
         .where(
-          and(adobeBaseWhere, inArray(imageBackendAdobeGroup.groupId, groupIds))
+          and(
+            adobeBaseWhere,
+            inArray(imageBackendAdobeGroup.groupId, adobeCandidateGroupIds)
+          )
         )
         .orderBy(
           asc(imageBackendAdobe.priority),
           asc(imageBackendAdobe.lastUsedAt),
           asc(imageBackendAdobe.createdAt)
         )
+        .limit(RUNTIME_BACKEND_CANDIDATE_LIMIT)
     : db
         .select(adobeSelection)
         .from(imageBackendAdobe)
@@ -3015,13 +3296,17 @@ async function selectPoolMember(
           asc(imageBackendAdobe.priority),
           asc(imageBackendAdobe.lastUsedAt),
           asc(imageBackendAdobe.createdAt)
-        );
+        )
+        .limit(RUNTIME_BACKEND_CANDIDATE_LIMIT);
 
+  recordSchedulerSql(diagnostics, 3);
   const [apiRows, accountRows, adobeRows] = await Promise.all([
     apiRowsPromise,
     accountRowsPromise,
     adobeRowsPromise,
   ]);
+  diagnostics.candidateRowsScanned +=
+    apiRows.length + accountRows.length + adobeRows.length;
 
   const apiMembers: PoolMember[] = apiRows
     .filter((row) => {
@@ -3219,6 +3504,7 @@ async function selectPoolMember(
     ...adobeMembers,
   ].filter((member) => !excluded?.has(backendKey(member)));
   const availableCandidates = notExcludedCandidates.filter(hasBackendCapacity);
+  diagnostics.eligibleCandidateCount += availableCandidates.length;
   // 仅因并发占满、值得"短等"的真·web 成员(非常驻 web 账号/API)。冷却成员已被 DB WHERE
   // 滤除、不在 notExcludedCandidates 内,天然不计入;常驻由判定排除。
   const webCapacityWaitCandidates = notExcludedCandidates.filter((member) =>
@@ -3334,6 +3620,7 @@ async function selectPoolMember(
     const leaseResult = await acquirePoolMemberInflightLease(member, {
       enforceLastAcquiredSnapshot:
         (member.schedulerLayer || "load_balance") === "load_balance",
+      diagnostics,
     });
     if (leaseResult === "stale") {
       sawStaleCandidate = true;
@@ -3347,7 +3634,8 @@ async function selectPoolMember(
         memberId: member.id,
         groupId: member.groupId,
         candidateCount: availableCandidates.length,
-        latencyMs: Date.now() - selectionStartedAt,
+        latencyMs: Date.now() - diagnostics.startedAtMs,
+        diagnostics,
       });
       return member;
     }
@@ -3374,7 +3662,8 @@ async function selectPoolMember(
       forceFirefly,
       staleRetryCount + 1,
       capacityWaitCount,
-      accountPlanFilter
+      accountPlanFilter,
+      diagnostics
     );
   }
 
@@ -3404,7 +3693,8 @@ async function selectPoolMember(
       forceFirefly,
       staleRetryCount,
       capacityWaitCount + 1,
-      accountPlanFilter
+      accountPlanFilter,
+      diagnostics
     );
   }
 
@@ -3610,13 +3900,20 @@ function toResolvedPoolConfig(
 }
 
 async function resolvePoolMember(
-  options: ResolveBackendOptions & { excluded?: Set<string> }
+  options: ResolveBackendOptions & {
+    excluded?: Set<string>;
+    diagnostics: SchedulerSelectionDiagnostics;
+  }
 ) {
   const userPlan = await getUserPlan(options.userId);
   if (options.spanGroupsForWeb) {
     return await resolveAnyWebPoolMember(options, userPlan.plan);
   }
-  const requestedGroup = await resolveRequestedGroup(options, userPlan.plan);
+  const requestedGroup = await resolveRequestedGroup(
+    options,
+    userPlan.plan,
+    options.diagnostics
+  );
   const canFallbackToAnyResponses =
     options.allowAnyResponsesBackend && options.requestKind === "responses";
   const resolveAnyResponsesMember = async () => {
@@ -3624,7 +3921,11 @@ async function resolvePoolMember(
     return await resolveAnyResponsesPoolMember(options, userPlan.plan);
   };
   const requestedGroupId = requestedGroup.groupId;
-  const group = await ensureGroupUsable(requestedGroupId, userPlan.plan);
+  const group = await ensureGroupUsable(
+    requestedGroupId,
+    userPlan.plan,
+    options.diagnostics
+  );
   if (!group) {
     const fallback = await resolveAnyResponsesMember();
     if (fallback) return fallback;
@@ -3651,10 +3952,12 @@ async function resolvePoolMember(
     resolveStickyBinding({
       layer: "previous_response_id",
       key: options.stickyPreviousResponseId,
+      diagnostics: options.diagnostics,
     }),
     resolveStickyBinding({
       layer: "session_hash",
       key: options.stickySessionKey,
+      diagnostics: options.diagnostics,
     }),
   ]);
 
@@ -3665,7 +3968,8 @@ async function resolvePoolMember(
     await listSelectableGroupContexts(
       group,
       userPlan.plan,
-      options.requestKind
+      options.requestKind,
+      options.diagnostics
     ),
     options.requestKind,
     options.excluded,
@@ -3679,7 +3983,8 @@ async function resolvePoolMember(
     options.forceFirefly,
     0,
     0,
-    options.accountPlanFilter ?? "any"
+    options.accountPlanFilter ?? "any",
+    options.diagnostics
   );
   if (!member) {
     const fallback = await resolveAnyResponsesMember();
@@ -3696,14 +4001,15 @@ async function resolvePoolMember(
 }
 
 async function resolveAnyResponsesPoolMember(
-  options: ResolveBackendOptions & { excluded?: Set<string> },
+  options: ResolveBackendOptions & {
+    excluded?: Set<string>;
+    diagnostics: SchedulerSelectionDiagnostics;
+  },
   plan: SubscriptionPlan
 ) {
-  const groups = await db
-    .select()
-    .from(imageBackendGroup)
-    .where(eq(imageBackendGroup.isEnabled, true))
-    .orderBy(asc(imageBackendGroup.priority), asc(imageBackendGroup.createdAt));
+  const groups = (await getBackendGroupSnapshot(options.diagnostics)).filter(
+    (group) => group.isEnabled
+  );
 
   for (const group of groups) {
     if (!canUseBackendGroupForPlan(group.metadata, plan)) continue;
@@ -3712,17 +4018,24 @@ async function resolveAnyResponsesPoolMember(
       resolveStickyBinding({
         layer: "previous_response_id",
         key: options.stickyPreviousResponseId,
+        diagnostics: options.diagnostics,
       }),
       resolveStickyBinding({
         layer: "session_hash",
         key: options.stickySessionKey,
+        diagnostics: options.diagnostics,
       }),
     ]);
     const member = await selectPoolMember(
       group.id,
       group.metadata,
       group.contentSafetyEnabled,
-      await listSelectableGroupContexts(group, plan, "responses"),
+      await listSelectableGroupContexts(
+        group,
+        plan,
+        "responses",
+        options.diagnostics
+      ),
       "responses",
       options.excluded,
       options.preferredMemberId,
@@ -3735,7 +4048,8 @@ async function resolveAnyResponsesPoolMember(
       options.forceFirefly,
       0,
       0,
-      options.accountPlanFilter ?? "any"
+      options.accountPlanFilter ?? "any",
+      options.diagnostics
     );
     if (member) return { group, member };
   }
@@ -3748,14 +4062,15 @@ async function resolveAnyResponsesPoolMember(
  * 付费 Web 账号可能集中在专用分组,外部 API key 绑定的分组未必可见。
  */
 async function resolveAnyWebPoolMember(
-  options: ResolveBackendOptions & { excluded?: Set<string> },
+  options: ResolveBackendOptions & {
+    excluded?: Set<string>;
+    diagnostics: SchedulerSelectionDiagnostics;
+  },
   plan: SubscriptionPlan
 ) {
-  const groups = await db
-    .select()
-    .from(imageBackendGroup)
-    .where(eq(imageBackendGroup.isEnabled, true))
-    .orderBy(asc(imageBackendGroup.priority), asc(imageBackendGroup.createdAt));
+  const groups = (await getBackendGroupSnapshot(options.diagnostics)).filter(
+    (group) => group.isEnabled
+  );
 
   for (const group of groups) {
     if (!canUseBackendGroupForPlan(group.metadata, plan)) continue;
@@ -3766,7 +4081,12 @@ async function resolveAnyWebPoolMember(
       group.id,
       group.metadata,
       group.contentSafetyEnabled,
-      await listSelectableGroupContexts(group, plan, options.requestKind),
+      await listSelectableGroupContexts(
+        group,
+        plan,
+        options.requestKind,
+        options.diagnostics
+      ),
       options.requestKind,
       options.excluded,
       options.preferredMemberId,
@@ -3779,7 +4099,8 @@ async function resolveAnyWebPoolMember(
       options.forceFirefly,
       0,
       0,
-      options.accountPlanFilter ?? "any"
+      options.accountPlanFilter ?? "any",
+      options.diagnostics
     );
     if (!member) continue;
     if (member.type === "account" && member.implementationMode === "web") {
@@ -3799,11 +4120,22 @@ async function resolveAnyWebPoolMember(
 export async function resolveImageBackendPoolConfig(
   options: ResolveBackendOptions & { excludedMemberKeys?: string[] }
 ): Promise<ResolvedImageBackendPoolConfig | null> {
+  const diagnostics = createSchedulerSelectionDiagnostics();
   const resolved = await resolvePoolMember({
     ...options,
     excluded: new Set(options.excludedMemberKeys || []),
+    diagnostics,
   });
-  if (!resolved) return null;
+  if (!resolved) {
+    await recordSchedulerMetric({
+      requestKind: options.requestKind,
+      layer: "load_balance",
+      candidateCount: diagnostics.eligibleCandidateCount,
+      latencyMs: Date.now() - diagnostics.startedAtMs,
+      diagnostics,
+    });
+    return null;
+  }
   try {
     if (!resolved.member.leaseTouchedMember) {
       await touchSelectedMember(resolved.member);
@@ -4311,8 +4643,10 @@ export async function listSelectableImageBackendGroups(
 
 export async function getUserImageBackendPreference(
   userId: string,
-  plan?: SubscriptionPlan
+  plan?: SubscriptionPlan,
+  diagnostics?: SchedulerSelectionDiagnostics
 ) {
+  recordSchedulerSql(diagnostics);
   const [preference] = await db
     .select({ groupId: userImageBackendPreference.groupId })
     .from(userImageBackendPreference)
@@ -4320,16 +4654,9 @@ export async function getUserImageBackendPreference(
     .limit(1);
   if (!preference?.groupId) return null;
 
-  const [group] = await db
-    .select({
-      id: imageBackendGroup.id,
-      isEnabled: imageBackendGroup.isEnabled,
-      isUserSelectable: imageBackendGroup.isUserSelectable,
-      metadata: imageBackendGroup.metadata,
-    })
-    .from(imageBackendGroup)
-    .where(eq(imageBackendGroup.id, preference.groupId))
-    .limit(1);
+  const group = (await getBackendGroupSnapshot(diagnostics)).find(
+    (candidate) => candidate.id === preference.groupId
+  );
 
   return group?.id === preference.groupId &&
     group.isEnabled &&
@@ -4435,6 +4762,7 @@ export async function upsertImageBackendGroup(input: UpsertGroupInput) {
       isDefault: false,
       updatedAt: new Date(),
     });
+    invalidateBackendGroupSnapshot();
   }
 
   if (input.id) {
@@ -4464,6 +4792,7 @@ export async function upsertImageBackendGroup(input: UpsertGroupInput) {
         updatedAt: new Date(),
       })
       .where(eq(imageBackendGroup.id, input.id));
+    invalidateBackendGroupSnapshot();
     return input.id;
   }
 
@@ -4484,11 +4813,13 @@ export async function upsertImageBackendGroup(input: UpsertGroupInput) {
     },
     priority: input.priority,
   });
+  invalidateBackendGroupSnapshot();
   return id;
 }
 
 export async function deleteImageBackendGroup(groupId: string) {
   await db.delete(imageBackendGroup).where(eq(imageBackendGroup.id, groupId));
+  invalidateBackendGroupSnapshot();
 }
 
 type UpsertAccountInput = {

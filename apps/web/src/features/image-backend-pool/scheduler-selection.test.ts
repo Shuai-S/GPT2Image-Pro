@@ -185,6 +185,8 @@ const dbMock = vi.hoisted(() => {
     schedulerMetrics: [] as Row[],
     leases: [] as Row[],
     lockedLastAcquiredAtById: new Map<string, Date | null>(),
+    fromCalls: [] as string[],
+    whereCalls: [] as { tableName: string; predicate: unknown }[],
     limitCalls: [] as { tableName: string; limit: number }[],
     updates: [] as { tableName: string; values: Row }[],
     inserts: [] as { tableName: string; values: Row }[],
@@ -271,11 +273,13 @@ const dbMock = vi.hoisted(() => {
     const builder: Record<string, unknown> = {};
     builder.from = vi.fn((table: unknown) => {
       tableName = tableNameOf(table);
+      state.fromCalls.push(tableName);
       return builder;
     });
     builder.innerJoin = vi.fn(() => builder);
     builder.where = vi.fn((predicate: unknown) => {
       wherePredicate = predicate;
+      state.whereCalls.push({ tableName, predicate });
       return builder;
     });
     builder.orderBy = vi.fn(() => builder);
@@ -423,11 +427,20 @@ vi.mock("@repo/database/schema", () => schemaMock);
 
 vi.mock("drizzle-orm", () => {
   const predicate = (kind: string, values: unknown[]) => ({ kind, values });
-  const sql = (strings: TemplateStringsArray, ...values: unknown[]) => ({
-    kind: "sql",
-    strings,
-    values,
-  });
+  const sql = Object.assign(
+    (strings: TemplateStringsArray, ...values: unknown[]) => ({
+      kind: "sql",
+      strings,
+      values,
+    }),
+    {
+      join: (chunks: unknown[], separator: unknown) => ({
+        kind: "sql_join",
+        chunks,
+        separator,
+      }),
+    }
+  );
   return {
     and: (...values: unknown[]) => predicate("and", values),
     asc: (...values: unknown[]) => predicate("asc", values),
@@ -538,6 +551,22 @@ function makeAdobe(index: number, overrides: Row = {}) {
   };
 }
 
+/** 递归检查 Drizzle 谓词 mock 是否引用指定列。 */
+function predicateIncludesColumn(
+  predicate: unknown,
+  columnName: string
+): boolean {
+  if (!predicate || typeof predicate !== "object") return false;
+  if ("__columnName" in predicate && predicate.__columnName === columnName) {
+    return true;
+  }
+  return Object.values(predicate).some((value) =>
+    Array.isArray(value)
+      ? value.some((item) => predicateIncludesColumn(item, columnName))
+      : predicateIncludesColumn(value, columnName)
+  );
+}
+
 describe("image backend pool scheduler selection", () => {
   beforeEach(() => {
     resetImageBackendInflightForTests();
@@ -567,6 +596,8 @@ describe("image backend pool scheduler selection", () => {
     dbMock.state.schedulerMetrics = [];
     dbMock.state.leases = [];
     dbMock.state.lockedLastAcquiredAtById.clear();
+    dbMock.state.fromCalls = [];
+    dbMock.state.whereCalls = [];
     dbMock.state.limitCalls = [];
     dbMock.state.updates = [];
     dbMock.state.inserts = [];
@@ -592,6 +623,56 @@ describe("image backend pool scheduler selection", () => {
     expect(dbMock.state.limitCalls.filter((call) => call.limit === 50)).toEqual(
       []
     );
+    expect(
+      dbMock.state.limitCalls.filter((call) => call.limit === 200)
+    ).toHaveLength(3);
+  });
+
+  it("caps each backend candidate query and records scanned rows", async () => {
+    dbMock.state.accounts = Array.from({ length: 250 }, (_, index) =>
+      makeAccount(index + 1)
+    );
+
+    const result = await resolveImageBackendPoolConfig({
+      userId: "user-a",
+      requestKind: "image_generation",
+    });
+
+    expect(result?.memberId).toBe("acct-1");
+    expect(
+      dbMock.state.limitCalls.filter((call) => call.limit === 200)
+    ).toHaveLength(3);
+    const metricInsert = dbMock.state.inserts.find(
+      (item) => item.tableName === "image_backend_scheduler_metric"
+    );
+    expect(metricInsert?.values.metadata).toMatchObject({
+      candidateRowsScannedTotal: 200,
+    });
+  });
+
+  it("caches static groups while querying members and acquisition order live", async () => {
+    dbMock.state.accounts = [makeAccount(1), makeAccount(2)];
+
+    const first = await resolveImageBackendPoolConfig({
+      userId: "user-a",
+      requestKind: "image_generation",
+    });
+    const second = await resolveImageBackendPoolConfig({
+      userId: "user-a",
+      requestKind: "image_generation",
+    });
+
+    expect([first?.memberId, second?.memberId]).toEqual(["acct-1", "acct-2"]);
+    expect(
+      dbMock.state.fromCalls.filter(
+        (tableName) => tableName === "image_backend_group"
+      )
+    ).toHaveLength(1);
+    expect(
+      dbMock.state.fromCalls.filter(
+        (tableName) => tableName === "image_backend_account"
+      ).length
+    ).toBeGreaterThanOrEqual(2);
   });
 
   it("reserves backend capacity during selection and skips saturated members", async () => {
@@ -705,6 +786,12 @@ describe("image backend pool scheduler selection", () => {
     });
 
     expect(result?.memberId).toBe("acct-2");
+    const metricInsert = dbMock.state.inserts.find(
+      (item) => item.tableName === "image_backend_scheduler_metric"
+    );
+    expect(metricInsert?.values.metadata).toMatchObject({
+      leaseConflictCountTotal: 1,
+    });
   });
 
   it("reselects when every candidate in the first snapshot is stale", async () => {
@@ -804,7 +891,75 @@ describe("image backend pool scheduler selection", () => {
       memberType: "account",
       memberId: "acct-1",
       selectCount: 1,
+      candidateCountTotal: 1,
+      latencyMsTotal: expect.any(Number),
+      metadata: {
+        sqlQueryCountTotal: expect.any(Number),
+        candidateRowsScannedTotal: 1,
+        leaseConflictCountTotal: 0,
+      },
     });
+    expect(
+      (metricInsert?.values.metadata as Row | undefined)?.sqlQueryCountTotal
+    ).toBeGreaterThan(0);
+  });
+
+  it("pushes model, lane, status, cooldown and exclusions into candidate SQL", async () => {
+    dbMock.state.accounts = [makeAccount(1)];
+    dbMock.state.apis = [
+      {
+        id: "api-1",
+        groupId: "group-a",
+        matchedGroupId: "group-a",
+        name: "Responses API",
+        baseUrl: "https://api.example.test/v1",
+        apiKey: "key",
+        model: "gpt-image-1",
+        enabledModels: ["gpt-image-1"],
+        interfaceMode: "responses",
+        chatCompletionsUpstreamMode: "responses",
+        imageUpstreamMode: "responses",
+        useStream: false,
+        adobeSourced: false,
+        contentSafetyEnabled: true,
+        alwaysActive: false,
+        priority: 20,
+        concurrency: 2,
+        lastUsedAt: null,
+        lastAcquiredAt: null,
+        createdAt: new Date(2026, 0, 1),
+        metadata: null,
+      },
+    ];
+
+    await resolveImageBackendPoolConfig({
+      userId: "user-a",
+      requestKind: "responses",
+      requestedModel: "gpt-image-1",
+      excludedMemberKeys: ["api:excluded-api"],
+    });
+
+    const accountWhere = dbMock.state.whereCalls.find(
+      (call) =>
+        call.tableName === "image_backend_account" &&
+        predicateIncludesColumn(call.predicate, "isEnabled")
+    )?.predicate;
+    expect(predicateIncludesColumn(accountWhere, "implementationMode")).toBe(
+      true
+    );
+    expect(predicateIncludesColumn(accountWhere, "status")).toBe(true);
+    expect(predicateIncludesColumn(accountWhere, "cooldownUntil")).toBe(true);
+
+    const apiWhere = dbMock.state.whereCalls.find(
+      (call) =>
+        call.tableName === "image_backend_api" &&
+        predicateIncludesColumn(call.predicate, "isEnabled")
+    )?.predicate;
+    expect(predicateIncludesColumn(apiWhere, "enabledModels")).toBe(true);
+    expect(predicateIncludesColumn(apiWhere, "interfaceMode")).toBe(true);
+    expect(predicateIncludesColumn(apiWhere, "status")).toBe(true);
+    expect(predicateIncludesColumn(apiWhere, "cooldownUntil")).toBe(true);
+    expect(predicateIncludesColumn(apiWhere, "id")).toBe(true);
   });
 
   it("uses scheduler health metadata to demote unhealthy peers at the same priority", async () => {
