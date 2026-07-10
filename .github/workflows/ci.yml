@@ -122,8 +122,113 @@ jobs:
       - uses: ./.github/actions/setup
       - run: pnpm turbo test
 
+  # PostgreSQL 真实执行门禁：同时覆盖空库完整迁移与上一正式版带数据升级。
+  # 单元测试保持 DB-free；迁移风险在独立数据库和独立 job 内隔离。
+  database-migrations:
+    name: PostgreSQL migrations
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: gpt2image
+          POSTGRES_PASSWORD: gpt2image
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gpt2image -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: gpt2image
+      PGPASSWORD: gpt2image
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5（钉 SHA 防 tag 重指向；dependabot 维护）
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup
+
+      - name: Check migration journal consistency
+        env:
+          DATABASE_URL: postgresql://gpt2image:gpt2image@localhost:5432/postgres
+        run: pnpm --dir packages/database exec drizzle-kit check --config drizzle.config.ts
+
+      - name: Create migration test databases
+        run: |
+          createdb gpt2image_empty
+          createdb gpt2image_upgrade
+
+      - name: Run current migrations on an empty database
+        env:
+          DATABASE_URL: postgresql://gpt2image:gpt2image@localhost:5432/gpt2image_empty
+        run: |
+          pnpm --dir packages/database db:migrate
+          pnpm --dir packages/database db:migrate
+
+      - name: Resolve previous stable release
+        id: previous-release
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          previous_tag="$({
+            git tag --merged HEAD --list 'v[0-9]*.[0-9]*.[0-9]*' \
+              --sort=-version:refname
+          } | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | head -n 1)"
+          if [[ -z "$previous_tag" ]]; then
+            echo "::error::找不到可达的上一正式版本 tag"
+            exit 1
+          fi
+          echo "tag=$previous_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare previous release migration folder
+        env:
+          PREVIOUS_TAG: ${{ steps.previous-release.outputs.tag }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/previous-release"
+          git archive "$PREVIOUS_TAG" packages/database/drizzle | \
+            tar -x -C "$RUNNER_TEMP/previous-release"
+
+      - name: Create and seed previous release database
+        env:
+          DATABASE_URL: postgresql://gpt2image:gpt2image@localhost:5432/gpt2image_upgrade
+        run: |
+          node scripts/run-migrations-from-folder.mjs \
+            "$RUNNER_TEMP/previous-release/packages/database/drizzle"
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+            --file scripts/seed-previous-release-schema.sql
+
+      - name: Upgrade previous release database
+        env:
+          DATABASE_URL: postgresql://gpt2image:gpt2image@localhost:5432/gpt2image_upgrade
+        run: |
+          pnpm --dir packages/database db:migrate
+          pnpm --dir packages/database db:migrate
+
+      - name: Assert migrated schemas
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected_migration_at="$(
+            node -e '
+              const journal = require("./packages/database/drizzle/meta/_journal.json");
+              console.log(Math.max(...journal.entries.map((entry) => entry.when)));
+            '
+          )"
+          for database in gpt2image_empty gpt2image_upgrade; do
+            psql \
+              --dbname "$database" \
+              -v ON_ERROR_STOP=1 \
+              -v expected_migration_at="$expected_migration_at" \
+              --file scripts/assert-migrated-schema.sql
+          done
+
   # ───────────────────────────────────────────────────────────────────────────
-  # 5) 构建（鲁棒性）：next build（standalone）。Next 在 build 时会做整体类型与编译校验，
+  # 6) 构建（鲁棒性）：next build（standalone）。Next 在 build 时会做整体类型与编译校验，
   #    能抓到仅在生产构建下暴露的问题。环境变量为占位值，与 Dockerfile.web 的 build-args 一致。
   #    注意：此处不设 NODE_ENV=production，否则 pnpm 可能跳过 devDependencies 导致构建失败。
   # ───────────────────────────────────────────────────────────────────────────
@@ -148,7 +253,7 @@ jobs:
       - run: pnpm turbo build --filter=@repo/web
 
   # ───────────────────────────────────────────────────────────────────────────
-  # 6) 容器构建校验（仅 PR）：用 Dockerfile.web 实打实构建 web 镜像但**不推送**，
+  # 7) 容器构建校验（仅 PR）：用 Dockerfile.web 实打实构建 web 镜像但**不推送**，
   #    验证多阶段 Dockerfile（turbo prune → install → build → standalone 打包）未损坏。
   #    gha 缓存让重复构建保持快速。门禁在前 4 个 job 通过后才跑，避免无谓消耗。
   # ───────────────────────────────────────────────────────────────────────────
