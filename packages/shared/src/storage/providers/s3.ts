@@ -90,6 +90,40 @@ async function getS3Client(): Promise<S3Client> {
 // ============================================
 
 /**
+ * 在硬字节上限内读取 Web ReadableStream。
+ *
+ * @param stream S3 SDK 转换出的对象正文流。
+ * @param maxBytes 可选最大字节数；超限时立即 cancel 流并抛错。
+ * @returns 完整对象 Buffer。
+ * @sideEffects 消费并关闭输入流；超限时主动中止剩余网络读取。
+ * @throws 流读取失败、上限非法或累计正文超限时抛错。
+ */
+export async function readWebStreamWithLimit(
+  stream: ReadableStream<Uint8Array>,
+  maxBytes?: number
+): Promise<Buffer> {
+  if (maxBytes !== undefined && (!Number.isFinite(maxBytes) || maxBytes < 0)) {
+    throw new Error("Invalid stored object read limit");
+  }
+  const chunks: Uint8Array[] = [];
+  const reader = stream.getReader();
+  let totalBytes = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    totalBytes += value.byteLength;
+    if (maxBytes !== undefined && totalBytes > maxBytes) {
+      await reader.cancel();
+      throw new Error("Stored object exceeds the configured read limit");
+    }
+    chunks.push(value);
+  }
+
+  return Buffer.concat(chunks, totalBytes);
+}
+
+/**
  * S3 兼容存储提供者
  *
  * 实现 StorageProvider 接口，支持：
@@ -183,7 +217,7 @@ export const s3Provider: StorageProvider = {
   async getObject(
     key: string,
     bucket: string,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; maxBytes?: number }
   ): Promise<Buffer> {
     const client = await getS3Client();
 
@@ -204,17 +238,20 @@ export const s3Provider: StorageProvider = {
       throw new Error(`File not found: ${key}`);
     }
 
-    // 将 ReadableStream 转换为 Buffer
-    const chunks: Uint8Array[] = [];
-    const reader = response.Body.transformToWebStream().getReader();
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
+    const maxBytes = options?.maxBytes;
+    if (
+      maxBytes !== undefined &&
+      response.ContentLength !== undefined &&
+      response.ContentLength > maxBytes
+    ) {
+      throw new Error("Stored object exceeds the configured read limit");
     }
 
-    return Buffer.concat(chunks);
+    // ContentLength 可能被兼容存储省略，因此读取流时仍执行硬上限。
+    return await readWebStreamWithLimit(
+      response.Body.transformToWebStream(),
+      maxBytes
+    );
   },
 
   async putObject(

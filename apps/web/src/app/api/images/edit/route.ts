@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { withApiLogging } from "@repo/shared/api-logger";
 import { auth } from "@repo/shared/auth";
+import type { DirectUploadReference } from "@repo/shared/storage/direct-upload";
 import {
   canUsePlanCapability,
   getPlanLimits,
@@ -17,6 +18,10 @@ import {
   getEffectiveImageEditMaxReferenceImages,
   getRuntimeImageEditMaxReferenceImages,
 } from "@/features/image-generation/edit-reference-limits";
+import {
+  loadDirectUploadedInputs,
+  parseDirectUploadReferences,
+} from "@/features/image-generation/direct-upload-input";
 import { runImageGenerationForUser } from "@/features/image-generation/operations";
 import {
   normalizeImageBackground,
@@ -47,6 +52,7 @@ import type {
   ImageQuality,
   ThinkingLevel,
 } from "@/features/image-generation/types";
+import { enforceApiRouteRateLimit } from "@/server/api-route-rate-limit";
 
 const VALID_QUALITIES = new Set<ImageQuality>([
   "auto",
@@ -149,6 +155,9 @@ function getImageFiles(formData: FormData) {
 }
 
 export const POST = withApiLogging(async (request: NextRequest) => {
+  const rateLimitResponse = await enforceApiRouteRateLimit(request, "ai");
+  if (rateLimitResponse) return rateLimitResponse;
+
   const session = await auth.api.getSession({
     headers: request.headers,
   });
@@ -313,17 +322,34 @@ export const POST = withApiLogging(async (request: NextRequest) => {
   if (displaySize && !parseImageSize(displaySize)) {
     return errorResponse("Invalid display size.");
   }
-  const sourceFiles = getImageFiles(formData);
-  if (sourceFiles.length === 0) {
+  const multipartSourceFiles = getImageFiles(formData);
+  let sourceReferences: DirectUploadReference[];
+  let maskReferences: DirectUploadReference[];
+  try {
+    sourceReferences = parseDirectUploadReferences(
+      formData,
+      "image_refs",
+      maxEditImages
+    );
+    maskReferences = parseDirectUploadReferences(formData, "mask_refs", 1);
+  } catch (error) {
+    return errorResponse(
+      error instanceof Error ? error.message : "Invalid upload references."
+    );
+  }
+  if (multipartSourceFiles.length > 0 && sourceReferences.length > 0) {
+    return errorResponse("Use either source image files or image_refs, not both.");
+  }
+  if (multipartSourceFiles.length + sourceReferences.length === 0) {
     return errorResponse("At least one source image is required.");
   }
 
-  if (sourceFiles.length > maxEditImages) {
+  if (multipartSourceFiles.length + sourceReferences.length > maxEditImages) {
     return errorResponse(`No more than ${maxEditImages} images are allowed.`);
   }
 
   try {
-    for (const file of sourceFiles) {
+    for (const file of multipartSourceFiles) {
       validateImageFile(file, { maxImageBytes });
     }
     const maskFile = formData.get("mask");
@@ -333,27 +359,50 @@ export const POST = withApiLogging(async (request: NextRequest) => {
     if (maskFile instanceof File) {
       validateImageFile(maskFile, { mask: true, maxImageBytes });
     }
-    if (
-      getTotalUploadSize(
-        sourceFiles,
-        maskFile instanceof File ? maskFile : undefined
-      ) > maxRequestBytes
-    ) {
+    if (maskFile instanceof File && maskReferences.length > 0) {
+      return errorResponse("Use either a mask file or mask_refs, not both.");
+    }
+    const multipartBytes = getTotalUploadSize(
+      multipartSourceFiles,
+      maskFile instanceof File ? maskFile : undefined
+    );
+    if (multipartBytes > maxRequestBytes) {
       return errorResponse(
         `Total upload size must be no more than ${formatMegabytes(maxRequestBytes)}.`,
         413
       );
     }
 
+    const directSourceInputs = await loadDirectUploadedInputs({
+      userId: session.user.id,
+      purpose: "image-source",
+      references: sourceReferences,
+      maxFileSizeBytes: maxImageBytes,
+      maxTotalBytes: maxRequestBytes,
+      existingBytes: multipartBytes,
+    });
+    const directMaskInputs = await loadDirectUploadedInputs({
+      userId: session.user.id,
+      purpose: "image-mask",
+      references: maskReferences,
+      maxFileSizeBytes: maxImageBytes,
+      maxTotalBytes: maxRequestBytes,
+      existingBytes: multipartBytes + directSourceInputs.totalBytes,
+    });
+
     const batchId = randomUUID();
-    const sourceImageUrls = await uploadTemporaryImageUrls(
-      session.user.id,
-      batchId,
-      sourceFiles,
-      { scope: "requests" }
-    );
+    const sourceImageUrls = sourceReferences.length
+      ? directSourceInputs.temporaryImages
+      : await uploadTemporaryImageUrls(
+          session.user.id,
+          batchId,
+          multipartSourceFiles,
+          { scope: "requests" }
+        );
     const maskImageUrls =
-      maskFile instanceof File
+      maskReferences.length > 0
+        ? directMaskInputs.temporaryImages
+        : maskFile instanceof File
         ? await uploadTemporaryImageUrls(
             session.user.id,
             `${batchId}-mask`,
@@ -362,6 +411,14 @@ export const POST = withApiLogging(async (request: NextRequest) => {
               scope: "requests",
             }
           )
+        : undefined;
+    const sourceImageInputs = sourceReferences.length
+      ? directSourceInputs.imageInputs
+      : await filesToImageInputs(multipartSourceFiles, sourceImageUrls);
+    const maskImageInput = maskReferences.length
+      ? directMaskInputs.imageInputs[0]
+      : maskFile instanceof File
+        ? (await filesToImageInputs([maskFile], maskImageUrls))[0]
         : undefined;
     const useStreamResponse = wantsStreamResponse(request, formData);
 
@@ -396,11 +453,8 @@ export const POST = withApiLogging(async (request: NextRequest) => {
           n: 1,
           mixWebFirst: requiresResponsesBackend ? false : mixWebFirst,
           requiresResponsesBackend,
-          images: await filesToImageInputs(sourceFiles, sourceImageUrls),
-          mask:
-            maskFile instanceof File
-              ? (await filesToImageInputs([maskFile], maskImageUrls))[0]
-              : undefined,
+          images: sourceImageInputs,
+          mask: maskImageInput,
         },
         onPartialImage
       );

@@ -225,18 +225,6 @@ export function createLocalId() {
 }
 
 /**
- * 复制 File 对象。
- *
- * @param file 原文件。
- * @returns 内容和类型一致的新 File。
- * @sideEffects 无。
- * @failureMode 大文件会占用相同级别内存。
- */
-export function cloneFile(file: File) {
-  return new File([file], file.name, { type: file.type });
-}
-
-/**
  * 判断提示词是否包含图片引用 token。
  *
  * @param text 提示词文本。

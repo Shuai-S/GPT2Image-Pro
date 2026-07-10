@@ -130,10 +130,16 @@ export const localProvider: StorageProvider = {
   async getObject(
     key: string,
     bucket: string,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; maxBytes?: number }
   ): Promise<Buffer> {
     const filePath = await safePath(bucket, key);
     const fs = await getFs();
+    if (options?.maxBytes !== undefined) {
+      const stats = await fs.stat(/* turbopackIgnore: true */ filePath);
+      if (stats.size > options.maxBytes) {
+        throw new Error("Stored object exceeds the configured read limit");
+      }
+    }
     // 透传 signal：调用方取消时中止读取（fs/promises.readFile 支持 { signal }）。
     return fs.readFile(
       /* turbopackIgnore: true */ filePath,

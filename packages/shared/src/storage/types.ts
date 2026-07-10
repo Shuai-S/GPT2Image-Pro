@@ -57,14 +57,14 @@ export interface StorageProvider {
    *
    * @param key - 文件键名 (路径)
    * @param bucket - 存储桶名称
-   * @param options - 可选项；`signal` 在调用方取消时（如客户端切换页面打断了
-   *   缩略图请求）中止底层下载，立即释放网络与处理资源，而非空跑到底再丢弃结果。
+   * @param options - 可选项；`signal` 中止底层下载，`maxBytes` 在读取前和流式读取中
+   *   约束正文上限，避免不可信对象造成无界内存占用。
    * @returns 文件内容 Buffer
    */
   getObject(
     key: string,
     bucket: string,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; maxBytes?: number }
   ): Promise<Buffer>;
 
   putObject(

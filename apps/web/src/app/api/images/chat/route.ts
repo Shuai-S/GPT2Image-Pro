@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { withApiLogging } from "@repo/shared/api-logger";
 import { auth } from "@repo/shared/auth";
+import type { DirectUploadReference } from "@repo/shared/storage/direct-upload";
 import { buildPublicImageUrl } from "@repo/shared/storage/signed-url";
 import {
   canUsePlanCapability,
@@ -14,6 +15,11 @@ import {
   firstBatchError,
   runBatchImageGeneration,
 } from "@/features/image-generation/batch-runner";
+import {
+  loadDirectUploadedInputs,
+  parseDirectUploadReferences,
+  type LoadedDirectUploadInputs,
+} from "@/features/image-generation/direct-upload-input";
 import { runImageGenerationForUser } from "@/features/image-generation/operations";
 import {
   normalizeImageBackground,
@@ -47,6 +53,7 @@ import type {
   StickyBackendMemberState,
   ThinkingLevel,
 } from "@/features/image-generation/types";
+import { enforceApiRouteRateLimit } from "@/server/api-route-rate-limit";
 
 const VALID_QUALITIES = new Set<ImageQuality>([
   "auto",
@@ -283,7 +290,7 @@ function getFileExtension(name: string) {
   return index >= 0 ? normalized.slice(index) : "";
 }
 
-function isReadableChatFile(file: File) {
+function isReadableChatFile(file: Pick<ResponsesInputFile, "name" | "type">) {
   const type = (file.type || "").toLowerCase();
   if (type.startsWith("text/") || CHAT_FILE_ACCEPT_TYPES.has(type)) {
     return true;
@@ -291,7 +298,7 @@ function isReadableChatFile(file: File) {
   return CHAT_FILE_ACCEPT_EXTENSIONS.has(getFileExtension(file.name || ""));
 }
 
-function isPdfChatFile(file: File) {
+function isPdfChatFile(file: Pick<ResponsesInputFile, "name" | "type">) {
   const type = (file.type || "").toLowerCase();
   return (
     PDF_MIME_TYPES.has(type) || getFileExtension(file.name || "") === ".pdf"
@@ -302,16 +309,18 @@ function sanitizeFileText(value: string) {
   return value.split("\0").join("").replace(/\r\n/g, "\n");
 }
 
-async function buildFileContext(files: File[], maxChars: number) {
+async function buildFileContext(
+  files: ResponsesInputFile[],
+  maxChars: number
+) {
   if (!files.length) return "";
 
   let remaining = Math.min(maxChars, MAX_CHAT_FILE_CONTEXT_CHARS);
   const parts: string[] = [];
   for (const file of files) {
     if (remaining <= 0) break;
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const text = sanitizeFileText(buffer.toString("utf8"));
-    const header = `\n--- ${file.name || "attachment"} (${file.type || "text/plain"}, ${file.size} bytes) ---\n`;
+    const text = sanitizeFileText(file.data.toString("utf8"));
+    const header = `\n--- ${file.name || "attachment"} (${file.type || "text/plain"}, ${file.data.length} bytes) ---\n`;
     const available = Math.max(0, remaining - header.length);
     if (available <= 0) break;
     const clipped = text.slice(0, available);
@@ -619,6 +628,9 @@ function limitChatContext(params: {
 }
 
 export const POST = withApiLogging(async (request: NextRequest) => {
+  const rateLimitResponse = await enforceApiRouteRateLimit(request, "ai");
+  if (rateLimitResponse) return rateLimitResponse;
+
   const session = await auth.api.getSession({
     headers: request.headers,
   });
@@ -753,9 +765,36 @@ export const POST = withApiLogging(async (request: NextRequest) => {
       error instanceof Error ? error.message : "Invalid history."
     );
   }
-  const sourceFiles = getImageFiles(formData);
-  const attachmentFiles = getAttachmentFiles(formData);
-  if (sourceFiles.length + attachmentFiles.length > planLimits.maxChatImages) {
+  const multipartSourceFiles = getImageFiles(formData);
+  const multipartAttachmentFiles = getAttachmentFiles(formData);
+  let sourceReferences: DirectUploadReference[];
+  let attachmentReferences: DirectUploadReference[];
+  try {
+    sourceReferences = parseDirectUploadReferences(
+      formData,
+      "image_refs",
+      planLimits.maxChatImages
+    );
+    attachmentReferences = parseDirectUploadReferences(
+      formData,
+      "file_refs",
+      planLimits.maxChatImages
+    );
+  } catch (error) {
+    return errorResponse(
+      error instanceof Error ? error.message : "Invalid upload references."
+    );
+  }
+  if (multipartSourceFiles.length > 0 && sourceReferences.length > 0) {
+    return errorResponse("Use either image files or image_refs, not both.");
+  }
+  if (multipartAttachmentFiles.length > 0 && attachmentReferences.length > 0) {
+    return errorResponse("Use either attachment files or file_refs, not both.");
+  }
+  const sourceCount = multipartSourceFiles.length + sourceReferences.length;
+  const attachmentCount =
+    multipartAttachmentFiles.length + attachmentReferences.length;
+  if (sourceCount + attachmentCount > planLimits.maxChatImages) {
     return errorResponse(
       `No more than ${planLimits.maxChatImages} attachments are allowed.`
     );
@@ -763,8 +802,10 @@ export const POST = withApiLogging(async (request: NextRequest) => {
 
   let fileContext = "";
   let responseInputFiles: ResponsesInputFile[] = [];
+  let directSourceInputs: LoadedDirectUploadInputs;
+  let directAttachmentInputs: LoadedDirectUploadInputs;
   try {
-    for (const file of attachmentFiles) {
+    for (const file of multipartAttachmentFiles) {
       if (!isReadableChatFile(file)) {
         return errorResponse(
           "Attachments must be text, code, JSON, CSV, Markdown, XML, YAML, PDF, or log files."
@@ -780,27 +821,50 @@ export const POST = withApiLogging(async (request: NextRequest) => {
         );
       }
     }
-    const totalAttachmentSize =
-      getTotalUploadSize(sourceFiles) + getTotalUploadSize(attachmentFiles);
-    if (totalAttachmentSize > maxRequestBytes) {
+    const multipartBytes =
+      getTotalUploadSize(multipartSourceFiles) +
+      getTotalUploadSize(multipartAttachmentFiles);
+    if (multipartBytes > maxRequestBytes) {
       return errorResponse(
         `Total upload size must be no more than ${formatMegabytes(maxRequestBytes)}.`,
         413
       );
     }
-    const pdfFiles = attachmentFiles.filter(isPdfChatFile);
-    const textFiles = attachmentFiles.filter((file) => !isPdfChatFile(file));
+    directSourceInputs = await loadDirectUploadedInputs({
+      userId: session.user.id,
+      purpose: "image-source",
+      references: sourceReferences,
+      maxFileSizeBytes: maxImageBytes,
+      maxTotalBytes: maxRequestBytes,
+      existingBytes: multipartBytes,
+    });
+    directAttachmentInputs = await loadDirectUploadedInputs({
+      userId: session.user.id,
+      purpose: "chat-attachment",
+      references: attachmentReferences,
+      maxFileSizeBytes: maxImageBytes,
+      maxTotalBytes: maxRequestBytes,
+      existingBytes: multipartBytes + directSourceInputs.totalBytes,
+    });
+    const attachmentInputs = attachmentReferences.length
+      ? directAttachmentInputs.imageInputs.map(({ data, name, type }) => ({
+          data,
+          name,
+          type,
+        }))
+      : await filesToResponsesInputFiles(multipartAttachmentFiles);
+    const pdfFiles = attachmentInputs.filter(isPdfChatFile);
+    const textFiles = attachmentInputs.filter((file) => !isPdfChatFile(file));
     fileContext = await buildFileContext(
       textFiles,
       Math.max(0, planLimits.maxChatContextChars - prompt.length)
     );
-    responseInputFiles = await filesToResponsesInputFiles(pdfFiles);
+    responseInputFiles = pdfFiles;
   } catch (error) {
     return errorResponse(
       error instanceof Error ? error.message : "Failed to read attachments."
     );
   }
-
   const limitedContext = limitChatContext({
     prompt,
     apiPrompt,
@@ -820,7 +884,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
   let size = getText(formData, "size") || DEFAULT_IMAGE_SIZE;
   const sizeCheck = validateImageSize(size);
   if (!sizeCheck.valid) {
-    if (sourceFiles.length > 0) {
+    if (sourceCount > 0) {
       size = DEFAULT_IMAGE_SIZE;
     } else {
       return errorResponse(sizeCheck.message);
@@ -920,7 +984,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
     );
   }
   try {
-    for (const file of sourceFiles) {
+    for (const file of multipartSourceFiles) {
       validateImageFile(file, {
         maxImageBytes,
         invalidTypeMessage:
@@ -929,7 +993,10 @@ export const POST = withApiLogging(async (request: NextRequest) => {
     }
 
     const totalUploadSize =
-      getTotalUploadSize(sourceFiles) + getTotalUploadSize(attachmentFiles);
+      getTotalUploadSize(multipartSourceFiles) +
+      getTotalUploadSize(multipartAttachmentFiles) +
+      directSourceInputs.totalBytes +
+      directAttachmentInputs.totalBytes;
     if (totalUploadSize > maxRequestBytes) {
       return errorResponse(
         `Total upload size must be no more than ${formatMegabytes(maxRequestBytes)}.`,
@@ -938,16 +1005,18 @@ export const POST = withApiLogging(async (request: NextRequest) => {
     }
 
     const batchId = randomUUID();
-    const sourceImageUrls = await uploadTemporaryImageUrls(
-      session.user.id,
-      batchId,
-      sourceFiles,
-      { scope: "requests" }
-    );
+    const sourceImageUrls = sourceReferences.length
+      ? directSourceInputs.temporaryImages
+      : await uploadTemporaryImageUrls(
+          session.user.id,
+          batchId,
+          multipartSourceFiles,
+          { scope: "requests" }
+        );
     const useStreamResponse = wantsStreamResponse(request, formData);
-
-    const buildImages = async () =>
-      await filesToImageInputs(sourceFiles, sourceImageUrls);
+    const sourceImageInputs = sourceReferences.length
+      ? directSourceInputs.imageInputs
+      : await filesToImageInputs(multipartSourceFiles, sourceImageUrls);
 
     const runChat = async (
       generationId: string,
@@ -964,7 +1033,7 @@ export const POST = withApiLogging(async (request: NextRequest) => {
           fileContext,
           files: responseInputFiles,
           promptOptimization,
-          images: await buildImages(),
+          images: sourceImageInputs,
           history,
           preferredBackendMemberId: preferredBackendMember?.id,
           preferredBackendMemberType: preferredBackendMember?.type,

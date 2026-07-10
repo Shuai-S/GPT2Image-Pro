@@ -73,6 +73,7 @@ import {
 import { CreatePageChatAgentHeader } from "./create-page-chat-agent-panel";
 import { CreatePageChatInput } from "./create-page-chat-input";
 import { CreatePageChatMessageList } from "./create-page-chat-message-list";
+import { appendDirectUploadsOrFiles } from "./direct-upload-client";
 import { CreatePageImagePanel } from "./create-page-image-panel";
 import {
   BACKGROUND_OPTIONS,
@@ -140,7 +141,6 @@ import {
   chatActiveConversationStorageKey,
   clampBatchCount,
   clampWaterfallTier,
-  cloneFile,
   compactChatConversations,
   createGenerationId,
   createInitialChatStreamState,
@@ -2383,14 +2383,21 @@ export function CreatePageClient({
       const fileAttachments = attachments.filter(
         (item) => item.kind === "file"
       );
-      imageAttachments.forEach(({ file }) => {
-        formData.append(
-          imageAttachments.length === 1 ? "image" : "image[]",
-          file
-        );
+      await appendDirectUploadsOrFiles({
+        formData,
+        files: imageAttachments.map(({ file }) => file),
+        purpose: "image-source",
+        referenceField: "image_refs",
+        fileField: (_index, count) => (count === 1 ? "image" : "image[]"),
+        signal,
       });
-      fileAttachments.forEach(({ file }) => {
-        formData.append(fileAttachments.length === 1 ? "file" : "file[]", file);
+      await appendDirectUploadsOrFiles({
+        formData,
+        files: fileAttachments.map(({ file }) => file),
+        purpose: "chat-attachment",
+        referenceField: "file_refs",
+        fileField: (_index, count) => (count === 1 ? "file" : "file[]"),
+        signal,
       });
 
       const response = await fetch("/api/images/chat", {
@@ -3868,10 +3875,7 @@ export function CreatePageClient({
       return;
     }
 
-    const attachments = chatAttachments.map((item) => ({
-      ...item,
-      file: cloneFile(item.file),
-    }));
+    const attachments = chatAttachments.map((item) => ({ ...item }));
     if (!validateChatAttachments(attachments)) return;
 
     const requestCount = options?.retryCardId ? 1 : waterfallLoadSize;
@@ -4213,10 +4217,7 @@ export function CreatePageClient({
     const currentPrompt = chatPrompt.trim();
     const requiresResponsesForReference =
       hasPromptImageReference(currentPrompt);
-    const attachments = chatAttachments.map((item) => ({
-      ...item,
-      file: cloneFile(item.file),
-    }));
+    const attachments = chatAttachments.map((item) => ({ ...item }));
     const hasImageAttachment = attachments.some(
       (item) => item.kind === "image"
     );
@@ -4739,13 +4740,6 @@ export function CreatePageClient({
     } else {
       formData.append("size", effectiveEditSize);
     }
-    orderedEditImages.forEach(({ file }) => {
-      formData.append(
-        orderedEditImages.length === 1 ? "image" : "image[]",
-        file
-      );
-    });
-    if (effectiveMaskFile) formData.append("mask", effectiveMaskFile.file);
     formData.append("count", String(editBatchCount));
     if (generationIds.length === 1) {
       const generationId = generationIds[0];
@@ -4772,6 +4766,22 @@ export function CreatePageClient({
     clearVisualStreamingPreview("image");
     formData.append("stream", "true");
     try {
+      await appendDirectUploadsOrFiles({
+        formData,
+        files: orderedEditImages.map(({ file }) => file),
+        purpose: "image-source",
+        referenceField: "image_refs",
+        fileField: (_index, count) => (count === 1 ? "image" : "image[]"),
+      });
+      if (effectiveMaskFile) {
+        await appendDirectUploadsOrFiles({
+          formData,
+          files: [effectiveMaskFile.file],
+          purpose: "image-mask",
+          referenceField: "mask_refs",
+          fileField: () => "mask",
+        });
+      }
       const response = await fetch("/api/images/edit", {
         method: "POST",
         headers: {

@@ -37,7 +37,10 @@ export type DirectUploadReference = z.infer<
 
 /** UOL 返回给浏览器的直传授权；uploadUrl 只用于 PUT，不作为资源身份。 */
 export const directUploadAuthorizationSchema = z.object({
-  uploadUrl: z.string().min(1),
+  uploadUrl: z.url().refine((value) => {
+    const protocol = new URL(value).protocol;
+    return protocol === "https:" || protocol === "http:";
+  }, "Upload URL must use HTTP(S)"),
   uploadContentType: z.string().min(1),
   expiresIn: z.number().int().positive(),
   reference: directUploadReferenceSchema,

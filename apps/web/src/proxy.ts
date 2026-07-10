@@ -195,10 +195,12 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - public folder files
+     * - 外部 v1 与仍兼容 multipart 的大正文入口；这些路由自行鉴权/限流，避免
+     *   Proxy 为单请求额外克隆最多 200 MB 正文
      *
      * 注意: 现在包含 /api 路由以便进行限流
      */
-    "/((?!_next/static|_next/image|favicon.ico|site\\.webmanifest|sitemap\\.xml|robots\\.txt|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!api/v1(?:/|$)|v1(?:/|$)|api/images/(?:chat|edit)(?:/|$)|api/editable-file/generate(?:/|$)|_next/static|_next/image|favicon.ico|site\\.webmanifest|sitemap\\.xml|robots\\.txt|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
     "/favicon.ico",
   ],
 };

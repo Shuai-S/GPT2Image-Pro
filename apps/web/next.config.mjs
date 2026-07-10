@@ -52,9 +52,11 @@ const nextConfig = {
     ],
   },
   experimental: {
-    proxyClientMaxBodySize: "200mb",
+    // Proxy 会克隆并在内存中缓冲请求正文。外部 v1 与兼容 multipart 的少数路由
+    // 已从 matcher 排除并在自身边界校验套餐上限，其余控制面请求统一限制为 2 MB。
+    proxyClientMaxBodySize: "2mb",
     serverActions: {
-      bodySizeLimit: "200mb",
+      bodySizeLimit: "2mb",
     },
     // 显式声明按需引入的常用包，让 Next 对其做 barrel 优化，
     // 只把实际被使用的具名导出打进 client/server bundle，
