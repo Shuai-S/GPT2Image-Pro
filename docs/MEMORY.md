@@ -15,8 +15,9 @@
 
 ## 架构
 
+- [项目架构与交接手册](PROJECT-ARCHITECTURE-HANDBOOK.md) / [项目模型目录](PROJECT-MODEL-CATALOG.md) / [交接改造技术方案](plan/2026-07-10-project-handover-refactor.md) — 2026-07-10 基于 `2aa2536e7d6c` 的当前实现快照：技术栈、工程边界、功能依赖、Mermaid、44 表、AI/状态/权限/定价模型及 UOL 渐进收敛路线；严格区分 As-Is 与 To-Be
 - [Agent 集成架构](plan/2026-05-31-agent-integration-architecture.md) — 统一接口层(UOL)优先；MCP 适配器默认关闭+管理秘钥；内置 agent 直连接口层；配套盘点表 plan/2026-05-31-feature-interface-inventory.md。**开发新功能前必读**（CLAUDE.md 已立约束）
-- **UOL Phase 0+1 已实现**（分支 `feat/uol-phase0-phase1`，已推送）：脚手架 7 核心模块 + 144 个操作注册(10 域) + 3 测试文件(registry/access/invoke)全绿。execute 均为 stub("Not yet wired")，待 Phase 2 委托对接。合并 dev 前须经 CI。
+- **UOL 当前仍在迁移**（2026-07-10 快照）：Registry/Principal/invoke 网关已落地，172 个 Operation 中 83 个定义内直接实现、12 个由 Web 延迟绑定、77 个仍未接线；会话用户的 capability 尚未由网关统一校验，迁移 Session 入口前须补齐 plan 解析与 Principal 对拍测试。
 
 - [图像后端池调度策略](image-backend-pool-scheduling.md) — 车道模型(web/codex/mixed × mixed-only)、候选资格(account 靠 implementationMode、api/adobe 靠分组车道)、mixed 分组 web 先行→回退 codex、满并发短等、冷却=已尝试;**常驻 alwaysActive 与换号判断正交**(只动持久化状态,不影响要不要换/换到谁/回退)
 
