@@ -1,15 +1,15 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
-
+import {
+  DEFAULT_IMAGE_FETCH_TIMEOUT_MS,
+  ResponseBodyTooLargeError,
+  readResponseBytesWithLimit as readSharedResponseBytesWithLimit,
+  sanitizeForwardedClientHeaders,
+} from "@repo/shared/http/fetch";
 import {
   fetchWithDnsPin,
   SsrfBlockedError,
 } from "@repo/shared/security/dns-pin";
-import {
-  DEFAULT_IMAGE_FETCH_TIMEOUT_MS,
-  readResponseBytesWithLimit as readSharedResponseBytesWithLimit,
-  ResponseBodyTooLargeError,
-} from "@repo/shared/http/fetch";
 
 /**
  * 共享的图片 URL SSRF 防护。
@@ -211,11 +211,60 @@ export async function fetchPublicCallback(
 }
 
 /**
+ * 向第三方预签名公网 URL 上传文件。
+ *
+ * @param rawUrl - 上游返回的绝对 HTTPS 上传地址。
+ * @param init - PUT 请求头、二进制正文、调用方中止信号与总截止时间。
+ * @returns 原始非重定向响应；调用方必须有限读取或取消正文。
+ * @throws 非公网、非 HTTPS、DNS rebinding、网络错误或截止时间到达时拒绝。
+ * @sideEffects 通过 DNS pin 发起一次 PUT；不跟随重定向，避免文件外发到新主机。
+ */
+export async function fetchPublicFileUpload(
+  rawUrl: string,
+  init: {
+    headers?: Record<string, string>;
+    body: Buffer;
+    signal?: AbortSignal;
+    timeoutMs: number;
+  }
+): Promise<Response> {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new SafeImageFetchError("Upload URL is invalid.");
+  }
+  if (parsed.protocol !== "https:") {
+    throw new SafeImageFetchError("Upload URL must use https.");
+  }
+  await assertPublicImageUrl(parsed);
+
+  const deadlineSignal = AbortSignal.timeout(init.timeoutMs);
+  const signal = init.signal
+    ? AbortSignal.any([init.signal, deadlineSignal])
+    : deadlineSignal;
+  try {
+    return await fetchWithDnsPin(parsed, {
+      method: "PUT",
+      headers: init.headers,
+      body: init.body,
+      signal,
+      timeoutMs: init.timeoutMs,
+    });
+  } catch (error) {
+    if (error instanceof SsrfBlockedError) {
+      throw new SafeImageFetchError(error.message);
+    }
+    throw error;
+  }
+}
+
+/**
  * 流式读取响应正文并在累计字节超过 maxBytes 时主动中止。
  *
  * 防御 content-length 头可伪造导致的内存耗尽 DoS：不依赖自报的 content-length，
  * 而是逐块累加真实字节，一旦超限即 cancel reader 并抛错（不把整段正文缓冲进内存）。
- * 当响应无可读流（如测试 stub）时回退到一次性 arrayBuffer 并对其长度复核。
+ * 实际流读取委托 shared HTTP helper；无可读流时按空正文处理。
  */
 export async function readResponseBytesWithLimit(
   response: Response,
@@ -240,7 +289,9 @@ export async function readResponseBytesWithLimit(
  * 1. assertPublicImageUrl：主机名黑名单 + DNS 预校验（快速拒绝已知非法目标）
  * 2. fetchWithDnsPin：连接层 pin IP，根除 DNS rebinding（使用 node:http/https）
  *
- * 返回最终的非重定向 Response（调用方负责检查 ok / content-type / 大小）。
+ * 返回最终的非重定向 Response（调用方负责检查 ok / content-type / 大小）。调用方
+ * 可为可信上游首跳提供服务端凭据；跨源重定向会移除 Authorization/Cookie，防止
+ * 上游用 302 把凭据带到攻击者控制的地址。
  *
  * 对 429 / 5xx 临时性失败做有限指数退避重试（最多 MAX_TRANSIENT_RETRIES 次），
  * 重定向与 SSRF 校验在每次重试内逐跳复检，重试不放宽任何安全约束。重定向响应
@@ -248,12 +299,17 @@ export async function readResponseBytesWithLimit(
  */
 export async function fetchPublicImage(
   rawUrl: string,
-  init: { headers?: Record<string, string>; signal?: AbortSignal } = {}
+  init: {
+    headers?: Record<string, string>;
+    signal?: AbortSignal;
+    timeoutMs?: number;
+  } = {}
 ): Promise<Response> {
   let currentUrl = rawUrl;
   // 同一个 signal 贯穿全部重试、重定向和返回后的正文读取，确保这里限制的是
   // 整次外链拉取而非仅等待响应头的时间。调用方更早中止时仍优先生效。
-  const deadlineSignal = AbortSignal.timeout(DEFAULT_IMAGE_FETCH_TIMEOUT_MS);
+  const timeoutMs = init.timeoutMs ?? DEFAULT_IMAGE_FETCH_TIMEOUT_MS;
+  const deadlineSignal = AbortSignal.timeout(timeoutMs);
   const signal = init.signal
     ? AbortSignal.any([init.signal, deadlineSignal])
     : deadlineSignal;
@@ -273,12 +329,19 @@ export async function fetchPublicImage(
     // 且使用 DNS-pinning fetch，安全约束不变。
     for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
       try {
+        const requestHeaders = Object.fromEntries(
+          sanitizeForwardedClientHeaders(
+            init.headers ?? {},
+            rawUrl,
+            parsed
+          ).entries()
+        );
         // 使用 DNS-pinning fetch 防止 rebinding 攻击
         response = await fetchWithDnsPin(parsed.href, {
           method: "GET",
-          headers: init.headers,
+          headers: requestHeaders,
           signal,
-          timeoutMs: DEFAULT_IMAGE_FETCH_TIMEOUT_MS,
+          timeoutMs,
         });
       } catch (err) {
         if (err instanceof SsrfBlockedError) {

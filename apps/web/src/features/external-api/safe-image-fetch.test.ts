@@ -10,12 +10,13 @@ vi.mock("@repo/shared/security/dns-pin", () => ({
   },
 }));
 
-import { fetchWithDnsPin } from "@repo/shared/security/dns-pin";
 import { DEFAULT_IMAGE_FETCH_TIMEOUT_MS } from "@repo/shared/http/fetch";
+import { fetchWithDnsPin } from "@repo/shared/security/dns-pin";
 import {
   assertPublicCallbackUrl,
   assertPublicImageUrl,
   fetchPublicCallback,
+  fetchPublicFileUpload,
   fetchPublicImage,
   readResponseBytesWithLimit,
   SafeImageFetchError,
@@ -100,6 +101,28 @@ describe("fetchPublicImage", () => {
     expect(response.status).toBe(200);
   });
 
+  it("removes authorization after a cross-origin redirect", async () => {
+    mockFetchWithDnsPin
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 302,
+          headers: { location: "https://8.8.8.8/final.png" },
+        })
+      )
+      .mockResolvedValueOnce(new Response("ok", { status: 200 }));
+
+    await fetchPublicImage("https://1.1.1.1/image.png", {
+      headers: { Authorization: "Bearer server-secret" },
+    });
+
+    expect(mockFetchWithDnsPin.mock.calls[0]?.[1]?.headers).toMatchObject({
+      authorization: "Bearer server-secret",
+    });
+    expect(
+      mockFetchWithDnsPin.mock.calls[1]?.[1]?.headers?.authorization
+    ).toBeUndefined();
+  });
+
   it("uses one total deadline across the image request", async () => {
     const deadlineController = new AbortController();
     const timeoutSpy = vi
@@ -114,11 +137,9 @@ describe("fetchPublicImage", () => {
               reject(signal.reason);
               return;
             }
-            signal?.addEventListener(
-              "abort",
-              () => reject(signal.reason),
-              { once: true }
-            );
+            signal?.addEventListener("abort", () => reject(signal.reason), {
+              once: true,
+            });
           })
       );
 
@@ -170,6 +191,41 @@ describe("fetchPublicImage", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("fetchPublicFileUpload", () => {
+  it("uploads through DNS pin with a total deadline", async () => {
+    mockFetchWithDnsPin.mockResolvedValueOnce(
+      new Response(null, { status: 201 })
+    );
+    const body = Buffer.from("file");
+
+    const response = await fetchPublicFileUpload("https://1.1.1.1/upload", {
+      body,
+      timeoutMs: 2_000,
+    });
+
+    expect(response.status).toBe(201);
+    expect(mockFetchWithDnsPin).toHaveBeenCalledWith(
+      new URL("https://1.1.1.1/upload"),
+      expect.objectContaining({
+        method: "PUT",
+        body,
+        timeoutMs: 2_000,
+        signal: expect.any(AbortSignal),
+      })
+    );
+  });
+
+  it("rejects plaintext upload URLs before connecting", async () => {
+    await expect(
+      fetchPublicFileUpload("http://1.1.1.1/upload", {
+        body: Buffer.from("file"),
+        timeoutMs: 2_000,
+      })
+    ).rejects.toThrow("must use https");
+    expect(mockFetchWithDnsPin).not.toHaveBeenCalled();
   });
 });
 

@@ -20,6 +20,8 @@ const responseDeadlineCleanups = new WeakMap<Response, () => void>();
 
 export interface FetchWithDeadlineOptions {
   timeoutMs?: number;
+  /** 可选的响应正文真实字节上限；用于保留原生 Response 解析接口的协议适配器。 */
+  maxResponseBytes?: number;
 }
 
 /** 响应正文超过调用方声明上限时抛出的错误。 */
@@ -64,6 +66,70 @@ function finishResponse(response: Response): void {
 }
 
 /**
+ * 用有限 Web Stream 包装第三方响应。
+ *
+ * @param response - 原始 fetch 响应。
+ * @param maxBytes - 允许消费的最大真实字节数。
+ * @returns 保留状态码与响应头的新 Response；text/json/reader 均受同一限制。
+ * @throws 消费正文时超过上限会抛 ResponseBodyTooLargeError。
+ * @sideEffects 锁定原始响应流；完成、超限或取消时释放底层连接与截止定时器。
+ */
+function limitResponseBody(
+  response: Response,
+  maxBytes: number,
+  onFinished: () => void
+): Response {
+  assertPositiveSafeInteger(maxBytes, "maxResponseBytes");
+  if (!response.body) {
+    onFinished();
+    return response;
+  }
+
+  const reader = response.body.getReader();
+  let totalBytes = 0;
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    onFinished();
+  };
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          controller.close();
+          finish();
+          return;
+        }
+        if (!value) return;
+
+        totalBytes += value.byteLength;
+        if (totalBytes > maxBytes) {
+          await reader.cancel().catch(() => undefined);
+          controller.error(new ResponseBodyTooLargeError(maxBytes, totalBytes));
+          finish();
+          return;
+        }
+        controller.enqueue(value);
+      } catch (error) {
+        controller.error(error);
+        finish();
+      }
+    },
+    async cancel(reason) {
+      await reader.cancel(reason).catch(() => undefined);
+      finish();
+    },
+  });
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
+/**
  * 发起带总截止时间的第三方请求。
  *
  * @param input - 与原生 fetch 相同的 URL 或 Request。
@@ -78,9 +144,11 @@ export async function fetchWithDeadline(
   init: RequestInit = {},
   options: FetchWithDeadlineOptions = {}
 ): Promise<Response> {
-  const timeoutMs =
-    options.timeoutMs ?? DEFAULT_THIRD_PARTY_FETCH_TIMEOUT_MS;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_THIRD_PARTY_FETCH_TIMEOUT_MS;
   assertPositiveSafeInteger(timeoutMs, "timeoutMs");
+  if (options.maxResponseBytes !== undefined) {
+    assertPositiveSafeInteger(options.maxResponseBytes, "maxResponseBytes");
+  }
 
   const deadlineController = new AbortController();
   const timeout = setTimeout(() => {
@@ -98,10 +166,11 @@ export async function fetchWithDeadline(
   try {
     const response = await fetch(input, { ...init, signal });
     const cleanup = () => clearTimeout(timeout);
-    responseDeadlineCleanups.set(response, cleanup);
-    if (!response.body) {
-      finishResponse(response);
+    if (options.maxResponseBytes !== undefined) {
+      return limitResponseBody(response, options.maxResponseBytes, cleanup);
     }
+    responseDeadlineCleanups.set(response, cleanup);
+    if (!response.body) finishResponse(response);
     return response;
   } catch (error) {
     clearTimeout(timeout);

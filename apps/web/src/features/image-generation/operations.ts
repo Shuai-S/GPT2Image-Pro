@@ -11,6 +11,13 @@ import {
   resolveImageGenerationTimeoutError,
 } from "@repo/shared/generation-maintenance";
 import { getFailedGenerationTargetCredits } from "@repo/shared/generation-settlement";
+import {
+  DEFAULT_IMAGE_RESPONSE_MAX_BYTES,
+  DEFAULT_JSON_RESPONSE_MAX_BYTES,
+  fetchWithDeadline,
+  readResponseJsonWithLimit,
+  readResponseTextWithLimit,
+} from "@repo/shared/http/fetch";
 import { logWarn } from "@repo/shared/logger";
 import {
   isContentModerationEnabled,
@@ -37,6 +44,11 @@ import {
   refundExternalApiKeyCredits,
   reserveExternalApiKeyCredits,
 } from "@/features/external-api/quota";
+import {
+  fetchPublicImage,
+  readResponseBytesWithLimit,
+  SafeImageFetchError,
+} from "@/features/external-api/safe-image-fetch";
 import {
   ImageBackendPoolUnavailableError,
   releaseImageBackendInflightLease,
@@ -342,12 +354,19 @@ async function toImageBuffer(result: {
     throw new Error("Missing image data");
   }
 
-  const response = await fetch(result.imageUrl);
+  const response = await fetchPublicImage(result.imageUrl);
   if (!response.ok) {
+    await response.body?.cancel();
     throw new Error(`Failed to download image: ${response.status}`);
   }
 
-  return Buffer.from(await response.arrayBuffer());
+  return await readResponseBytesWithLimit(
+    response,
+    DEFAULT_IMAGE_RESPONSE_MAX_BYTES,
+    () => {
+      throw new SafeImageFetchError("Generated image exceeds size limit.", 413);
+    }
+  );
 }
 
 function stripTrailingSlash(value: string) {
@@ -419,16 +438,17 @@ async function uploadResponsesImageFile(params: {
   formData.append("purpose", "vision");
 
   try {
-    const response = await fetch(
+    const response = await fetchWithDeadline(
       `${stripTrailingSlash(params.config.baseUrl)}/files`,
       {
         method: "POST",
         headers: getMultipartHeaders(params.config),
         body: formData,
-      }
+      },
+      { timeoutMs: 60_000, maxResponseBytes: DEFAULT_JSON_RESPONSE_MAX_BYTES }
     );
     if (!response.ok) {
-      const body = await response.text().catch(() => "");
+      const body = await readResponseTextWithLimit(response).catch(() => "");
       logWarn("Responses 输出图片上传 Files 失败", {
         status: response.status,
         generationId: params.generationId,
@@ -436,7 +456,9 @@ async function uploadResponsesImageFile(params: {
       });
       return undefined;
     }
-    const payload = (await response.json().catch(() => null)) as {
+    const payload = (await readResponseJsonWithLimit(response).catch(
+      () => null
+    )) as {
       id?: unknown;
     } | null;
     const fileId = typeof payload?.id === "string" ? payload.id : undefined;

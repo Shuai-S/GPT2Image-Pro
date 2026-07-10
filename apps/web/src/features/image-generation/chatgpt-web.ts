@@ -1,13 +1,24 @@
 import { createHash, randomUUID } from "node:crypto";
+import {
+  DEFAULT_ERROR_RESPONSE_MAX_BYTES,
+  DEFAULT_IMAGE_RESPONSE_MAX_BYTES,
+  DEFAULT_JSON_RESPONSE_MAX_BYTES,
+  DEFAULT_VIDEO_RESPONSE_MAX_BYTES,
+  fetchWithDeadline,
+  ResponseBodyTooLargeError,
+  readResponseBytesWithLimit,
+  readResponseJsonWithLimit,
+  readResponseTextWithLimit,
+} from "@repo/shared/http/fetch";
 import { logError } from "@repo/shared/logger";
 import { getRuntimeSettingString } from "@repo/shared/system-settings";
+import { z } from "zod";
+import {
+  fetchPublicFileUpload,
+  fetchPublicImage,
+} from "@/features/external-api/safe-image-fetch";
 import { parseImageSize } from "./resolution";
 import { isContentSafetyRejection } from "./sla-classification";
-import {
-  buildWebHistoryTranscript,
-  downloadWebHistoryImageReference,
-  getRecentWebHistoryImageReferences,
-} from "./web-history-references";
 import type {
   ApiConfig,
   ChatGptWebConversationState,
@@ -19,6 +30,11 @@ import type {
   ResponsesInputFile,
   ThinkingLevel,
 } from "./types";
+import {
+  buildWebHistoryTranscript,
+  downloadWebHistoryImageReference,
+  getRecentWebHistoryImageReferences,
+} from "./web-history-references";
 
 const CHATGPT_BASE_URL = "https://chatgpt.com";
 const USER_AGENT =
@@ -33,6 +49,12 @@ const IMAGE_POLL_INTERVAL_MS = 6_000;
 // 故发起后至少等这么久再开始轮询,大幅削减状态查询量、降低 429。
 const IMAGE_POLL_INITIAL_DELAY_MS = 45_000;
 const WEB_PROXY_REQUEST_TIMEOUT_MS = 310_000;
+const WEB_UPLOAD_REQUEST_TIMEOUT_MS = 120_000;
+const WEB_EXTERNAL_IMAGE_FETCH_TIMEOUT_MS = 60_000;
+const WEB_EXTERNAL_FILE_FETCH_TIMEOUT_MS = 120_000;
+const WEB_DOCUMENT_RESPONSE_MAX_BYTES = 8 * 1024 * 1024;
+const WEB_EVENT_STREAM_RESPONSE_MAX_BYTES = 64 * 1024 * 1024;
+const WEB_PROXY_ENVELOPE_METADATA_MAX_BYTES = DEFAULT_JSON_RESPONSE_MAX_BYTES;
 
 type ChatRequirements = {
   token: string;
@@ -75,11 +97,13 @@ export type ChatGptWebAccountInfo = {
 
 const webSessionCache = new Map<string, WebSession>();
 
-type WebProxyResponsePayload = {
-  status: number;
-  headers?: Record<string, string[]>;
-  bodyBase64?: string;
-};
+const webProxyResponsePayloadSchema = z.object({
+  status: z.number().int().min(200).max(599),
+  headers: z.record(z.string(), z.array(z.string())).optional(),
+  bodyBase64: z.string().optional(),
+});
+
+type WebProxyResponsePayload = z.infer<typeof webProxyResponsePayloadSchema>;
 
 type WebImageParams = (GenerateImageParams | EditImageParams) & {
   history?: ChatHistoryMessage[];
@@ -191,13 +215,28 @@ function encodeBody(body: BodyInit | null | undefined) {
   );
 }
 
-function decodeBody(bodyBase64: string | undefined) {
+/**
+ * 解码代理返回的 base64 正文并复核解码后大小。
+ *
+ * @param bodyBase64 - Go 代理返回的可选 base64 字符串。
+ * @param maxBytes - 目标协议正文的真实字节上限。
+ * @returns 解码后的二进制正文；空字段返回空数组。
+ * @throws 解码后的真实字节超过上限时拒绝，避免只限制 base64 外壳。
+ */
+function decodeBody(bodyBase64: string | undefined, maxBytes: number) {
   if (!bodyBase64) return new Uint8Array();
-  return Buffer.from(bodyBase64, "base64");
+  const decoded = Buffer.from(bodyBase64, "base64");
+  if (decoded.byteLength > maxBytes) {
+    throw new ResponseBodyTooLargeError(maxBytes, decoded.byteLength);
+  }
+  return decoded;
 }
 
 async function webErrorMessage(response: Response, context: string) {
-  const text = await response.text().catch(() => "");
+  const text = await readResponseTextWithLimit(
+    response,
+    DEFAULT_ERROR_RESPONSE_MAX_BYTES
+  ).catch(() => "");
   const extracted = extractWebErrorPayloadMessage(text);
   const trimmed = (extracted || text).replace(/\s+/g, " ").trim();
   return `${context} failed: HTTP ${response.status}${
@@ -252,6 +291,37 @@ function headersToObject(headers: HeadersInit | undefined) {
   return result;
 }
 
+/**
+ * 按请求声明的响应协议选择正文上限。
+ *
+ * @param headers - 发给 ChatGPT Web 的最终请求头。
+ * @returns JSON/HTML、SSE 或二进制下载对应的真实字节上限。
+ * @sideEffects 无；未知 Accept 按 8 MiB 文档响应处理并 fail-closed。
+ */
+function webResponseMaxBytesForHeaders(headers: HeadersInit): number {
+  const accept = new Headers(headers).get("accept")?.toLowerCase() || "";
+  if (accept.includes("application/octet-stream")) {
+    return DEFAULT_VIDEO_RESPONSE_MAX_BYTES;
+  }
+  if (accept.includes("text/event-stream")) {
+    return WEB_EVENT_STREAM_RESPONSE_MAX_BYTES;
+  }
+  return WEB_DOCUMENT_RESPONSE_MAX_BYTES;
+}
+
+/**
+ * 计算代理 JSON 外壳的上限，包含 base64 膨胀与固定元数据预算。
+ *
+ * @param decodedMaxBytes - 解码后目标正文上限。
+ * @returns 代理响应允许的最大真实 JSON 字节数。
+ * @sideEffects 无。
+ */
+function webProxyEnvelopeMaxBytes(decodedMaxBytes: number): number {
+  return (
+    Math.ceil(decodedMaxBytes / 3) * 4 + WEB_PROXY_ENVELOPE_METADATA_MAX_BYTES
+  );
+}
+
 function toResponseHeaders(headers: WebProxyResponsePayload["headers"]) {
   const result = new Headers();
   for (const [key, values] of Object.entries(headers || {})) {
@@ -289,28 +359,28 @@ async function fetchChatGptWeb(
     ...headersToObject(init?.headers),
     ...(extraHeaders || {}),
   };
+  const maxResponseBytes = webResponseMaxBytesForHeaders(headers);
   const proxy = await getWebProxyConfig();
   if (!proxy) {
-    return fetch(`${CHATGPT_BASE_URL}${urlPath}`, {
-      ...init,
-      headers,
-    });
+    return fetchWithDeadline(
+      `${CHATGPT_BASE_URL}${urlPath}`,
+      {
+        ...init,
+        headers,
+      },
+      {
+        timeoutMs: WEB_PROXY_REQUEST_TIMEOUT_MS,
+        maxResponseBytes,
+      }
+    );
   }
 
-  const controller = new AbortController();
-  const abortFromCaller = () => controller.abort();
-  if (init?.signal?.aborted) {
-    controller.abort();
-  } else {
-    init?.signal?.addEventListener("abort", abortFromCaller, { once: true });
-  }
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, WEB_PROXY_REQUEST_TIMEOUT_MS);
-  try {
-    const response = await fetch(`${proxy.url}/request`, {
+  const maxProxyResponseBytes = webProxyEnvelopeMaxBytes(maxResponseBytes);
+  const response = await fetchWithDeadline(
+    `${proxy.url}/request`,
+    {
       method: "POST",
-      signal: controller.signal,
+      signal: init?.signal,
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
@@ -325,22 +395,34 @@ async function fetchChatGptWeb(
         headerOrder: Object.keys(headers),
         bodyBase64: encodeBody(init?.body),
       }),
-    });
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new Error(
-        `ChatGPT Web proxy failed: HTTP ${response.status}${text ? ` ${text.slice(0, 300)}` : ""}`
-      );
+    },
+    {
+      timeoutMs: WEB_PROXY_REQUEST_TIMEOUT_MS,
+      maxResponseBytes: maxProxyResponseBytes,
     }
-    const payload = (await response.json()) as WebProxyResponsePayload;
-    return new Response(decodeBody(payload.bodyBase64), {
-      status: payload.status,
-      headers: toResponseHeaders(payload.headers),
-    });
-  } finally {
-    clearTimeout(timeout);
-    init?.signal?.removeEventListener("abort", abortFromCaller);
+  );
+  if (!response.ok) {
+    const text = await readResponseTextWithLimit(
+      response,
+      DEFAULT_ERROR_RESPONSE_MAX_BYTES
+    ).catch(() => "");
+    throw new Error(
+      `ChatGPT Web proxy failed: HTTP ${response.status}${text ? ` ${text.slice(0, 300)}` : ""}`
+    );
   }
+  const rawPayload = await readResponseJsonWithLimit(
+    response,
+    maxProxyResponseBytes
+  );
+  const parsedPayload = webProxyResponsePayloadSchema.safeParse(rawPayload);
+  if (!parsedPayload.success) {
+    throw new Error("ChatGPT Web proxy returned an invalid response");
+  }
+  const payload = parsedPayload.data;
+  return new Response(decodeBody(payload.bodyBase64, maxResponseBytes), {
+    status: payload.status,
+    headers: toResponseHeaders(payload.headers),
+  });
 }
 
 function powResourcesFromHtml(html: string): PowResources {
@@ -735,8 +817,7 @@ async function uploadAttachment(
     file_id: string;
     upload_url: string;
   };
-  const uploadResponse = await fetch(uploadMeta.upload_url, {
-    method: "PUT",
+  const uploadResponse = await fetchPublicFileUpload(uploadMeta.upload_url, {
     signal: config.signal,
     headers: {
       "Content-Type": file.type || "application/octet-stream",
@@ -746,13 +827,15 @@ async function uploadAttachment(
       Referer: `${CHATGPT_BASE_URL}/`,
       "User-Agent": USER_AGENT,
     },
-    body: new Uint8Array(file.data),
+    body: file.data,
+    timeoutMs: WEB_UPLOAD_REQUEST_TIMEOUT_MS,
   });
   if (!uploadResponse.ok) {
     throw new Error(
-      `ChatGPT Web file upload failed: HTTP ${uploadResponse.status}`
+      await webErrorMessage(uploadResponse, "ChatGPT Web file upload")
     );
   }
+  await uploadResponse.body?.cancel();
   const uploadedPath = `/backend-api/files/${uploadMeta.file_id}/uploaded`;
   const uploadedResponse = await fetchChatGptWeb(
     config,
@@ -965,12 +1048,7 @@ async function startImageGeneration(
     body: JSON.stringify({
       action: "next",
       messages: [
-        buildMessage(
-          prompt,
-          references,
-          options.requestMessageId,
-          systemHints
-        ),
+        buildMessage(prompt, references, options.requestMessageId, systemHints),
       ],
       ...(options.continuation?.useNativeContinuation
         ? { conversation_id: options.continuation.conversationId }
@@ -1906,19 +1984,25 @@ async function downloadImage(
   url: string,
   signal?: AbortSignal
 ) {
-  const response = await fetch(url, {
+  const response = await fetchPublicImage(url, {
     signal,
+    timeoutMs: WEB_EXTERNAL_IMAGE_FETCH_TIMEOUT_MS,
     headers: {
       Authorization: `Bearer ${config.apiKey}`,
       "User-Agent": USER_AGENT,
     },
   });
   if (!response.ok) {
+    await response.body?.cancel();
     throw new Error(
       `ChatGPT Web image download failed: HTTP ${response.status}`
     );
   }
-  return Buffer.from(await response.arrayBuffer()).toString("base64");
+  const bytes = await readResponseBytesWithLimit(
+    response,
+    DEFAULT_IMAGE_RESPONSE_MAX_BYTES
+  );
+  return Buffer.from(bytes).toString("base64");
 }
 
 async function downloadImageOutputs(
@@ -2045,12 +2129,9 @@ async function runWebImage(
       )),
       ...(await Promise.all(
         historyImages.map((image, index) =>
-          uploadAttachment(
-            configWithSignal,
-            image,
-            images.length + index + 1,
-            { image: true }
-          )
+          uploadAttachment(configWithSignal, image, images.length + index + 1, {
+            image: true,
+          })
         )
       )),
       ...(await Promise.all(
@@ -2237,7 +2318,11 @@ async function pollWebChatResult(
   conversationId: string,
   requestMessageId: string,
   signal?: AbortSignal
-): Promise<{ responseText: string; hasImage: boolean; parentMessageId: string }> {
+): Promise<{
+  responseText: string;
+  hasImage: boolean;
+  parentMessageId: string;
+}> {
   const deadline = Date.now() + WEB_CHAT_POLL_TIMEOUT_MS;
   let bestText = "";
   let hasImage = false;
@@ -2336,12 +2421,9 @@ async function runWebChat(
       )),
       ...(await Promise.all(
         historyImages.map((image, index) =>
-          uploadAttachment(
-            configWithSignal,
-            image,
-            images.length + index + 1,
-            { image: true }
-          )
+          uploadAttachment(configWithSignal, image, images.length + index + 1, {
+            image: true,
+          })
         )
       )),
       ...(await Promise.all(
@@ -2455,8 +2537,7 @@ async function runWebChat(
       requestKind: config.backend?.requestKind,
     });
     return {
-      error:
-        error instanceof Error ? error.message : "ChatGPT Web chat failed",
+      error: error instanceof Error ? error.message : "ChatGPT Web chat failed",
     };
   } finally {
     clearTimeout(timeout);
@@ -2784,9 +2865,7 @@ async function fetchResolvedDownload(
     abs = null;
   }
   const isBackend =
-    !abs ||
-    abs.host.endsWith("chatgpt.com") ||
-    abs.host.endsWith("openai.com");
+    !abs || abs.host.endsWith("chatgpt.com") || abs.host.endsWith("openai.com");
   if (isBackend) {
     const path = abs ? `${abs.pathname}${abs.search}` : url;
     return fetchChatGptWeb(config, path, path, {
@@ -2796,8 +2875,9 @@ async function fetchResolvedDownload(
       }),
     });
   }
-  return fetch(url, {
+  return fetchPublicImage(url, {
     signal: config.signal,
+    timeoutMs: WEB_EXTERNAL_FILE_FETCH_TIMEOUT_MS,
     headers: {
       Authorization: `Bearer ${config.apiKey}`,
       "User-Agent": USER_AGENT,
@@ -2814,12 +2894,22 @@ async function downloadEditableBinary(
   conversationId: string,
   artifact: EditableArtifact
 ): Promise<EditableFileBinary | null> {
-  const url = await resolveEditableDownloadUrl(config, conversationId, artifact);
+  const url = await resolveEditableDownloadUrl(
+    config,
+    conversationId,
+    artifact
+  );
   if (!url) return null;
   const response = await fetchResolvedDownload(config, url);
-  const buffer = response.ok
-    ? Buffer.from(await response.arrayBuffer())
-    : null;
+  if (!response.ok) {
+    await response.body?.cancel();
+    return null;
+  }
+  const bytes = await readResponseBytesWithLimit(
+    response,
+    DEFAULT_VIDEO_RESPONSE_MAX_BYTES
+  );
+  const buffer = Buffer.from(bytes);
   if (buffer && buffer.length > 0) {
     const mimeType =
       artifact.mimeType ||
@@ -2981,6 +3071,8 @@ export async function generateFileWithChatGptWeb(params: {
 }
 
 export const __testing__ = {
+  decodeBody,
+  webResponseMaxBytesForHeaders,
   extractWebErrorPayloadMessage,
   extractWebStreamError,
   extractWebSystemError,

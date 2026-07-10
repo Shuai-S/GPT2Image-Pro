@@ -97,6 +97,81 @@ describe("fetchWithDeadline", () => {
     await vi.advanceTimersByTimeAsync(25);
     await rejection;
   });
+
+  it("limits native Response text consumption by actual streamed bytes", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("0123456789"))
+    );
+
+    const response = await fetchWithDeadline(
+      "https://api.example.com/large",
+      undefined,
+      { timeoutMs: 1_000, maxResponseBytes: 4 }
+    );
+
+    await expect(response.text()).rejects.toThrow("exceeded 4 bytes");
+  });
+
+  it.each([
+    0,
+    Number.NaN,
+  ])("rejects invalid response limit %s before starting the request", async (maxResponseBytes) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchWithDeadline("https://api.example.com/invalid-limit", undefined, {
+        timeoutMs: 1_000,
+        maxResponseBytes,
+      })
+    ).rejects.toThrow("maxResponseBytes must be a positive safe integer");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("cleans up an immediately completed bounded stream", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(""))
+    );
+    const response = await fetchWithDeadline(
+      "https://api.example.com/empty",
+      undefined,
+      { timeoutMs: 25, maxResponseBytes: 4 }
+    );
+
+    await expect(response.text()).resolves.toBe("");
+    await vi.advanceTimersByTimeAsync(25);
+    expect(response.bodyUsed).toBe(true);
+  });
+
+  it("cancels the original stream when a bounded response is cancelled", async () => {
+    const cancel = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              pull(controller) {
+                controller.enqueue(new Uint8Array([1]));
+              },
+              cancel,
+            })
+          )
+      )
+    );
+    const response = await fetchWithDeadline(
+      "https://api.example.com/cancel",
+      undefined,
+      { timeoutMs: 1_000, maxResponseBytes: 4 }
+    );
+
+    await response.body?.cancel("done");
+
+    expect(cancel).toHaveBeenCalledWith("done");
+  });
 });
 
 describe("limited response readers", () => {

@@ -6,6 +6,28 @@ vi.mock("@repo/shared/system-settings", () => ({
 }));
 
 describe("ChatGPT Web image choices", () => {
+  it("按响应协议选择有限正文预算", () => {
+    expect(
+      __testing__.webResponseMaxBytesForHeaders({ Accept: "application/json" })
+    ).toBe(8 * 1024 * 1024);
+    expect(
+      __testing__.webResponseMaxBytesForHeaders({ Accept: "text/event-stream" })
+    ).toBe(64 * 1024 * 1024);
+    expect(
+      __testing__.webResponseMaxBytesForHeaders({
+        Accept: "application/octet-stream",
+      })
+    ).toBe(200 * 1024 * 1024);
+  });
+
+  it("代理正文解码后仍复核真实字节上限", () => {
+    const encoded = Buffer.from("12345").toString("base64");
+
+    expect(() => __testing__.decodeBody(encoded, 4)).toThrow(
+      "exceeded 4 bytes"
+    );
+  });
+
   it("extracts too many requests from Web JSON error payloads", () => {
     expect(
       __testing__.extractWebErrorPayloadMessage(
@@ -351,7 +373,11 @@ describe("ChatGPT Web chat (text answer extraction)", () => {
     const conversation = {
       current_node: "answer_1",
       mapping: {
-        request_1: { id: "request_1", create_time: 100, children: ["answer_1"] },
+        request_1: {
+          id: "request_1",
+          create_time: 100,
+          children: ["answer_1"],
+        },
         answer_1: {
           id: "answer_1",
           parent: "request_1",

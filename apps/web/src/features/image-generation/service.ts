@@ -12,6 +12,11 @@ import {
   RESPONSES_IMAGE_MODELS,
   type SubscriptionPlan,
 } from "@repo/shared/config/subscription-plan";
+import {
+  DEFAULT_IMAGE_RESPONSE_MAX_BYTES,
+  DEFAULT_JSON_RESPONSE_MAX_BYTES,
+  fetchWithDeadline,
+} from "@repo/shared/http/fetch";
 import { logError, logWarn } from "@repo/shared/logger";
 import { canUsePlanCapability } from "@repo/shared/subscription/services/plan-capabilities";
 import { getUserPlan } from "@repo/shared/subscription/services/user-plan";
@@ -21,7 +26,12 @@ import {
   getRuntimeSettingString,
 } from "@repo/shared/system-settings";
 import { eq } from "drizzle-orm";
-import { assertPublicApiBaseUrl } from "@/features/external-api/safe-image-fetch";
+import {
+  assertPublicApiBaseUrl,
+  fetchPublicImage,
+  readResponseBytesWithLimit,
+  SafeImageFetchError,
+} from "@/features/external-api/safe-image-fetch";
 import { imageBackendApiUsesResponsesEndpoint } from "@/features/image-backend-pool/api-interface-mode";
 import {
   acquireImageBackendInflight,
@@ -301,6 +311,18 @@ function getHeaders(
   };
 }
 
+// 图像接口可把最多 10 张图片内联为 base64。按单图 25 MiB 真实字节换算
+// 编码膨胀并留出 JSON/SSE 元数据，既保留批量能力也阻止失控上游无限扩大正文。
+const MAX_IMAGE_API_OUTPUT_COUNT = 10;
+const IMAGE_API_RESPONSE_MAX_BYTES =
+  MAX_IMAGE_API_OUTPUT_COUNT *
+    Math.ceil(DEFAULT_IMAGE_RESPONSE_MAX_BYTES / 3) *
+    4 +
+  DEFAULT_JSON_RESPONSE_MAX_BYTES;
+const IMAGE_API_FETCH_TIMEOUT_MS = 20 * 60_000;
+const TASK_STATUS_FETCH_TIMEOUT_MS = 30_000;
+const ADOBE_MEDIA_FETCH_TIMEOUT_MS = 60_000;
+
 // 判定当前 pool-api 后端是否选择 Google 原生图像协议；非 pool-api 一律不劫持。
 function isGoogleImageBackend(config: ApiConfig) {
   return (
@@ -321,21 +343,28 @@ async function postGoogleImageRequest(
     signal?: AbortSignal;
   }
 ) {
-  const response = await fetch(buildGoogleImageUrl(config.baseUrl), {
-    method: "POST",
-    redirect: "manual",
-    signal: params.signal,
-    headers: getGoogleImageHeaders(config.apiKey),
-    body: JSON.stringify(
-      buildGoogleImageRequest({
-        model: params.model,
-        prompt: appendImagesUpstreamNonce(params.prompt),
-        images: params.images,
-        size: params.size,
-        outputFormat: params.outputFormat,
-      })
-    ),
-  });
+  const response = await fetchWithDeadline(
+    buildGoogleImageUrl(config.baseUrl),
+    {
+      method: "POST",
+      redirect: "manual",
+      signal: params.signal,
+      headers: getGoogleImageHeaders(config.apiKey),
+      body: JSON.stringify(
+        buildGoogleImageRequest({
+          model: params.model,
+          prompt: appendImagesUpstreamNonce(params.prompt),
+          images: params.images,
+          size: params.size,
+          outputFormat: params.outputFormat,
+        })
+      ),
+    },
+    {
+      timeoutMs: IMAGE_API_FETCH_TIMEOUT_MS,
+      maxResponseBytes: IMAGE_API_RESPONSE_MAX_BYTES,
+    }
+  );
   return await parseGoogleImageResponse(response);
 }
 
@@ -954,7 +983,7 @@ async function postResponsesImageRequest(
   },
   callbacks?: ImageGenerationCallbacks
 ) {
-  const response = await fetch(
+  const response = await fetchWithDeadline(
     `${stripTrailingSlash(config.baseUrl)}/responses`,
     {
       method: "POST",
@@ -968,6 +997,10 @@ async function postResponsesImageRequest(
         "Cache-Control": "no-cache",
       }),
       body: JSON.stringify(requestBody),
+    },
+    {
+      timeoutMs: IMAGE_API_FETCH_TIMEOUT_MS,
+      maxResponseBytes: IMAGE_API_RESPONSE_MAX_BYTES,
     }
   );
   return await parseResponsesResponse(response, callbacks, {
@@ -2176,7 +2209,7 @@ async function generateChatImageWithChatCompletions(
     delete (body as Record<string, unknown>).requires_responses_backend;
 
     try {
-      const response = await fetch(
+      const response = await fetchWithDeadline(
         `${stripTrailingSlash(config.baseUrl)}/chat/completions`,
         {
           method: "POST",
@@ -2194,6 +2227,10 @@ async function generateChatImageWithChatCompletions(
               : {}),
           }),
           body: JSON.stringify(body),
+        },
+        {
+          timeoutMs: IMAGE_API_FETCH_TIMEOUT_MS,
+          maxResponseBytes: IMAGE_API_RESPONSE_MAX_BYTES,
         }
       );
       return await parseChatCompletionsResponse(response, callbacks);
@@ -2431,7 +2468,7 @@ async function fetchResponses(
   },
   callbacks?: ImageGenerationCallbacks
 ): Promise<ResponsesResultWithOutput> {
-  const response = await fetch(
+  const response = await fetchWithDeadline(
     `${stripTrailingSlash(config.baseUrl)}/responses`,
     {
       method: "POST",
@@ -2449,6 +2486,10 @@ async function fetchResponses(
           : {}),
       }),
       body: JSON.stringify(requestBody),
+    },
+    {
+      timeoutMs: IMAGE_API_FETCH_TIMEOUT_MS,
+      maxResponseBytes: IMAGE_API_RESPONSE_MAX_BYTES,
     }
   );
 
@@ -4286,7 +4327,7 @@ async function pollTaskImageResult(
 ): Promise<GenerateImageResult> {
   const deadline = Date.now() + TASK_IMAGE_MAX_WAIT_MS;
   while (Date.now() < deadline) {
-    const response = await fetch(
+    const response = await fetchWithDeadline(
       `${stripTrailingSlash(config.baseUrl)}/tasks/${encodeURIComponent(
         taskId
       )}?language=en`,
@@ -4296,6 +4337,10 @@ async function pollTaskImageResult(
         signal,
         cache: "no-store",
         headers: getHeaders(config, {}),
+      },
+      {
+        timeoutMs: TASK_STATUS_FETCH_TIMEOUT_MS,
+        maxResponseBytes: DEFAULT_JSON_RESPONSE_MAX_BYTES,
       }
     );
     const parsed = await parseTaskStatusResponse(response);
@@ -4320,7 +4365,7 @@ async function postTaskImageGeneration(
   requestBody: Record<string, unknown>,
   signal?: AbortSignal
 ): Promise<GenerateImageResult> {
-  const response = await fetch(
+  const response = await fetchWithDeadline(
     `${stripTrailingSlash(config.baseUrl)}/images/generations`,
     {
       method: "POST",
@@ -4330,6 +4375,10 @@ async function postTaskImageGeneration(
         "Content-Type": "application/json",
       }),
       body: JSON.stringify(requestBody),
+    },
+    {
+      timeoutMs: IMAGE_API_FETCH_TIMEOUT_MS,
+      maxResponseBytes: DEFAULT_JSON_RESPONSE_MAX_BYTES,
     }
   );
 
@@ -4618,7 +4667,7 @@ async function runAdobeImageRequest(
       ? { images: params.images }
       : {}),
   });
-  const response = await fetch(
+  const response = await fetchWithDeadline(
     `${stripTrailingSlash(config.baseUrl)}/v1/chat/completions`,
     {
       method: "POST",
@@ -4626,6 +4675,10 @@ async function runAdobeImageRequest(
       signal: params.signal,
       headers: getHeaders(config, { "Content-Type": "application/json" }),
       body: JSON.stringify(body),
+    },
+    {
+      timeoutMs: IMAGE_API_FETCH_TIMEOUT_MS,
+      maxResponseBytes: DEFAULT_JSON_RESPONSE_MAX_BYTES,
     }
   );
   if (!response.ok) {
@@ -4637,13 +4690,22 @@ async function runAdobeImageRequest(
   const json = (await response.json().catch(() => null)) as unknown;
   const parsed = parseAdobeMediaResult(json, config.baseUrl);
   if ("error" in parsed) return { error: parsed.error };
-  const mediaResponse = await fetch(parsed.url, { signal: params.signal });
+  const mediaResponse = await fetchPublicImage(parsed.url, {
+    signal: params.signal,
+    timeoutMs: ADOBE_MEDIA_FETCH_TIMEOUT_MS,
+  });
   if (!mediaResponse.ok) {
     return {
       error: `Adobe Firefly 媒体下载失败 HTTP ${mediaResponse.status}`,
     };
   }
-  const buffer = Buffer.from(await mediaResponse.arrayBuffer());
+  const buffer = await readResponseBytesWithLimit(
+    mediaResponse,
+    DEFAULT_IMAGE_RESPONSE_MAX_BYTES,
+    () => {
+      throw new SafeImageFetchError("Adobe Firefly media exceeds size limit.");
+    }
+  );
   return { imageBase64: buffer.toString("base64") };
 }
 
@@ -4826,44 +4888,51 @@ export async function generateImage(
     // (b64 为默认返回)。中转(pool-api)后端不受影响,原样发送。
     // size 仍照发,但 codex 上游不尊重(#19175,直连端点亦然,见 shouldCodexUseDirectImagesEndpoint)。
     const isCodexDirect = shouldCodexUseDirectImagesEndpoint(config);
-    const response = await fetch(`${config.baseUrl}/images/generations`, {
-      method: "POST",
-      redirect: "manual",
-      signal: params.signal,
-      headers: getHeaders(config, {
-        "Content-Type": "application/json",
-      }),
-      body: JSON.stringify({
-        model,
-        // images 端点不吃 prompt_cache_key,改在 prompt 注入每请求唯一零宽 nonce,
-        // 打掉上游中转按请求体内容缓存导致的"同图同词出同图"。仅作用于上游请求体。
-        prompt: appendImagesUpstreamNonce(prompt),
-        n: params.n || 1,
-        size,
-        ...(dimensions && !isCodexDirect
-          ? { width: dimensions.width, height: dimensions.height }
-          : {}),
-        ...(normalizeQuality(params.quality)
-          ? { quality: normalizeQuality(params.quality) }
-          : {}),
-        ...(normalizeModeration(params.moderation)
-          ? { moderation: normalizeModeration(params.moderation) }
-          : {}),
-        ...(normalizeOutputFormat(params.outputFormat)
-          ? { output_format: normalizeOutputFormat(params.outputFormat) }
-          : {}),
-        ...(normalizeOutputCompression(params.outputCompression) !== undefined
-          ? {
-              output_compression: normalizeOutputCompression(
-                params.outputCompression
-              ),
-            }
-          : {}),
-        ...(background ? { background } : {}),
-        ...(config.useStream ? { stream: true, partial_images: 2 } : {}),
-        ...(isCodexDirect ? {} : { response_format: "b64_json" }),
-      }),
-    });
+    const response = await fetchWithDeadline(
+      `${config.baseUrl}/images/generations`,
+      {
+        method: "POST",
+        redirect: "manual",
+        signal: params.signal,
+        headers: getHeaders(config, {
+          "Content-Type": "application/json",
+        }),
+        body: JSON.stringify({
+          model,
+          // images 端点不吃 prompt_cache_key,改在 prompt 注入每请求唯一零宽 nonce,
+          // 打掉上游中转按请求体内容缓存导致的"同图同词出同图"。仅作用于上游请求体。
+          prompt: appendImagesUpstreamNonce(prompt),
+          n: params.n || 1,
+          size,
+          ...(dimensions && !isCodexDirect
+            ? { width: dimensions.width, height: dimensions.height }
+            : {}),
+          ...(normalizeQuality(params.quality)
+            ? { quality: normalizeQuality(params.quality) }
+            : {}),
+          ...(normalizeModeration(params.moderation)
+            ? { moderation: normalizeModeration(params.moderation) }
+            : {}),
+          ...(normalizeOutputFormat(params.outputFormat)
+            ? { output_format: normalizeOutputFormat(params.outputFormat) }
+            : {}),
+          ...(normalizeOutputCompression(params.outputCompression) !== undefined
+            ? {
+                output_compression: normalizeOutputCompression(
+                  params.outputCompression
+                ),
+              }
+            : {}),
+          ...(background ? { background } : {}),
+          ...(config.useStream ? { stream: true, partial_images: 2 } : {}),
+          ...(isCodexDirect ? {} : { response_format: "b64_json" }),
+        }),
+      },
+      {
+        timeoutMs: IMAGE_API_FETCH_TIMEOUT_MS,
+        maxResponseBytes: IMAGE_API_RESPONSE_MAX_BYTES,
+      }
+    );
 
     return requireImageOutput(
       applyPromptOptimizationResultVisibility(
@@ -5052,43 +5121,51 @@ export async function editImage(
         `data:${file.type || "image/png"};base64,${Buffer.from(
           file.data
         ).toString("base64")}`;
-      const response = await fetch(`${config.baseUrl}/images/edits`, {
-        method: "POST",
-        redirect: "manual",
-        signal: params.signal,
-        headers: getHeaders(config, { "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          model,
-          // 同生图：注入每请求唯一零宽 nonce 破上游内容缓存（仅上游请求体）。
-          prompt: appendImagesUpstreamNonce(effectiveEditPrompt),
-          n: params.n || 1,
-          size,
-          images: params.images.map((image) => ({
-            image_url: toImageUrl(image),
-          })),
-          ...(params.mask
-            ? { mask: { image_url: toImageUrl(params.mask) } }
-            : {}),
-          ...(normalizeQuality(params.quality)
-            ? { quality: normalizeQuality(params.quality) }
-            : {}),
-          ...(normalizeModeration(params.moderation)
-            ? { moderation: normalizeModeration(params.moderation) }
-            : {}),
-          ...(normalizeOutputFormat(params.outputFormat)
-            ? { output_format: normalizeOutputFormat(params.outputFormat) }
-            : {}),
-          ...(normalizeOutputCompression(params.outputCompression) !== undefined
-            ? {
-                output_compression: normalizeOutputCompression(
-                  params.outputCompression
-                ),
-              }
-            : {}),
-          ...(background ? { background } : {}),
-          ...(config.useStream ? { stream: true, partial_images: 2 } : {}),
-        }),
-      });
+      const response = await fetchWithDeadline(
+        `${config.baseUrl}/images/edits`,
+        {
+          method: "POST",
+          redirect: "manual",
+          signal: params.signal,
+          headers: getHeaders(config, { "Content-Type": "application/json" }),
+          body: JSON.stringify({
+            model,
+            // 同生图：注入每请求唯一零宽 nonce 破上游内容缓存（仅上游请求体）。
+            prompt: appendImagesUpstreamNonce(effectiveEditPrompt),
+            n: params.n || 1,
+            size,
+            images: params.images.map((image) => ({
+              image_url: toImageUrl(image),
+            })),
+            ...(params.mask
+              ? { mask: { image_url: toImageUrl(params.mask) } }
+              : {}),
+            ...(normalizeQuality(params.quality)
+              ? { quality: normalizeQuality(params.quality) }
+              : {}),
+            ...(normalizeModeration(params.moderation)
+              ? { moderation: normalizeModeration(params.moderation) }
+              : {}),
+            ...(normalizeOutputFormat(params.outputFormat)
+              ? { output_format: normalizeOutputFormat(params.outputFormat) }
+              : {}),
+            ...(normalizeOutputCompression(params.outputCompression) !==
+            undefined
+              ? {
+                  output_compression: normalizeOutputCompression(
+                    params.outputCompression
+                  ),
+                }
+              : {}),
+            ...(background ? { background } : {}),
+            ...(config.useStream ? { stream: true, partial_images: 2 } : {}),
+          }),
+        },
+        {
+          timeoutMs: IMAGE_API_FETCH_TIMEOUT_MS,
+          maxResponseBytes: IMAGE_API_RESPONSE_MAX_BYTES,
+        }
+      );
       return requireImageOutput(
         applyPromptOptimizationResultVisibility(
           await parseImageResponse(response, callbacks)
@@ -5191,13 +5268,20 @@ export async function editImage(
       );
     }
 
-    const response = await fetch(`${config.baseUrl}/images/edits`, {
-      method: "POST",
-      redirect: "manual",
-      signal: params.signal,
-      headers: getHeaders(config, {}),
-      body: formData,
-    });
+    const response = await fetchWithDeadline(
+      `${config.baseUrl}/images/edits`,
+      {
+        method: "POST",
+        redirect: "manual",
+        signal: params.signal,
+        headers: getHeaders(config, {}),
+        body: formData,
+      },
+      {
+        timeoutMs: IMAGE_API_FETCH_TIMEOUT_MS,
+        maxResponseBytes: IMAGE_API_RESPONSE_MAX_BYTES,
+      }
+    );
 
     return requireImageOutput(
       applyPromptOptimizationResultVisibility(

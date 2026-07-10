@@ -13,11 +13,17 @@
  *
  * 安全：moemail/代理凭据仅服务端读取并下发给同内网 sidecar，不返回客户端。
  */
+
+import {
+  fetchWithDeadline,
+  readResponseTextWithLimit,
+} from "@repo/shared/http/fetch";
 import {
   getRuntimeSettingBoolean,
   getRuntimeSettingNumber,
   getRuntimeSettingString,
 } from "@repo/shared/system-settings";
+import { z } from "zod";
 
 import { importImageBackendWebAccountsFromAccessTokens } from "./service";
 
@@ -27,6 +33,17 @@ type SidecarEvent =
   | { type: "tokens"; tokens: string[] }
   | { type: "error"; message: string }
   | { type: "done" };
+
+const sidecarEventSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("log"), line: z.string() }),
+  z.object({ type: z.literal("tokens"), tokens: z.array(z.string()) }),
+  z.object({ type: z.literal("error"), message: z.string() }),
+  z.object({ type: z.literal("done") }),
+]);
+const REGISTER_SIDECAR_MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
+const REGISTER_SIDECAR_MIN_TIMEOUT_MS = 10 * 60_000;
+const REGISTER_SIDECAR_MAX_TIMEOUT_MS = 2 * 60 * 60_000;
+const REGISTER_SIDECAR_TIMEOUT_PER_WAVE_MS = 2 * 60_000;
 
 export type RegisterBatchResult = {
   tokens: string[];
@@ -39,6 +56,27 @@ export type RegisterBatchResult = {
 // counter % domains.length 取一个域名，使「每一轮用不同的域名」。跨副本各自计数、
 // 重启归零均可接受——目的只是分散域名、避免单域名被拉黑，非严格全局轮转。
 let domainRotationCounter = 0;
+
+/**
+ * 按 sidecar 并发波次数计算注册硬截止。
+ *
+ * @param input - 已由入口校验的注册数与并发数。
+ * @returns 10 分钟至 2 小时之间的总截止毫秒数。
+ * @sideEffects 无；单账号异常慢时最终由硬截止中止整个批次。
+ */
+function getRegisterSidecarTimeoutMs(input: {
+  count: number;
+  concurrency: number;
+}): number {
+  const waves = Math.ceil(input.count / Math.max(1, input.concurrency));
+  return Math.min(
+    REGISTER_SIDECAR_MAX_TIMEOUT_MS,
+    Math.max(
+      REGISTER_SIDECAR_MIN_TIMEOUT_MS,
+      waves * REGISTER_SIDECAR_TIMEOUT_PER_WAVE_MS
+    )
+  );
+}
 
 /**
  * 调 sidecar 跑一批注册，流式回调日志，返回获得的 access token。
@@ -114,27 +152,37 @@ export async function callRegisterSidecar(
     onLog?.(`[注册机] 本轮使用域名：${effectiveDomain}`);
   }
 
-  const resp = await fetch(`${sidecarUrl.replace(/\/$/, "")}/register`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Register-Secret": sidecarSecret,
+  const resp = await fetchWithDeadline(
+    `${sidecarUrl.replace(/\/$/, "")}/register`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Register-Secret": sidecarSecret,
+      },
+      body: JSON.stringify({
+        count: input.count,
+        concurrency: input.concurrency,
+        moemailBaseUrl: baseUrl ?? "",
+        moemailApiKey: apiKey,
+        moemailDomain: effectiveDomain,
+        proxy: effectiveProxy,
+        refreshUrl: effectiveRefreshUrl,
+        refreshMinIntervalSeconds,
+        refreshMinAttempts,
+      }),
     },
-    body: JSON.stringify({
-      count: input.count,
-      concurrency: input.concurrency,
-      moemailBaseUrl: baseUrl ?? "",
-      moemailApiKey: apiKey,
-      moemailDomain: effectiveDomain,
-      proxy: effectiveProxy,
-      refreshUrl: effectiveRefreshUrl,
-      refreshMinIntervalSeconds,
-      refreshMinAttempts,
-    }),
-  });
+    {
+      timeoutMs: getRegisterSidecarTimeoutMs(input),
+      maxResponseBytes: REGISTER_SIDECAR_MAX_RESPONSE_BYTES,
+    }
+  );
 
   if (!resp.ok || !resp.body) {
-    throw new Error(`注册机 sidecar 返回 ${resp.status}`);
+    const error = await readResponseTextWithLimit(resp).catch(() => "");
+    throw new Error(
+      `注册机 sidecar 返回 ${resp.status}${error ? `: ${error}` : ""}`
+    );
   }
 
   const reader = resp.body.getReader();
@@ -165,7 +213,8 @@ export async function callRegisterSidecar(
         const json = line.slice(5).trim();
         if (!json) continue;
         try {
-          handleEvent(JSON.parse(json) as SidecarEvent);
+          const parsed = sidecarEventSchema.safeParse(JSON.parse(json));
+          if (parsed.success) handleEvent(parsed.data);
         } catch {
           // 忽略无法解析的行
         }

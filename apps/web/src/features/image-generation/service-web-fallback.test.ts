@@ -13,6 +13,29 @@ vi.mock("@repo/shared/logger", () => ({
   logWarn: vi.fn(),
 }));
 
+vi.mock("@/features/external-api/safe-image-fetch", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/features/external-api/safe-image-fetch")
+    >();
+  return {
+    ...actual,
+    fetchPublicImage: vi.fn(
+      async (
+        url: string,
+        init?: {
+          headers?: Record<string, string>;
+          signal?: AbortSignal;
+        }
+      ) =>
+        fetch(url, {
+          headers: init?.headers,
+          signal: init?.signal,
+        })
+    ),
+  };
+});
+
 const backendPoolMock = vi.hoisted(() => {
   class ImageBackendPoolUnavailableError extends Error {}
   return {
