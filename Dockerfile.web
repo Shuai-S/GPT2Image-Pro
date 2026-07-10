@@ -84,8 +84,11 @@ COPY --from=builder /app/apps/web/public ./apps/web/public
 COPY scripts/docker-native-runtime-smoke.cjs ./docker-native-runtime-smoke.cjs
 COPY scripts/docker-web-entrypoint.cjs /usr/local/bin/gpt2image-web-entrypoint.cjs
 
-# 在目标架构的最终文件系统中实际加载原生 binding 与动态库；缺 trace 时构建立刻失败。
-RUN node ./docker-native-runtime-smoke.cjs && rm ./docker-native-runtime-smoke.cjs
+# standalone 保留 pnpm 虚拟仓库而不保留根层依赖软链；只给当前冒烟命令指定
+# 模块目录，既确保从最终镜像解析依赖，也不改变应用运行时的模块查找边界。
+RUN NODE_PATH=/app/node_modules/.pnpm/node_modules \
+    node ./docker-native-runtime-smoke.cjs && \
+    rm ./docker-native-runtime-smoke.cjs
 
 RUN mkdir -p /app/storage /app/.gpt2image /app/apps/web/.next/cache && \
     chown -R nextjs:nodejs /app/storage /app/.gpt2image /app/apps/web/.next
