@@ -249,10 +249,19 @@ jobs:
       BETTER_AUTH_URL: http://localhost:3000
       # build job 不启动 PostgreSQL；公开 ISR 在构建期用 env/default，运行时再读 DB。
       GPT2IMAGE_SKIP_RUNTIME_SETTINGS_DB: "1"
+      # Lighthouse 仅探测公开页面，不应启动需要数据库的后台循环。
+      INTERNAL_JOB_SCHEDULER_ENABLED: "false"
+      EXTERNAL_ASYNC_TASK_WORKERS_ENABLED: "false"
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5（钉 SHA 防 tag 重指向；dependabot 维护）
       - uses: ./.github/actions/setup
       - run: pnpm turbo build --filter=@repo/web
+      - name: Enforce client asset budgets
+        run: pnpm performance:assets
+      - name: Enforce public page Lighthouse budgets
+        uses: treosh/lighthouse-ci-action@3e7e23fb74242897f95c0ba9cabad3d0227b9b18 # v12
+        with:
+          configPath: ./lighthouserc.cjs
 
   # ───────────────────────────────────────────────────────────────────────────
   # 7) 容器构建校验（仅 PR）：用 Dockerfile.web 实打实构建 web 镜像但**不推送**，

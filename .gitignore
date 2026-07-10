@@ -19,6 +19,7 @@ node_modules/
 
 # testing
 /coverage
+.lighthouseci/
 
 # next.js
 .next/

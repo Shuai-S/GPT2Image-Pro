@@ -8,6 +8,7 @@
     "test": "turbo test",
     "typecheck": "turbo typecheck",
     "lint": "turbo lint",
+    "performance:assets": "node scripts/check-next-client-budgets.mjs",
     "dev:web": "turbo dev --filter=@repo/web",
     "build:web": "turbo build --filter=@repo/web",
     "db:generate": "pnpm --filter @repo/database db:generate",
