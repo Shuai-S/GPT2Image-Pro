@@ -1,4 +1,5 @@
 import type { CanvasNode } from "@/features/infinite-canvas/canvas-state";
+import { appendDirectUploadsOrFiles } from "@/features/image-generation/components/direct-upload-client";
 import {
   type GenerationResult,
   GENERATION_RESULT_SCHEMA,
@@ -349,14 +350,20 @@ export async function runImageEdit(
   formData.set("size", node.size || DEFAULT_IMAGE_SIZE);
   if (node.model) formData.set("model", node.model);
 
+  const files: File[] = [];
   for (const [index, imageNode] of imageNodes.entries()) {
     if (!imageNode.imageUrl) continue;
-    const file = await imageUrlToFile(
-      imageNode.imageUrl,
-      `canvas-${index}.png`
+    files.push(
+      await imageUrlToFile(imageNode.imageUrl, `canvas-${index}.png`)
     );
-    formData.append("image", file);
   }
+  await appendDirectUploadsOrFiles({
+    formData,
+    files,
+    purpose: "image-source",
+    referenceField: "image_refs",
+    fileField: (_index, count) => (count === 1 ? "image" : "image[]"),
+  });
 
   const response = await fetch("/api/images/edit", {
     method: "POST",
@@ -388,14 +395,20 @@ export async function runImageEditBatch(
   formData.set("size", node.size || DEFAULT_IMAGE_SIZE);
   if (node.model) formData.set("model", node.model);
 
+  const files: File[] = [];
   for (const [index, imageNode] of imageNodes.entries()) {
     if (!imageNode.imageUrl) continue;
-    const file = await imageUrlToFile(
-      imageNode.imageUrl,
-      `canvas-${index}.png`
+    files.push(
+      await imageUrlToFile(imageNode.imageUrl, `canvas-${index}.png`)
     );
-    formData.append("image", file);
   }
+  await appendDirectUploadsOrFiles({
+    formData,
+    files,
+    purpose: "image-source",
+    referenceField: "image_refs",
+    fileField: (_index, count) => (count === 1 ? "image" : "image[]"),
+  });
 
   const response = await fetch("/api/images/edit", {
     method: "POST",
