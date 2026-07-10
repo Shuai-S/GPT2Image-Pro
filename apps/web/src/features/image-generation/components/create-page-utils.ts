@@ -94,6 +94,28 @@ export function readStoredCreateActiveMode(): ActiveMode {
 }
 
 /**
+ * 选择首次客户端模式守卫应使用的当前模式。
+ *
+ * @param params.activeMode 服务端与客户端首帧共享的运行时模式。
+ * @param params.requestedMode URL 显式请求的模式；存在时由后续守卫优先处理。
+ * @param params.storedMode 挂载后读取到的持久模式。
+ * @param params.shouldRestoreStoredMode 是否仍处于首次客户端恢复阶段。
+ * @returns 交给模式权限守卫的当前模式。
+ * @sideEffects 无。
+ * @failureMode 非首次恢复或 URL 已指定模式时保持运行时模式，避免反复覆盖用户选择。
+ */
+export function resolveHydratedCreateActiveMode(params: {
+  activeMode: ActiveMode;
+  requestedMode: ActiveMode | null;
+  storedMode: ActiveMode;
+  shouldRestoreStoredMode: boolean;
+}): ActiveMode {
+  return params.shouldRestoreStoredMode && !params.requestedMode
+    ? params.storedMode
+    : params.activeMode;
+}
+
+/**
  * 从 URL 读取创作模式。
  *
  * @param value URL query 中的 mode 值。

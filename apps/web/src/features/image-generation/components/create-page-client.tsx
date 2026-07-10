@@ -165,6 +165,7 @@ import {
   readImageApiJsonResponse,
   readStoredCreateActiveMode,
   replaceChatVariantByGenerationId,
+  resolveHydratedCreateActiveMode,
   resolveConversationSwitchTarget,
   resolveModeGuardTarget,
   resolveReferenceTarget,
@@ -449,8 +450,9 @@ export function CreatePageClient({
     uploadLimits.maxUploadBytes || DEFAULT_MAX_EDIT_REQUEST_BYTES;
   const [activeMode, setActiveMode] = useCreateRuntimeState<ActiveMode>(
     "activeMode",
-    readStoredCreateActiveMode()
+    "text"
   );
+  const shouldRestoreStoredModeRef = useRef(true);
   // 视频面板惰性挂载标志:首屏不挂 VideoCreatePanel(将其 chunk 移出首屏 bundle),
   // 首次切到 video mode 后置 true 并永不复位,切走再回来仍保留草稿态。
   const [videoMounted, setVideoMounted] = useState(activeMode === "video");
@@ -1357,9 +1359,19 @@ export function CreatePageClient({
 
   useEffect(() => {
     const requestedMode = parseCreateModeParam(searchParams.get("mode"));
+    const shouldRestoreStoredMode = shouldRestoreStoredModeRef.current;
+    shouldRestoreStoredModeRef.current = false;
+    const hydratedActiveMode = resolveHydratedCreateActiveMode({
+      activeMode,
+      requestedMode,
+      storedMode: shouldRestoreStoredMode
+        ? readStoredCreateActiveMode()
+        : activeMode,
+      shouldRestoreStoredMode,
+    });
     const decision = resolveModeGuardTarget({
       requestedMode,
-      activeMode,
+      activeMode: hydratedActiveMode,
       isActiveModeAllowed,
       fallbackMode,
     });
