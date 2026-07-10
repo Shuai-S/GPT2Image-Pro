@@ -175,10 +175,23 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          previous_tag="$({
+          current_tag=""
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            current_tag="${GITHUB_REF_NAME:-}"
+          fi
+          stable_tags="$(
             git tag --merged HEAD --list 'v[0-9]*.[0-9]*.[0-9]*' \
-              --sort=-version:refname
-          } | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | head -n 1)"
+              --sort=-version:refname | \
+              grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' || true
+          )"
+          previous_tag=""
+          while IFS= read -r candidate; do
+            [[ -n "$candidate" ]] || continue
+            if [[ "$candidate" != "$current_tag" ]]; then
+              previous_tag="$candidate"
+              break
+            fi
+          done <<< "$stable_tags"
           if [[ -z "$previous_tag" ]]; then
             echo "::error::找不到可达的上一正式版本 tag"
             exit 1
