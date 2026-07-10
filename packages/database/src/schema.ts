@@ -1777,6 +1777,11 @@ export const externalAsyncTask = pgTable(
       .where(
         sql`${table.taskType} = 'editable_file' AND ${table.clientRequestId} IS NOT NULL`
       ),
+    uniqueIndex("external_async_task_generation_client_unique")
+      .on(table.userId, table.apiKeyId, table.taskType, table.clientRequestId)
+      .where(
+        sql`${table.taskType} IN ('image', 'video') AND ${table.apiKeyId} IS NOT NULL AND ${table.clientRequestId} IS NOT NULL`
+      ),
     index("external_async_task_editable_claim_idx").on(
       table.taskType,
       table.status,

@@ -435,6 +435,13 @@
       "when": 1783695600000,
       "tag": "0061_external_async_task_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1783699200000,
+      "tag": "0062_external_async_task_generation_idempotency",
+      "breakpoints": true
     }
   ]
 }

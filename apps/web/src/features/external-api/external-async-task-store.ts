@@ -441,6 +441,34 @@ export async function findEditableTaskByClientRequest(input: {
 }
 
 /**
+ * 查找同一外部身份、普通任务类型与 Idempotency-Key 的任务。
+ *
+ * @param input 用户、已鉴权 API Key、image/video 类型与已 trim 的 clientRequestId。
+ * @returns 唯一命中行；不存在时为 undefined。
+ * @sideEffects 查询 external_async_task，不修改任务状态。
+ */
+export async function findGenerationTaskByClientRequest(input: {
+  userId: string;
+  apiKeyId: string;
+  taskType: "image" | "video";
+  clientRequestId: string;
+}): Promise<ExternalAsyncTaskRow | undefined> {
+  const [row] = await db
+    .select()
+    .from(externalAsyncTask)
+    .where(
+      and(
+        eq(externalAsyncTask.taskType, input.taskType),
+        eq(externalAsyncTask.userId, input.userId),
+        eq(externalAsyncTask.apiKeyId, input.apiKeyId),
+        eq(externalAsyncTask.clientRequestId, input.clientRequestId)
+      )
+    )
+    .limit(1);
+  return row;
+}
+
+/**
  * 把一条过期 running 且已耗尽尝试次数的可编辑任务收敛为 failed。
  *
  * 该维护写入避免进程连续崩溃后任务永久停在 running；返回被收敛的完整行，供调用方

@@ -145,13 +145,23 @@ const queuedTask = {
  *
  * @param path 外部 API 路径。
  * @param body 待序列化 JSON 对象。
+ * @param idempotencyKey 可选标准幂等请求头。
  * @returns 可传入 handler 的 Request 测试替身。
  * @sideEffects 仅在本地 Request 上定义只读 nextUrl。
  */
-function jsonRequest(path: string, body: Record<string, unknown>): never {
+function jsonRequest(
+  path: string,
+  body: Record<string, unknown>,
+  idempotencyKey?: string
+): never {
   const request = new Request(`https://api.example.test${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(idempotencyKey !== undefined
+        ? { "Idempotency-Key": idempotencyKey }
+        : {}),
+    },
     body: JSON.stringify(body),
   });
   Object.defineProperty(request, "nextUrl", { value: new URL(request.url) });
@@ -217,17 +227,23 @@ beforeEach(() => {
 
 describe("external generation async handlers", () => {
   it("文生图只持久入队批量 ID 与套餐队列设置", async () => {
-    const { postExternalImageGenerations } = await import("./image-generations");
+    const { postExternalImageGenerations } = await import(
+      "./image-generations"
+    );
 
     const response = await postExternalImageGenerations(
-      jsonRequest("/v1/images/generations", {
-        prompt: "draw a poster",
-        model: "gpt-image-2",
-        n: 2,
-        async: true,
-        response_format: "url",
-        prompt_repair: false,
-      })
+      jsonRequest(
+        "/v1/images/generations",
+        {
+          prompt: "draw a poster",
+          model: "gpt-image-2",
+          n: 2,
+          async: true,
+          response_format: "url",
+          prompt_repair: false,
+        },
+        "  image-request-1  "
+      )
     );
 
     const responsePayload = await response.clone().json();
@@ -237,6 +253,7 @@ describe("external generation async handlers", () => {
         userId: "user-1",
         apiKeyId: "key-1",
         relayOnly: false,
+        clientRequestId: "image-request-1",
         priority: "priority",
         userConcurrency: 3,
         request: expect.objectContaining({
@@ -259,7 +276,9 @@ describe("external generation async handlers", () => {
     mocks.enqueueGenerationTask.mockRejectedValueOnce(
       new Error("database unavailable")
     );
-    const { postExternalImageGenerations } = await import("./image-generations");
+    const { postExternalImageGenerations } = await import(
+      "./image-generations"
+    );
 
     const response = await postExternalImageGenerations(
       jsonRequest("/v1/images/generations", {
@@ -283,7 +302,9 @@ describe("external generation async handlers", () => {
       moderationBlockRiskLevel: "low",
       relayOnly: true,
     });
-    const { postExternalImageGenerations } = await import("./image-generations");
+    const { postExternalImageGenerations } = await import(
+      "./image-generations"
+    );
 
     const response = await postExternalImageGenerations(
       jsonRequest("/v1/images/generations", {
@@ -303,15 +324,19 @@ describe("external generation async handlers", () => {
     const { postExternalImageEdits } = await import("./image-edits");
 
     const response = await postExternalImageEdits(
-      jsonRequest("/v1/images/edits", {
-        prompt: "remove background",
-        model: "gpt-image-2",
-        image: "https://assets.example.test/source.png",
-        async: true,
-        hd_repair: false,
-        block_repair: true,
-        repair_prompt: "preserve the product label",
-      })
+      jsonRequest(
+        "/v1/images/edits",
+        {
+          prompt: "remove background",
+          model: "gpt-image-2",
+          image: "https://assets.example.test/source.png",
+          async: true,
+          hd_repair: false,
+          block_repair: true,
+          repair_prompt: "preserve the product label",
+        },
+        "edit-request-1"
+      )
     );
 
     const responsePayload = await response.clone().json();
@@ -319,6 +344,7 @@ describe("external generation async handlers", () => {
     const call = mocks.enqueueGenerationTask.mock.calls[0]?.[0];
     expect(call).toEqual(
       expect.objectContaining({
+        clientRequestId: "edit-request-1",
         priority: "priority",
         userConcurrency: 3,
         request: expect.objectContaining({
@@ -374,18 +400,23 @@ describe("external generation async handlers", () => {
     );
 
     const response = await postExternalVideoGenerations(
-      jsonRequest("/v1/videos/generations", {
-        prompt: "slow camera movement",
-        model: "firefly-sora2-8s-16x9",
-        negative_prompt: "flicker",
-        image: images,
-        async: true,
-      })
+      jsonRequest(
+        "/v1/videos/generations",
+        {
+          prompt: "slow camera movement",
+          model: "firefly-sora2-8s-16x9",
+          negative_prompt: "flicker",
+          image: images,
+          async: true,
+        },
+        "video-request-1"
+      )
     );
 
     expect(response.status).toBe(200);
     expect(mocks.enqueueGenerationTask).toHaveBeenCalledWith(
       expect.objectContaining({
+        clientRequestId: "video-request-1",
         priority: "highest",
         userConcurrency: 2,
         request: expect.objectContaining({
@@ -398,7 +429,10 @@ describe("external generation async handlers", () => {
           },
         }),
         mediaInputs: [
-          expect.objectContaining({ data: Buffer.from("first"), role: "first" }),
+          expect.objectContaining({
+            data: Buffer.from("first"),
+            role: "first",
+          }),
           expect.objectContaining({ data: Buffer.from("last"), role: "last" }),
           expect.objectContaining({
             data: Buffer.from("reference"),
@@ -411,17 +445,132 @@ describe("external generation async handlers", () => {
   });
 
   it("同步文生图继续直达统一管线且不创建持久任务", async () => {
-    const { postExternalImageGenerations } = await import("./image-generations");
+    const { postExternalImageGenerations } = await import(
+      "./image-generations"
+    );
 
     const response = await postExternalImageGenerations(
-      jsonRequest("/v1/images/generations", {
-        prompt: "draw a poster",
-        model: "gpt-image-2",
-      })
+      jsonRequest(
+        "/v1/images/generations",
+        {
+          prompt: "draw a poster",
+          model: "gpt-image-2",
+        },
+        "x".repeat(256)
+      )
     );
 
     expect(response.status).toBe(200);
     expect(mocks.enqueueGenerationTask).not.toHaveBeenCalled();
     expect(mocks.runBatchImageGeneration).toHaveBeenCalledOnce();
+  });
+
+  it("三个 async handler 都在入队前拒绝非法 Idempotency-Key", async () => {
+    const invalidKey = "x".repeat(256);
+    const { postExternalImageGenerations } = await import(
+      "./image-generations"
+    );
+    const { postExternalImageEdits } = await import("./image-edits");
+    const { postExternalVideoGenerations } = await import(
+      "./video-generations"
+    );
+
+    const responses = await Promise.all([
+      postExternalImageGenerations(
+        jsonRequest(
+          "/v1/images/generations",
+          { prompt: "draw", model: "gpt-image-2", async: true },
+          invalidKey
+        )
+      ),
+      postExternalImageEdits(
+        jsonRequest(
+          "/v1/images/edits",
+          {
+            prompt: "edit",
+            model: "gpt-image-2",
+            image: "https://assets.example.test/source.png",
+            async: true,
+          },
+          invalidKey
+        )
+      ),
+      postExternalVideoGenerations(
+        jsonRequest(
+          "/v1/videos/generations",
+          {
+            prompt: "animate",
+            model: "firefly-sora2-8s-16x9",
+            async: true,
+          },
+          invalidKey
+        )
+      ),
+    ]);
+
+    for (const response of responses) {
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "invalid_idempotency_key" },
+      });
+    }
+    expect(mocks.fetchPublicImage).not.toHaveBeenCalled();
+    expect(mocks.enqueueGenerationTask).not.toHaveBeenCalled();
+  });
+
+  it("三个 async handler 都把幂等内容冲突映射为 409", async () => {
+    const { GenerationTaskConflictError } = await import(
+      "../generation-task-idempotency"
+    );
+    mocks.enqueueGenerationTask.mockRejectedValue(
+      new GenerationTaskConflictError()
+    );
+    const { postExternalImageGenerations } = await import(
+      "./image-generations"
+    );
+    const { postExternalImageEdits } = await import("./image-edits");
+    const { postExternalVideoGenerations } = await import(
+      "./video-generations"
+    );
+
+    const responses = await Promise.all([
+      postExternalImageGenerations(
+        jsonRequest(
+          "/v1/images/generations",
+          { prompt: "draw", model: "gpt-image-2", async: true },
+          "conflict-1"
+        )
+      ),
+      postExternalImageEdits(
+        jsonRequest(
+          "/v1/images/edits",
+          {
+            prompt: "edit",
+            model: "gpt-image-2",
+            image: "https://assets.example.test/source.png",
+            async: true,
+          },
+          "conflict-2"
+        )
+      ),
+      postExternalVideoGenerations(
+        jsonRequest(
+          "/v1/videos/generations",
+          {
+            prompt: "animate",
+            model: "firefly-sora2-8s-16x9",
+            async: true,
+          },
+          "conflict-3"
+        )
+      ),
+    ]);
+
+    for (const response of responses) {
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "idempotency_key_conflict" },
+      });
+    }
   });
 });

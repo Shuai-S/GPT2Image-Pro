@@ -54,6 +54,8 @@ type CreateAsyncImageTaskParams = {
   priority?: number;
   userConcurrency?: number;
   maxAttempts?: number;
+  clientRequestId?: string;
+  requestHash?: string;
   requestPayload?: Record<string, unknown>;
 };
 
@@ -116,6 +118,8 @@ export async function createAsyncImageTask(
     priority: params.priority,
     userConcurrency: params.userConcurrency,
     maxAttempts: params.maxAttempts,
+    clientRequestId: params.clientRequestId,
+    requestHash: params.requestHash,
     initialPayload: task,
     requestPayload: params.requestPayload,
     callbackUrl: params.callbackUrl,

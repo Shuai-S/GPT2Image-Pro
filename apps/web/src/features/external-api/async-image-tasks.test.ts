@@ -187,6 +187,8 @@ describe("external async tasks", () => {
       apiKeyId: "key_1",
       model: "gpt-image-2",
       generationIds: ["gen_1"],
+      clientRequestId: "request_1",
+      requestHash: "hash_1",
     });
 
     const response = toAsyncImageTaskResponse(task);
@@ -200,7 +202,12 @@ describe("external async tasks", () => {
     });
     expect(response).not.toHaveProperty("userId");
     expect(response).not.toHaveProperty("apiKeyId");
-    expect(storeMocks.create).toHaveBeenCalledOnce();
+    expect(storeMocks.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientRequestId: "request_1",
+        requestHash: "hash_1",
+      })
+    );
   });
 
   it("完成任务时把结果字段平铺且重复完成保持首个终态", async () => {

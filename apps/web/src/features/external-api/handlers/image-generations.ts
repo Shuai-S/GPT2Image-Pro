@@ -21,6 +21,11 @@ import {
   validateCallbackUrl,
 } from "@/features/external-api/async-image-tasks";
 import { authenticateExternalApiRequest } from "@/features/external-api/auth";
+import {
+  GenerationTaskConflictError,
+  GenerationTaskIdempotencyKeyError,
+  readGenerationIdempotencyKey,
+} from "@/features/external-api/generation-task-idempotency";
 import { enqueueGenerationTask } from "@/features/external-api/generation-task-service";
 import {
   createExternalImageStreamResponse,
@@ -251,6 +256,21 @@ export const postExternalImageGenerations = withApiLogging(
         "unsupported_async_mode"
       );
     }
+    let clientRequestId: string | undefined;
+    if (useAsync) {
+      try {
+        clientRequestId = readGenerationIdempotencyKey(request);
+      } catch (error) {
+        if (error instanceof GenerationTaskIdempotencyKeyError) {
+          return openAIImageError(
+            error.message,
+            400,
+            "invalid_idempotency_key"
+          );
+        }
+        throw error;
+      }
+    }
     let callbackUrl: string | undefined;
     if (parsed.data.callback_url) {
       try {
@@ -366,6 +386,7 @@ export const postExternalImageGenerations = withApiLogging(
           userId: auth.userId,
           apiKeyId: auth.apiKeyId,
           relayOnly: auth.relayOnly,
+          ...(clientRequestId ? { clientRequestId } : {}),
           callbackUrl,
           priority: limits.queuePriority,
           userConcurrency: limits.imageGenerationConcurrency,
@@ -378,6 +399,13 @@ export const postExternalImageGenerations = withApiLogging(
           },
         });
       } catch (error) {
+        if (error instanceof GenerationTaskConflictError) {
+          return openAIImageError(
+            error.message,
+            409,
+            "idempotency_key_conflict"
+          );
+        }
         logError(error, {
           source: "external-api-image-generation-enqueue",
           userId: auth.userId,

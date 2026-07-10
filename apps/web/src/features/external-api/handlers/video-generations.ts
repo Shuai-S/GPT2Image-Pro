@@ -25,6 +25,11 @@ import {
   validateCallbackUrl,
 } from "@/features/external-api/async-image-tasks";
 import { authenticateExternalApiRequest } from "@/features/external-api/auth";
+import {
+  GenerationTaskConflictError,
+  GenerationTaskIdempotencyKeyError,
+  readGenerationIdempotencyKey,
+} from "@/features/external-api/generation-task-idempotency";
 import type { GenerationTaskInputObject } from "@/features/external-api/generation-task-input";
 import { enqueueGenerationTask } from "@/features/external-api/generation-task-service";
 import {
@@ -147,6 +152,21 @@ export const postExternalVideoGenerations = withApiLogging(
         "unsupported_async_mode"
       );
     }
+    let clientRequestId: string | undefined;
+    if (useAsync) {
+      try {
+        clientRequestId = readGenerationIdempotencyKey(request);
+      } catch (error) {
+        if (error instanceof GenerationTaskIdempotencyKeyError) {
+          return openAIImageError(
+            error.message,
+            400,
+            "invalid_idempotency_key"
+          );
+        }
+        throw error;
+      }
+    }
     const inputImages = parsed.data.image?.map(decodeImageDataUrl);
     let callbackUrl: string | undefined;
     if (parsed.data.callback_url || parsed.data.callbackUrl) {
@@ -182,6 +202,7 @@ export const postExternalVideoGenerations = withApiLogging(
           userId: auth.userId,
           apiKeyId: auth.apiKeyId,
           relayOnly: auth.relayOnly,
+          ...(clientRequestId ? { clientRequestId } : {}),
           callbackUrl,
           priority: queueSettings.priority,
           userConcurrency: queueSettings.userConcurrency,
@@ -201,6 +222,13 @@ export const postExternalVideoGenerations = withApiLogging(
           headers: { "Cache-Control": "no-store" },
         });
       } catch (error) {
+        if (error instanceof GenerationTaskConflictError) {
+          return openAIImageError(
+            error.message,
+            409,
+            "idempotency_key_conflict"
+          );
+        }
         logError(error, {
           source: "external-api-video-enqueue",
           userId: auth.userId,
