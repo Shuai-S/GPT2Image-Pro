@@ -1,17 +1,19 @@
 import dotenv from "dotenv";
 import { defineConfig } from "drizzle-kit";
 
+const WORKSPACE_ROOT = "../..";
+
 // 检测测试环境 (通过命令行参数或环境变量)
 const isTestEnv =
   process.argv.includes("--test") || process.env.USE_TEST_DB === "true";
 
 // 根据环境加载对应的环境变量文件
 if (isTestEnv) {
-  dotenv.config({ path: ".env.test" });
+  dotenv.config({ path: `${WORKSPACE_ROOT}/.env.test` });
 } else {
-  // 加载环境变量 (优先 .env.local，其次 .env)
-  dotenv.config({ path: ".env.local" });
-  dotenv.config({ path: ".env" });
+  // pnpm --dir 会把 cwd 切到本包，因此显式从 monorepo 根目录读取。
+  dotenv.config({ path: `${WORKSPACE_ROOT}/.env.local` });
+  dotenv.config({ path: `${WORKSPACE_ROOT}/.env` });
 }
 
 // 确保环境变量存在 (drizzle-kit 命令运行时检查)
