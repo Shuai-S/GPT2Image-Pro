@@ -14,7 +14,7 @@ export type AsyncCallbackWorkerDependencies<TRow, TPayload> = {
   getTaskId: (row: TRow) => string;
   getCallbackUrl: (row: TRow) => string | null;
   getAttempts: (row: TRow) => number;
-  materializePayload: (row: TRow) => TPayload;
+  materializePayload: (row: TRow) => TPayload | Promise<TPayload>;
   deliver: (callbackUrl: string, payload: TPayload) => Promise<void>;
   complete: (id: string, callbackToken: string) => Promise<boolean>;
   retry: (input: {
@@ -39,7 +39,7 @@ export async function processAsyncCallbackClaim<TRow, TPayload>(
   try {
     const callbackUrl = dependencies.getCallbackUrl(claim.row);
     if (!callbackUrl) throw new Error("Persisted callback URL is missing");
-    const payload = dependencies.materializePayload(claim.row);
+    const payload = await dependencies.materializePayload(claim.row);
     await dependencies.deliver(callbackUrl, payload);
     return (await dependencies.complete(id, claim.callbackToken))
       ? "sent"
@@ -49,7 +49,8 @@ export async function processAsyncCallbackClaim<TRow, TPayload>(
       id,
       callbackToken: claim.callbackToken,
       attempts: dependencies.getAttempts(claim.row),
-      error: error instanceof Error ? error.message : "Callback delivery failed",
+      error:
+        error instanceof Error ? error.message : "Callback delivery failed",
     });
     return scheduled ? "retry_scheduled" : "lease_lost";
   }

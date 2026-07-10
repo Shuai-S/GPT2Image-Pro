@@ -13,11 +13,17 @@ const storeMocks = vi.hoisted(() => ({
   get: vi.fn<(id: unknown) => Promise<unknown>>(),
   complete: vi.fn<(input: unknown) => Promise<unknown>>(),
 }));
+const materializerMocks = vi.hoisted(() => ({
+  materialize: vi.fn(),
+}));
 
 vi.mock("./external-async-task-store", () => ({
   createExternalAsyncTask: storeMocks.create,
   getExternalAsyncTask: storeMocks.get,
   completeExternalAsyncTask: storeMocks.complete,
+}));
+vi.mock("./generation-task-materializer", () => ({
+  materializeGenerationTask: materializerMocks.materialize,
 }));
 
 vi.mock("@repo/shared/security/dns-pin", () => ({
@@ -38,6 +44,7 @@ import {
   createAsyncImageTask,
   deliverAsyncImageCallback,
   type GenerationTaskRow,
+  getAsyncImageTask,
   toAsyncImageTask,
   toAsyncImageTaskResponse,
   toGenerationImageTaskResponse,
@@ -124,6 +131,8 @@ beforeEach(() => {
   storeMocks.create.mockReset();
   storeMocks.get.mockReset();
   storeMocks.complete.mockReset();
+  materializerMocks.materialize.mockReset();
+  materializerMocks.materialize.mockResolvedValue(undefined);
   mockFetchWithDnsPin.mockReset();
   process.env.BETTER_AUTH_SECRET = "test-storage-signing-secret";
 
@@ -140,7 +149,11 @@ beforeEach(() => {
     const current = storeMocks.rows.get(input.id) as
       | ExternalAsyncTaskRow
       | undefined;
-    if (!current || current.status === "completed" || current.status === "failed") {
+    if (
+      !current ||
+      current.status === "completed" ||
+      current.status === "failed"
+    ) {
       return undefined;
     }
     const row: ExternalAsyncTaskRow = {
@@ -218,6 +231,45 @@ describe("external async tasks", () => {
     });
     expect(replay?.status).toBe("completed");
     expect(storeMocks.complete).toHaveBeenCalledOnce();
+  });
+
+  it("轮询普通终态时使用动态 generation 物化结果", async () => {
+    const row = createStoreRow({
+      id: "task_dynamic",
+      taskType: "image",
+      objectType: "image",
+      userId: "user_1",
+      status: "running",
+      initialPayload: {
+        id: "task_dynamic",
+        object: "image.generation",
+        status: "processing",
+        generationId: "gen_1",
+      },
+    });
+    row.status = "completed";
+    row.resultPayload = { generationIds: ["gen_1"] };
+    storeMocks.rows.set(row.id, row);
+    materializerMocks.materialize.mockResolvedValueOnce({
+      objectType: "image",
+      status: "completed",
+      payload: {
+        data: [{ url: "https://runtime.example.com/image.png?sig=current" }],
+        credits_consumed: 3.15,
+      },
+    });
+
+    const task = await getAsyncImageTask(row.id);
+
+    expect(materializerMocks.materialize).toHaveBeenCalledWith(row);
+    expect(task).toMatchObject({
+      id: row.id,
+      object: "image",
+      status: "completed",
+      data: [{ url: "https://runtime.example.com/image.png?sig=current" }],
+      credits_consumed: 3.15,
+    });
+    expect(task).not.toHaveProperty("generationIds");
   });
 
   it("可编辑终态仅持久化对象引用并在每次读取时重新签名", () => {

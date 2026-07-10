@@ -6,12 +6,11 @@
  */
 
 import { createContextLogger } from "@repo/shared/logger";
-
+import { processAsyncCallbackClaim } from "./async-callback-worker-core";
 import {
   deliverAsyncImageCallback,
-  toAsyncImageTask,
+  materializeAsyncImageTask,
 } from "./async-image-tasks";
-import { processAsyncCallbackClaim } from "./async-callback-worker-core";
 import {
   claimExternalAsyncCallback,
   completeExternalAsyncCallback,
@@ -59,7 +58,7 @@ async function runCallbackTick(): Promise<number> {
     getTaskId: (row) => row.id,
     getCallbackUrl: (row) => row.callbackUrl,
     getAttempts: (row) => row.callbackAttempts,
-    materializePayload: toAsyncImageTask,
+    materializePayload: materializeAsyncImageTask,
     deliver: deliverAsyncImageCallback,
     complete: completeExternalAsyncCallback,
     retry: retryExternalAsyncCallback,

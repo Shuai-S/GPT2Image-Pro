@@ -21,6 +21,7 @@ type CallbackRow = {
  * @returns 注入状态机的依赖对象及可断言 mock，无外部副作用。
  */
 function makeDependencies(overrides?: {
+  materialize?: (row: CallbackRow) => { id: string } | Promise<{ id: string }>;
   deliver?: (url: string, payload: { id: string }) => Promise<void>;
   complete?: (id: string, token: string) => Promise<boolean>;
   retry?: (input: {
@@ -45,7 +46,11 @@ function makeDependencies(overrides?: {
         error: string;
       }) => true)
   );
+  const materializePayload = vi.fn(
+    overrides?.materialize ?? ((row: CallbackRow) => ({ id: row.id }))
+  );
   return {
+    materializePayload,
     deliver,
     complete,
     retry,
@@ -53,7 +58,7 @@ function makeDependencies(overrides?: {
       getTaskId: (row: CallbackRow) => row.id,
       getCallbackUrl: (row: CallbackRow) => row.callbackUrl,
       getAttempts: (row: CallbackRow) => row.attempts,
-      materializePayload: (row: CallbackRow) => ({ id: row.id }),
+      materializePayload,
       deliver,
       complete,
       retry,
@@ -101,6 +106,25 @@ describe("processAsyncCallbackClaim", () => {
       attempts: 2,
       error: "upstream unavailable",
     });
+  });
+
+  it("异步物化失败时不投递并进入有限重试", async () => {
+    const { dependencies, materializePayload, deliver, complete, retry } =
+      makeDependencies({
+        materialize: async () => {
+          throw new Error("result storage unavailable");
+        },
+      });
+
+    await expect(processAsyncCallbackClaim(claim, dependencies)).resolves.toBe(
+      "retry_scheduled"
+    );
+    expect(materializePayload).toHaveBeenCalledWith(claim.row);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(complete).not.toHaveBeenCalled();
+    expect(retry).toHaveBeenCalledWith(
+      expect.objectContaining({ error: "result storage unavailable" })
+    );
   });
 
   it("投递成功但终态 token 已失时返回 lease_lost", async () => {

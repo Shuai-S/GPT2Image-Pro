@@ -16,6 +16,10 @@ import {
   getExternalAsyncTask,
 } from "./external-async-task-store";
 import {
+  type MaterializedGenerationTask,
+  materializeGenerationTask,
+} from "./generation-task-materializer";
+import {
   assertPublicCallbackUrl,
   fetchPublicCallback,
 } from "./safe-image-fetch";
@@ -24,7 +28,7 @@ type AsyncImageTaskStatus = "processing" | "completed" | "failed";
 
 export type AsyncImageTask = {
   id: string;
-  object: "image.generation" | "image" | "editable_file_task";
+  object: "image.generation" | "image" | "video" | "editable_file_task";
   userId: string;
   apiKeyId?: string;
   model?: string;
@@ -117,7 +121,10 @@ export async function createAsyncImageTask(
  * initialPayload 保留创建响应；终态 result/error 字段覆盖其上，内部租约与回调字段
  * 永不进入公开对象。
  */
-export function toAsyncImageTask(row: ExternalAsyncTaskRow): AsyncImageTask {
+function mapAsyncImageTask(
+  row: ExternalAsyncTaskRow,
+  materializedGeneration?: MaterializedGenerationTask
+): AsyncImageTask {
   const initialPayload =
     row.initialPayload && typeof row.initialPayload === "object"
       ? (row.initialPayload as Record<string, unknown>)
@@ -130,17 +137,24 @@ export function toAsyncImageTask(row: ExternalAsyncTaskRow): AsyncImageTask {
     row.taskType === "editable_file" &&
     row.status === "completed" &&
     !materializedEditableResult;
-  const resultPayload = materializedEditableResult
-    ? materializedEditableResult
-    : row.taskType === "editable_file"
-      ? {}
-      : row.resultPayload && typeof row.resultPayload === "object"
-        ? (row.resultPayload as Record<string, unknown>)
-        : row.resultPayload === null
-          ? {}
-          : { result: row.resultPayload };
-  const errorPayload =
-    row.errorPayload && typeof row.errorPayload === "object"
+  const resultPayload = materializedGeneration
+    ? materializedGeneration.status === "completed"
+      ? materializedGeneration.payload
+      : {}
+    : materializedEditableResult
+      ? materializedEditableResult
+      : row.taskType === "editable_file"
+        ? {}
+        : row.resultPayload && typeof row.resultPayload === "object"
+          ? (row.resultPayload as Record<string, unknown>)
+          : row.resultPayload === null
+            ? {}
+            : { result: row.resultPayload };
+  const errorPayload = materializedGeneration
+    ? materializedGeneration.status === "failed"
+      ? materializedGeneration.payload
+      : {}
+    : row.errorPayload && typeof row.errorPayload === "object"
       ? (row.errorPayload as Record<string, unknown>)
       : row.errorPayload === null
         ? {}
@@ -152,17 +166,20 @@ export function toAsyncImageTask(row: ExternalAsyncTaskRow): AsyncImageTask {
       ? { error: { message: "Editable file task result is unavailable." } }
       : errorPayload),
     id: row.id,
-    object: row.objectType as AsyncImageTask["object"],
+    object: (materializedGeneration?.objectType ??
+      row.objectType) as AsyncImageTask["object"],
     userId: row.userId,
     apiKeyId: row.apiKeyId ?? undefined,
     model: row.model ?? undefined,
-    status: invalidEditableResult
-      ? "failed"
-      : row.status === "completed"
-        ? "completed"
-        : row.status === "failed"
-          ? "failed"
-          : "processing",
+    status:
+      materializedGeneration?.status ??
+      (invalidEditableResult
+        ? "failed"
+        : row.status === "completed"
+          ? "completed"
+          : row.status === "failed"
+            ? "failed"
+            : "processing"),
     created_at: row.createdAt.toISOString(),
     ...(row.completedAt
       ? {
@@ -173,12 +190,38 @@ export function toAsyncImageTask(row: ExternalAsyncTaskRow): AsyncImageTask {
   };
 }
 
+/**
+ * 将持久任务行同步还原为基础公开任务。
+ *
+ * @param row external_async_task 完整行。
+ * @returns 处理中任务、editable 动态签名或持久终态字段。
+ * @sideEffects editable 完成行会生成当前签名，不访问数据库或对象存储。
+ */
+export function toAsyncImageTask(row: ExternalAsyncTaskRow): AsyncImageTask {
+  return mapAsyncImageTask(row);
+}
+
+/**
+ * 在读取当下从 generation 真相动态物化普通图像/视频任务。
+ *
+ * @param row external_async_task 完整行。
+ * @returns 普通终态使用重新签名/有限读取的当前产物；其他任务返回基础映射。
+ * @throws generation 查询、对象读取或归属校验失败时向上抛，callback 会安排重试。
+ * @sideEffects 普通终态查询产物表；b64_json 结果有限读取对象存储。
+ */
+export async function materializeAsyncImageTask(
+  row: ExternalAsyncTaskRow
+): Promise<AsyncImageTask> {
+  const materializedGeneration = await materializeGenerationTask(row);
+  return mapAsyncImageTask(row, materializedGeneration);
+}
+
 /** 按 task id 读取并物化公开任务；不存在时返回 undefined。 */
 export async function getAsyncImageTask(
   id: string
 ): Promise<AsyncImageTask | undefined> {
   const row = await getExternalAsyncTask(id);
-  return row ? toAsyncImageTask(row) : undefined;
+  return row ? await materializeAsyncImageTask(row) : undefined;
 }
 
 /** 删除内部 userId/apiKeyId 后生成可直接编码的公开任务对象。 */
