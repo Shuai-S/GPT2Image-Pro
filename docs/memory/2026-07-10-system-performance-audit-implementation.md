@@ -37,6 +37,9 @@
 
 - `1d83039c`、`2abe86c4`：后端候选过滤下推 SQL，设置每类候选上限，多组先去重再限流；
   指标记录查询数、候选数、租约冲突和选择耗时，调度对拍测试锁定原有车道语义。
+- `78f8e5fd`：后端错误规则、重置时间解析、冷却分类与失败状态收敛移入 DB-free 模块；
+  `service.ts` 仅负责注入运行时设置并兼容重导出。后端池全套与生图回退共 132 项测试通过，
+  分类测试不再通过 mock 数据库聚合层制造“纯函数”假象。
 - `9b7e58ef`、`9813be89`：统一 `fetchWithDeadline`、组合 abort、正文流式限额与有限错误解析；
   覆盖支付、Adobe、生图、图片回读和注册机等关键路径。
 - `ff584c74`：OpenAI moderation 真实中止请求，响应上限 1 MiB，失败继续 fail-closed。
@@ -71,6 +74,7 @@ Buildx，因此真实迁移、登录态 Lighthouse、跨架构镜像和 OCI desc
 
 1. `pnpm audit --prod` 的 esbuild 开发链 1 moderate、2 low，等待 Drizzle/Vite/tsx 上游兼容
    更新，禁止通过未经全量验证的跨 major override 制造表面零告警。
-2. 后端池、生图 service/operations、创作页和两处管理面板仍然过大。后续只按
-   error-classification、cooldown、协议适配、持久化或独立 UI 面板等真实职责提取，每步保留
-   调度对拍或交互回归；不以行数为目标机械拆分。
+2. 后端池、生图 service/operations、创作页和两处管理面板仍然过大。后端池的
+   error-classification/cooldown 已完成首块提取；后续继续按 scheduler、OAuth、导入同步、
+   协议适配、持久化或独立 UI 面板等真实职责提取，每步保留调度对拍或交互回归，不以行数
+   为目标机械拆分。

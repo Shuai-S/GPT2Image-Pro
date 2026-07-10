@@ -43,7 +43,7 @@
 
 - [ ] **上帝组件结构性拆分（defer，需人在环专项 + 重新 UI 实测）**：
   - `image-generation/components/create-page-client.tsx`、`image-generation/service.ts` 与 `operations.ts`：按状态机、协议适配和持久化边界渐进提取，每步补回归测试。
-  - `image-backend-pool/service.ts`：按 scheduler/error-classification/cooldown/oauth/import/sub2api-sync/crud 等真实职责渐进提取，保留调度对拍测试。
+  - `image-backend-pool/service.ts`：error-classification/cooldown 已由 `78f8e5fd` 提取为 DB-free 模块；继续按 scheduler/oauth/import/sub2api-sync/crud 等真实职责渐进提取，保留调度对拍测试。
   - `image-backend-pool/admin-panel.tsx`、`system-settings/components/system-settings-panel.tsx`：仅拆独立 UI 面板，不以行数做机械拆分。
 - [ ] **2026-05-31 审计的其余跨文件 backlog 需重新盘点**：原 23 条中的 Creem 金额校验、
   财务幂等/存储归属等已在后续批次完成；C-H2 与 M-M7/M-M10/M-M15/M-M17 等尚未逐条
@@ -405,8 +405,9 @@
   release descriptor promote 的首次全绿记录。
 - [ ] **esbuild 开发链公告**：`pnpm audit --prod` 仍为 1 moderate、2 low，来自 Drizzle 旧
   `@esbuild-kit` 与 Vite/tsx。等待上游落入兼容版本范围，禁止未经全量验证的跨 major override。
-- [ ] **巨型文件按职责渐进拆分**：优先提取后端池 error-classification/cooldown、生成协议适配
-  与独立 UI 面板；每次提取需有调度对拍或交互回归，不做机械分文件。
+- [ ] **巨型文件按职责渐进拆分**：后端池 error-classification/cooldown 已由 `78f8e5fd`
+  完成首块提取；继续处理生成协议适配、后端池 scheduler/OAuth/导入同步与独立 UI 面板。
+  每次提取需有调度对拍或交互回归，不做机械分文件。
 
 ---
 

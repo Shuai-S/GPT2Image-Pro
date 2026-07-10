@@ -101,6 +101,9 @@ Authorization/Cookie。
   `maxBytes` 与 UOL 输出类型。
 - 异步生命周期：`13097ae5`、`02540180` 增加终态有界 retention 与严格输入 GC；
   `0f97e0f2` 增加普通图像/视频异步 HTTP 幂等、稳定内容摘要和唯一索引。
+- 结构收敛：`78f8e5fd` 将后端错误分类、重置时间解析与冷却状态收敛提取为
+  DB-free 模块；`service.ts` 只注入运行时设置并保留既有公共导出，132 项后端池与
+  生图回退测试锁定行为。
 - 资源预算：CI 强制客户端 gzip 资源体积预算、公开/登录态 LCP、CLS、TBT 等门槛；
   Docker Compose 与发布文档使用 exact tag，避免运行组件漂移。
 
@@ -108,7 +111,8 @@ Authorization/Cookie。
 
 - 巨型文件仍需按真实职责渐进提取并逐块回归，禁止机械拆分。当前重点为
   `image-backend-pool/service.ts`、`image-generation/service.ts`、`operations.ts`、
-  `create-page-client.tsx`、`admin-panel.tsx`、`system-settings-panel.tsx`。
+  `create-page-client.tsx`、`admin-panel.tsx`、`system-settings-panel.tsx`；后端池的
+  error-classification/cooldown 已完成首块提取，剩余 scheduler、OAuth、导入同步与 CRUD。
 - `pnpm audit --prod` 仍报告 esbuild 开发工具链的 1 moderate、2 low；来源为 Drizzle
   旧 `@esbuild-kit` 与 Vite/tsx，等待上游进入兼容范围，不做跨 major override 假修复。
 - 本机没有可用 PostgreSQL 服务、Chrome 与 Docker Buildx，无法本地复现真实迁移、
