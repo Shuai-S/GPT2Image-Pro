@@ -8,14 +8,14 @@
 
 const authenticated = process.env.LHCI_AUTHENTICATED === "true";
 const publicUrls = [
-  "http://127.0.0.1:3000/en",
-  "http://127.0.0.1:3000/en/docs",
-  "http://127.0.0.1:3000/en/sign-in",
+  "http://localhost:3000/en",
+  "http://localhost:3000/en/docs",
+  "http://localhost:3000/en/sign-in",
 ];
 const protectedUrls = [
-  "http://127.0.0.1:3000/en/dashboard/create",
-  "http://127.0.0.1:3000/en/dashboard/canvas",
-  "http://127.0.0.1:3000/en/dashboard/admin/settings",
+  "http://localhost:3000/en/dashboard/create",
+  "http://localhost:3000/en/dashboard/canvas",
+  "http://localhost:3000/en/dashboard/admin/settings",
 ];
 
 /** 返回公开页面或 Dashboard 页面共用的 Lighthouse 断言。 */
