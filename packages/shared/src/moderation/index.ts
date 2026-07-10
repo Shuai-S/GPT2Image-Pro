@@ -11,13 +11,14 @@ import type {
   ModerationBlockRiskLevel,
   SubscriptionPlan,
 } from "../config/subscription-plan";
-import { normalizePlanModerationBlockRiskLevel } from "../subscription/services/plan-capabilities";
-import { logError, logWarn } from "../logger";
 import {
+  DEFAULT_JSON_RESPONSE_MAX_BYTES,
   fetchWithDeadline,
   readResponseJsonWithLimit,
   readResponseTextWithLimit,
 } from "../http/fetch";
+import { logError, logWarn } from "../logger";
+import { normalizePlanModerationBlockRiskLevel } from "../subscription/services/plan-capabilities";
 import {
   getRuntimeSettingBoolean,
   getRuntimeSettingNumber,
@@ -30,6 +31,7 @@ import {
   shouldBlockAliyunRisk,
 } from "./risk";
 
+export type { AliyunRiskLevel } from "./risk";
 // 纯逻辑工具从 ./risk re-export，便于在 DB-free 单测中直接引用。
 export {
   ALIYUN_MAX_CONTENT_LENGTH,
@@ -38,7 +40,6 @@ export {
   getContentChunks,
   shouldBlockAliyunRisk,
 } from "./risk";
-export type { AliyunRiskLevel } from "./risk";
 
 type ModerationProvider = "aliyun" | "openai";
 type ModerationDecision = "allow" | "block" | "skipped" | "error";
@@ -114,7 +115,9 @@ async function shouldFailClosed() {
   return getRuntimeSettingBoolean("CONTENT_MODERATION_FAIL_CLOSED", true);
 }
 
-async function runtimeValue(name: Parameters<typeof getRuntimeSettingString>[0]) {
+async function runtimeValue(
+  name: Parameters<typeof getRuntimeSettingString>[0]
+) {
   return getRuntimeSettingString(name);
 }
 
@@ -131,7 +134,8 @@ async function getAliyunConfig(): Promise<AliyunConfig | null> {
   const config: AliyunConfig = {
     accessKeyId,
     accessKeySecret,
-    regionId: (await runtimeValue("ALIYUN_MODERATION_REGION_ID")) || "cn-shanghai",
+    regionId:
+      (await runtimeValue("ALIYUN_MODERATION_REGION_ID")) || "cn-shanghai",
     timeoutMs: await getProviderTimeoutMs(),
   };
 
@@ -187,9 +191,13 @@ async function getProxySecret() {
 }
 
 async function getProxyTimeoutMs() {
-  return getRuntimeSettingNumber("CONTENT_MODERATION_PROXY_TIMEOUT_MS", 10_000, {
-    positive: true,
-  });
+  return getRuntimeSettingNumber(
+    "CONTENT_MODERATION_PROXY_TIMEOUT_MS",
+    10_000,
+    {
+      positive: true,
+    }
+  );
 }
 
 async function getProviderTimeoutMs() {
@@ -269,7 +277,9 @@ function toBlockResult(
 function formatModerationErrors(
   errors: Array<{ provider: string; error: string }>
 ) {
-  return errors.map(({ provider, error }) => `${provider}: ${error}`).join("; ");
+  return errors
+    .map(({ provider, error }) => `${provider}: ${error}`)
+    .join("; ");
 }
 
 function getAliyunClient(config: AliyunConfig) {
@@ -592,14 +602,26 @@ async function moderateWithAliyun(
 }
 
 async function moderateWithOpenAI(
-  input: ModerateContentInput
+  input: ModerateContentInput,
+  timeoutMs: number
 ): Promise<ModerationResult> {
   const apiKey = await getOpenAiApiKey();
   if (!apiKey) {
     return { decision: "skipped", provider: "openai" };
   }
 
-  const client = new OpenAI({ apiKey });
+  // SDK 默认超时和重试会让外层 Promise.race 返回后请求仍占用连接。把共享
+  // deadline 注入真实 fetch，并关闭 SDK 重试，确保一次审核只有一个总资源预算。
+  const client = new OpenAI({
+    apiKey,
+    timeout: timeoutMs,
+    maxRetries: 0,
+    fetch: (request, init) =>
+      fetchWithDeadline(request, init, {
+        timeoutMs,
+        maxResponseBytes: DEFAULT_JSON_RESPONSE_MAX_BYTES,
+      }),
+  });
   const moderationInput: Array<
     | { type: "text"; text: string }
     | { type: "image_url"; image_url: { url: string } }
@@ -731,13 +753,15 @@ export async function moderateContent(
 
   for (const provider of providers) {
     try {
-      const result = await withTimeout(
+      const timeoutMs = await getProviderTimeoutMs();
+      const result =
         provider === "aliyun"
-          ? moderateWithAliyun(input)
-          : moderateWithOpenAI(input),
-        await getProviderTimeoutMs(),
-        `${provider} moderation`
-      );
+          ? await withTimeout(
+              moderateWithAliyun(input),
+              timeoutMs,
+              `${provider} moderation`
+            )
+          : await moderateWithOpenAI(input, timeoutMs);
 
       if (result.decision === "block") {
         return result;

@@ -7,19 +7,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const runtimeSettingsMock = vi.hoisted(() => {
   const stringValues = new Map<string, string>();
   const booleanValues = new Map<string, boolean>();
+  const numberValues = new Map<string, number>();
 
   return {
     stringValues,
     booleanValues,
+    numberValues,
     getRuntimeSettingString: vi.fn(async (key: string) =>
       stringValues.get(key)
     ),
-    getRuntimeSettingBoolean: vi.fn(
-      async (key: string, fallback: boolean) =>
-        booleanValues.has(key) ? booleanValues.get(key) : fallback
+    getRuntimeSettingBoolean: vi.fn(async (key: string, fallback: boolean) =>
+      booleanValues.has(key) ? booleanValues.get(key) : fallback
     ),
-    getRuntimeSettingNumber: vi.fn(
-      async (_key: string, fallback: number) => fallback
+    getRuntimeSettingNumber: vi.fn(async (key: string, fallback: number) =>
+      numberValues.has(key) ? numberValues.get(key) : fallback
     ),
   };
 });
@@ -49,16 +50,14 @@ vi.mock("@alicloud/tea-util", () => ({
 vi.mock("../system-settings", () => runtimeSettingsMock);
 vi.mock("../logger", () => loggerMock);
 
-import {
-  getConfiguredModerationProviders,
-  moderateContent,
-} from "./index";
+import { getConfiguredModerationProviders, moderateContent } from "./index";
 
 const PROXY_URL = "https://moderation.example.com/check";
 
 beforeEach(() => {
   runtimeSettingsMock.stringValues.clear();
   runtimeSettingsMock.booleanValues.clear();
+  runtimeSettingsMock.numberValues.clear();
   runtimeSettingsMock.getRuntimeSettingString.mockClear();
   runtimeSettingsMock.getRuntimeSettingBoolean.mockClear();
   runtimeSettingsMock.getRuntimeSettingNumber.mockClear();
@@ -283,5 +282,128 @@ describe("moderateContent orchestration", () => {
     const init = fetchMock.mock.calls[0]?.[1];
     expect(init?.headers.authorization).toBe("Bearer top-secret");
     expect(init?.headers["x-moderation-proxy-secret"]).toBe("top-secret");
+  });
+
+  it("allows content after parsing a bounded OpenAI response", async () => {
+    runtimeSettingsMock.stringValues.set(
+      "CONTENT_MODERATION_PROVIDER",
+      "openai"
+    );
+    runtimeSettingsMock.stringValues.set(
+      "OPENAI_MODERATION_API_KEY",
+      "sk-test"
+    );
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: "modr-test",
+            model: "omni-moderation-latest",
+            results: [
+              {
+                flagged: false,
+                categories: {},
+                category_scores: {},
+              },
+            ],
+          }),
+          {
+            headers: { "content-type": "application/json" },
+          }
+        )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(moderateContent({ prompt: "hi" })).resolves.toMatchObject({
+      decision: "allow",
+      provider: "openai",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("aborts the OpenAI request when the provider deadline expires", async () => {
+    runtimeSettingsMock.stringValues.set(
+      "CONTENT_MODERATION_PROVIDER",
+      "openai"
+    );
+    runtimeSettingsMock.stringValues.set(
+      "OPENAI_MODERATION_API_KEY",
+      "sk-test"
+    );
+    runtimeSettingsMock.numberValues.set(
+      "CONTENT_MODERATION_PROVIDER_TIMEOUT_MS",
+      20
+    );
+    const observedSignals: AbortSignal[] = [];
+    const fetchMock = vi.fn(
+      async (_request: string | URL | Request, init?: RequestInit) =>
+        await new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          if (!signal) {
+            reject(new Error("OpenAI request did not receive an abort signal"));
+            return;
+          }
+          observedSignals.push(signal);
+          const rejectOnAbort = () => {
+            reject(
+              signal.reason ??
+                new DOMException("OpenAI moderation aborted", "AbortError")
+            );
+          };
+          if (signal.aborted) {
+            rejectOnAbort();
+            return;
+          }
+          signal.addEventListener("abort", rejectOnAbort, {
+            once: true,
+          });
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await moderateContent({ prompt: "hi" });
+
+    expect(result.decision).toBe("error");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(observedSignals).toHaveLength(1);
+    expect(observedSignals[0]?.aborted).toBe(true);
+  });
+
+  it("fails closed when the OpenAI response exceeds the shared limit", async () => {
+    runtimeSettingsMock.stringValues.set(
+      "CONTENT_MODERATION_PROVIDER",
+      "openai"
+    );
+    runtimeSettingsMock.stringValues.set(
+      "OPENAI_MODERATION_API_KEY",
+      "sk-test"
+    );
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: "modr-test",
+            model: "omni-moderation-latest",
+            results: [
+              {
+                flagged: false,
+                categories: {},
+                category_scores: {},
+              },
+            ],
+            padding: "x".repeat(1024 * 1024),
+          }),
+          {
+            headers: { "content-type": "application/json" },
+          }
+        )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await moderateContent({ prompt: "hi" });
+
+    expect(result.decision).toBe("error");
+    expect(result.reason).toContain("Response body exceeded");
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });
