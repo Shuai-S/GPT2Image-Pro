@@ -1009,9 +1009,9 @@
   font-variant-numeric: tabular-nums;
 }
 
-.customRatioEditor {
+.customResolutionEditor {
   display: grid;
-  grid-template-columns: auto 42px 8px 42px minmax(0, 1fr);
+  grid-template-columns: auto 56px 10px 56px minmax(0, 1fr);
   align-items: center;
   gap: 6px;
   margin-top: 10px;
@@ -1019,8 +1019,8 @@
   border-top: 1px solid var(--preview-edge);
 }
 
-.customRatioEditor input {
-  width: 42px;
+.customResolutionEditor input {
+  width: 56px;
   height: 31px;
   border: 1px solid var(--preview-edge);
   border-radius: 3px;
@@ -1031,17 +1031,17 @@
   text-align: center;
 }
 
-.customRatioEditor input:focus {
+.customResolutionEditor input:focus {
   border-color: var(--preview-edge-strong);
 }
 
-.customRatioDivider {
+.customResolutionDivider {
   color: var(--preview-text-faint);
   font-size: 11px;
   text-align: center;
 }
 
-.customRatioEditor button {
+.customResolutionEditor button {
   min-width: 0;
   min-height: 31px;
   overflow: hidden;
@@ -1056,14 +1056,14 @@
   white-space: nowrap;
 }
 
-.customRatioEditor button:hover,
-.customRatioEditor[data-active="true"] button {
+.customResolutionEditor button:hover,
+.customResolutionEditor[data-active="true"] button {
   border-color: var(--preview-edge-strong);
   color: var(--preview-text);
   background: var(--preview-control-fill-strong);
 }
 
-.customRatioEditor button:disabled {
+.customResolutionEditor button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }

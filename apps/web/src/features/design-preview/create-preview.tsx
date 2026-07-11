@@ -28,8 +28,9 @@ import {
   modelOptions,
 } from "./mock-data";
 import {
-  getPreviewCustomImageSize,
   getPreviewImageSize,
+  isPreviewCustomResolutionValid,
+  normalizePreviewCustomResolution,
   type PreviewImageSizeTier,
   previewImageRatioPresets,
   previewImageSizeTiers,
@@ -78,7 +79,10 @@ export function CreatePreview({
   const [count, setCount] = useState(showResults ? 4 : 1);
   const [ratio, setRatio] = useState<PreviewRatioValue>("16:9");
   const [sizeTier, setSizeTier] = useState<PreviewImageSizeTier>("2k");
-  const [customRatio, setCustomRatio] = useState({ width: 7, height: 5 });
+  const [customResolution, setCustomResolution] = useState({
+    width: 2048,
+    height: 1152,
+  });
   const [focusedArtwork, setFocusedArtwork] = useState<{
     artworkId: string;
     originRect: ArtworkFocusRect;
@@ -221,8 +225,8 @@ export function CreatePreview({
             onRatioChange={setRatio}
             sizeTier={sizeTier}
             onSizeTierChange={setSizeTier}
-            customRatio={customRatio}
-            onCustomRatioChange={setCustomRatio}
+            customResolution={customResolution}
+            onCustomResolutionChange={setCustomResolution}
             onGenerate={requestGeneration}
             concealed={Boolean(focusedArtwork)}
           />
@@ -280,8 +284,8 @@ function Composer({
   onRatioChange,
   sizeTier,
   onSizeTierChange,
-  customRatio,
-  onCustomRatioChange,
+  customResolution,
+  onCustomResolutionChange,
   onGenerate,
   concealed = false,
 }: {
@@ -297,8 +301,8 @@ function Composer({
   onRatioChange: (value: PreviewRatioValue) => void;
   sizeTier: PreviewImageSizeTier;
   onSizeTierChange: (value: PreviewImageSizeTier) => void;
-  customRatio: { width: number; height: number };
-  onCustomRatioChange: (value: { width: number; height: number }) => void;
+  customResolution: { width: number; height: number };
+  onCustomResolutionChange: (value: { width: number; height: number }) => void;
   onGenerate: (generationCount: number) => void;
   concealed?: boolean;
 }) {
@@ -368,20 +372,20 @@ function Composer({
             {ratio === "auto"
               ? "自动"
               : ratio === "custom"
-                ? `${customRatio.width}:${customRatio.height} · ${sizeTier.toUpperCase()}`
+                ? `${customResolution.width} × ${customResolution.height}`
                 : `${ratio} · ${sizeTier.toUpperCase()}`}
           </button>
           {activePanel === "ratio" && (
             <RatioPanel
               ratio={ratio}
               sizeTier={sizeTier}
-              customRatio={customRatio}
+              customResolution={customResolution}
               onRatioChange={(value) => {
                 onRatioChange(value);
                 onPanelChange(null);
               }}
               onSizeTierChange={onSizeTierChange}
-              onCustomRatioChange={onCustomRatioChange}
+              onCustomResolutionChange={onCustomResolutionChange}
             />
           )}
         </div>
@@ -502,53 +506,45 @@ function getRatioShapeStyle(ratio: { width: number; height: number }) {
  * @param props.sizeTier 当前 1K、2K 或 4K 档位。
  * @param props.onRatioChange 选择比例后应用合法预设尺寸并关闭面板。
  * @param props.onSizeTierChange 切换分辨率档位，面板保持打开。
- * @param props.customRatio 当前已应用的自定义宽高比。
- * @param props.onCustomRatioChange 应用通过系统边界校验的自定义宽高比。
- * @returns 比例形状、像素尺寸、分辨率档位和自定义输入组成的紧凑面板。
+ * @param props.customResolution 当前已应用的自定义像素分辨率。
+ * @param props.onCustomResolutionChange 应用通过系统边界校验的自定义分辨率。
+ * @returns 比例形状、预设档位和自定义分辨率输入组成的紧凑面板。
  */
 function RatioPanel({
   ratio,
   sizeTier,
-  customRatio,
+  customResolution,
   onRatioChange,
   onSizeTierChange,
-  onCustomRatioChange,
+  onCustomResolutionChange,
 }: {
   ratio: PreviewRatioValue;
   sizeTier: PreviewImageSizeTier;
-  customRatio: { width: number; height: number };
+  customResolution: { width: number; height: number };
   onRatioChange: (value: PreviewRatioValue) => void;
   onSizeTierChange: (value: PreviewImageSizeTier) => void;
-  onCustomRatioChange: (value: { width: number; height: number }) => void;
+  onCustomResolutionChange: (value: { width: number; height: number }) => void;
 }) {
   const [customWidthDraft, setCustomWidthDraft] = useState(
-    String(customRatio.width)
+    String(customResolution.width)
   );
   const [customHeightDraft, setCustomHeightDraft] = useState(
-    String(customRatio.height)
+    String(customResolution.height)
   );
   const customWidth = Number(customWidthDraft);
   const customHeight = Number(customHeightDraft);
-  const customRatioValid =
-    Number.isInteger(customWidth) &&
-    Number.isInteger(customHeight) &&
-    customWidth >= 1 &&
-    customWidth <= 99 &&
-    customHeight >= 1 &&
-    customHeight <= 99 &&
-    Math.max(customWidth / customHeight, customHeight / customWidth) <= 3;
-  const customSize = customRatioValid
-    ? getPreviewCustomImageSize(customWidth, customHeight, sizeTier)
+  const customResolutionValid = isPreviewCustomResolutionValid(
+    customWidth,
+    customHeight
+  );
+  const normalizedCustomResolution = customResolutionValid
+    ? normalizePreviewCustomResolution(customWidth, customHeight)
     : null;
   const selectedSize =
     ratio === "auto"
       ? null
       : ratio === "custom"
-        ? getPreviewCustomImageSize(
-            customRatio.width,
-            customRatio.height,
-            sizeTier
-          )
+        ? ([customResolution.width, customResolution.height] as const)
         : getPreviewImageSize(ratio, sizeTier);
 
   return (
@@ -613,42 +609,49 @@ function RatioPanel({
         </button>
       </div>
       <div
-        className={styles.customRatioEditor}
+        className={styles.customResolutionEditor}
         data-active={ratio === "custom"}
       >
-        <span className={styles.fieldLegend}>自定义</span>
+        <span className={styles.fieldLegend}>自定义分辨率</span>
         <input
           type="number"
-          min={1}
-          max={99}
-          step={1}
-          aria-label="自定义比例宽度"
+          min={256}
+          max={3840}
+          step={16}
+          aria-label="自定义分辨率宽度"
           value={customWidthDraft}
           onChange={(event) => setCustomWidthDraft(event.target.value)}
         />
-        <span className={styles.customRatioDivider}>:</span>
+        <span className={styles.customResolutionDivider}>×</span>
         <input
           type="number"
-          min={1}
-          max={99}
-          step={1}
-          aria-label="自定义比例高度"
+          min={256}
+          max={3840}
+          step={16}
+          aria-label="自定义分辨率高度"
           value={customHeightDraft}
           onChange={(event) => setCustomHeightDraft(event.target.value)}
         />
         <button
           type="button"
-          disabled={!customRatioValid}
-          title={customRatioValid ? "应用自定义比例" : "比例范围为 1:3 至 3:1"}
+          disabled={!customResolutionValid}
+          title={
+            customResolutionValid
+              ? "应用自定义分辨率"
+              : "尺寸范围为 256–3840px，宽高比不超过 3:1"
+          }
           onClick={() => {
-            if (!customRatioValid) return;
-            onCustomRatioChange({ width: customWidth, height: customHeight });
+            if (!normalizedCustomResolution) return;
+            onCustomResolutionChange({
+              width: normalizedCustomResolution[0],
+              height: normalizedCustomResolution[1],
+            });
             onRatioChange("custom");
           }}
         >
-          {customSize
-            ? `应用 · ${customSize[0]} × ${customSize[1]}`
-            : "比例无效"}
+          {normalizedCustomResolution
+            ? `应用 · ${normalizedCustomResolution[0]} × ${normalizedCustomResolution[1]}`
+            : "尺寸无效"}
         </button>
       </div>
     </div>

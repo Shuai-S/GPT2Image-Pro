@@ -1,6 +1,9 @@
 // 创作原型的画面比例预设。数值与生产环境 AspectRatioSizeDialog 的合法尺寸矩阵保持一致。
 
 import {
+  MAX_IMAGE_ASPECT_RATIO,
+  MAX_IMAGE_DIMENSION,
+  MIN_IMAGE_DIMENSION,
   normalizeValidImageSize,
   parseImageSize,
 } from "../image-generation/resolution";
@@ -24,11 +27,10 @@ export type PreviewRatioValue = PreviewImageAspectRatio | "auto" | "custom";
 export const previewImageSizeTiers: Array<{
   value: PreviewImageSizeTier;
   label: string;
-  edge: number;
 }> = [
-  { value: "1k", label: "1K", edge: 1024 },
-  { value: "2k", label: "2K", edge: 2048 },
-  { value: "4k", label: "4K", edge: 3840 },
+  { value: "1k", label: "1K" },
+  { value: "2k", label: "2K" },
+  { value: "4k", label: "4K" },
 ];
 
 export const previewImageRatioPresets: Array<{
@@ -124,35 +126,40 @@ export function getPreviewImageSize(
 }
 
 /**
- * 按生产环境尺寸归一化规则计算自定义比例的合法输出尺寸。
+ * 判断自定义分辨率是否处于生产环境允许的输入边界内。
  *
- * @param width 自定义比例宽度，调用方保证大于零。
- * @param height 自定义比例高度，调用方保证大于零。
- * @param tier 1K、2K 或 4K 分辨率档位。
- * @returns 经过 16 像素步进和系统像素边界校正后的宽高。
+ * @param width 用户输入的像素宽度。
+ * @param height 用户输入的像素高度。
+ * @returns 是否为整数、处于尺寸边界内且宽高比不超过 3:1。
  */
-export function getPreviewCustomImageSize(
+export function isPreviewCustomResolutionValid(width: number, height: number) {
+  return (
+    Number.isInteger(width) &&
+    Number.isInteger(height) &&
+    width >= MIN_IMAGE_DIMENSION &&
+    width <= MAX_IMAGE_DIMENSION &&
+    height >= MIN_IMAGE_DIMENSION &&
+    height <= MAX_IMAGE_DIMENSION &&
+    Math.max(width / height, height / width) <= MAX_IMAGE_ASPECT_RATIO
+  );
+}
+
+/**
+ * 按生产环境尺寸归一化规则计算自定义分辨率的合法输出尺寸。
+ *
+ * @param width 用户输入的像素宽度。
+ * @param height 用户输入的像素高度。
+ * @returns 经过 16 像素步进和系统像素范围校正后的宽高。
+ */
+export function normalizePreviewCustomResolution(
   width: number,
-  height: number,
-  tier: PreviewImageSizeTier
+  height: number
 ): readonly [number, number] {
-  const tierSpec = previewImageSizeTiers.find((item) => item.value === tier);
-  if (!tierSpec) {
-    throw new Error(`Unsupported preview image size tier: ${tier}`);
-  }
-  const landscape = width >= height;
-  const rawWidth = landscape ? tierSpec.edge : (tierSpec.edge * width) / height;
-  const rawHeight = landscape
-    ? (tierSpec.edge * height) / width
-    : tierSpec.edge;
-  const normalized = normalizeValidImageSize({
-    width: rawWidth,
-    height: rawHeight,
-  });
+  const normalized = normalizeValidImageSize({ width, height });
   const dimensions = parseImageSize(normalized);
   if (!dimensions) {
     throw new Error(
-      `Unable to normalize preview image size: ${width}:${height}`
+      `Unable to normalize preview image size: ${width}x${height}`
     );
   }
   return [dimensions.width, dimensions.height];
