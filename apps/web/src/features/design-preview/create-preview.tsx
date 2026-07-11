@@ -7,18 +7,19 @@ import {
   Brush,
   Check,
   ChevronDown,
-  Download,
   ImagePlus,
-  Images,
   Maximize2,
-  PanelTopOpen,
   Settings2,
   Sparkles,
   WandSparkles,
-  X,
 } from "lucide-react";
 import Image from "next/image";
 import { type CSSProperties, useMemo, useState } from "react";
+import {
+  ArtworkFocus,
+  type ArtworkFocusRect,
+  getArtworkFocusOrigin,
+} from "./artwork-focus";
 import {
   createSamples,
   getArtwork,
@@ -61,9 +62,10 @@ export function CreatePreview({
   const [selectedModelId, setSelectedModelId] = useState("gpt-image-2");
   const [count, setCount] = useState(showResults ? 4 : 1);
   const [ratio, setRatio] = useState("16:9");
-  const [selectedArtworkId, setSelectedArtworkId] = useState<string | null>(
-    null
-  );
+  const [focusedArtwork, setFocusedArtwork] = useState<{
+    artworkId: string;
+    originRect: ArtworkFocusRect;
+  } | null>(null);
   const [activeBatchId, setActiveBatchId] = useState("batch-01");
   const [inpaintMode, setInpaintMode] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
@@ -78,8 +80,8 @@ export function CreatePreview({
   const visibleArtworkIds = showResults
     ? (activeBatch?.imageIds.slice(0, count) ?? [])
     : [];
-  const selectedArtwork = selectedArtworkId
-    ? getArtwork(selectedArtworkId)
+  const selectedArtwork = focusedArtwork
+    ? getArtwork(focusedArtwork.artworkId)
     : getArtwork(visibleArtworkIds[0] ?? "art-04");
 
   /**
@@ -120,7 +122,7 @@ export function CreatePreview({
               type="button"
               className={styles.secondaryButton}
               onClick={() => {
-                setSelectedArtworkId(null);
+                setFocusedArtwork(null);
                 setPrompt("");
               }}
             >
@@ -132,11 +134,24 @@ export function CreatePreview({
         <div className={styles.canvasStage}>
           {inpaintMode ? (
             <InpaintStage artworkId={selectedArtwork.id} />
+          ) : focusedArtwork ? (
+            <ArtworkFocus
+              artworkId={focusedArtwork.artworkId}
+              originRect={focusedArtwork.originRect}
+              prompt={activeBatch?.prompt ?? prompt}
+              generatedAt={activeBatch?.time ?? "刚刚"}
+              modelName={selectedModel?.name ?? "GPT Image 2"}
+              onClose={() => setFocusedArtwork(null)}
+              onUseAsReference={() => setFocusedArtwork(null)}
+              onInpaint={() => setInpaintMode(true)}
+              onOpenGallery={onOpenGallery}
+            />
           ) : showResults ? (
             <ResultGrid
               artworkIds={visibleArtworkIds}
-              selectedArtworkId={selectedArtworkId}
-              onSelect={setSelectedArtworkId}
+              onSelect={(artworkId, originRect) =>
+                setFocusedArtwork({ artworkId, originRect })
+              }
             />
           ) : (
             <div className={styles.emptyStage}>
@@ -190,6 +205,7 @@ export function CreatePreview({
           onGenerate={requestGeneration}
           docked={showResults}
           hidden={!showResults}
+          concealed={Boolean(focusedArtwork)}
         />
       )}
 
@@ -203,57 +219,15 @@ export function CreatePreview({
         />
       )}
 
-      {!inpaintMode && (
+      {!inpaintMode && !focusedArtwork && (
         <HistoryWheel
           activeBatchId={activeBatchId}
           onBatchChange={(batchId) => {
             setActiveBatchId(batchId);
-            setSelectedArtworkId(null);
+            setFocusedArtwork(null);
             if (!showResults) onShowResults();
           }}
         />
-      )}
-
-      {selectedArtworkId && !inpaintMode && (
-        <div className={styles.contextBar}>
-          <button type="button" className={styles.contextAction}>
-            <ImagePlus size={14} aria-hidden="true" />
-            用作参考
-          </button>
-          <button
-            type="button"
-            className={styles.contextAction}
-            onClick={() => setInpaintMode(true)}
-          >
-            <Brush size={14} aria-hidden="true" />
-            局部重绘
-          </button>
-          <button type="button" className={styles.contextAction}>
-            <PanelTopOpen size={14} aria-hidden="true" />
-            加入无限画布
-          </button>
-          <button
-            type="button"
-            className={styles.contextAction}
-            onClick={onOpenGallery}
-          >
-            <Images size={14} aria-hidden="true" />
-            打开图库
-          </button>
-          <button type="button" className={styles.contextAction}>
-            <Download size={14} aria-hidden="true" />
-            下载
-          </button>
-          <button
-            type="button"
-            className={styles.contextAction}
-            aria-label="取消选择"
-            title="取消选择"
-            onClick={() => setSelectedArtworkId(null)}
-          >
-            <X size={14} aria-hidden="true" />
-          </button>
-        </div>
       )}
 
       {authOpen && (
@@ -286,6 +260,7 @@ function Composer({
   onGenerate,
   docked,
   hidden = false,
+  concealed = false,
 }: {
   prompt: string;
   onPromptChange: (value: string) => void;
@@ -300,6 +275,7 @@ function Composer({
   onGenerate: () => void;
   docked: boolean;
   hidden?: boolean;
+  concealed?: boolean;
 }) {
   const selectedModel =
     modelOptions.find((model) => model.id === selectedModelId) ??
@@ -309,7 +285,11 @@ function Composer({
   if (hidden) return null;
 
   return (
-    <div className={styles.composer} data-docked={docked}>
+    <div
+      className={styles.composer}
+      data-docked={docked}
+      data-concealed={concealed}
+    >
       <div className={styles.composerTop}>
         <textarea
           className={styles.promptInput}
@@ -550,34 +530,38 @@ function AdvancedPanel() {
 }
 
 /**
- * 渲染当前批次结果并支持等权与聚焦两种布局。
+ * 渲染当前批次的完整作品网格。
+ *
+ * @param props.artworkIds 当前批次作品 ID。
+ * @param props.onSelect 返回作品 ID 与真实可见图片区域，进入共享聚焦查看器。
+ * @returns 不裁切作品内容的两列结果画布。
  */
 function ResultGrid({
   artworkIds,
-  selectedArtworkId,
   onSelect,
 }: {
   artworkIds: string[];
-  selectedArtworkId: string | null;
-  onSelect: (artworkId: string) => void;
+  onSelect: (artworkId: string, originRect: ArtworkFocusRect) => void;
 }) {
   return (
-    <div
-      className={styles.resultsStage}
-      data-focus={Boolean(selectedArtworkId)}
-    >
+    <div className={styles.resultsStage}>
       {artworkIds.map((artworkId, index) => {
         const artwork = getArtwork(artworkId);
         return (
           <button
             type="button"
             className={styles.resultFrame}
-            data-selected={selectedArtworkId === artwork.id}
-            data-muted={Boolean(
-              selectedArtworkId && selectedArtworkId !== artwork.id
-            )}
             key={artwork.id}
-            onClick={() => onSelect(artwork.id)}
+            onClick={(event) =>
+              onSelect(
+                artwork.id,
+                getArtworkFocusOrigin(
+                  event.currentTarget,
+                  artwork.width,
+                  artwork.height
+                )
+              )
+            }
           >
             <Image
               src={artwork.src}

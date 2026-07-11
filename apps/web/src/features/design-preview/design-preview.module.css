@@ -118,7 +118,6 @@
 .sideNav button,
 .toolButton,
 .tinyButton,
-.contextAction,
 .sampleButton,
 .modelOption,
 .historyWheelItem,
@@ -296,8 +295,7 @@
   color: #141414;
 }
 
-.authActions .primaryButton,
-.lightboxActions .primaryButton {
+.authActions .primaryButton {
   margin-top: 0;
 }
 
@@ -611,7 +609,15 @@
   bottom: 20px;
   left: 50%;
   width: min(820px, calc(100vw - 260px));
-  transform: translateX(-50%);
+  transform: translate(-50%, 0);
+  transition: transform 360ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 220ms ease, box-shadow 250ms ease, border-color 250ms ease;
+}
+
+.composer[data-docked="true"][data-concealed="true"] {
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, calc(100% + 40px));
 }
 
 .composerTop {
@@ -876,29 +882,10 @@
   gap: 14px;
 }
 
-.resultsStage[data-focus="true"] .resultFrame[data-selected="true"] {
-  grid-column: 1 / -1;
-  min-height: 390px;
-}
-
-.resultsStage[data-focus="true"] .resultFrame[data-selected="true"] img {
-  min-height: 390px;
-  object-fit: contain;
-}
-
-.resultsStage[data-focus="true"] .resultFrame[data-muted="true"] {
-  min-height: 88px;
-}
-
-.resultsStage[data-focus="true"] .resultFrame[data-muted="true"] img {
-  min-height: 88px;
-  max-height: 110px;
-}
-
 .resultFrame {
   position: relative;
   overflow: hidden;
-  height: min(28vh, 250px);
+  height: min(29vh, 260px);
   min-height: 210px;
   border: 1px solid var(--preview-edge);
   border-radius: var(--preview-radius);
@@ -908,13 +895,9 @@
 }
 
 .resultFrame:hover,
-.resultFrame[data-selected="true"] {
+.resultFrame:focus-visible {
   border-color: var(--preview-edge-strong);
   transform: translateY(-2px);
-}
-
-.resultFrame[data-muted="true"] {
-  opacity: 0.36;
 }
 
 .resultFrame img {
@@ -922,7 +905,7 @@
   width: 100%;
   height: 100%;
   min-height: 0;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .resultLabel {
@@ -939,40 +922,171 @@
   text-shadow: 0 1px 12px #000;
 }
 
-.contextBar {
+.artworkFocus {
   position: fixed;
-  z-index: 34;
-  bottom: 104px;
-  left: 50%;
-  display: flex;
-  max-width: calc(100vw - 48px);
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 5px;
-  padding: 6px;
-  border: 1px solid var(--preview-edge-strong);
-  border-radius: var(--preview-radius);
-  background: var(--preview-panel);
-  box-shadow: var(--preview-shadow);
-  backdrop-filter: blur(18px);
-  transform: translateX(-50%);
+  z-index: 60;
+  inset: 0;
 }
 
-.contextAction {
-  display: inline-flex;
-  min-height: 31px;
+.artworkFocusBackdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--preview-overlay);
+  cursor: zoom-out;
+  backdrop-filter: blur(8px);
+}
+
+.artworkFocusLayout {
+  position: absolute;
+  z-index: 1;
+  top: 112px;
+  right: 72px;
+  bottom: 40px;
+  left: 82px;
+  display: grid;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) 270px;
+  gap: 24px;
+  pointer-events: none;
+}
+
+.artworkFocusStage {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
   align-items: center;
-  gap: 7px;
-  padding: 0 9px;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid var(--preview-edge-strong);
+  border-radius: var(--preview-radius);
+  background: var(--preview-surface-solid);
+  box-shadow: var(--preview-shadow);
+  pointer-events: auto;
+}
+
+.artworkFocusMovingImage {
+  position: fixed;
+  z-index: 2;
+  overflow: hidden;
+  border-radius: var(--preview-radius);
+  background: var(--preview-surface-solid);
+  box-shadow: var(--preview-shadow);
+  pointer-events: none;
+  transform-origin: center;
+  will-change: transform;
+}
+
+.artworkFocusMovingImage img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+}
+
+.artworkFocusInfo {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  padding: 20px;
+  border: 1px solid var(--preview-edge);
+  border-radius: var(--preview-radius);
+  background: var(--preview-panel-soft);
+  box-shadow: var(--preview-shadow);
+  backdrop-filter: blur(18px);
+  pointer-events: auto;
+}
+
+.artworkFocusInfo h2 {
+  margin: 12px 0 8px;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.artworkFocusInfo > p {
+  overflow-y: auto;
+  margin: 0;
+  color: var(--preview-text-muted);
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.artworkFocusClose {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--preview-edge);
+  border-radius: var(--preview-radius);
+  color: var(--preview-text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.artworkFocusClose:hover {
+  color: var(--preview-text);
+  background: var(--preview-control-fill);
+}
+
+.artworkFocusMeta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 24px 0;
+}
+
+.artworkFocusMeta div {
+  padding-top: 9px;
+  border-top: 1px solid var(--preview-edge);
+}
+
+.artworkFocusMeta dt {
+  color: var(--preview-text-faint);
+  font-size: 9px;
+}
+
+.artworkFocusMeta dd {
+  margin: 5px 0 0;
+  color: var(--preview-text);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.artworkFocusActions {
+  display: grid;
+  gap: 5px;
+  margin-top: auto;
+}
+
+.artworkFocusActions button,
+.artworkFocusActions a {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px;
+  border: 0;
   border-radius: 4px;
   color: var(--preview-text-muted);
   background: transparent;
+  cursor: pointer;
   font-size: 10px;
+  text-decoration: none;
+  text-align: left;
 }
 
-.contextAction:hover {
+.artworkFocusActions button:hover,
+.artworkFocusActions a:hover {
   color: var(--preview-text);
-  background: var(--preview-control-fill-strong);
+  background: var(--preview-control-fill);
 }
 
 .historyWheel {
@@ -1297,76 +1411,6 @@
   color: var(--preview-text);
   font-size: 10px;
   text-shadow: 0 1px 15px #000;
-}
-
-.lightbox {
-  position: fixed;
-  z-index: 80;
-  inset: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
-  gap: 24px;
-  padding: 78px 72px 48px;
-  background: var(--preview-nav-background);
-}
-
-.lightboxImage {
-  position: relative;
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  border: 1px solid var(--preview-edge);
-  border-radius: var(--preview-radius);
-  background: var(--preview-surface-solid);
-}
-
-.lightboxImage img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.lightboxInfo {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  padding: 16px 0;
-}
-
-.lightboxInfo h2 {
-  margin: 14px 0 8px;
-  font-size: 22px;
-  font-weight: 500;
-}
-
-.lightboxInfo p {
-  margin: 0;
-  color: var(--preview-text-muted);
-  font-size: 12px;
-  line-height: 1.65;
-}
-
-.lightboxActions {
-  display: grid;
-  gap: 8px;
-  margin-top: auto;
-}
-
-.lightboxClose {
-  display: inline-flex;
-  width: 34px;
-  height: 34px;
-  align-items: center;
-  justify-content: center;
-  align-self: flex-end;
-  border: 1px solid var(--preview-edge);
-  border-radius: var(--preview-radius);
-  color: var(--preview-text-muted);
-  background: transparent;
-  cursor: pointer;
 }
 
 .canvasView {
@@ -1974,6 +2018,15 @@
     min-height: 0;
   }
 
+  .artworkFocusLayout {
+    top: 104px;
+    right: 48px;
+    bottom: 32px;
+    left: 72px;
+    grid-template-columns: minmax(0, 1fr) 240px;
+    gap: 18px;
+  }
+
   .composer[data-docked="true"],
   .inpaintControls {
     right: 92px;
@@ -2029,23 +2082,22 @@
     height: 160px;
   }
 
-  .lightbox {
-    grid-template-columns: 1fr;
-    padding: 72px 20px 20px;
-  }
-
-  .lightboxInfo {
-    position: absolute;
+  .artworkFocusLayout {
+    top: 82px;
     right: 20px;
     bottom: 20px;
     left: 20px;
-    padding: 16px;
-    border: 1px solid var(--preview-edge);
-    border-radius: var(--preview-radius);
-    background: var(--preview-panel);
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(260px, 1fr) auto;
+    gap: 12px;
   }
 
-  .lightboxActions {
+  .artworkFocusInfo {
+    max-height: 300px;
+    padding: 16px;
+  }
+
+  .artworkFocusActions {
     display: flex;
     flex-wrap: wrap;
     margin-top: 16px;

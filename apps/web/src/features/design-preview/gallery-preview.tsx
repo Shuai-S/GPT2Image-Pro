@@ -2,17 +2,14 @@
 
 // 私人图库原型。展示等高行作品浏览、搜索和全屏聚焦操作，不读取用户真实资产。
 
-import {
-  Brush,
-  Download,
-  ImagePlus,
-  PanelTopOpen,
-  Search,
-  SlidersHorizontal,
-  X,
-} from "lucide-react";
+import { Search, SlidersHorizontal } from "lucide-react";
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
+import {
+  ArtworkFocus,
+  type ArtworkFocusRect,
+  getArtworkFocusOrigin,
+} from "./artwork-focus";
 import { artworks, getArtwork } from "./mock-data";
 import styles from "./design-preview.module.css";
 
@@ -48,9 +45,10 @@ export function GalleryPreview({
   onUseAsReference: () => void;
 }) {
   const [query, setQuery] = useState("");
-  const [selectedArtworkId, setSelectedArtworkId] = useState<string | null>(
-    null
-  );
+  const [focusedArtwork, setFocusedArtwork] = useState<{
+    artworkId: string;
+    originRect: ArtworkFocusRect;
+  } | null>(null);
   const filteredIds = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) return artworks.map((artwork) => artwork.id);
@@ -65,24 +63,23 @@ export function GalleryPreview({
   const rows = useMemo(() => buildRows(filteredIds), [filteredIds]);
 
   useEffect(() => {
-    if (!selectedArtworkId) return;
+    if (!focusedArtwork || filteredIds.length === 0) return;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setSelectedArtworkId(null);
-        return;
-      }
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-      const currentIndex = artworks.findIndex(
-        (artwork) => artwork.id === selectedArtworkId
-      );
+      const currentIndex = filteredIds.indexOf(focusedArtwork.artworkId);
+      if (currentIndex < 0) return;
       const direction = event.key === "ArrowRight" ? 1 : -1;
       const nextIndex =
-        (currentIndex + direction + artworks.length) % artworks.length;
-      setSelectedArtworkId(artworks[nextIndex]?.id ?? null);
+        (currentIndex + direction + filteredIds.length) % filteredIds.length;
+      const nextArtworkId = filteredIds[nextIndex];
+      if (!nextArtworkId) return;
+      setFocusedArtwork((current) =>
+        current ? { ...current, artworkId: nextArtworkId } : null
+      );
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedArtworkId]);
+  }, [filteredIds, focusedArtwork]);
 
   return (
     <main className={styles.galleryView}>
@@ -128,7 +125,16 @@ export function GalleryPreview({
                   className={styles.galleryItem}
                   style={{ flexGrow: artwork.width / artwork.height }}
                   key={artwork.id}
-                  onClick={() => setSelectedArtworkId(artwork.id)}
+                  onClick={(event) =>
+                    setFocusedArtwork({
+                      artworkId: artwork.id,
+                      originRect: getArtworkFocusOrigin(
+                        event.currentTarget,
+                        artwork.width,
+                        artwork.height
+                      ),
+                    })
+                  }
                 >
                   <Image
                     src={artwork.src}
@@ -148,80 +154,17 @@ export function GalleryPreview({
         ))}
       </section>
 
-      {selectedArtworkId && (
-        <GalleryLightbox
-          artworkId={selectedArtworkId}
-          onClose={() => setSelectedArtworkId(null)}
+      {focusedArtwork && (
+        <ArtworkFocus
+          artworkId={focusedArtwork.artworkId}
+          originRect={focusedArtwork.originRect}
+          prompt={`“${getArtwork(focusedArtwork.artworkId).title}”私人作品，可继续作为参考图或进入局部重绘。`}
+          modelName="GPT Image 2"
+          generatedAt="今天"
+          onClose={() => setFocusedArtwork(null)}
           onUseAsReference={onUseAsReference}
         />
       )}
     </main>
-  );
-}
-
-/**
- * 渲染私人作品的全屏聚焦层和核心继续创作动作。
- */
-function GalleryLightbox({
-  artworkId,
-  onClose,
-  onUseAsReference,
-}: {
-  artworkId: string;
-  onClose: () => void;
-  onUseAsReference: () => void;
-}) {
-  const artwork = getArtwork(artworkId);
-  return (
-    <div className={styles.lightbox} role="dialog" aria-modal="true">
-      <div className={styles.lightboxImage}>
-        <Image
-          src={artwork.src}
-          alt={artwork.alt}
-          width={artwork.width}
-          height={artwork.height}
-          unoptimized
-        />
-      </div>
-      <aside className={styles.lightboxInfo}>
-        <button
-          type="button"
-          className={styles.lightboxClose}
-          aria-label="关闭作品聚焦层"
-          title="关闭"
-          onClick={onClose}
-        >
-          <X size={15} aria-hidden="true" />
-        </button>
-        <div className={styles.sectionEyebrow}>{artwork.category}</div>
-        <h2>{artwork.title}</h2>
-        <p>
-          一张用于高保真原型的私人作品。正式版本将在这里展示原提示词、模型、尺寸、
-          积分和生成时间。
-        </p>
-        <div className={styles.lightboxActions}>
-          <button
-            type="button"
-            className={styles.primaryButton}
-            onClick={onUseAsReference}
-          >
-            <ImagePlus size={14} aria-hidden="true" />
-            用作参考
-          </button>
-          <button type="button" className={styles.secondaryButton}>
-            <Brush size={14} aria-hidden="true" />
-            局部重绘
-          </button>
-          <button type="button" className={styles.secondaryButton}>
-            <PanelTopOpen size={14} aria-hidden="true" />
-            加入无限画布
-          </button>
-          <button type="button" className={styles.secondaryButton}>
-            <Download size={14} aria-hidden="true" />
-            下载
-          </button>
-        </div>
-      </aside>
-    </div>
   );
 }
