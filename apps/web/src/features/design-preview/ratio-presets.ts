@@ -1,5 +1,10 @@
 // 创作原型的画面比例预设。数值与生产环境 AspectRatioSizeDialog 的合法尺寸矩阵保持一致。
 
+import {
+  normalizeValidImageSize,
+  parseImageSize,
+} from "../image-generation/resolution";
+
 export type PreviewImageSizeTier = "1k" | "2k" | "4k";
 
 export type PreviewImageAspectRatio =
@@ -14,15 +19,16 @@ export type PreviewImageAspectRatio =
   | "9:16"
   | "21:9";
 
-export type PreviewRatioValue = PreviewImageAspectRatio | "auto";
+export type PreviewRatioValue = PreviewImageAspectRatio | "auto" | "custom";
 
 export const previewImageSizeTiers: Array<{
   value: PreviewImageSizeTier;
   label: string;
+  edge: number;
 }> = [
-  { value: "1k", label: "1K" },
-  { value: "2k", label: "2K" },
-  { value: "4k", label: "4K" },
+  { value: "1k", label: "1K", edge: 1024 },
+  { value: "2k", label: "2K", edge: 2048 },
+  { value: "4k", label: "4K", edge: 3840 },
 ];
 
 export const previewImageRatioPresets: Array<{
@@ -115,4 +121,39 @@ export function getPreviewImageSize(
     throw new Error(`Unsupported preview image size: ${ratio}/${tier}`);
   }
   return size;
+}
+
+/**
+ * 按生产环境尺寸归一化规则计算自定义比例的合法输出尺寸。
+ *
+ * @param width 自定义比例宽度，调用方保证大于零。
+ * @param height 自定义比例高度，调用方保证大于零。
+ * @param tier 1K、2K 或 4K 分辨率档位。
+ * @returns 经过 16 像素步进和系统像素边界校正后的宽高。
+ */
+export function getPreviewCustomImageSize(
+  width: number,
+  height: number,
+  tier: PreviewImageSizeTier
+): readonly [number, number] {
+  const tierSpec = previewImageSizeTiers.find((item) => item.value === tier);
+  if (!tierSpec) {
+    throw new Error(`Unsupported preview image size tier: ${tier}`);
+  }
+  const landscape = width >= height;
+  const rawWidth = landscape ? tierSpec.edge : (tierSpec.edge * width) / height;
+  const rawHeight = landscape
+    ? (tierSpec.edge * height) / width
+    : tierSpec.edge;
+  const normalized = normalizeValidImageSize({
+    width: rawWidth,
+    height: rawHeight,
+  });
+  const dimensions = parseImageSize(normalized);
+  if (!dimensions) {
+    throw new Error(
+      `Unable to normalize preview image size: ${width}:${height}`
+    );
+  }
+  return [dimensions.width, dimensions.height];
 }

@@ -28,6 +28,7 @@ import {
   modelOptions,
 } from "./mock-data";
 import {
+  getPreviewCustomImageSize,
   getPreviewImageSize,
   type PreviewImageSizeTier,
   previewImageRatioPresets,
@@ -77,6 +78,7 @@ export function CreatePreview({
   const [count, setCount] = useState(showResults ? 4 : 1);
   const [ratio, setRatio] = useState<PreviewRatioValue>("16:9");
   const [sizeTier, setSizeTier] = useState<PreviewImageSizeTier>("2k");
+  const [customRatio, setCustomRatio] = useState({ width: 7, height: 5 });
   const [focusedArtwork, setFocusedArtwork] = useState<{
     artworkId: string;
     originRect: ArtworkFocusRect;
@@ -105,7 +107,7 @@ export function CreatePreview({
   /**
    * 完成一次继续生成，把新批次留在中央并将旧批次收进右侧时间轮。
    */
-  const completeGeneration = () => {
+  const completeGeneration = (generationCount: number) => {
     const imageIds =
       continuedGenerationImageSets[
         generationSequence % continuedGenerationImageSets.length
@@ -116,7 +118,7 @@ export function CreatePreview({
       time: "刚刚",
       prompt: prompt.trim() || "未命名创作",
       status: "完成",
-      imageIds: [...imageIds],
+      imageIds: [...imageIds].slice(0, generationCount),
     };
     setRecentBatches((current) => [
       nextBatch,
@@ -129,6 +131,7 @@ export function CreatePreview({
         .slice(0, 4),
     ]);
     setGenerationSequence((current) => current + 1);
+    setCount(generationCount);
     setActiveBatchId(batchId);
     setFocusedArtwork(null);
     onShowResults();
@@ -137,12 +140,13 @@ export function CreatePreview({
   /**
    * 模拟受保护生成：未登录时保留草稿并打开登录层，已登录时直接继续生成。
    */
-  const requestGeneration = () => {
+  const requestGeneration = (generationCount: number) => {
+    setCount(generationCount);
     if (!authenticated) {
       setAuthOpen(true);
       return;
     }
-    completeGeneration();
+    completeGeneration(generationCount);
   };
 
   /**
@@ -151,7 +155,7 @@ export function CreatePreview({
   const completeMockLogin = () => {
     setAuthenticated(true);
     setAuthOpen(false);
-    completeGeneration();
+    completeGeneration(count);
   };
 
   return (
@@ -217,6 +221,8 @@ export function CreatePreview({
             onRatioChange={setRatio}
             sizeTier={sizeTier}
             onSizeTierChange={setSizeTier}
+            customRatio={customRatio}
+            onCustomRatioChange={setCustomRatio}
             onGenerate={requestGeneration}
             concealed={Boolean(focusedArtwork)}
           />
@@ -274,6 +280,8 @@ function Composer({
   onRatioChange,
   sizeTier,
   onSizeTierChange,
+  customRatio,
+  onCustomRatioChange,
   onGenerate,
   concealed = false,
 }: {
@@ -289,7 +297,9 @@ function Composer({
   onRatioChange: (value: PreviewRatioValue) => void;
   sizeTier: PreviewImageSizeTier;
   onSizeTierChange: (value: PreviewImageSizeTier) => void;
-  onGenerate: () => void;
+  customRatio: { width: number; height: number };
+  onCustomRatioChange: (value: { width: number; height: number }) => void;
+  onGenerate: (generationCount: number) => void;
   concealed?: boolean;
 }) {
   const selectedModel =
@@ -355,19 +365,23 @@ function Composer({
             }
           >
             <Maximize2 size={13} aria-hidden="true" />
-            {ratio === "auto" ? "自动" : `${ratio} · ${sizeTier.toUpperCase()}`}
+            {ratio === "auto"
+              ? "自动"
+              : ratio === "custom"
+                ? `${customRatio.width}:${customRatio.height} · ${sizeTier.toUpperCase()}`
+                : `${ratio} · ${sizeTier.toUpperCase()}`}
           </button>
           {activePanel === "ratio" && (
             <RatioPanel
               ratio={ratio}
               sizeTier={sizeTier}
-              count={count}
+              customRatio={customRatio}
               onRatioChange={(value) => {
                 onRatioChange(value);
                 onPanelChange(null);
               }}
               onSizeTierChange={onSizeTierChange}
-              onCountChange={onCountChange}
+              onCustomRatioChange={onCustomRatioChange}
             />
           )}
         </div>
@@ -385,15 +399,38 @@ function Composer({
         {activePanel === "advanced" && <AdvancedPanel />}
         <div className={styles.controlSpacer} />
         <span className={styles.costLabel}>预计 {totalCost} 积分</span>
-        <button
-          type="button"
-          className={styles.generateButton}
-          onClick={onGenerate}
-          disabled={!prompt.trim()}
-        >
-          <Sparkles size={13} aria-hidden="true" />
-          生成 {count} 张
-        </button>
+        <div className={styles.generationControl}>
+          <button
+            type="button"
+            className={styles.generateButton}
+            onClick={() => onGenerate(count)}
+            disabled={!prompt.trim()}
+          >
+            <Sparkles size={13} aria-hidden="true" />
+            生成 {count} 张
+            <ChevronDown size={12} aria-hidden="true" />
+          </button>
+          <fieldset
+            className={styles.generationCountMenu}
+            aria-label="生成数量"
+          >
+            {[1, 2, 3, 4]
+              .filter((value) => value !== count)
+              .map((value) => (
+                <button
+                  type="button"
+                  key={value}
+                  disabled={!prompt.trim()}
+                  onClick={() => {
+                    onCountChange(value);
+                    onGenerate(value);
+                  }}
+                >
+                  生成 {value} 张
+                </button>
+              ))}
+          </fieldset>
+        </div>
       </div>
     </div>
   );
@@ -463,29 +500,56 @@ function getRatioShapeStyle(ratio: { width: number; height: number }) {
  *
  * @param props.ratio 当前比例或自动模式。
  * @param props.sizeTier 当前 1K、2K 或 4K 档位。
- * @param props.count 当前单批生成数量。
  * @param props.onRatioChange 选择比例后应用合法预设尺寸并关闭面板。
  * @param props.onSizeTierChange 切换分辨率档位，面板保持打开。
- * @param props.onCountChange 修改单批生成数量。
- * @returns 比例形状、像素尺寸、档位和数量组成的紧凑面板。
+ * @param props.customRatio 当前已应用的自定义宽高比。
+ * @param props.onCustomRatioChange 应用通过系统边界校验的自定义宽高比。
+ * @returns 比例形状、像素尺寸、分辨率档位和自定义输入组成的紧凑面板。
  */
 function RatioPanel({
   ratio,
   sizeTier,
-  count,
+  customRatio,
   onRatioChange,
   onSizeTierChange,
-  onCountChange,
+  onCustomRatioChange,
 }: {
   ratio: PreviewRatioValue;
   sizeTier: PreviewImageSizeTier;
-  count: number;
+  customRatio: { width: number; height: number };
   onRatioChange: (value: PreviewRatioValue) => void;
   onSizeTierChange: (value: PreviewImageSizeTier) => void;
-  onCountChange: (value: number) => void;
+  onCustomRatioChange: (value: { width: number; height: number }) => void;
 }) {
+  const [customWidthDraft, setCustomWidthDraft] = useState(
+    String(customRatio.width)
+  );
+  const [customHeightDraft, setCustomHeightDraft] = useState(
+    String(customRatio.height)
+  );
+  const customWidth = Number(customWidthDraft);
+  const customHeight = Number(customHeightDraft);
+  const customRatioValid =
+    Number.isInteger(customWidth) &&
+    Number.isInteger(customHeight) &&
+    customWidth >= 1 &&
+    customWidth <= 99 &&
+    customHeight >= 1 &&
+    customHeight <= 99 &&
+    Math.max(customWidth / customHeight, customHeight / customWidth) <= 3;
+  const customSize = customRatioValid
+    ? getPreviewCustomImageSize(customWidth, customHeight, sizeTier)
+    : null;
   const selectedSize =
-    ratio === "auto" ? null : getPreviewImageSize(ratio, sizeTier);
+    ratio === "auto"
+      ? null
+      : ratio === "custom"
+        ? getPreviewCustomImageSize(
+            customRatio.width,
+            customRatio.height,
+            sizeTier
+          )
+        : getPreviewImageSize(ratio, sizeTier);
 
   return (
     <div className={`${styles.floatingPanel} ${styles.ratioPanel}`}>
@@ -548,21 +612,44 @@ function RatioPanel({
           </span>
         </button>
       </div>
-      <div className={styles.ratioCountField}>
-        <span className={styles.fieldLegend}>生成数量</span>
-        <div className={styles.segmentGroup}>
-          {[1, 2, 3, 4].map((value) => (
-            <button
-              type="button"
-              className={styles.segmentButton}
-              data-active={value === count}
-              key={value}
-              onClick={() => onCountChange(value)}
-            >
-              {value}
-            </button>
-          ))}
-        </div>
+      <div
+        className={styles.customRatioEditor}
+        data-active={ratio === "custom"}
+      >
+        <span className={styles.fieldLegend}>自定义</span>
+        <input
+          type="number"
+          min={1}
+          max={99}
+          step={1}
+          aria-label="自定义比例宽度"
+          value={customWidthDraft}
+          onChange={(event) => setCustomWidthDraft(event.target.value)}
+        />
+        <span className={styles.customRatioDivider}>:</span>
+        <input
+          type="number"
+          min={1}
+          max={99}
+          step={1}
+          aria-label="自定义比例高度"
+          value={customHeightDraft}
+          onChange={(event) => setCustomHeightDraft(event.target.value)}
+        />
+        <button
+          type="button"
+          disabled={!customRatioValid}
+          title={customRatioValid ? "应用自定义比例" : "比例范围为 1:3 至 3:1"}
+          onClick={() => {
+            if (!customRatioValid) return;
+            onCustomRatioChange({ width: customWidth, height: customHeight });
+            onRatioChange("custom");
+          }}
+        >
+          {customSize
+            ? `应用 · ${customSize[0]} × ${customSize[1]}`
+            : "比例无效"}
+        </button>
       </div>
     </div>
   );
