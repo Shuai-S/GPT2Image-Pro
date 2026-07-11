@@ -23,6 +23,7 @@
 
 ## 功能
 
+- [2026-07-11 前端视觉重构决策稿](plan/2026-07-11-frontend-visual-redesign-decisions.md) — 确认以画布为统一设计语言，首页采用 12 幅作品的 3D 虚空画廊，基础创作合并文生图/图生图并使用自适应输入器与最近 5 批，无限画布保留节点能力并重做节点/连线/工具坞，图库保持私人资产；先制作 5 个代码高保真原型，再分阶段接入业务并删除旧页面。
 - [纯中转 API Key](plan/2026-05-30-relay-only-api-key.md) — relay_only key：不记录/不存储/仍扣费仍审核；附带修复 consumeCredits 幂等（dev: 7c6da21→e957f48）
 - **Issue #1/#15/#16 修复**（dev: a2dd4dc/10d0bc8/c8e9118，详见 [TODO.md](TODO.md)）— #1 管理员建号/改密改邮箱(superAdminAction+better-auth hashPassword)；#15 瀑布流 tier/参数/3警告对齐原项目；#16 数量控件改数字输入+滚轮、上限与服务端 count 校验统一挂 `imageGenerationConcurrency`（**语义变化**：单次张数上限不再用 maxBatchCount）。待 UI 实测。
 
