@@ -2,6 +2,7 @@
 
 // 作品聚焦共享组件。供基础创作结果与私人图库复用同一套曲线放大、信息和操作体验。
 
+import { motion } from "framer-motion";
 import {
   Brush,
   Download,
@@ -10,7 +11,6 @@ import {
   PanelTopOpen,
   X,
 } from "lucide-react";
-import { motion } from "framer-motion";
 import Image from "next/image";
 import {
   type RefObject,
@@ -220,6 +220,8 @@ function useFocusedArtworkRect(
  * @param props.onInpaint 进入局部重绘。
  * @param props.onOpenCanvas 将作品加入无限画布。
  * @param props.onOpenGallery 从结果页进入私人图库；图库内可省略。
+ * @param props.referenceLabel 覆盖参考图操作文案，用于无限画布的继续创作语境。
+ * @param props.inpaintLabel 覆盖局部重绘操作文案，用于统一图片编辑入口。
  * @returns 共享的曲线转场、完整图片、元信息与继续创作操作。
  */
 export function ArtworkFocus({
@@ -233,6 +235,8 @@ export function ArtworkFocus({
   onInpaint,
   onOpenCanvas,
   onOpenGallery,
+  referenceLabel = "用作参考",
+  inpaintLabel = "局部重绘",
 }: {
   artworkId: string;
   originRect: ArtworkFocusRect;
@@ -244,6 +248,8 @@ export function ArtworkFocus({
   onInpaint?: () => void;
   onOpenCanvas?: () => void;
   onOpenGallery?: () => void;
+  referenceLabel?: string;
+  inpaintLabel?: string;
 }) {
   const artwork = getArtwork(artworkId);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -360,16 +366,18 @@ export function ArtworkFocus({
           <div className={styles.artworkFocusActions}>
             <button type="button" onClick={onUseAsReference}>
               <ImagePlus size={14} aria-hidden="true" />
-              用作参考
+              {referenceLabel}
             </button>
             <button type="button" onClick={onInpaint}>
               <Brush size={14} aria-hidden="true" />
-              局部重绘
+              {inpaintLabel}
             </button>
-            <button type="button" onClick={onOpenCanvas}>
-              <PanelTopOpen size={14} aria-hidden="true" />
-              加入无限画布
-            </button>
+            {onOpenCanvas && (
+              <button type="button" onClick={onOpenCanvas}>
+                <PanelTopOpen size={14} aria-hidden="true" />
+                加入无限画布
+              </button>
+            )}
             {onOpenGallery && (
               <button type="button" onClick={onOpenGallery}>
                 <Images size={14} aria-hidden="true" />
