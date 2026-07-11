@@ -300,7 +300,7 @@ export function ArtworkFocus({
         aria-hidden="true"
         initial={{ opacity: 0 }}
         animate={{ opacity: phase === "exiting" ? 0 : 1 }}
-        transition={{ duration: 0.28 }}
+        transition={{ duration: 0.2 }}
         onClick={requestClose}
       />
       <div className={styles.artworkFocusLayout}>
@@ -309,7 +309,10 @@ export function ArtworkFocus({
           className={styles.artworkFocusStage}
           initial={{ opacity: 0 }}
           animate={{ opacity: phase === "exiting" ? 0 : 1 }}
-          transition={{ duration: 0.22, delay: phase === "entering" ? 0.2 : 0 }}
+          transition={{
+            duration: 0.16,
+            delay: phase === "entering" ? 0.12 : 0,
+          }}
         />
         <motion.aside
           className={styles.artworkFocusInfo}
@@ -318,8 +321,8 @@ export function ArtworkFocus({
             phase === "exiting" ? { opacity: 0, x: 12 } : { opacity: 1, x: 0 }
           }
           transition={{
-            duration: 0.3,
-            delay: phase === "entering" ? 0.22 : 0,
+            duration: 0.22,
+            delay: phase === "entering" ? 0.14 : 0,
           }}
         >
           <button
@@ -400,7 +403,7 @@ export function ArtworkFocus({
           }
           animate={motionFrames}
           transition={{
-            duration: 0.68,
+            duration: 0.48,
             ease: "linear",
           }}
           onAnimationComplete={() => {
