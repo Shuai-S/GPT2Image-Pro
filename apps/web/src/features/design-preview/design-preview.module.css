@@ -559,7 +559,7 @@
 }
 
 .emptyStage p {
-  margin: 0 auto 24px;
+  margin: 0 auto;
   color: var(--preview-text-muted);
   font-size: 13px;
 }
@@ -707,11 +707,6 @@
 .controlGroup > .floatingPanel {
   right: auto;
   left: 0;
-}
-
-.composer[data-docked="false"] .floatingPanel {
-  top: calc(100% + 9px);
-  bottom: auto;
 }
 
 .floatingPanel h3 {
@@ -954,11 +949,16 @@
   border-top: 1px solid var(--preview-edge);
 }
 
-.sampleList {
+.dockedSampleList {
+  position: fixed;
+  z-index: 31;
+  bottom: 136px;
+  left: 50%;
   display: grid;
+  width: min(820px, calc(100vw - 260px));
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 7px;
-  margin-top: 18px;
+  transform: translateX(-50%);
 }
 
 .sampleButton {
@@ -2103,6 +2103,11 @@
     width: min(650px, calc(100vw - 340px));
   }
 
+  .dockedSampleList {
+    bottom: 132px;
+    width: min(650px, calc(100vw - 340px));
+  }
+
   .historyWheel {
     height: min(560px, calc(100svh - 160px));
     transform: translate(238px, -50%);
@@ -2182,6 +2187,10 @@
     left: 20px;
     width: auto;
     transform: none;
+  }
+
+  .dockedSampleList {
+    display: none;
   }
 
 }

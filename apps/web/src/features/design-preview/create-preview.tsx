@@ -183,60 +183,44 @@ export function CreatePreview({
             <div className={styles.emptyStage}>
               <h2>从一个想法开始</h2>
               <p>描述你想创作的画面，也可以添加一张参考图。</p>
-              <Composer
-                prompt={prompt}
-                onPromptChange={setPrompt}
-                activePanel={activePanel}
-                onPanelChange={setActivePanel}
-                selectedModelId={selectedModelId}
-                onModelChange={setSelectedModelId}
-                count={count}
-                onCountChange={setCount}
-                ratio={ratio}
-                onRatioChange={setRatio}
-                sizeTier={sizeTier}
-                onSizeTierChange={setSizeTier}
-                onGenerate={requestGeneration}
-                docked={false}
-              />
-              {!prompt && (
-                <div className={styles.sampleList}>
-                  {createSamples.map((sample) => (
-                    <button
-                      type="button"
-                      className={styles.sampleButton}
-                      key={sample}
-                      onClick={() => setPrompt(sample)}
-                    >
-                      {sample}
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
           )}
         </div>
       </section>
 
       {!inpaintMode && (
-        <Composer
-          prompt={prompt}
-          onPromptChange={setPrompt}
-          activePanel={activePanel}
-          onPanelChange={setActivePanel}
-          selectedModelId={selectedModelId}
-          onModelChange={setSelectedModelId}
-          count={count}
-          onCountChange={setCount}
-          ratio={ratio}
-          onRatioChange={setRatio}
-          sizeTier={sizeTier}
-          onSizeTierChange={setSizeTier}
-          onGenerate={requestGeneration}
-          docked={showResults}
-          hidden={!showResults}
-          concealed={Boolean(focusedArtwork)}
-        />
+        <>
+          {!showResults && !prompt && activePanel === null && (
+            <nav className={styles.dockedSampleList} aria-label="示例提示词">
+              {createSamples.map((sample) => (
+                <button
+                  type="button"
+                  className={styles.sampleButton}
+                  key={sample}
+                  onClick={() => setPrompt(sample)}
+                >
+                  {sample}
+                </button>
+              ))}
+            </nav>
+          )}
+          <Composer
+            prompt={prompt}
+            onPromptChange={setPrompt}
+            activePanel={activePanel}
+            onPanelChange={setActivePanel}
+            selectedModelId={selectedModelId}
+            onModelChange={setSelectedModelId}
+            count={count}
+            onCountChange={setCount}
+            ratio={ratio}
+            onRatioChange={setRatio}
+            sizeTier={sizeTier}
+            onSizeTierChange={setSizeTier}
+            onGenerate={requestGeneration}
+            concealed={Boolean(focusedArtwork)}
+          />
+        </>
       )}
 
       {inpaintMode && (
@@ -291,8 +275,6 @@ function Composer({
   sizeTier,
   onSizeTierChange,
   onGenerate,
-  docked,
-  hidden = false,
   concealed = false,
 }: {
   prompt: string;
@@ -308,8 +290,6 @@ function Composer({
   sizeTier: PreviewImageSizeTier;
   onSizeTierChange: (value: PreviewImageSizeTier) => void;
   onGenerate: () => void;
-  docked: boolean;
-  hidden?: boolean;
   concealed?: boolean;
 }) {
   const selectedModel =
@@ -317,12 +297,10 @@ function Composer({
     modelOptions[0];
   const totalCost = (selectedModel?.cost ?? 3) * count;
 
-  if (hidden) return null;
-
   return (
     <div
       className={styles.composer}
-      data-docked={docked}
+      data-docked="true"
       data-concealed={concealed}
     >
       <div className={styles.composerTop}>
