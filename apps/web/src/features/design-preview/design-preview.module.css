@@ -1069,6 +1069,7 @@
   padding: 5px;
   border: 1px solid transparent;
   border-radius: var(--preview-radius);
+  outline: 0;
   color: var(--preview-text-muted);
   background: transparent;
   cursor: pointer;
@@ -1078,13 +1079,16 @@
     transform 180ms ease;
 }
 
-.historyWheelItem:hover,
-.historyWheel:hover .historyWheelItem[data-active="true"],
-.historyWheel:focus-within .historyWheelItem[data-active="true"] {
+.historyWheelItem:hover {
   border-color: var(--preview-edge-strong);
   color: var(--preview-text);
   background: var(--preview-panel);
   transform: translateY(-50%);
+}
+
+.historyWheelItem:focus-visible .historyWheelThumb {
+  box-shadow: 0 0 0 3px var(--preview-control-fill-strong),
+    var(--preview-shadow);
 }
 
 .historyWheel:not(:hover):not(:focus-within) .historyWheelItem {
