@@ -33,20 +33,23 @@ const planOptions = [
  * 渲染首页三个固定镜头对应的内容状态。
  *
  * @param props.section 当前空间场景。
+ * @param props.theme 当前明暗主题，用于同步 Three.js 背景。
  * @param props.onStartCreation 进入最近使用功能页。
  * @returns 全屏 3D 场景及其 HTML 信息层。
  */
 export function HomePreview({
   section,
+  theme,
   onStartCreation,
 }: {
   section: HomeSection;
+  theme: "dark" | "light";
   onStartCreation: () => void;
 }) {
   return (
     <main className={styles.homeScene} data-section={section}>
       <div className={styles.sceneFallback} />
-      <GalleryScene section={section} />
+      <GalleryScene section={section} theme={theme} />
       <div className={styles.sceneVignette} />
       {section === "gallery" && (
         <section className={styles.homeCopy}>

@@ -10,7 +10,9 @@ import {
   LogIn,
   PanelLeftClose,
   Pin,
+  Moon,
   Sparkles,
+  Sun,
   UserRound,
 } from "lucide-react";
 import { MotionConfig } from "framer-motion";
@@ -23,6 +25,9 @@ import { HomePreview, type HomeSection } from "./home-preview";
 import type { PreviewView } from "./mock-data";
 
 const LAST_CREATIVE_VIEW_KEY = "gpt2image.design-preview.last-creative-view";
+const PREVIEW_THEME_KEY = "gpt2image.design-preview.theme";
+
+type PreviewTheme = "dark" | "light";
 
 const navigationItems: Array<{
   id: PreviewView;
@@ -46,6 +51,7 @@ export function DesignPreview({ initialView }: { initialView: PreviewView }) {
   const [homeSection, setHomeSection] = useState<HomeSection>("gallery");
   const [navOpen, setNavOpen] = useState(false);
   const [navPinned, setNavPinned] = useState(false);
+  const [theme, setTheme] = useState<PreviewTheme>("dark");
   const [lastCreativeView, setLastCreativeView] = useState<
     "create-empty" | "create-results" | "canvas"
   >("create-empty");
@@ -59,6 +65,10 @@ export function DesignPreview({ initialView }: { initialView: PreviewView }) {
       stored === "canvas"
     ) {
       setLastCreativeView(stored);
+    }
+    const storedTheme = window.localStorage.getItem(PREVIEW_THEME_KEY);
+    if (storedTheme === "dark" || storedTheme === "light") {
+      setTheme(storedTheme);
     }
   }, []);
 
@@ -107,11 +117,23 @@ export function DesignPreview({ initialView }: { initialView: PreviewView }) {
 
   const isCreateView = view === "create-empty" || view === "create-results";
 
+  /**
+   * 切换整套原型主题并保留本地选择。
+   *
+   * @param nextTheme 用户明确选择的明暗主题。
+   * @sideEffects 写入 localStorage，刷新后继续展示同一主题。
+   */
+  const changeTheme = (nextTheme: PreviewTheme) => {
+    setTheme(nextTheme);
+    window.localStorage.setItem(PREVIEW_THEME_KEY, nextTheme);
+  };
+
   return (
     <MotionConfig reducedMotion="user">
       <div
         className={styles.root}
-        data-nav-open={view !== "home" && (navOpen || navPinned)}
+        data-nav-pinned={view !== "home" && navPinned}
+        data-theme={theme}
       >
         <Topbar
           view={view}
@@ -121,6 +143,8 @@ export function DesignPreview({ initialView }: { initialView: PreviewView }) {
             if (view !== "home") changeView("home");
           }}
           onStartCreation={() => changeView(lastCreativeView)}
+          onThemeChange={changeTheme}
+          theme={theme}
           onViewChange={changeView}
         />
 
@@ -179,13 +203,11 @@ export function DesignPreview({ initialView }: { initialView: PreviewView }) {
           </>
         )}
 
-        <div
-          className={styles.contentFrame}
-          style={{ paddingLeft: navPinned ? 236 : 0 }}
-        >
+        <div className={styles.contentFrame} data-nav-pinned={navPinned}>
           {view === "home" && (
             <HomePreview
               section={homeSection}
+              theme={theme}
               onStartCreation={() => changeView(lastCreativeView)}
             />
           )}
@@ -245,12 +267,16 @@ function Topbar({
   homeSection,
   onHomeSectionChange,
   onStartCreation,
+  onThemeChange,
+  theme,
   onViewChange,
 }: {
   view: PreviewView;
   homeSection: HomeSection;
   onHomeSectionChange: (section: HomeSection) => void;
   onStartCreation: () => void;
+  onThemeChange: (theme: PreviewTheme) => void;
+  theme: PreviewTheme;
   onViewChange: (view: PreviewView) => void;
 }) {
   return (
@@ -313,6 +339,26 @@ function Topbar({
         </nav>
       )}
       <div className={styles.topActions}>
+        <fieldset className={styles.themeSwitch} aria-label="界面主题">
+          <button
+            type="button"
+            data-active={theme === "light"}
+            aria-label="切换到明亮主题"
+            title="明亮主题"
+            onClick={() => onThemeChange("light")}
+          >
+            <Sun size={13} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            data-active={theme === "dark"}
+            aria-label="切换到暗色主题"
+            title="暗色主题"
+            onClick={() => onThemeChange("dark")}
+          >
+            <Moon size={13} aria-hidden="true" />
+          </button>
+        </fieldset>
         {view === "home" ? (
           <button
             type="button"

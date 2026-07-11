@@ -85,7 +85,14 @@ function ArtworkField({ section }: { section: HomeSection }) {
  * @returns 带静态背景、透视相机、雾效与作品群的全屏画布。
  * @failureMode 纹理未完成时 Suspense 保留父层静态石墨背景，不阻塞标题与按钮。
  */
-export function GalleryScene({ section }: { section: HomeSection }) {
+export function GalleryScene({
+  section,
+  theme,
+}: {
+  section: HomeSection;
+  theme: "dark" | "light";
+}) {
+  const backgroundColor = theme === "light" ? "#e8e8e6" : "#0e0e0e";
   return (
     <Canvas
       className={styles.sceneCanvas}
@@ -97,8 +104,8 @@ export function GalleryScene({ section }: { section: HomeSection }) {
         powerPreference: "high-performance",
       }}
     >
-      <color attach="background" args={["#0e0e0e"]} />
-      <fog attach="fog" args={["#0e0e0e", 9, 22]} />
+      <color attach="background" args={[backgroundColor]} />
+      <fog attach="fog" args={[backgroundColor, 9, 22]} />
       <Suspense fallback={null}>
         <ArtworkField section={section} />
       </Suspense>
