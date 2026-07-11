@@ -8,6 +8,7 @@ import { Suspense, useRef } from "react";
 import type { Group } from "three";
 import { MathUtils, TextureLoader } from "three";
 import { artworks, type Artwork } from "./mock-data";
+import type { HomeSection } from "./home-preview";
 import styles from "./design-preview.module.css";
 
 /**
@@ -46,16 +47,23 @@ function ArtworkPlane({ artwork }: { artwork: Artwork }) {
  * @returns 由 12 幅作品组成的空间组。
  * @sideEffects 每帧根据指针位置更新组旋转与位移；减少动态效果时保持静止。
  */
-function ArtworkField() {
+function ArtworkField({ section }: { section: HomeSection }) {
   const groupRef = useRef<Group>(null);
   const reducedMotion = useReducedMotion();
 
   useFrame((state) => {
     const group = groupRef.current;
-    if (!group || reducedMotion) return;
+    if (!group) return;
+    const panelVisible = section !== "gallery";
+    const targetScale = panelVisible ? 0.72 : 1;
+    const targetZ = panelVisible ? -2.8 : 0;
+    group.scale.setScalar(MathUtils.lerp(group.scale.x, targetScale, 0.045));
+    group.position.z = MathUtils.lerp(group.position.z, targetZ, 0.045);
+    if (reducedMotion) return;
     const time = state.clock.getElapsedTime();
-    const targetRotationY = state.pointer.x * 0.035;
-    const targetRotationX = -state.pointer.y * 0.022;
+    const parallaxStrength = panelVisible ? 0.012 : 0.035;
+    const targetRotationY = state.pointer.x * parallaxStrength;
+    const targetRotationX = -state.pointer.y * parallaxStrength * 0.63;
     group.rotation.y = MathUtils.lerp(group.rotation.y, targetRotationY, 0.035);
     group.rotation.x = MathUtils.lerp(group.rotation.x, targetRotationX, 0.035);
     group.position.y = Math.sin(time * 0.22) * 0.045;
@@ -77,7 +85,7 @@ function ArtworkField() {
  * @returns 带静态背景、透视相机、雾效与作品群的全屏画布。
  * @failureMode 纹理未完成时 Suspense 保留父层静态石墨背景，不阻塞标题与按钮。
  */
-export function GalleryScene() {
+export function GalleryScene({ section }: { section: HomeSection }) {
   return (
     <Canvas
       className={styles.sceneCanvas}
@@ -92,7 +100,7 @@ export function GalleryScene() {
       <color attach="background" args={["#0e0e0e"]} />
       <fog attach="fog" args={["#0e0e0e", 9, 22]} />
       <Suspense fallback={null}>
-        <ArtworkField />
+        <ArtworkField section={section} />
       </Suspense>
     </Canvas>
   );

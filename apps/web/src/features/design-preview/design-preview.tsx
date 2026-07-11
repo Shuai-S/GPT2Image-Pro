@@ -3,7 +3,6 @@
 // 前端视觉重构高保真原型入口。仅编排模拟视图、导航与本地交互状态。
 
 import {
-  BookOpen,
   Coins,
   Home,
   Images,
@@ -45,7 +44,7 @@ const navigationItems: Array<{
 export function DesignPreview({ initialView }: { initialView: PreviewView }) {
   const [view, setView] = useState<PreviewView>(initialView);
   const [homeSection, setHomeSection] = useState<HomeSection>("gallery");
-  const [navOpen, setNavOpen] = useState(initialView === "home");
+  const [navOpen, setNavOpen] = useState(false);
   const [navPinned, setNavPinned] = useState(false);
   const [lastCreativeView, setLastCreativeView] = useState<
     "create-empty" | "create-results" | "canvas"
@@ -110,7 +109,10 @@ export function DesignPreview({ initialView }: { initialView: PreviewView }) {
 
   return (
     <MotionConfig reducedMotion="user">
-      <div className={styles.root} data-nav-open={navOpen || navPinned}>
+      <div
+        className={styles.root}
+        data-nav-open={view !== "home" && (navOpen || navPinned)}
+      >
         <Topbar
           view={view}
           homeSection={homeSection}
@@ -118,80 +120,64 @@ export function DesignPreview({ initialView }: { initialView: PreviewView }) {
             setHomeSection(section);
             if (view !== "home") changeView("home");
           }}
+          onStartCreation={() => changeView(lastCreativeView)}
           onViewChange={changeView}
         />
 
-        <button
-          type="button"
-          className={styles.edgeTrigger}
-          aria-label="展开全站导航"
-          onMouseEnter={openNav}
-          onFocus={openNav}
-        />
-        <aside
-          className={styles.sideNav}
-          data-open={navOpen || navPinned}
-          onMouseEnter={openNav}
-          onMouseLeave={scheduleNavClose}
-        >
-          <div className={styles.sideNavHeader}>
-            <span>Navigation</span>
+        {view !== "home" && (
+          <>
             <button
               type="button"
-              className={styles.pinButton}
-              data-pinned={navPinned}
-              aria-label={navPinned ? "取消固定导航" : "固定导航"}
-              title={navPinned ? "取消固定" : "固定展开"}
-              onClick={() => {
-                setNavPinned((current) => !current);
-                setNavOpen(true);
-              }}
+              className={styles.edgeTrigger}
+              aria-label="展开全站导航"
+              onMouseEnter={openNav}
+              onFocus={openNav}
+            />
+            <aside
+              className={styles.sideNav}
+              data-open={navOpen || navPinned}
+              onMouseEnter={openNav}
+              onMouseLeave={scheduleNavClose}
             >
-              {navPinned ? (
-                <PanelLeftClose size={13} aria-hidden="true" />
-              ) : (
-                <Pin size={13} aria-hidden="true" />
-              )}
-            </button>
-          </div>
-          {navigationItems.map((item) => {
-            const Icon = item.icon;
-            const active =
-              item.id === "create-empty" ? isCreateView : view === item.id;
-            return (
-              <button
-                type="button"
-                key={item.id}
-                data-active={active}
-                onClick={() => changeView(item.id)}
-              >
-                <Icon size={15} aria-hidden="true" />
-                {item.label}
-              </button>
-            );
-          })}
-          <div className={styles.sideNavDivider} />
-          <button
-            type="button"
-            onClick={() => {
-              setHomeSection("pricing");
-              changeView("home");
-            }}
-          >
-            <Coins size={15} aria-hidden="true" />
-            定价
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setHomeSection("docs");
-              changeView("home");
-            }}
-          >
-            <BookOpen size={15} aria-hidden="true" />
-            文档
-          </button>
-        </aside>
+              <div className={styles.sideNavHeader}>
+                <span>Navigation</span>
+                <button
+                  type="button"
+                  className={styles.pinButton}
+                  data-pinned={navPinned}
+                  aria-label={navPinned ? "取消固定导航" : "固定导航"}
+                  title={navPinned ? "取消固定" : "固定展开"}
+                  onClick={() => {
+                    setNavPinned((current) => !current);
+                    setNavOpen(true);
+                  }}
+                >
+                  {navPinned ? (
+                    <PanelLeftClose size={13} aria-hidden="true" />
+                  ) : (
+                    <Pin size={13} aria-hidden="true" />
+                  )}
+                </button>
+              </div>
+              {navigationItems.map((item) => {
+                const Icon = item.icon;
+                const active =
+                  item.id === "create-empty" ? isCreateView : view === item.id;
+                return (
+                  <button
+                    type="button"
+                    key={item.id}
+                    data-active={active}
+                    onClick={() => changeView(item.id)}
+                  >
+                    <Icon size={15} aria-hidden="true" />
+                    {item.label}
+                  </button>
+                );
+              })}
+            </aside>
+          </>
+        )}
 
         <div
           className={styles.contentFrame}
@@ -258,11 +244,13 @@ function Topbar({
   view,
   homeSection,
   onHomeSectionChange,
+  onStartCreation,
   onViewChange,
 }: {
   view: PreviewView;
   homeSection: HomeSection;
   onHomeSectionChange: (section: HomeSection) => void;
+  onStartCreation: () => void;
   onViewChange: (view: PreviewView) => void;
 }) {
   return (
@@ -329,7 +317,7 @@ function Topbar({
           <button
             type="button"
             className={styles.topAction}
-            onClick={() => onViewChange("create-empty")}
+            onClick={onStartCreation}
           >
             <Sparkles size={13} aria-hidden="true" />
             开始创作

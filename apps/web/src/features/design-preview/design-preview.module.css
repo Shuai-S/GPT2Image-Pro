@@ -168,6 +168,12 @@
   inset: 0;
   pointer-events: none;
   background: radial-gradient(circle at 53% 46%, transparent 26%, rgba(7, 7, 7, 0.62) 100%);
+  transition: background 520ms ease;
+}
+
+.homeScene[data-section="pricing"] .sceneVignette,
+.homeScene[data-section="docs"] .sceneVignette {
+  background: rgba(5, 5, 5, 0.68);
 }
 
 .homeCopy {
@@ -178,10 +184,6 @@
   width: min(420px, 32vw);
   transform: translateY(-42%);
   transition: left 240ms ease;
-}
-
-.root[data-nav-open="true"] .homeCopy {
-  left: clamp(300px, 24vw, 360px);
 }
 
 .eyebrow,
@@ -1611,20 +1613,39 @@
 }
 
 .spatialPanel {
+  position: relative;
+  width: 100%;
+  max-height: calc(100svh - 150px);
+  overflow: auto;
+  padding: 30px;
+  border: 1px solid rgba(242, 241, 237, 0.38);
+  border-radius: 2px;
+  background-color: rgba(29, 29, 28, 0.97);
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(255, 255, 255, 0.016) 0,
+    rgba(255, 255, 255, 0.016) 1px,
+    transparent 1px,
+    transparent 4px
+  );
+  box-shadow: 0 48px 140px rgba(0, 0, 0, 0.72), 0 0 0 8px rgba(18, 18, 18, 0.72);
+}
+
+.spatialPanelPortal {
   position: absolute;
   z-index: 6;
-  top: 50%;
-  left: 50%;
+  inset: 68px 0 0;
+  display: grid;
+  place-items: center;
+  padding: 30px 0 48px;
+  pointer-events: none;
+}
+
+.spatialPanelStage {
   width: min(980px, calc(100vw - 150px));
-  max-height: calc(100svh - 160px);
-  overflow: auto;
-  padding: 26px;
-  border: 1px solid var(--preview-edge-strong);
-  border-radius: var(--preview-radius);
-  background: rgba(26, 26, 26, 0.94);
-  box-shadow: 0 34px 110px rgba(0, 0, 0, 0.46);
-  backdrop-filter: blur(18px);
-  transform: translate(-50%, -46%);
+  perspective: 1200px;
+  pointer-events: auto;
+  transform-origin: 50% 62%;
 }
 
 .spatialPanelHeader {

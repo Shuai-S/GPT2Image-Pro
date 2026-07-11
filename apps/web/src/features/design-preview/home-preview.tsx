@@ -4,6 +4,7 @@
 
 import { ArrowRight, Search } from "lucide-react";
 import dynamic from "next/dynamic";
+import { AnimatePresence, motion } from "framer-motion";
 import { useState } from "react";
 import { previewPromise, previewTitle } from "./mock-data";
 import styles from "./design-preview.module.css";
@@ -43,9 +44,9 @@ export function HomePreview({
   onStartCreation: () => void;
 }) {
   return (
-    <main className={styles.homeScene}>
+    <main className={styles.homeScene} data-section={section}>
       <div className={styles.sceneFallback} />
-      <GalleryScene />
+      <GalleryScene section={section} />
       <div className={styles.sceneVignette} />
       {section === "gallery" && (
         <section className={styles.homeCopy}>
@@ -62,8 +63,42 @@ export function HomePreview({
           </button>
         </section>
       )}
-      {section === "pricing" && <PricingPanel />}
-      {section === "docs" && <DocsPanel />}
+      <AnimatePresence mode="wait">
+        {section !== "gallery" && (
+          <div className={styles.spatialPanelPortal}>
+            <motion.div
+              key={section}
+              className={styles.spatialPanelStage}
+              initial={{
+                opacity: 0,
+                scale: 0.58,
+                y: 44,
+                filter: "blur(16px)",
+              }}
+              animate={{
+                opacity: 1,
+                scale: 1,
+                y: 0,
+                filter: "blur(0px)",
+              }}
+              exit={{
+                opacity: 0,
+                scale: 0.76,
+                y: -18,
+                filter: "blur(10px)",
+              }}
+              transition={{
+                type: "spring",
+                stiffness: 118,
+                damping: 22,
+                mass: 1.05,
+              }}
+            >
+              {section === "pricing" ? <PricingPanel /> : <DocsPanel />}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </main>
   );
 }
