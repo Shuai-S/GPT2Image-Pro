@@ -389,18 +389,20 @@ function Composer({
             />
           )}
         </div>
-        <button
-          type="button"
-          className={styles.controlButton}
-          data-active={activePanel === "advanced"}
-          onClick={() =>
-            onPanelChange(activePanel === "advanced" ? null : "advanced")
-          }
-        >
-          <Settings2 size={13} aria-hidden="true" />
-          高级
-        </button>
-        {activePanel === "advanced" && <AdvancedPanel />}
+        <div className={styles.controlGroup}>
+          <button
+            type="button"
+            className={styles.controlButton}
+            data-active={activePanel === "advanced"}
+            onClick={() =>
+              onPanelChange(activePanel === "advanced" ? null : "advanced")
+            }
+          >
+            <Settings2 size={13} aria-hidden="true" />
+            高级
+          </button>
+          {activePanel === "advanced" && <AdvancedPanel />}
+        </div>
         <div className={styles.controlSpacer} />
         <span className={styles.costLabel}>预计 {totalCost} 积分</span>
         <div className={styles.generationControl}>
