@@ -31,6 +31,7 @@ import {
   DesktopRequired,
 } from "./admin-shell";
 import { AdminToolsPreview } from "./admin-tools-preview";
+import { AdminUsagePreview } from "./admin-usage-preview";
 import { UserInspector } from "./admin-user-inspector";
 import { UserManagementPage } from "./admin-users";
 
@@ -181,6 +182,10 @@ function writeAdminUrlState(
   } else {
     url.searchParams.delete("adminUser");
     url.searchParams.delete("adminUserTab");
+  }
+
+  if (state.section !== "usage") {
+    url.searchParams.delete("usageRecord");
   }
 
   if (mode === "push") {
@@ -679,12 +684,17 @@ export function AdminPreview({ locale }: { locale: string }) {
             />
           )}
 
+          {section === "usage" && (
+            <AdminUsagePreview locale={locale} onOpenUser={openUserInspector} />
+          )}
+
           {section === "backends" && <AdminToolsPreview view="backends" />}
 
           {section === "settings" && <AdminToolsPreview view="settings" />}
 
           {section !== "overview" &&
             section !== "users" &&
+            section !== "usage" &&
             section !== "backends" &&
             section !== "settings" && (
               <DeferredAdminPage locale={locale} section={section} />

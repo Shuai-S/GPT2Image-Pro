@@ -17,6 +17,7 @@ export type PreviewTheme = "dark" | "light";
 export type AdminSection =
   | "overview"
   | "users"
+  | "usage"
   | "tickets"
   | "payments"
   | "referrals"

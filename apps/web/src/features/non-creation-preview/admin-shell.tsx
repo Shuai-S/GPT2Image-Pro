@@ -10,6 +10,7 @@ import {
   CircleUserRound,
   CreditCard,
   FileText,
+  History,
   LifeBuoy,
   type LucideIcon,
   Moon,
@@ -72,6 +73,18 @@ export const navigationGroups: NavigationGroup[] = [
         labelZh: "工单管理",
         labelEn: "Tickets",
         icon: TicketCheck,
+      },
+    ],
+  },
+  {
+    labelZh: "生成运营",
+    labelEn: "Generation operations",
+    items: [
+      {
+        id: "usage",
+        labelZh: "使用记录",
+        labelEn: "Usage records",
+        icon: History,
       },
     ],
   },
@@ -350,7 +363,7 @@ export function DeferredAdminPage({
   locale: string;
   section: Exclude<
     AdminSection,
-    "overview" | "users" | "backends" | "settings"
+    "overview" | "users" | "usage" | "backends" | "settings"
   >;
 }) {
   const labels: Record<typeof section, [string, string, LucideIcon]> = {
