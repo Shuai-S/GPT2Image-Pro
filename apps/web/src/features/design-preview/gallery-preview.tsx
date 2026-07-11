@@ -84,13 +84,6 @@ export function GalleryPreview({
   return (
     <main className={styles.galleryView}>
       <header className={styles.galleryHeader}>
-        <div>
-          <div className={styles.sectionEyebrow}>Private library</div>
-          <h1>图库</h1>
-          <p>
-            所有生成图片和上传素材都保持私人状态，点击作品可继续生成或进入局部重绘。
-          </p>
-        </div>
         <div className={styles.galleryTools}>
           <label className={styles.controlGroup}>
             <Search

@@ -24,8 +24,16 @@ import {
   createSamples,
   getArtwork,
   historyBatches,
+  type HistoryBatch,
   modelOptions,
 } from "./mock-data";
+import {
+  getPreviewImageSize,
+  type PreviewImageSizeTier,
+  previewImageRatioPresets,
+  previewImageSizeTiers,
+  type PreviewRatioValue,
+} from "./ratio-presets";
 import styles from "./design-preview.module.css";
 
 type ComposerPanel = "model" | "ratio" | "advanced" | null;
@@ -36,6 +44,12 @@ const historyWheelPoints = [
   { x: 62, y: "50%" },
   { x: 78, y: "64.75%" },
   { x: 120, y: "79.67%" },
+] as const;
+
+const continuedGenerationImageSets = [
+  ["art-06", "art-10", "art-05", "art-08"],
+  ["art-12", "art-08", "art-04", "art-05"],
+  ["art-10", "art-06", "art-12", "art-04"],
 ] as const;
 
 /**
@@ -61,11 +75,15 @@ export function CreatePreview({
   const [activePanel, setActivePanel] = useState<ComposerPanel>(null);
   const [selectedModelId, setSelectedModelId] = useState("gpt-image-2");
   const [count, setCount] = useState(showResults ? 4 : 1);
-  const [ratio, setRatio] = useState("16:9");
+  const [ratio, setRatio] = useState<PreviewRatioValue>("16:9");
+  const [sizeTier, setSizeTier] = useState<PreviewImageSizeTier>("2k");
   const [focusedArtwork, setFocusedArtwork] = useState<{
     artworkId: string;
     originRect: ArtworkFocusRect;
   } | null>(null);
+  const [recentBatches, setRecentBatches] =
+    useState<HistoryBatch[]>(historyBatches);
+  const [generationSequence, setGenerationSequence] = useState(0);
   const [activeBatchId, setActiveBatchId] = useState("batch-01");
   const [inpaintMode, setInpaintMode] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
@@ -75,8 +93,8 @@ export function CreatePreview({
     modelOptions.find((model) => model.id === selectedModelId) ??
     modelOptions[0];
   const activeBatch =
-    historyBatches.find((batch) => batch.id === activeBatchId) ??
-    historyBatches[0];
+    recentBatches.find((batch) => batch.id === activeBatchId) ??
+    recentBatches[0];
   const visibleArtworkIds = showResults
     ? (activeBatch?.imageIds.slice(0, count) ?? [])
     : [];
@@ -85,14 +103,46 @@ export function CreatePreview({
     : getArtwork(visibleArtworkIds[0] ?? "art-04");
 
   /**
-   * 模拟受保护生成：未登录时保留草稿并打开登录层，已登录时直接显示结果。
+   * 完成一次继续生成，把新批次留在中央并将旧批次收进右侧时间轮。
+   */
+  const completeGeneration = () => {
+    const imageIds =
+      continuedGenerationImageSets[
+        generationSequence % continuedGenerationImageSets.length
+      ] ?? continuedGenerationImageSets[0];
+    const batchId = `preview-batch-${Date.now()}`;
+    const nextBatch: HistoryBatch = {
+      id: batchId,
+      time: "刚刚",
+      prompt: prompt.trim() || "未命名创作",
+      status: "完成",
+      imageIds: [...imageIds],
+    };
+    setRecentBatches((current) => [
+      nextBatch,
+      ...current
+        .map((batch, index) =>
+          index === 0 && batch.time === "刚刚"
+            ? { ...batch, time: "片刻前" }
+            : batch
+        )
+        .slice(0, 4),
+    ]);
+    setGenerationSequence((current) => current + 1);
+    setActiveBatchId(batchId);
+    setFocusedArtwork(null);
+    onShowResults();
+  };
+
+  /**
+   * 模拟受保护生成：未登录时保留草稿并打开登录层，已登录时直接继续生成。
    */
   const requestGeneration = () => {
     if (!authenticated) {
       setAuthOpen(true);
       return;
     }
-    onShowResults();
+    completeGeneration();
   };
 
   /**
@@ -101,36 +151,12 @@ export function CreatePreview({
   const completeMockLogin = () => {
     setAuthenticated(true);
     setAuthOpen(false);
-    onShowResults();
+    completeGeneration();
   };
 
   return (
     <main className={styles.canvasSurface}>
       <section className={styles.workbench}>
-        <header className={styles.workbenchHeader}>
-          <div>
-            <div className={styles.sectionEyebrow}>Create</div>
-            <h1>{inpaintMode ? "局部重绘" : "创作"}</h1>
-            <p>
-              {inpaintMode
-                ? "在当前图片上绘制蒙版，原图不会被覆盖。"
-                : "没有参考图时进行文生图，添加参考图后自然进入图生图。"}
-            </p>
-          </div>
-          {showResults && !inpaintMode && (
-            <button
-              type="button"
-              className={styles.secondaryButton}
-              onClick={() => {
-                setFocusedArtwork(null);
-                setPrompt("");
-              }}
-            >
-              新建创作
-            </button>
-          )}
-        </header>
-
         <div className={styles.canvasStage}>
           {inpaintMode ? (
             <InpaintStage artworkId={selectedArtwork.id} />
@@ -168,6 +194,8 @@ export function CreatePreview({
                 onCountChange={setCount}
                 ratio={ratio}
                 onRatioChange={setRatio}
+                sizeTier={sizeTier}
+                onSizeTierChange={setSizeTier}
                 onGenerate={requestGeneration}
                 docked={false}
               />
@@ -202,6 +230,8 @@ export function CreatePreview({
           onCountChange={setCount}
           ratio={ratio}
           onRatioChange={setRatio}
+          sizeTier={sizeTier}
+          onSizeTierChange={setSizeTier}
           onGenerate={requestGeneration}
           docked={showResults}
           hidden={!showResults}
@@ -221,6 +251,7 @@ export function CreatePreview({
 
       {!inpaintMode && !focusedArtwork && (
         <HistoryWheel
+          batches={recentBatches}
           activeBatchId={activeBatchId}
           onBatchChange={(batchId) => {
             setActiveBatchId(batchId);
@@ -257,6 +288,8 @@ function Composer({
   onCountChange,
   ratio,
   onRatioChange,
+  sizeTier,
+  onSizeTierChange,
   onGenerate,
   docked,
   hidden = false,
@@ -270,8 +303,10 @@ function Composer({
   onModelChange: (value: string) => void;
   count: number;
   onCountChange: (value: number) => void;
-  ratio: string;
-  onRatioChange: (value: string) => void;
+  ratio: PreviewRatioValue;
+  onRatioChange: (value: PreviewRatioValue) => void;
+  sizeTier: PreviewImageSizeTier;
+  onSizeTierChange: (value: PreviewImageSizeTier) => void;
   onGenerate: () => void;
   docked: boolean;
   hidden?: boolean;
@@ -342,13 +377,18 @@ function Composer({
             }
           >
             <Maximize2 size={13} aria-hidden="true" />
-            {ratio}
+            {ratio === "auto" ? "自动" : `${ratio} · ${sizeTier.toUpperCase()}`}
           </button>
           {activePanel === "ratio" && (
             <RatioPanel
               ratio={ratio}
+              sizeTier={sizeTier}
               count={count}
-              onRatioChange={onRatioChange}
+              onRatioChange={(value) => {
+                onRatioChange(value);
+                onPanelChange(null);
+              }}
+              onSizeTierChange={onSizeTierChange}
               onCountChange={onCountChange}
             />
           )}
@@ -422,36 +462,115 @@ function ModelPanel({
 }
 
 /**
- * 渲染现有比例能力的原型面板和 1 至 4 张分段选择器。
+ * 生成比例卡片里的简化形状尺寸。
+ *
+ * @param ratio 生产环境支持的比例定义。
+ * @returns 可直接传给样式属性的稳定宽高。
+ */
+function getRatioShapeStyle(ratio: { width: number; height: number }) {
+  const max = 25;
+  const min = 10;
+  const landscape = ratio.width >= ratio.height;
+  const width = landscape
+    ? max
+    : Math.max(min, Math.round((max * ratio.width) / ratio.height));
+  const height = landscape
+    ? Math.max(min, Math.round((max * ratio.height) / ratio.width))
+    : max;
+  return { width, height };
+}
+
+/**
+ * 渲染与生产系统相同的比例、分辨率档位和 1 至 4 张数量选择器。
+ *
+ * @param props.ratio 当前比例或自动模式。
+ * @param props.sizeTier 当前 1K、2K 或 4K 档位。
+ * @param props.count 当前单批生成数量。
+ * @param props.onRatioChange 选择比例后应用合法预设尺寸并关闭面板。
+ * @param props.onSizeTierChange 切换分辨率档位，面板保持打开。
+ * @param props.onCountChange 修改单批生成数量。
+ * @returns 比例形状、像素尺寸、档位和数量组成的紧凑面板。
  */
 function RatioPanel({
   ratio,
+  sizeTier,
   count,
   onRatioChange,
+  onSizeTierChange,
   onCountChange,
 }: {
-  ratio: string;
+  ratio: PreviewRatioValue;
+  sizeTier: PreviewImageSizeTier;
   count: number;
-  onRatioChange: (value: string) => void;
+  onRatioChange: (value: PreviewRatioValue) => void;
+  onSizeTierChange: (value: PreviewImageSizeTier) => void;
   onCountChange: (value: number) => void;
 }) {
+  const selectedSize =
+    ratio === "auto" ? null : getPreviewImageSize(ratio, sizeTier);
+
   return (
-    <div className={styles.floatingPanel}>
-      <h3>画面比例</h3>
-      <div className={styles.segmentGroup}>
-        {["1:1", "4:3", "3:4", "16:9"].map((value) => (
+    <div className={`${styles.floatingPanel} ${styles.ratioPanel}`}>
+      <div className={styles.panelHeader}>
+        <h3>画面比例</h3>
+        <span>
+          {selectedSize
+            ? `${selectedSize[0]} × ${selectedSize[1]}`
+            : "模型自行决定"}
+        </span>
+      </div>
+      <fieldset className={styles.ratioTierGroup} aria-label="分辨率档位">
+        {previewImageSizeTiers.map((tier) => (
           <button
             type="button"
-            className={styles.segmentButton}
-            data-active={value === ratio}
-            key={value}
-            onClick={() => onRatioChange(value)}
+            data-active={tier.value === sizeTier}
+            key={tier.value}
+            onClick={() => onSizeTierChange(tier.value)}
           >
-            {value}
+            {tier.label}
           </button>
         ))}
+      </fieldset>
+      <div className={styles.ratioPresetGrid}>
+        {previewImageRatioPresets.map((preset) => {
+          const size = getPreviewImageSize(preset.value, sizeTier);
+          return (
+            <button
+              type="button"
+              className={styles.ratioPreset}
+              data-active={preset.value === ratio}
+              key={preset.value}
+              onClick={() => onRatioChange(preset.value)}
+            >
+              <span
+                className={styles.ratioShape}
+                style={getRatioShapeStyle(preset)}
+              />
+              <span className={styles.ratioPresetCopy}>
+                <strong>
+                  {preset.value} · {preset.label}
+                </strong>
+                <span>
+                  {size[0]} × {size[1]}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          className={styles.ratioPreset}
+          data-active={ratio === "auto"}
+          onClick={() => onRatioChange("auto")}
+        >
+          <span className={styles.ratioAutoShape}>A</span>
+          <span className={styles.ratioPresetCopy}>
+            <strong>自动</strong>
+            <span>模型自行决定</span>
+          </span>
+        </button>
       </div>
-      <div className={styles.field} style={{ marginTop: 14 }}>
+      <div className={styles.ratioCountField}>
         <span className={styles.fieldLegend}>生成数量</span>
         <div className={styles.segmentGroup}>
           {[1, 2, 3, 4].map((value) => (
@@ -584,14 +703,17 @@ function ResultGrid({
 /**
  * 渲染空态与结果态共用的右侧时间轮。
  *
+ * @param props.batches 最近五个生成批次，新批次位于首位。
  * @param props.activeBatchId 当前在中央画布展示的批次。
  * @param props.onBatchChange 选择弧线作品时切换批次。
  * @returns 默认虚隐、悬停或聚焦后完整浮现的五批历史记录。
  */
 function HistoryWheel({
+  batches,
   activeBatchId,
   onBatchChange,
 }: {
+  batches: HistoryBatch[];
   activeBatchId: string;
   onBatchChange: (batchId: string) => void;
 }) {
@@ -610,7 +732,7 @@ function HistoryWheel({
         <path d="M 120 124 Q 78 170, 78 215 Q 62 260, 62 305 Q 62 350, 78 395 Q 78 440, 120 486" />
         <circle cx="62" cy="305" r="4" />
       </svg>
-      {historyBatches.map((batch, index) => {
+      {batches.map((batch, index) => {
         const artwork = getArtwork(batch.imageIds[0] ?? "art-04");
         const point = historyWheelPoints[index] ?? historyWheelPoints[0];
         const wheelStyle = {

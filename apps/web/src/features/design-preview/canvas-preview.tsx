@@ -64,7 +64,7 @@ export function CanvasPreview() {
   const [activeTool, setActiveTool] = useState<CanvasTool>("select");
   const [connectFromId, setConnectFromId] = useState<string | null>(null);
   const [connectionPoint, setConnectionPoint] = useState({ x: 0, y: 0 });
-  const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 0.86 });
+  const [viewport, setViewport] = useState({ x: 0, y: -96, zoom: 0.9 });
   const [addOpen, setAddOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
@@ -269,7 +269,7 @@ export function CanvasPreview() {
   /**
    * 将视口恢复到原型的标准观察距离。
    */
-  const fitView = () => setViewport({ x: 0, y: 0, zoom: 0.86 });
+  const fitView = () => setViewport({ x: 0, y: -96, zoom: 0.9 });
 
   return (
     <main
@@ -289,12 +289,6 @@ export function CanvasPreview() {
         }));
       }}
     >
-      <header className={styles.canvasHeader}>
-        <div className={styles.sectionEyebrow}>Infinite canvas</div>
-        <h1>无限画布</h1>
-        <p>一组可以连接的创作画布，节点结构在操作中逐渐显露。</p>
-      </header>
-
       <div
         className={styles.nodeWorld}
         style={{
