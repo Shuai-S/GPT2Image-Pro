@@ -3,7 +3,6 @@
 // 基础创作原型。模拟匿名草稿、统一生成输入器、结果聚焦、最近批次与局部重绘。
 
 import {
-  ArrowRight,
   Brush,
   Check,
   ChevronDown,
@@ -14,17 +13,19 @@ import {
   WandSparkles,
 } from "lucide-react";
 import Image from "next/image";
-import { type CSSProperties, useMemo, useState } from "react";
+import { type CSSProperties, useState } from "react";
 import {
   ArtworkFocus,
   type ArtworkFocusRect,
   getArtworkFocusOrigin,
 } from "./artwork-focus";
+import type { AuthRequestContext } from "./auth-overlay-preview";
+import styles from "./design-preview.module.css";
 import {
   createSamples,
   getArtwork,
-  historyBatches,
   type HistoryBatch,
+  historyBatches,
   modelOptions,
 } from "./mock-data";
 import {
@@ -32,11 +33,10 @@ import {
   isPreviewCustomResolutionValid,
   normalizePreviewCustomResolution,
   type PreviewImageSizeTier,
+  type PreviewRatioValue,
   previewImageRatioPresets,
   previewImageSizeTiers,
-  type PreviewRatioValue,
 } from "./ratio-presets";
-import styles from "./design-preview.module.css";
 
 type ComposerPanel = "model" | "ratio" | "advanced" | null;
 
@@ -64,12 +64,19 @@ const continuedGenerationImageSets = [
  */
 export function CreatePreview({
   showResults,
+  authenticated,
   onShowResults,
   onOpenGallery,
+  onRequireAuthentication,
 }: {
   showResults: boolean;
+  authenticated: boolean;
   onShowResults: () => void;
   onOpenGallery: () => void;
+  onRequireAuthentication: (
+    onAuthenticated: () => void,
+    context: AuthRequestContext
+  ) => void;
 }) {
   const [prompt, setPrompt] = useState(
     showResults ? "一座漂浮在雾海上方的古老观测站，电影感宽幅构图" : ""
@@ -92,8 +99,6 @@ export function CreatePreview({
   const [generationSequence, setGenerationSequence] = useState(0);
   const [activeBatchId, setActiveBatchId] = useState("batch-01");
   const [inpaintMode, setInpaintMode] = useState(false);
-  const [authOpen, setAuthOpen] = useState(false);
-  const [authenticated, setAuthenticated] = useState(showResults);
 
   const selectedModel =
     modelOptions.find((model) => model.id === selectedModelId) ??
@@ -147,19 +152,14 @@ export function CreatePreview({
   const requestGeneration = (generationCount: number) => {
     setCount(generationCount);
     if (!authenticated) {
-      setAuthOpen(true);
+      onRequireAuthentication(() => completeGeneration(generationCount), {
+        prompt,
+        modelName: selectedModel?.name ?? "GPT Image 2",
+        cost: (selectedModel?.cost ?? 3) * generationCount,
+      });
       return;
     }
     completeGeneration(generationCount);
-  };
-
-  /**
-   * 模拟登录成功并恢复原生成动作。
-   */
-  const completeMockLogin = () => {
-    setAuthenticated(true);
-    setAuthOpen(false);
-    completeGeneration(count);
   };
 
   return (
@@ -252,16 +252,6 @@ export function CreatePreview({
             setFocusedArtwork(null);
             if (!showResults) onShowResults();
           }}
-        />
-      )}
-
-      {authOpen && (
-        <AuthOverlay
-          prompt={prompt}
-          modelName={selectedModel?.name ?? "GPT Image 2"}
-          cost={(selectedModel?.cost ?? 3) * count}
-          onCancel={() => setAuthOpen(false)}
-          onContinue={completeMockLogin}
         />
       )}
     </main>
@@ -892,61 +882,6 @@ function InpaintControls({
         <Sparkles size={13} aria-hidden="true" />
         重绘 · 3 积分
       </button>
-    </div>
-  );
-}
-
-/**
- * 渲染保留当前草稿的模拟登录浮层。
- */
-function AuthOverlay({
-  prompt,
-  modelName,
-  cost,
-  onCancel,
-  onContinue,
-}: {
-  prompt: string;
-  modelName: string;
-  cost: number;
-  onCancel: () => void;
-  onContinue: () => void;
-}) {
-  const promptSummary = useMemo(
-    () => (prompt.length > 44 ? `${prompt.slice(0, 44)}...` : prompt),
-    [prompt]
-  );
-
-  return (
-    <div className={styles.authOverlay} role="dialog" aria-modal="true">
-      <div className={styles.authDialog}>
-        <div className={styles.sectionEyebrow}>Continue creation</div>
-        <h2>登录后继续生成</h2>
-        <p>提示词、模型、比例和参考图会完整保留，登录成功后继续当前操作。</p>
-        <div className={styles.authSummary}>
-          <span>{promptSummary}</span>
-          <strong>{modelName}</strong>
-          <span>预计消耗</span>
-          <strong>{cost} 积分</strong>
-        </div>
-        <div className={styles.authActions}>
-          <button
-            type="button"
-            className={styles.secondaryButton}
-            onClick={onCancel}
-          >
-            暂不登录
-          </button>
-          <button
-            type="button"
-            className={styles.primaryButton}
-            onClick={onContinue}
-          >
-            模拟登录并继续
-            <ArrowRight size={14} aria-hidden="true" />
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
