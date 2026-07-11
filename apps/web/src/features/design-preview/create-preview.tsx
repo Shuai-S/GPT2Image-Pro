@@ -18,7 +18,7 @@ import {
   X,
 } from "lucide-react";
 import Image from "next/image";
-import { useMemo, useState } from "react";
+import { type CSSProperties, useMemo, useState } from "react";
 import {
   createSamples,
   getArtwork,
@@ -195,12 +195,13 @@ export function CreatePreview({
         />
       )}
 
-      {showResults && !inpaintMode && (
-        <HistoryRail
+      {!inpaintMode && (
+        <HistoryWheel
           activeBatchId={activeBatchId}
           onBatchChange={(batchId) => {
             setActiveBatchId(batchId);
             setSelectedArtworkId(null);
+            if (!showResults) onShowResults();
           }}
         />
       )}
@@ -589,9 +590,13 @@ function ResultGrid({
 }
 
 /**
- * 渲染基础创作页右侧最近五个批次。
+ * 渲染空态与结果态共用的右侧时间轮。
+ *
+ * @param props.activeBatchId 当前在中央画布展示的批次。
+ * @param props.onBatchChange 选择弧线作品时切换批次。
+ * @returns 默认虚隐、悬停或聚焦后完整浮现的五批历史记录。
  */
-function HistoryRail({
+function HistoryWheel({
   activeBatchId,
   onBatchChange,
 }: {
@@ -599,44 +604,45 @@ function HistoryRail({
   onBatchChange: (batchId: string) => void;
 }) {
   return (
-    <aside className={styles.historyRail}>
-      <div className={styles.historyHeader}>
+    <aside className={styles.historyWheel} aria-label="最近生成时间轮">
+      <div className={styles.historyWheelHeader}>
+        <span>Recent generations</span>
         <h2>最近生成</h2>
-        <span>最近 5 批</span>
       </div>
-      <div className={styles.historyList}>
-        {historyBatches.map((batch) => (
+      <div className={styles.historyArc} aria-hidden="true" />
+      {historyBatches.map((batch, index) => {
+        const artwork = getArtwork(batch.imageIds[0] ?? "art-04");
+        const wheelStyle = {
+          "--wheel-index": index,
+        } as CSSProperties;
+        return (
           <button
             type="button"
-            className={styles.historyButton}
+            className={styles.historyWheelItem}
             data-active={batch.id === activeBatchId}
             key={batch.id}
+            style={wheelStyle}
             onClick={() => onBatchChange(batch.id)}
           >
-            <span className={styles.historyThumbs}>
-              {batch.imageIds.slice(0, 4).map((artworkId) => {
-                const artwork = getArtwork(artworkId);
-                return (
-                  <Image
-                    key={artwork.id}
-                    src={artwork.src}
-                    alt=""
-                    width={62}
-                    height={30}
-                    unoptimized
-                  />
-                );
-              })}
+            <span className={styles.historyWheelThumb}>
+              <Image
+                src={artwork.src}
+                alt=""
+                width={72}
+                height={72}
+                unoptimized
+              />
+              <span>{batch.imageIds.length}</span>
             </span>
-            <span className={styles.historyMeta}>
+            <span className={styles.historyWheelMeta}>
               <strong>{batch.prompt}</strong>
               <span>
                 {batch.time} · {batch.imageIds.length} 张
               </span>
             </span>
           </button>
-        ))}
-      </div>
+        );
+      })}
     </aside>
   );
 }
