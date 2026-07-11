@@ -29,6 +29,14 @@ import styles from "./design-preview.module.css";
 
 type ComposerPanel = "model" | "ratio" | "advanced" | null;
 
+const historyWheelPoints = [
+  { x: 120, y: "20.33%" },
+  { x: 78, y: "35.25%" },
+  { x: 62, y: "50%" },
+  { x: 78, y: "64.75%" },
+  { x: 120, y: "79.67%" },
+] as const;
+
 /**
  * 渲染基础创作空态或结果态。
  *
@@ -609,11 +617,21 @@ function HistoryWheel({
         <span>Recent generations</span>
         <h2>最近生成</h2>
       </div>
-      <div className={styles.historyArc} aria-hidden="true" />
+      <svg
+        className={styles.historyArc}
+        viewBox="0 0 348 610"
+        preserveAspectRatio="none"
+        aria-hidden="true"
+      >
+        <path d="M 120 124 Q 78 170, 78 215 Q 62 260, 62 305 Q 62 350, 78 395 Q 78 440, 120 486" />
+        <circle cx="62" cy="305" r="4" />
+      </svg>
       {historyBatches.map((batch, index) => {
         const artwork = getArtwork(batch.imageIds[0] ?? "art-04");
+        const point = historyWheelPoints[index] ?? historyWheelPoints[0];
         const wheelStyle = {
-          "--wheel-index": index,
+          "--wheel-x": `${point.x - 36}px`,
+          "--wheel-y": point.y,
         } as CSSProperties;
         return (
           <button

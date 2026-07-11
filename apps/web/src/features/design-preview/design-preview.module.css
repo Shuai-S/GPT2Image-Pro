@@ -987,7 +987,7 @@
   border-radius: 48% 0 0 48%;
   outline: 0;
   background: transparent;
-  transform: translate(280px, -50%);
+  transform: translate(238px, -50%);
   transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1),
     background 260ms ease, border-color 260ms ease, box-shadow 260ms ease;
 }
@@ -1003,8 +1003,10 @@
 
 .historyWheelHeader {
   position: absolute;
-  top: 24px;
-  left: 112px;
+  z-index: 3;
+  top: 16px;
+  left: 140px;
+  width: 150px;
   opacity: 0;
   transition: opacity 180ms ease 80ms;
 }
@@ -1015,10 +1017,12 @@
 }
 
 .historyWheelHeader span {
+  display: block;
   color: var(--preview-text-faint);
   font-size: 9px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .historyWheelHeader h2 {
@@ -1029,35 +1033,32 @@
 
 .historyArc {
   position: absolute;
-  top: 66px;
-  bottom: 34px;
-  left: 42px;
-  width: 228px;
-  border: 1px solid var(--preview-edge-strong);
-  border-right: 0;
-  border-radius: 52% 0 0 52%;
+  z-index: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
   opacity: 0.7;
+  pointer-events: none;
 }
 
-.historyArc::after {
-  position: absolute;
-  top: 50%;
-  left: -4px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--preview-text-muted);
-  box-shadow: 0 0 0 4px var(--preview-control-fill-strong);
-  content: "";
-  transform: translateY(-50%);
+.historyArc path {
+  fill: none;
+  stroke: var(--preview-edge-strong);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.historyArc circle {
+  fill: var(--preview-text-muted);
+  stroke: var(--preview-control-fill-strong);
+  stroke-width: 8;
+  vector-effect: non-scaling-stroke;
 }
 
 .historyWheelItem {
-  --wheel-y: calc(86px + var(--wheel-index) * 94px);
-  --wheel-x: calc(
-    72px + abs(var(--wheel-index) - 2) * abs(var(--wheel-index) - 2) * 18px
-  );
   position: absolute;
+  z-index: 2;
   top: var(--wheel-y);
   left: var(--wheel-x);
   display: grid;
@@ -1078,16 +1079,19 @@
 }
 
 .historyWheelItem:hover,
-.historyWheelItem[data-active="true"] {
+.historyWheel:hover .historyWheelItem[data-active="true"],
+.historyWheel:focus-within .historyWheelItem[data-active="true"] {
   border-color: var(--preview-edge-strong);
   color: var(--preview-text);
   background: var(--preview-panel);
-  transform: translate(-5px, -50%);
+  transform: translateY(-50%);
 }
 
 .historyWheel:not(:hover):not(:focus-within) .historyWheelItem {
+  border-color: transparent;
+  background: transparent;
   opacity: 0.78;
-  transform: translate(-112px, -50%);
+  transform: translateY(-50%);
 }
 
 .historyWheelThumb {
@@ -1125,6 +1129,7 @@
 }
 
 .historyWheelMeta {
+  width: 104px;
   min-width: 0;
   opacity: 0;
   transform: translateX(8px);
@@ -1973,12 +1978,12 @@
 
   .historyWheel {
     height: min(560px, calc(100svh - 160px));
-    transform: translate(296px, -50%);
+    transform: translate(238px, -50%);
   }
 
   .historyWheel:hover,
   .historyWheel:focus-within {
-    transform: translate(20px, -50%);
+    transform: translate(0, -50%);
   }
 }
 
