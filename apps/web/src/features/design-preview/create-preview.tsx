@@ -1,0 +1,752 @@
+"use client";
+
+// 基础创作原型。模拟匿名草稿、统一生成输入器、结果聚焦、最近批次与局部重绘。
+
+import {
+  ArrowRight,
+  Brush,
+  Check,
+  ChevronDown,
+  Download,
+  ImagePlus,
+  Images,
+  Maximize2,
+  PanelTopOpen,
+  Settings2,
+  Sparkles,
+  WandSparkles,
+  X,
+} from "lucide-react";
+import Image from "next/image";
+import { useMemo, useState } from "react";
+import {
+  createSamples,
+  getArtwork,
+  historyBatches,
+  modelOptions,
+} from "./mock-data";
+import styles from "./design-preview.module.css";
+
+type ComposerPanel = "model" | "ratio" | "advanced" | null;
+
+/**
+ * 渲染基础创作空态或结果态。
+ *
+ * @param props.showResults 是否展示模拟生成结果。
+ * @param props.onShowResults 登录完成或直接预览后切换到结果态。
+ * @param props.onOpenGallery 打开私人图库视图。
+ * @returns 完整基础创作工作台。
+ */
+export function CreatePreview({
+  showResults,
+  onShowResults,
+  onOpenGallery,
+}: {
+  showResults: boolean;
+  onShowResults: () => void;
+  onOpenGallery: () => void;
+}) {
+  const [prompt, setPrompt] = useState(
+    showResults ? "一座漂浮在雾海上方的古老观测站，电影感宽幅构图" : ""
+  );
+  const [activePanel, setActivePanel] = useState<ComposerPanel>(null);
+  const [selectedModelId, setSelectedModelId] = useState("gpt-image-2");
+  const [count, setCount] = useState(showResults ? 4 : 1);
+  const [ratio, setRatio] = useState("16:9");
+  const [selectedArtworkId, setSelectedArtworkId] = useState<string | null>(
+    null
+  );
+  const [activeBatchId, setActiveBatchId] = useState("batch-01");
+  const [inpaintMode, setInpaintMode] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authenticated, setAuthenticated] = useState(showResults);
+
+  const selectedModel =
+    modelOptions.find((model) => model.id === selectedModelId) ??
+    modelOptions[0];
+  const activeBatch =
+    historyBatches.find((batch) => batch.id === activeBatchId) ??
+    historyBatches[0];
+  const visibleArtworkIds = showResults
+    ? (activeBatch?.imageIds.slice(0, count) ?? [])
+    : [];
+  const selectedArtwork = selectedArtworkId
+    ? getArtwork(selectedArtworkId)
+    : getArtwork(visibleArtworkIds[0] ?? "art-04");
+
+  /**
+   * 模拟受保护生成：未登录时保留草稿并打开登录层，已登录时直接显示结果。
+   */
+  const requestGeneration = () => {
+    if (!authenticated) {
+      setAuthOpen(true);
+      return;
+    }
+    onShowResults();
+  };
+
+  /**
+   * 模拟登录成功并恢复原生成动作。
+   */
+  const completeMockLogin = () => {
+    setAuthenticated(true);
+    setAuthOpen(false);
+    onShowResults();
+  };
+
+  return (
+    <main className={styles.canvasSurface}>
+      <section className={styles.workbench}>
+        <header className={styles.workbenchHeader}>
+          <div>
+            <div className={styles.sectionEyebrow}>Create</div>
+            <h1>{inpaintMode ? "局部重绘" : "创作"}</h1>
+            <p>
+              {inpaintMode
+                ? "在当前图片上绘制蒙版，原图不会被覆盖。"
+                : "没有参考图时进行文生图，添加参考图后自然进入图生图。"}
+            </p>
+          </div>
+          {showResults && !inpaintMode && (
+            <button
+              type="button"
+              className={styles.secondaryButton}
+              onClick={() => {
+                setSelectedArtworkId(null);
+                setPrompt("");
+              }}
+            >
+              新建创作
+            </button>
+          )}
+        </header>
+
+        <div className={styles.canvasStage}>
+          {inpaintMode ? (
+            <InpaintStage artworkId={selectedArtwork.id} />
+          ) : showResults ? (
+            <ResultGrid
+              artworkIds={visibleArtworkIds}
+              selectedArtworkId={selectedArtworkId}
+              onSelect={setSelectedArtworkId}
+            />
+          ) : (
+            <div className={styles.emptyStage}>
+              <h2>从一个想法开始</h2>
+              <p>描述你想创作的画面，也可以添加一张参考图。</p>
+              <Composer
+                prompt={prompt}
+                onPromptChange={setPrompt}
+                activePanel={activePanel}
+                onPanelChange={setActivePanel}
+                selectedModelId={selectedModelId}
+                onModelChange={setSelectedModelId}
+                count={count}
+                onCountChange={setCount}
+                ratio={ratio}
+                onRatioChange={setRatio}
+                onGenerate={requestGeneration}
+                docked={false}
+              />
+              {!prompt && (
+                <div className={styles.sampleList}>
+                  {createSamples.map((sample) => (
+                    <button
+                      type="button"
+                      className={styles.sampleButton}
+                      key={sample}
+                      onClick={() => setPrompt(sample)}
+                    >
+                      {sample}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {!inpaintMode && (
+        <Composer
+          prompt={prompt}
+          onPromptChange={setPrompt}
+          activePanel={activePanel}
+          onPanelChange={setActivePanel}
+          selectedModelId={selectedModelId}
+          onModelChange={setSelectedModelId}
+          count={count}
+          onCountChange={setCount}
+          ratio={ratio}
+          onRatioChange={setRatio}
+          onGenerate={requestGeneration}
+          docked={showResults}
+          hidden={!showResults}
+        />
+      )}
+
+      {inpaintMode && (
+        <InpaintControls
+          onClose={() => setInpaintMode(false)}
+          onGenerate={() => {
+            setInpaintMode(false);
+            onShowResults();
+          }}
+        />
+      )}
+
+      {showResults && !inpaintMode && (
+        <HistoryRail
+          activeBatchId={activeBatchId}
+          onBatchChange={(batchId) => {
+            setActiveBatchId(batchId);
+            setSelectedArtworkId(null);
+          }}
+        />
+      )}
+
+      {selectedArtworkId && !inpaintMode && (
+        <div className={styles.contextBar}>
+          <button type="button" className={styles.contextAction}>
+            <ImagePlus size={14} aria-hidden="true" />
+            用作参考
+          </button>
+          <button
+            type="button"
+            className={styles.contextAction}
+            onClick={() => setInpaintMode(true)}
+          >
+            <Brush size={14} aria-hidden="true" />
+            局部重绘
+          </button>
+          <button type="button" className={styles.contextAction}>
+            <PanelTopOpen size={14} aria-hidden="true" />
+            加入无限画布
+          </button>
+          <button
+            type="button"
+            className={styles.contextAction}
+            onClick={onOpenGallery}
+          >
+            <Images size={14} aria-hidden="true" />
+            打开图库
+          </button>
+          <button type="button" className={styles.contextAction}>
+            <Download size={14} aria-hidden="true" />
+            下载
+          </button>
+          <button
+            type="button"
+            className={styles.contextAction}
+            aria-label="取消选择"
+            title="取消选择"
+            onClick={() => setSelectedArtworkId(null)}
+          >
+            <X size={14} aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
+      {authOpen && (
+        <AuthOverlay
+          prompt={prompt}
+          modelName={selectedModel?.name ?? "GPT Image 2"}
+          cost={(selectedModel?.cost ?? 3) * count}
+          onCancel={() => setAuthOpen(false)}
+          onContinue={completeMockLogin}
+        />
+      )}
+    </main>
+  );
+}
+
+/**
+ * 渲染唯一生成输入器及其模型、比例和高级参数面板。
+ */
+function Composer({
+  prompt,
+  onPromptChange,
+  activePanel,
+  onPanelChange,
+  selectedModelId,
+  onModelChange,
+  count,
+  onCountChange,
+  ratio,
+  onRatioChange,
+  onGenerate,
+  docked,
+  hidden = false,
+}: {
+  prompt: string;
+  onPromptChange: (value: string) => void;
+  activePanel: ComposerPanel;
+  onPanelChange: (value: ComposerPanel) => void;
+  selectedModelId: string;
+  onModelChange: (value: string) => void;
+  count: number;
+  onCountChange: (value: number) => void;
+  ratio: string;
+  onRatioChange: (value: string) => void;
+  onGenerate: () => void;
+  docked: boolean;
+  hidden?: boolean;
+}) {
+  const selectedModel =
+    modelOptions.find((model) => model.id === selectedModelId) ??
+    modelOptions[0];
+  const totalCost = (selectedModel?.cost ?? 3) * count;
+
+  if (hidden) return null;
+
+  return (
+    <div className={styles.composer} data-docked={docked}>
+      <div className={styles.composerTop}>
+        <textarea
+          className={styles.promptInput}
+          aria-label="创作提示词"
+          placeholder="描述你想创作的画面"
+          rows={1}
+          value={prompt}
+          onChange={(event) => onPromptChange(event.target.value)}
+        />
+        <button
+          type="button"
+          className={styles.tinyButton}
+          aria-label="添加参考图"
+          title="添加参考图"
+        >
+          <ImagePlus size={17} aria-hidden="true" />
+        </button>
+      </div>
+      <div className={styles.composerControls}>
+        <div className={styles.controlGroup}>
+          <button
+            type="button"
+            className={styles.controlButton}
+            data-active={activePanel === "model"}
+            onClick={() =>
+              onPanelChange(activePanel === "model" ? null : "model")
+            }
+          >
+            <WandSparkles size={13} aria-hidden="true" />
+            {selectedModel?.name}
+            <ChevronDown size={12} aria-hidden="true" />
+          </button>
+          {activePanel === "model" && (
+            <ModelPanel
+              selectedModelId={selectedModelId}
+              onSelect={(modelId) => {
+                onModelChange(modelId);
+                onPanelChange(null);
+              }}
+            />
+          )}
+        </div>
+        <div className={styles.controlGroup}>
+          <button
+            type="button"
+            className={styles.controlButton}
+            data-active={activePanel === "ratio"}
+            onClick={() =>
+              onPanelChange(activePanel === "ratio" ? null : "ratio")
+            }
+          >
+            <Maximize2 size={13} aria-hidden="true" />
+            {ratio}
+          </button>
+          {activePanel === "ratio" && (
+            <RatioPanel
+              ratio={ratio}
+              count={count}
+              onRatioChange={onRatioChange}
+              onCountChange={onCountChange}
+            />
+          )}
+        </div>
+        <button
+          type="button"
+          className={styles.controlButton}
+          data-active={activePanel === "advanced"}
+          onClick={() =>
+            onPanelChange(activePanel === "advanced" ? null : "advanced")
+          }
+        >
+          <Settings2 size={13} aria-hidden="true" />
+          高级
+        </button>
+        {activePanel === "advanced" && <AdvancedPanel />}
+        <div className={styles.controlSpacer} />
+        <span className={styles.costLabel}>预计 {totalCost} 积分</span>
+        <button
+          type="button"
+          className={styles.generateButton}
+          onClick={onGenerate}
+          disabled={!prompt.trim()}
+        >
+          <Sparkles size={13} aria-hidden="true" />
+          生成 {count} 张
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 渲染含定位、单张价格和选中状态的模型列表。
+ */
+function ModelPanel({
+  selectedModelId,
+  onSelect,
+}: {
+  selectedModelId: string;
+  onSelect: (modelId: string) => void;
+}) {
+  return (
+    <div className={styles.floatingPanel}>
+      <div className={styles.panelHeader}>
+        <h3>选择模型</h3>
+        <span>价格随尺寸变化</span>
+      </div>
+      <div className={styles.modelList}>
+        {modelOptions.map((model) => (
+          <button
+            type="button"
+            key={model.id}
+            className={styles.modelOption}
+            data-active={model.id === selectedModelId}
+            onClick={() => onSelect(model.id)}
+          >
+            <span>
+              <span className={styles.modelName}>{model.name}</span>
+              <span className={styles.modelDetail}>{model.detail}</span>
+            </span>
+            <span className={styles.modelCost}>
+              {model.cost} 积分/张
+              {model.id === selectedModelId && <Check size={12} />}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 渲染现有比例能力的原型面板和 1 至 4 张分段选择器。
+ */
+function RatioPanel({
+  ratio,
+  count,
+  onRatioChange,
+  onCountChange,
+}: {
+  ratio: string;
+  count: number;
+  onRatioChange: (value: string) => void;
+  onCountChange: (value: number) => void;
+}) {
+  return (
+    <div className={styles.floatingPanel}>
+      <h3>画面比例</h3>
+      <div className={styles.segmentGroup}>
+        {["1:1", "4:3", "3:4", "16:9"].map((value) => (
+          <button
+            type="button"
+            className={styles.segmentButton}
+            data-active={value === ratio}
+            key={value}
+            onClick={() => onRatioChange(value)}
+          >
+            {value}
+          </button>
+        ))}
+      </div>
+      <div className={styles.field} style={{ marginTop: 14 }}>
+        <span className={styles.fieldLegend}>生成数量</span>
+        <div className={styles.segmentGroup}>
+          {[1, 2, 3, 4].map((value) => (
+            <button
+              type="button"
+              className={styles.segmentButton}
+              data-active={value === count}
+              key={value}
+              onClick={() => onCountChange(value)}
+            >
+              {value}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 渲染生成、输出和增强三个高级参数分组。
+ */
+function AdvancedPanel() {
+  return (
+    <div className={styles.floatingPanel}>
+      <div className={styles.panelHeader}>
+        <h3>高级参数</h3>
+        <span>只展示当前模型可用项</span>
+      </div>
+      <div className={styles.advancedPanel}>
+        <div className={styles.field}>
+          <label htmlFor="preview-quality">生成 · 质量档位</label>
+          <select id="preview-quality" defaultValue="high">
+            <option value="auto">自动</option>
+            <option value="high">高质量</option>
+            <option value="medium">均衡</option>
+          </select>
+        </div>
+        <div className={styles.field}>
+          <label htmlFor="preview-channel">生成 · 生成通道</label>
+          <select id="preview-channel" defaultValue="primary">
+            <option value="primary">主通道</option>
+            <option value="backup">备用通道</option>
+          </select>
+        </div>
+        <div className={styles.field}>
+          <label htmlFor="preview-format">输出 · 格式</label>
+          <select id="preview-format" defaultValue="png">
+            <option value="png">PNG</option>
+            <option value="webp">WebP</option>
+            <option value="jpeg">JPEG</option>
+          </select>
+        </div>
+        <div className={styles.field}>
+          <label htmlFor="preview-background">输出 · 背景</label>
+          <select id="preview-background" defaultValue="auto">
+            <option value="auto">自动</option>
+            <option value="opaque">不透明</option>
+            <option value="transparent">透明</option>
+          </select>
+        </div>
+        <div className={styles.field}>
+          <span className={styles.fieldLegend}>增强</span>
+          <div className={styles.segmentGroup}>
+            <button type="button" className={styles.segmentButton}>
+              高清修复
+            </button>
+            <button type="button" className={styles.segmentButton}>
+              生成式修复
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 渲染当前批次结果并支持等权与聚焦两种布局。
+ */
+function ResultGrid({
+  artworkIds,
+  selectedArtworkId,
+  onSelect,
+}: {
+  artworkIds: string[];
+  selectedArtworkId: string | null;
+  onSelect: (artworkId: string) => void;
+}) {
+  return (
+    <div
+      className={styles.resultsStage}
+      data-focus={Boolean(selectedArtworkId)}
+    >
+      {artworkIds.map((artworkId, index) => {
+        const artwork = getArtwork(artworkId);
+        return (
+          <button
+            type="button"
+            className={styles.resultFrame}
+            data-selected={selectedArtworkId === artwork.id}
+            data-muted={Boolean(
+              selectedArtworkId && selectedArtworkId !== artwork.id
+            )}
+            key={artwork.id}
+            onClick={() => onSelect(artwork.id)}
+          >
+            <Image
+              src={artwork.src}
+              alt={artwork.alt}
+              width={artwork.width}
+              height={artwork.height}
+              unoptimized
+            />
+            <span className={styles.resultLabel}>
+              <span>结果 {index + 1}</span>
+              <span>{artwork.width > artwork.height ? "横版" : "竖版"}</span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * 渲染基础创作页右侧最近五个批次。
+ */
+function HistoryRail({
+  activeBatchId,
+  onBatchChange,
+}: {
+  activeBatchId: string;
+  onBatchChange: (batchId: string) => void;
+}) {
+  return (
+    <aside className={styles.historyRail}>
+      <div className={styles.historyHeader}>
+        <h2>最近生成</h2>
+        <span>最近 5 批</span>
+      </div>
+      <div className={styles.historyList}>
+        {historyBatches.map((batch) => (
+          <button
+            type="button"
+            className={styles.historyButton}
+            data-active={batch.id === activeBatchId}
+            key={batch.id}
+            onClick={() => onBatchChange(batch.id)}
+          >
+            <span className={styles.historyThumbs}>
+              {batch.imageIds.slice(0, 4).map((artworkId) => {
+                const artwork = getArtwork(artworkId);
+                return (
+                  <Image
+                    key={artwork.id}
+                    src={artwork.src}
+                    alt=""
+                    width={62}
+                    height={30}
+                    unoptimized
+                  />
+                );
+              })}
+            </span>
+            <span className={styles.historyMeta}>
+              <strong>{batch.prompt}</strong>
+              <span>
+                {batch.time} · {batch.imageIds.length} 张
+              </span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </aside>
+  );
+}
+
+/**
+ * 渲染局部重绘聚焦图片和中性蒙版示意。
+ */
+function InpaintStage({ artworkId }: { artworkId: string }) {
+  const artwork = getArtwork(artworkId);
+  return (
+    <div className={styles.inpaintStage}>
+      <Image
+        src={artwork.src}
+        alt={artwork.alt}
+        width={artwork.width}
+        height={artwork.height}
+        unoptimized
+      />
+      <div className={styles.maskOverlay} />
+      <div className={styles.maskHint}>蒙版草稿已保留</div>
+    </div>
+  );
+}
+
+/**
+ * 渲染局部重绘底部控制器。
+ */
+function InpaintControls({
+  onClose,
+  onGenerate,
+}: {
+  onClose: () => void;
+  onGenerate: () => void;
+}) {
+  return (
+    <div className={styles.inpaintControls}>
+      <button type="button" className={styles.controlButton}>
+        <Brush size={13} aria-hidden="true" />
+        画笔 48
+      </button>
+      <input
+        aria-label="局部重绘提示词"
+        defaultValue="重绘选中区域，保持原有光线与材质"
+      />
+      <button type="button" className={styles.controlButton} onClick={onClose}>
+        退出
+      </button>
+      <button
+        type="button"
+        className={styles.generateButton}
+        onClick={onGenerate}
+      >
+        <Sparkles size={13} aria-hidden="true" />
+        重绘 · 3 积分
+      </button>
+    </div>
+  );
+}
+
+/**
+ * 渲染保留当前草稿的模拟登录浮层。
+ */
+function AuthOverlay({
+  prompt,
+  modelName,
+  cost,
+  onCancel,
+  onContinue,
+}: {
+  prompt: string;
+  modelName: string;
+  cost: number;
+  onCancel: () => void;
+  onContinue: () => void;
+}) {
+  const promptSummary = useMemo(
+    () => (prompt.length > 44 ? `${prompt.slice(0, 44)}...` : prompt),
+    [prompt]
+  );
+
+  return (
+    <div className={styles.authOverlay} role="dialog" aria-modal="true">
+      <div className={styles.authDialog}>
+        <div className={styles.sectionEyebrow}>Continue creation</div>
+        <h2>登录后继续生成</h2>
+        <p>提示词、模型、比例和参考图会完整保留，登录成功后继续当前操作。</p>
+        <div className={styles.authSummary}>
+          <span>{promptSummary}</span>
+          <strong>{modelName}</strong>
+          <span>预计消耗</span>
+          <strong>{cost} 积分</strong>
+        </div>
+        <div className={styles.authActions}>
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            onClick={onCancel}
+          >
+            暂不登录
+          </button>
+          <button
+            type="button"
+            className={styles.primaryButton}
+            onClick={onContinue}
+          >
+            模拟登录并继续
+            <ArrowRight size={14} aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
