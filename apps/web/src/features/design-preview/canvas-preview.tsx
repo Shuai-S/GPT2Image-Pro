@@ -1018,7 +1018,11 @@ export function CanvasPreview() {
                 setEditorImageId(node.id);
               }}
               onRestore={() =>
-                patchImage(node.id, { edited: false, hasMask: false })
+                patchImage(node.id, {
+                  edited: false,
+                  hasMask: false,
+                  maskDataUrl: undefined,
+                })
               }
               onRetry={() => {
                 patchImage(node.id, { status: "generating", error: undefined });
@@ -1183,8 +1187,12 @@ export function CanvasPreview() {
             setFocusedImage(editorReturnFocus);
             setEditorReturnFocus(null);
           }}
-          onComplete={({ hasMask }) => {
-            patchImage(editorImageNode.id, { edited: true, hasMask });
+          onComplete={({ hasMask, maskDataUrl }) => {
+            patchImage(editorImageNode.id, {
+              edited: true,
+              hasMask,
+              maskDataUrl,
+            });
             setEditorImageId(null);
             setFocusedImage(null);
             setEditorReturnFocus(null);

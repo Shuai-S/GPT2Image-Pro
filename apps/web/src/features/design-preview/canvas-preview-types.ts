@@ -61,6 +61,7 @@ export type ImageNode = {
   generatedAt?: string;
   edited: boolean;
   hasMask: boolean;
+  maskDataUrl?: string;
   error?: string;
 };
 

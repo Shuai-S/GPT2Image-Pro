@@ -21,7 +21,13 @@ import {
   X,
 } from "lucide-react";
 import Image from "next/image";
-import { useMemo, useState } from "react";
+import {
+  type PointerEvent as ReactPointerEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import styles from "./canvas-preview.module.css";
 import type { ImageNode } from "./canvas-preview-types";
 import { artworks, getArtwork } from "./mock-data";
@@ -305,7 +311,7 @@ export function CanvasImageEditor({
 }: {
   imageNode: ImageNode;
   onCancel: () => void;
-  onComplete: (result: { hasMask: boolean }) => void;
+  onComplete: (result: { hasMask: boolean; maskDataUrl?: string }) => void;
 }) {
   const [tool, setTool] = useState<EditorTool>(
     imageNode.hasMask ? "mask" : "crop"
@@ -317,7 +323,23 @@ export function CanvasImageEditor({
   const [brushSize, setBrushSize] = useState(42);
   const [dirty, setDirty] = useState(false);
   const [confirmAbandon, setConfirmAbandon] = useState(false);
+  const maskCanvasRef = useRef<HTMLCanvasElement>(null);
+  const drawingRef = useRef(false);
+  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
   const artwork = getArtwork(imageNode.artworkId);
+
+  useEffect(() => {
+    const canvas = maskCanvasRef.current;
+    if (!canvas || !imageNode.maskDataUrl) return;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    const maskImage = new window.Image();
+    maskImage.onload = () => {
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(maskImage, 0, 0, canvas.width, canvas.height);
+    };
+    maskImage.src = imageNode.maskDataUrl;
+  }, [imageNode.maskDataUrl]);
 
   /** 选择编辑工具并应用离散变换命令。 */
   const chooseTool = (nextTool: EditorTool) => {
@@ -336,6 +358,55 @@ export function CanvasImageEditor({
       return;
     }
     onCancel();
+  };
+
+  /** 把屏幕指针位置换算为蒙版位图坐标。 */
+  const getMaskPoint = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    const canvas = event.currentTarget;
+    const bounds = canvas.getBoundingClientRect();
+    return {
+      x: ((event.clientX - bounds.left) / bounds.width) * canvas.width,
+      y: ((event.clientY - bounds.top) / bounds.height) * canvas.height,
+      scale: canvas.width / bounds.width,
+    };
+  };
+
+  /** 按当前画笔模式绘制一段连续蒙版轨迹。 */
+  const drawMaskStroke = (
+    event: ReactPointerEvent<HTMLCanvasElement>,
+    startStroke: boolean
+  ) => {
+    if (tool !== "mask" && tool !== "erase") return;
+    const canvas = event.currentTarget;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    const point = getMaskPoint(event);
+    const previous = startStroke ? point : (lastPointRef.current ?? point);
+    context.save();
+    context.globalCompositeOperation =
+      tool === "erase" ? "destination-out" : "source-over";
+    context.strokeStyle = "rgba(255, 255, 255, 0.72)";
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.lineWidth = brushSize * point.scale;
+    context.beginPath();
+    context.moveTo(previous.x, previous.y);
+    context.lineTo(point.x, point.y);
+    context.stroke();
+    context.restore();
+    lastPointRef.current = point;
+    if (tool === "mask") setHasMask(true);
+    setDirty(true);
+  };
+
+  /** 结束当前笔刷轨迹并释放指针捕获。 */
+  const finishMaskStroke = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (!drawingRef.current) return;
+    drawingRef.current = false;
+    lastPointRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
   };
 
   const tools: Array<{ id: EditorTool; label: string; icon: typeof Crop }> = [
@@ -358,7 +429,12 @@ export function CanvasImageEditor({
           <button
             type="button"
             data-primary="true"
-            onClick={() => onComplete({ hasMask })}
+            onClick={() => {
+              const maskDataUrl = hasMask
+                ? maskCanvasRef.current?.toDataURL("image/png")
+                : undefined;
+              onComplete({ hasMask, maskDataUrl });
+            }}
           >
             完成
           </button>
@@ -379,13 +455,26 @@ export function CanvasImageEditor({
             }}
             unoptimized
           />
+          <canvas
+            ref={maskCanvasRef}
+            className={styles.editorMaskCanvas}
+            data-active={tool === "mask" || tool === "erase"}
+            width={artwork.width}
+            height={artwork.height}
+            aria-label="蒙版绘制区域"
+            onPointerDown={(event) => {
+              if (tool !== "mask" && tool !== "erase") return;
+              drawingRef.current = true;
+              event.currentTarget.setPointerCapture(event.pointerId);
+              drawMaskStroke(event, true);
+            }}
+            onPointerMove={(event) => {
+              if (drawingRef.current) drawMaskStroke(event, false);
+            }}
+            onPointerUp={finishMaskStroke}
+            onPointerCancel={finishMaskStroke}
+          />
           {tool === "crop" && <span className={styles.cropFrame} />}
-          {hasMask && (tool === "mask" || tool === "erase") && (
-            <span
-              className={styles.editorMask}
-              style={{ width: brushSize * 4 }}
-            />
-          )}
         </div>
       </div>
       <div className={styles.editorDock}>
@@ -422,6 +511,10 @@ export function CanvasImageEditor({
             <button
               type="button"
               onClick={() => {
+                const canvas = maskCanvasRef.current;
+                canvas
+                  ?.getContext("2d")
+                  ?.clearRect(0, 0, canvas.width, canvas.height);
                 setHasMask(false);
                 setDirty(true);
               }}

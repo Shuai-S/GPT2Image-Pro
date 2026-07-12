@@ -19,7 +19,12 @@ import {
   WandSparkles,
 } from "lucide-react";
 import Image from "next/image";
-import { type PointerEvent as ReactPointerEvent, useState } from "react";
+import {
+  type PointerEvent as ReactPointerEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import styles from "./canvas-preview.module.css";
 import type {
   CreatorNode,
@@ -92,6 +97,8 @@ export function CreatorNodeView({
   onRun,
 }: CreatorNodeViewProps) {
   const [mentionOpen, setMentionOpen] = useState(false);
+  const [runMenuOpen, setRunMenuOpen] = useState(false);
+  const runMenuCloseTimerRef = useRef<number | null>(null);
   const hasMask = inputImages.some((image) => image.hasMask);
   const mode = hasMask
     ? "局部重绘"
@@ -103,6 +110,15 @@ export function CreatorNodeView({
   const connectedIds = new Set(inputImages.map((image) => image.id));
   const invalidReferences = node.references.filter(
     (referenceId) => !connectedIds.has(referenceId)
+  );
+
+  useEffect(
+    () => () => {
+      if (runMenuCloseTimerRef.current !== null) {
+        window.clearTimeout(runMenuCloseTimerRef.current);
+      }
+    },
+    []
   );
 
   /**
@@ -123,6 +139,23 @@ export function CreatorNodeView({
     onPatch({ prompt: `${promptWithoutTrigger}@${imageNode.title} ` });
     onMentionImage(imageNode.id);
     setMentionOpen(false);
+  };
+
+  /** 打开数量菜单，并取消尚未执行的延迟关闭。 */
+  const openRunMenu = () => {
+    if (runMenuCloseTimerRef.current !== null) {
+      window.clearTimeout(runMenuCloseTimerRef.current);
+      runMenuCloseTimerRef.current = null;
+    }
+    setRunMenuOpen(true);
+  };
+
+  /** 给指针跨越按钮与菜单边缘保留短暂的可点击时间。 */
+  const scheduleRunMenuClose = () => {
+    runMenuCloseTimerRef.current = window.setTimeout(() => {
+      setRunMenuOpen(false);
+      runMenuCloseTimerRef.current = null;
+    }, 180);
   };
 
   return (
@@ -182,7 +215,13 @@ export function CreatorNodeView({
               </div>
             </div>
           )}
-          <div className={styles.runGroup}>
+          <div
+            className={styles.runGroup}
+            onPointerEnter={openRunMenu}
+            onPointerLeave={scheduleRunMenuClose}
+            onFocusCapture={openRunMenu}
+            onBlurCapture={scheduleRunMenuClose}
+          >
             <button
               type="button"
               className={styles.runButton}
@@ -203,13 +242,17 @@ export function CreatorNodeView({
               )}
             </button>
             {!running && (
-              <div className={styles.runMenu}>
+              <div className={styles.runMenu} data-open={runMenuOpen}>
                 {[1, 2, 3, 4].map((count) => (
                   <button
                     type="button"
                     key={count}
                     disabled={!valid}
-                    onClick={() => onRun(count)}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={() => {
+                      setRunMenuOpen(false);
+                      onRun(count);
+                    }}
                   >
                     <span>{count} 张</span>
                     <span>{count * 3} 积分</span>
@@ -445,12 +488,27 @@ export function ImageNodeView({
               已编辑
             </button>
             {editMenuOpen && (
-              <div className={styles.editedMenu}>
-                <button type="button" onClick={onEdit}>
+              <div
+                className={styles.editedMenu}
+                onPointerDown={(event) => event.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditMenuOpen(false);
+                    onEdit();
+                  }}
+                >
                   <Crop size={12} aria-hidden="true" />
                   继续编辑
                 </button>
-                <button type="button" onClick={onRestore}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditMenuOpen(false);
+                    onRestore();
+                  }}
+                >
                   <RotateCcw size={12} aria-hidden="true" />
                   还原原图
                 </button>
