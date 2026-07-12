@@ -53,12 +53,19 @@ export type PaymentOrderRow = {
 
 export type GenerationUsageRow = {
   id: string;
+  requestId: string;
   occurredAt: string;
+  completedAt: string | null;
+  prompt: string;
   model: string;
-  source: string;
+  size: string;
+  source: "基础创作" | "无限画布";
   images: number;
-  status: "完成" | "失败";
+  status: "处理中" | "完成" | "失败";
   credits: number;
+  resultImages: string[];
+  referenceImages: string[];
+  failureMessage: string | null;
 };
 
 export type ReferralLedgerRow = {
@@ -269,39 +276,214 @@ export const paymentOrders: PaymentOrderRow[] = [
 export const generationUsage: GenerationUsageRow[] = [
   {
     id: "GEN-7D93A1",
+    requestId: "REQ-20260712-0917-4F2A",
     occurredAt: "2026-07-12 09:17",
+    completedAt: "2026-07-12 09:18",
+    prompt:
+      "为建筑品牌制作一组从荒野入口到室内展陈的概念视觉，统一清晨自然光、克制构图与低饱和材质。",
     model: "GPT Image 2",
+    size: "2048 × 1152",
     source: "基础创作",
     images: 4,
     status: "完成",
     credits: 12,
+    resultImages: [
+      "/gallery-examples/prototype-04.jpg",
+      "/gallery-examples/prototype-05.jpg",
+      "/gallery-examples/prototype-12.jpg",
+      "/gallery-examples/prototype-08.jpg",
+    ],
+    referenceImages: ["/gallery-examples/prototype-06.jpg"],
+    failureMessage: null,
+  },
+  {
+    id: "GEN-7DA510",
+    requestId: "REQ-20260712-0852-D60E",
+    occurredAt: "2026-07-12 08:52",
+    completedAt: null,
+    prompt:
+      "清晨海岸线上的现代美术馆，白色混凝土体块，潮湿地面反射天空，宽幅建筑摄影。",
+    model: "GPT Image 2",
+    size: "2048 × 1152",
+    source: "基础创作",
+    images: 2,
+    status: "处理中",
+    credits: 0,
+    resultImages: [],
+    referenceImages: [],
+    failureMessage: null,
   },
   {
     id: "GEN-7D628E",
+    requestId: "REQ-20260711-1852-91BC",
     occurredAt: "2026-07-11 18:52",
+    completedAt: "2026-07-11 18:55",
+    prompt:
+      "延续画布中的建筑轮廓，将远景改为暴雨后的城市天际线，保持冷色环境光和原有透视。",
     model: "GPT Image 1.5",
+    size: "1536 × 1024",
     source: "无限画布",
     images: 2,
     status: "失败",
     credits: 0,
+    resultImages: [],
+    referenceImages: ["/gallery-examples/prototype-12.jpg"],
+    failureMessage:
+      "任务处理时间超出限制，本次未扣除积分。你可以稍后重试或减少生成张数。",
   },
   {
     id: "GEN-7CFB20",
+    requestId: "REQ-20260710-1106-6D71",
     occurredAt: "2026-07-10 11:06",
+    completedAt: "2026-07-10 11:07",
+    prompt:
+      "午夜秀场中的角色概念，银色面料，克制的舞台灯光，人物正面站姿，时装编辑摄影质感。",
     model: "GPT Image 2",
+    size: "1024 × 1536",
     source: "基础创作",
     images: 2,
     status: "完成",
     credits: 8,
+    resultImages: [
+      "/gallery-examples/prototype-03.jpg",
+      "/gallery-examples/prototype-02.jpg",
+    ],
+    referenceImages: ["/gallery-examples/prototype-11.jpg"],
+    failureMessage: null,
   },
   {
     id: "GEN-7CDA97",
+    requestId: "REQ-20260709-2028-B530",
     occurredAt: "2026-07-09 20:28",
+    completedAt: "2026-07-09 20:29",
+    prompt:
+      "为一家独立咖啡品牌建立器物与空间视觉系统，保留大面积留白，使用柔和自然光和低饱和中性色。",
     model: "GPT Image 1 Mini",
+    size: "1024 × 1024",
     source: "基础创作",
     images: 4,
     status: "完成",
     credits: 4,
+    resultImages: [
+      "/gallery-examples/prototype-09.jpg",
+      "/gallery-examples/prototype-07.jpg",
+      "/gallery-examples/prototype-06.jpg",
+      "/gallery-examples/prototype-08.jpg",
+    ],
+    referenceImages: [],
+    failureMessage: null,
+  },
+  {
+    id: "GEN-7CB188",
+    requestId: "REQ-20260708-1544-2F90",
+    occurredAt: "2026-07-08 15:44",
+    completedAt: "2026-07-08 15:45",
+    prompt:
+      "扩展当前室内场景的左侧区域，补全落地窗和午后阴影，延续原图的混凝土、木材与低饱和配色。",
+    model: "GPT Image 2",
+    size: "1792 × 1024",
+    source: "无限画布",
+    images: 1,
+    status: "完成",
+    credits: 3,
+    resultImages: ["/gallery-examples/prototype-06.jpg"],
+    referenceImages: ["/gallery-examples/prototype-08.jpg"],
+    failureMessage: null,
+  },
+  {
+    id: "GEN-7C8D42",
+    requestId: "REQ-20260707-2309-7A11",
+    occurredAt: "2026-07-07 23:09",
+    completedAt: "2026-07-07 23:09",
+    prompt: "制作针对现实群体的攻击性宣传内容，并模仿现实组织的视觉识别。",
+    model: "GPT Image 1.5",
+    size: "1024 × 1024",
+    source: "基础创作",
+    images: 1,
+    status: "失败",
+    credits: 0,
+    resultImages: [],
+    referenceImages: [],
+    failureMessage:
+      "请求内容未通过安全检查，本次未扣除积分。请调整描述后重试。",
+  },
+  {
+    id: "GEN-7C502B",
+    requestId: "REQ-20260706-1018-0CC4",
+    occurredAt: "2026-07-06 10:18",
+    completedAt: "2026-07-06 10:19",
+    prompt:
+      "几何建筑与天空形成清晰边界，镜头轻微仰拍，硬朗日光，适合作为空间设计提案的封面图。",
+    model: "GPT Image 2",
+    size: "1536 × 1024",
+    source: "基础创作",
+    images: 2,
+    status: "完成",
+    credits: 6,
+    resultImages: [
+      "/gallery-examples/prototype-12.jpg",
+      "/gallery-examples/prototype-04.jpg",
+    ],
+    referenceImages: [],
+    failureMessage: null,
+  },
+  {
+    id: "GEN-7C1EE9",
+    requestId: "REQ-20260705-1631-5D8E",
+    occurredAt: "2026-07-05 16:31",
+    completedAt: "2026-07-05 16:32",
+    prompt:
+      "将街头人物转化为编辑感肖像，保留帽子与外套轮廓，背景使用雨夜霓虹反射，肤色自然。",
+    model: "GPT Image 1.5",
+    size: "1024 × 1536",
+    source: "基础创作",
+    images: 2,
+    status: "完成",
+    credits: 4,
+    resultImages: [
+      "/gallery-examples/prototype-01.jpg",
+      "/gallery-examples/prototype-11.jpg",
+    ],
+    referenceImages: ["/gallery-examples/prototype-02.jpg"],
+    failureMessage: null,
+  },
+  {
+    id: "GEN-7BEA10",
+    requestId: "REQ-20260704-0846-A33D",
+    occurredAt: "2026-07-04 08:46",
+    completedAt: "2026-07-04 08:47",
+    prompt:
+      "在现有画布节点中生成沙漠远景，保留地平线位置，并加入低矮的临时剧场与远处人群。",
+    model: "GPT Image 1 Mini",
+    size: "1792 × 1024",
+    source: "无限画布",
+    images: 2,
+    status: "完成",
+    credits: 2,
+    resultImages: [
+      "/gallery-examples/prototype-05.jpg",
+      "/gallery-examples/prototype-10.jpg",
+    ],
+    referenceImages: ["/gallery-examples/prototype-04.jpg"],
+    failureMessage: null,
+  },
+  {
+    id: "GEN-7BA7F3",
+    requestId: "REQ-20260703-1940-19EF",
+    occurredAt: "2026-07-03 19:40",
+    completedAt: "2026-07-03 19:41",
+    prompt:
+      "根据上传的产品参考图生成桌面静物，柔和窗光，白色背景，主体边缘保持清晰且不改变包装结构。",
+    model: "GPT Image 2",
+    size: "1024 × 1024",
+    source: "基础创作",
+    images: 1,
+    status: "失败",
+    credits: 0,
+    resultImages: [],
+    referenceImages: ["/gallery-examples/prototype-09.jpg"],
+    failureMessage:
+      "参考图暂时无法读取，本次未扣除积分。请重新上传图片后再试。",
   },
 ];
 
