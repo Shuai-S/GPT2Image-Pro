@@ -1,25 +1,25 @@
 /* 文件职责：定义生图后端池子原型的本地标签、紧凑列表、检查器与模拟测活样式。 */
 
 .previewRoot {
-  --tool-background: var(--admin-bg, #111110);
-  --tool-surface: var(--admin-surface-raised, #20201f);
-  --tool-surface-soft: var(--admin-surface, #181817);
-  --tool-surface-solid: var(--admin-surface, #181817);
-  --tool-fill: var(--admin-control, #222220);
-  --tool-fill-strong: var(--admin-surface-hover, #252523);
-  --tool-edge: var(--admin-border, rgba(255, 255, 255, 0.1));
+  --tool-background: var(--admin-bg, #111211);
+  --tool-surface: var(--admin-surface-raised, #1c1d1c);
+  --tool-surface-soft: var(--admin-surface, #191a19);
+  --tool-surface-solid: var(--admin-surface, #191a19);
+  --tool-fill: var(--admin-control, #242524);
+  --tool-fill-strong: var(--admin-surface-hover, #2b2c2b);
+  --tool-edge: var(--admin-border, rgba(255, 255, 255, 0.12));
   --tool-edge-strong: var(
     --admin-border-strong,
-    rgba(255, 255, 255, 0.2)
+    rgba(255, 255, 255, 0.25)
   );
-  --tool-text: var(--admin-text, #f1f0ed);
-  --tool-muted: var(--admin-text-muted, #aaa8a2);
-  --tool-faint: var(--admin-text-faint, #77756f);
+  --tool-text: var(--admin-text, #f1f1ed);
+  --tool-muted: var(--admin-text-muted, #a6a6a0);
+  --tool-faint: var(--admin-text-faint, #74746f);
   --tool-radius: 6px;
-  --tool-success: var(--admin-success, #83b496);
-  --tool-warning: var(--admin-warning, #d0ab68);
-  --tool-danger: var(--admin-danger, #d17e7e);
-  --tool-info: var(--admin-info, #83a9c3);
+  --tool-success: var(--admin-success, #70b58b);
+  --tool-warning: var(--admin-warning, #d2a85f);
+  --tool-danger: var(--admin-danger, #d97a77);
+  --tool-info: var(--admin-info, #77a8cf);
   display: flex;
   min-width: 0;
   min-height: 680px;
@@ -30,6 +30,7 @@
   background: var(--tool-background);
   font-family: Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei",
     sans-serif;
+  font-size: 12px;
 }
 
 .previewRoot,

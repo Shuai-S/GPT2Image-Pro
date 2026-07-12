@@ -2,60 +2,63 @@
 
 .root,
 .mobileGate {
-  --admin-bg: #111110;
-  --admin-nav: #171716;
-  --admin-surface: #181817;
-  --admin-surface-raised: #20201f;
-  --admin-surface-hover: #252523;
-  --admin-control: #222220;
-  --admin-border: rgba(255, 255, 255, 0.1);
-  --admin-border-strong: rgba(255, 255, 255, 0.2);
-  --admin-text: #f1f0ed;
-  --admin-text-muted: #aaa8a2;
-  --admin-text-faint: #77756f;
+  --admin-bg: #111211;
+  --admin-nav: #171817;
+  --admin-surface: #191a19;
+  --admin-surface-raised: #1c1d1c;
+  --admin-surface-hover: #2b2c2b;
+  --admin-control: #242524;
+  --admin-border: rgba(255, 255, 255, 0.12);
+  --admin-border-strong: rgba(255, 255, 255, 0.25);
+  --admin-text: #f1f1ed;
+  --admin-text-muted: #a6a6a0;
+  --admin-text-faint: #74746f;
   --admin-chart-grid: rgba(255, 255, 255, 0.08);
-  --admin-chart-info: #7d9bb5;
-  --admin-chart-success: #76a58b;
-  --admin-chart-warning: #c0a068;
-  --admin-chart-danger: #bd7474;
-  --admin-chart-previous: #9c9991;
-  --admin-success: #83b496;
-  --admin-warning: #d0ab68;
-  --admin-danger: #d17e7e;
-  --admin-info: #83a9c3;
-  --admin-shadow: 0 18px 52px rgba(0, 0, 0, 0.36);
+  --admin-chart-info: #77a8cf;
+  --admin-chart-success: #70b58b;
+  --admin-chart-warning: #d2a85f;
+  --admin-chart-danger: #d97a77;
+  --admin-chart-previous: #a6a6a0;
+  --admin-success: #70b58b;
+  --admin-warning: #d2a85f;
+  --admin-danger: #d97a77;
+  --admin-info: #77a8cf;
+  --admin-overlay: rgba(6, 7, 6, 0.76);
+  --admin-shadow: 0 20px 64px rgba(0, 0, 0, 0.38);
   color: var(--admin-text);
   background: var(--admin-bg);
   font-family: Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei",
     sans-serif;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
 }
 
 .root[data-theme="light"],
 .mobileGate[data-theme="light"] {
-  --admin-bg: #ededeb;
-  --admin-nav: #f5f5f2;
-  --admin-surface: #f7f7f4;
-  --admin-surface-raised: #fdfdfb;
-  --admin-surface-hover: #e9e9e5;
-  --admin-control: #efefeb;
-  --admin-border: rgba(20, 20, 19, 0.12);
-  --admin-border-strong: rgba(20, 20, 19, 0.24);
-  --admin-text: #181817;
-  --admin-text-muted: #65635f;
-  --admin-text-faint: #8a8882;
-  --admin-chart-grid: rgba(20, 20, 19, 0.09);
-  --admin-chart-info: #557a96;
-  --admin-chart-success: #527c63;
-  --admin-chart-warning: #9a783e;
-  --admin-chart-danger: #a85858;
-  --admin-chart-previous: #77746d;
-  --admin-success: #47755a;
-  --admin-warning: #8e6d32;
-  --admin-danger: #a84f4f;
-  --admin-info: #4c7390;
-  --admin-shadow: 0 18px 52px rgba(30, 30, 27, 0.18);
+  --admin-bg: #eeeeeb;
+  --admin-nav: #f7f7f4;
+  --admin-surface: #f3f3f0;
+  --admin-surface-raised: #fafaf7;
+  --admin-surface-hover: #dfdfda;
+  --admin-control: #e8e8e4;
+  --admin-border: rgba(25, 26, 24, 0.14);
+  --admin-border-strong: rgba(25, 26, 24, 0.3);
+  --admin-text: #1a1b19;
+  --admin-text-muted: #5f605c;
+  --admin-text-faint: #898984;
+  --admin-chart-grid: rgba(25, 26, 24, 0.09);
+  --admin-chart-info: #356f9b;
+  --admin-chart-success: #34764d;
+  --admin-chart-warning: #8d671e;
+  --admin-chart-danger: #aa4744;
+  --admin-chart-previous: #5f605c;
+  --admin-success: #34764d;
+  --admin-warning: #8d671e;
+  --admin-danger: #aa4744;
+  --admin-info: #356f9b;
+  --admin-overlay: rgba(222, 222, 217, 0.76);
+  --admin-shadow: 0 20px 64px rgba(34, 35, 31, 0.18);
 }
 
 .root {
@@ -99,7 +102,7 @@
 .viewportProbe {
   width: 100%;
   height: 100svh;
-  background: #111110;
+  background: #111211;
 }
 
 .navigation {
@@ -209,9 +212,8 @@
   padding: 5px 9px 2px;
   overflow: hidden;
   color: var(--admin-text-faint);
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
+  font-size: 9px;
+  font-weight: 650;
   white-space: nowrap;
 }
 
@@ -219,13 +221,14 @@
   display: flex;
   align-items: center;
   width: 100%;
-  min-height: 36px;
+  min-height: 38px;
   padding: 0 10px;
-  gap: 10px;
+  gap: 8px;
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: 6px;
   color: var(--admin-text-muted);
   background: transparent;
+  font-size: 12px;
   text-align: left;
   text-decoration: none;
   white-space: nowrap;
@@ -270,7 +273,7 @@
   position: relative;
   z-index: 10;
   display: flex;
-  flex: 0 0 72px;
+  flex: 0 0 64px;
   align-items: center;
   justify-content: space-between;
   min-width: 0;
@@ -282,8 +285,8 @@
 
 .header h1 {
   margin: 3px 0 0;
-  font-size: 17px;
-  font-weight: 620;
+  font-size: 16px;
+  font-weight: 650;
 }
 
 .headerBreadcrumb {
@@ -291,7 +294,7 @@
   align-items: center;
   gap: 4px;
   color: var(--admin-text-faint);
-  font-size: 10px;
+  font-size: 9px;
 }
 
 .headerBreadcrumb span {
@@ -403,17 +406,16 @@
 .eyebrow {
   margin: 0;
   color: var(--admin-text-faint);
-  font-size: 10px;
-  font-weight: 650;
-  text-transform: uppercase;
+  font-size: 9px;
+  font-weight: 700;
 }
 
 .pageDescription {
   max-width: 680px;
   margin: 5px 0 0;
   color: var(--admin-text-muted);
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: 13px;
+  line-height: 1.65;
 }
 
 .rangeToolbar {
@@ -621,8 +623,8 @@
 }
 
 .chartHeading strong {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 650;
 }
 
 .chartHeading > span {
@@ -658,16 +660,16 @@
 
 .sectionHeading h2 {
   margin: 0;
-  font-size: 13px;
-  font-weight: 620;
+  font-size: 14px;
+  font-weight: 650;
 }
 
 .sectionHeading p {
   max-width: 620px;
   margin: 5px 0 0;
   color: var(--admin-text-muted);
-  font-size: 10px;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .updatedAt {
@@ -1322,7 +1324,7 @@
   overflow: hidden;
   color: var(--admin-text-faint);
   font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 8px;
+  font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1403,7 +1405,7 @@
 
 .auditTimeline small {
   color: var(--admin-text-faint);
-  font-size: 8px;
+  font-size: 9px;
 }
 
 .inspectorEmpty {
@@ -1427,11 +1429,7 @@
   display: grid;
   padding: 24px;
   place-items: center;
-  background: rgba(7, 7, 7, 0.68);
-}
-
-.root[data-theme="light"] .dialogBackdrop {
-  background: rgba(226, 226, 222, 0.76);
+  background: var(--admin-overlay);
 }
 
 .dialog,
@@ -1595,7 +1593,7 @@
 .dialogFooter > span {
   margin-right: auto;
   color: var(--admin-text-faint);
-  font-size: 8px;
+  font-size: 9px;
 }
 
 .dialogFooter button,

@@ -1,24 +1,24 @@
 /* 管理使用记录原型的筛选、分页、紧凑表格和右侧检查器样式。 */
 
 .root {
-  --usage-bg: var(--admin-bg, #111110);
-  --usage-surface: var(--admin-surface, #181817);
-  --usage-raised: var(--admin-surface-raised, #20201f);
-  --usage-hover: var(--admin-surface-hover, #252523);
-  --usage-control: var(--admin-control, #222220);
-  --usage-border: var(--admin-border, rgba(255, 255, 255, 0.1));
+  --usage-bg: var(--admin-bg, #111211);
+  --usage-surface: var(--admin-surface, #191a19);
+  --usage-raised: var(--admin-surface-raised, #1c1d1c);
+  --usage-hover: var(--admin-surface-hover, #2b2c2b);
+  --usage-control: var(--admin-control, #242524);
+  --usage-border: var(--admin-border, rgba(255, 255, 255, 0.12));
   --usage-border-strong: var(
     --admin-border-strong,
-    rgba(255, 255, 255, 0.2)
+    rgba(255, 255, 255, 0.25)
   );
-  --usage-text: var(--admin-text, #f1f0ed);
-  --usage-muted: var(--admin-text-muted, #aaa8a2);
-  --usage-faint: var(--admin-text-faint, #77756f);
-  --usage-success: var(--admin-success, #83b496);
-  --usage-warning: var(--admin-warning, #d0ab68);
-  --usage-danger: var(--admin-danger, #d17e7e);
-  --usage-info: var(--admin-info, #83a9c3);
-  --usage-shadow: var(--admin-shadow, 0 18px 52px rgba(0, 0, 0, 0.36));
+  --usage-text: var(--admin-text, #f1f1ed);
+  --usage-muted: var(--admin-text-muted, #a6a6a0);
+  --usage-faint: var(--admin-text-faint, #74746f);
+  --usage-success: var(--admin-success, #70b58b);
+  --usage-warning: var(--admin-warning, #d2a85f);
+  --usage-danger: var(--admin-danger, #d97a77);
+  --usage-info: var(--admin-info, #77a8cf);
+  --usage-shadow: var(--admin-shadow, 0 20px 64px rgba(0, 0, 0, 0.38));
   width: 100%;
   min-width: 760px;
   min-height: 100%;
@@ -27,44 +27,45 @@
   background: var(--usage-bg);
   font-family: Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei",
     sans-serif;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
 }
 
 .root[data-theme="dark"] {
-  --usage-bg: #111110;
-  --usage-surface: #181817;
-  --usage-raised: #20201f;
-  --usage-hover: #252523;
-  --usage-control: #222220;
-  --usage-border: rgba(255, 255, 255, 0.1);
-  --usage-border-strong: rgba(255, 255, 255, 0.2);
-  --usage-text: #f1f0ed;
-  --usage-muted: #aaa8a2;
-  --usage-faint: #77756f;
-  --usage-success: #83b496;
-  --usage-warning: #d0ab68;
-  --usage-danger: #d17e7e;
-  --usage-info: #83a9c3;
-  --usage-shadow: 0 18px 52px rgba(0, 0, 0, 0.36);
+  --usage-bg: #111211;
+  --usage-surface: #191a19;
+  --usage-raised: #1c1d1c;
+  --usage-hover: #2b2c2b;
+  --usage-control: #242524;
+  --usage-border: rgba(255, 255, 255, 0.12);
+  --usage-border-strong: rgba(255, 255, 255, 0.25);
+  --usage-text: #f1f1ed;
+  --usage-muted: #a6a6a0;
+  --usage-faint: #74746f;
+  --usage-success: #70b58b;
+  --usage-warning: #d2a85f;
+  --usage-danger: #d97a77;
+  --usage-info: #77a8cf;
+  --usage-shadow: 0 20px 64px rgba(0, 0, 0, 0.38);
 }
 
 .root[data-theme="light"] {
-  --usage-bg: #ededeb;
-  --usage-surface: #f7f7f4;
-  --usage-raised: #fdfdfb;
-  --usage-hover: #e9e9e5;
-  --usage-control: #efefeb;
-  --usage-border: rgba(20, 20, 19, 0.12);
-  --usage-border-strong: rgba(20, 20, 19, 0.24);
-  --usage-text: #181817;
-  --usage-muted: #65635f;
-  --usage-faint: #8a8882;
-  --usage-success: #47755a;
-  --usage-warning: #8e6d32;
-  --usage-danger: #a84f4f;
-  --usage-info: #4c7390;
-  --usage-shadow: 0 18px 52px rgba(30, 30, 27, 0.18);
+  --usage-bg: #eeeeeb;
+  --usage-surface: #f3f3f0;
+  --usage-raised: #fafaf7;
+  --usage-hover: #dfdfda;
+  --usage-control: #e8e8e4;
+  --usage-border: rgba(25, 26, 24, 0.14);
+  --usage-border-strong: rgba(25, 26, 24, 0.3);
+  --usage-text: #1a1b19;
+  --usage-muted: #5f605c;
+  --usage-faint: #898984;
+  --usage-success: #34764d;
+  --usage-warning: #8d671e;
+  --usage-danger: #aa4744;
+  --usage-info: #356f9b;
+  --usage-shadow: 0 20px 64px rgba(34, 35, 31, 0.18);
 }
 
 .root,
@@ -351,7 +352,7 @@
   margin-top: 3px;
   overflow: hidden;
   color: var(--usage-faint);
-  font-size: 8px;
+  font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -370,7 +371,7 @@
   margin-top: 3px;
   overflow: hidden;
   color: var(--usage-danger);
-  font-size: 8px;
+  font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -675,7 +676,7 @@
   display: block;
   margin-bottom: 4px;
   color: var(--usage-info);
-  font-size: 8px;
+  font-size: 9px;
 }
 
 .revisedPrompt p {
@@ -722,7 +723,7 @@
   color: var(--usage-danger);
   background: color-mix(in srgb, var(--usage-danger) 7%, transparent);
   font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 8px;
+  font-size: 9px;
   line-height: 1.55;
 }
 
@@ -747,7 +748,7 @@
 .detailGrid dt,
 .idList dt {
   color: var(--usage-faint);
-  font-size: 8px;
+  font-size: 9px;
 }
 
 .detailGrid dd,
@@ -788,7 +789,7 @@
 
 .creditBreakdown span {
   color: var(--usage-faint);
-  font-size: 8px;
+  font-size: 9px;
 }
 
 .creditBreakdown strong {
