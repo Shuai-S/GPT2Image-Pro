@@ -616,13 +616,15 @@ function ReferencePicker({
               disabled={!selected && selectedArtworkIds.length >= 4}
               onClick={() => toggleArtwork(artwork.id)}
             >
-              <Image
-                src={artwork.src}
-                alt={artwork.alt}
-                width={84}
-                height={62}
-                unoptimized
-              />
+              <span className={styles.referencePickerImage}>
+                <Image
+                  src={artwork.src}
+                  alt={artwork.alt}
+                  fill
+                  sizes="84px"
+                  unoptimized
+                />
+              </span>
               <span>{artwork.title}</span>
               {selected && <Check size={12} aria-hidden="true" />}
             </button>
