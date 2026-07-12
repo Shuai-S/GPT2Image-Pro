@@ -576,7 +576,7 @@
   position: relative;
   display: grid;
   height: 40px;
-  grid-template-columns: minmax(120px, 1fr) 104px 44px 28px;
+  grid-template-columns: minmax(120px, 1fr) 104px 28px;
   align-items: center;
   gap: 4px;
   padding: 5px 7px;

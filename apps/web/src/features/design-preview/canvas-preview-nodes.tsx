@@ -382,13 +382,6 @@ export function CreatorNodeView({
             onPanelChange(activePanel === "ratio" ? null : "ratio")
           }
         />
-        <CreatorControl
-          active={false}
-          label={`${node.count} 张`}
-          onClick={() =>
-            onPatch({ count: node.count === 4 ? 1 : node.count + 1 })
-          }
-        />
         <button
           type="button"
           className={styles.advancedButton}
