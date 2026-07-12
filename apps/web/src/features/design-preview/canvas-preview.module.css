@@ -803,24 +803,69 @@
   opacity: 0.45;
 }
 
-.parameterRow {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 110px;
-  min-height: 54px;
+.advancedPanelHeader {
+  display: flex;
+  min-height: 28px;
   align-items: center;
-  gap: 12px;
-  padding: 7px;
-  border-top: 1px solid var(--preview-edge);
+  justify-content: space-between;
 }
 
-.parameterRow > span {
+.advancedPanelHeader > span {
+  padding-right: 7px;
+  color: var(--preview-text-faint);
+  font-size: 8px;
+}
+
+.advancedFields {
   display: grid;
-  gap: 3px;
+  gap: 9px;
+  padding: 2px 4px 4px;
 }
 
-.parameterRow input,
-.parameterRow select {
+.advancedField {
+  display: grid;
+  gap: 6px;
+}
+
+.advancedField label,
+.advancedFieldLegend {
+  color: var(--preview-text-muted);
+  font-size: 8px;
+}
+
+.advancedField select {
   width: 100%;
+  min-height: 29px;
+  padding: 0 7px;
+  border: 1px solid var(--preview-edge);
+  border-radius: 3px;
+  outline: 0;
+  color: var(--preview-text);
+  background: var(--preview-control-fill);
+  font-size: 9px;
+}
+
+.advancedSegmentGroup {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.advancedSegmentButton {
+  min-height: 29px;
+  border: 1px solid var(--preview-edge);
+  border-radius: 3px;
+  color: var(--preview-text-muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 8px;
+}
+
+.advancedSegmentButton:hover,
+.advancedSegmentButton[data-active="true"] {
+  border-color: var(--preview-edge-strong);
+  color: var(--preview-text);
+  background: var(--preview-control-fill);
 }
 
 .imageNode {

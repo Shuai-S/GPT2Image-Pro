@@ -25,6 +25,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { PreviewAdvancedParameterFields } from "./advanced-parameters";
 import styles from "./canvas-preview.module.css";
 import type {
   CreatorNode,
@@ -820,24 +821,20 @@ function CreatorParameterPanel({
 
   return (
     <div className={styles.parameterPanel} data-panel="advanced">
-      <div className={styles.panelCaption}>高级参数</div>
-      <label className={styles.parameterRow}>
-        <span>
-          <strong>创意强度</strong>
-          <small>保持构图与探索变化之间的平衡</small>
-        </span>
-        <input type="range" min="0" max="100" defaultValue="62" />
-      </label>
-      <label className={styles.parameterRow}>
-        <span>
-          <strong>输出质量</strong>
-          <small>高质量会使用更多积分</small>
-        </span>
-        <select defaultValue="standard">
-          <option value="standard">标准</option>
-          <option value="high">高</option>
-        </select>
-      </label>
+      <div className={styles.advancedPanelHeader}>
+        <div className={styles.panelCaption}>高级参数</div>
+        <span>只展示当前模型可用项</span>
+      </div>
+      <PreviewAdvancedParameterFields
+        idPrefix={`canvas-${node.id}`}
+        classNames={{
+          container: styles.advancedFields,
+          field: styles.advancedField,
+          fieldLegend: styles.advancedFieldLegend,
+          segmentGroup: styles.advancedSegmentGroup,
+          segmentButton: styles.advancedSegmentButton,
+        }}
+      />
     </div>
   );
 }

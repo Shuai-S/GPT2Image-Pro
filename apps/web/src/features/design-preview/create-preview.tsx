@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { type CSSProperties, useState } from "react";
+import { PreviewAdvancedParameterFields } from "./advanced-parameters";
 import {
   ArtworkFocus,
   type ArtworkFocusRect,
@@ -868,50 +869,16 @@ function AdvancedPanel() {
         <h3>高级参数</h3>
         <span>只展示当前模型可用项</span>
       </div>
-      <div className={styles.advancedPanel}>
-        <div className={styles.field}>
-          <label htmlFor="preview-quality">生成 · 质量档位</label>
-          <select id="preview-quality" defaultValue="high">
-            <option value="auto">自动</option>
-            <option value="high">高质量</option>
-            <option value="medium">均衡</option>
-          </select>
-        </div>
-        <div className={styles.field}>
-          <label htmlFor="preview-channel">生成 · 生成通道</label>
-          <select id="preview-channel" defaultValue="primary">
-            <option value="primary">主通道</option>
-            <option value="backup">备用通道</option>
-          </select>
-        </div>
-        <div className={styles.field}>
-          <label htmlFor="preview-format">输出 · 格式</label>
-          <select id="preview-format" defaultValue="png">
-            <option value="png">PNG</option>
-            <option value="webp">WebP</option>
-            <option value="jpeg">JPEG</option>
-          </select>
-        </div>
-        <div className={styles.field}>
-          <label htmlFor="preview-background">输出 · 背景</label>
-          <select id="preview-background" defaultValue="auto">
-            <option value="auto">自动</option>
-            <option value="opaque">不透明</option>
-            <option value="transparent">透明</option>
-          </select>
-        </div>
-        <div className={styles.field}>
-          <span className={styles.fieldLegend}>增强</span>
-          <div className={styles.segmentGroup}>
-            <button type="button" className={styles.segmentButton}>
-              高清修复
-            </button>
-            <button type="button" className={styles.segmentButton}>
-              生成式修复
-            </button>
-          </div>
-        </div>
-      </div>
+      <PreviewAdvancedParameterFields
+        idPrefix="create-preview"
+        classNames={{
+          container: styles.advancedPanel,
+          field: styles.field,
+          fieldLegend: styles.fieldLegend,
+          segmentGroup: styles.segmentGroup,
+          segmentButton: styles.segmentButton,
+        }}
+      />
     </div>
   );
 }
