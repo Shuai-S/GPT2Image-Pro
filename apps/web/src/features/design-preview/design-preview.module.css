@@ -730,11 +730,234 @@
 }
 
 .composerTop {
-  display: flex;
+  position: relative;
+  display: grid;
   min-height: 55px;
-  align-items: flex-end;
-  gap: 10px;
+  gap: 7px;
   padding: 9px 10px 9px 14px;
+}
+
+.composerInputRow {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.composerInputActions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.composerInputActions .tinyButton {
+  width: 32px;
+  height: 32px;
+}
+
+.composerInputActions .tinyButton[data-active="true"] {
+  color: var(--preview-text);
+  background: var(--preview-control-fill);
+}
+
+.referenceControl {
+  position: relative;
+}
+
+.referenceStrip {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 5px;
+}
+
+.referenceThumb {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  overflow: visible;
+  border: 1px solid var(--preview-edge);
+  border-radius: 3px;
+  background: var(--preview-control-fill);
+}
+
+.referenceThumb > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 2px;
+  object-fit: cover;
+}
+
+.referenceThumb > button {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  display: grid;
+  width: 15px;
+  height: 15px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--preview-edge-strong);
+  border-radius: 50%;
+  color: var(--preview-text);
+  background: var(--preview-panel);
+  cursor: pointer;
+}
+
+.referencePicker,
+.referenceMentionMenu {
+  position: absolute;
+  z-index: 42;
+  right: 0;
+  bottom: calc(100% + 10px);
+  border: 1px solid var(--preview-edge-strong);
+  border-radius: var(--preview-radius);
+  background: var(--preview-panel);
+  box-shadow: var(--preview-shadow);
+}
+
+.referencePicker {
+  width: 390px;
+  padding: 7px;
+}
+
+.referencePicker > header,
+.referencePicker > footer {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 5px;
+  color: var(--preview-text-muted);
+  font-size: 9px;
+}
+
+.referencePicker > div {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.referencePicker > div > button {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--preview-text-muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 8px;
+  text-align: left;
+}
+
+.referencePicker > div > button:hover,
+.referencePicker > div > button[data-selected="true"] {
+  border-color: var(--preview-edge-strong);
+  color: var(--preview-text);
+  background: var(--preview-control-fill);
+}
+
+.referencePicker > div > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.referencePicker > div img {
+  width: 100%;
+  height: 62px;
+  border-radius: 2px;
+  object-fit: cover;
+}
+
+.referencePicker > div svg {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px;
+  border-radius: 50%;
+  color: var(--preview-space);
+  background: var(--preview-text);
+}
+
+.referencePicker > footer {
+  justify-content: flex-end;
+  padding-top: 6px;
+}
+
+.referencePicker > footer button {
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--preview-edge);
+  border-radius: 3px;
+  color: var(--preview-text-muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 8px;
+}
+
+.referenceMentionMenu {
+  right: 38px;
+  display: grid;
+  width: 280px;
+  padding: 5px;
+}
+
+.referenceMentionMenu > button {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  min-height: 38px;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--preview-text-muted);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.referenceMentionMenu > button:hover {
+  color: var(--preview-text);
+  background: var(--preview-control-fill);
+}
+
+.referenceMentionMenu img {
+  width: 30px;
+  height: 30px;
+  border-radius: 3px;
+  object-fit: cover;
+}
+
+.referenceMentionMenu span,
+.referenceMentionMenu strong,
+.referenceMentionMenu small {
+  display: block;
+  min-width: 0;
+}
+
+.referenceMentionMenu strong,
+.referenceMentionMenu small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.referenceMentionMenu strong {
+  font-size: 9px;
+  font-weight: 620;
+}
+
+.referenceMentionMenu small {
+  margin-top: 2px;
+  color: var(--preview-text-faint);
+  font-size: 8px;
 }
 
 .promptInput {

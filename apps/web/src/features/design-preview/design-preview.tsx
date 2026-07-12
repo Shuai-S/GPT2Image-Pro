@@ -69,6 +69,9 @@ export function DesignPreview({ initialView }: { initialView: PreviewView }) {
   const [authenticated, setAuthenticated] = useState(
     initialView !== "home" && initialView !== "create-empty"
   );
+  const [createReferenceArtworkIds, setCreateReferenceArtworkIds] = useState<
+    string[]
+  >([]);
   const [lastCreativeView, setLastCreativeView] = useState<
     "create-empty" | "create-results" | "canvas"
   >("create-empty");
@@ -351,6 +354,8 @@ export function DesignPreview({ initialView }: { initialView: PreviewView }) {
             <CreatePreview
               showResults={view === "create-results"}
               authenticated={authenticated}
+              referenceArtworkIds={createReferenceArtworkIds}
+              onReferenceArtworkIdsChange={setCreateReferenceArtworkIds}
               onShowResults={() => {
                 changeView("create-results");
                 setNavOpen(false);
@@ -363,7 +368,12 @@ export function DesignPreview({ initialView }: { initialView: PreviewView }) {
           )}
           {view === "gallery" && (
             <GalleryPreview
-              onUseAsReference={() => changeView("create-results")}
+              onUseAsReference={(artworkId) => {
+                setCreateReferenceArtworkIds((current) =>
+                  Array.from(new Set([...current, artworkId])).slice(0, 4)
+                );
+                changeView("create-results");
+              }}
             />
           )}
           {view === "canvas" && <CanvasPreview />}

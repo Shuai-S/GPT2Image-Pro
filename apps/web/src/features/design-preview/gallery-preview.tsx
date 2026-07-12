@@ -10,8 +10,8 @@ import {
   type ArtworkFocusRect,
   getArtworkFocusOrigin,
 } from "./artwork-focus";
-import { artworks, getArtwork } from "./mock-data";
 import styles from "./design-preview.module.css";
+import { artworks, getArtwork } from "./mock-data";
 
 /**
  * 将作品列表切分为适合等高行展示的稳定分组。
@@ -36,13 +36,13 @@ function buildRows(ids: string[]) {
 /**
  * 渲染私人图库与全屏作品聚焦层。
  *
- * @param props.onUseAsReference 模拟从图库返回基础创作并带入参考图。
+ * @param props.onUseAsReference 从图库返回基础创作并带入指定作品 ID。
  * @returns 等高行图库、搜索控件和聚焦层。
  */
 export function GalleryPreview({
   onUseAsReference,
 }: {
-  onUseAsReference: () => void;
+  onUseAsReference: (artworkId: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [focusedArtwork, setFocusedArtwork] = useState<{
@@ -155,7 +155,7 @@ export function GalleryPreview({
           modelName="GPT Image 2"
           generatedAt="今天"
           onClose={() => setFocusedArtwork(null)}
-          onUseAsReference={onUseAsReference}
+          onUseAsReference={() => onUseAsReference(focusedArtwork.artworkId)}
         />
       )}
     </main>

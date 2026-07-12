@@ -3,6 +3,7 @@
 // 基础创作原型。模拟匿名草稿、统一生成输入器、结果聚焦、最近批次与局部重绘。
 
 import {
+  AtSign,
   Brush,
   Check,
   ChevronDown,
@@ -11,6 +12,7 @@ import {
   Settings2,
   Sparkles,
   WandSparkles,
+  X,
 } from "lucide-react";
 import Image from "next/image";
 import { type CSSProperties, useState } from "react";
@@ -22,6 +24,7 @@ import {
 import type { AuthRequestContext } from "./auth-overlay-preview";
 import styles from "./design-preview.module.css";
 import {
+  artworks,
   createSamples,
   getArtwork,
   type HistoryBatch,
@@ -38,7 +41,7 @@ import {
   previewImageSizeTiers,
 } from "./ratio-presets";
 
-type ComposerPanel = "model" | "ratio" | "advanced" | null;
+type ComposerPanel = "references" | "model" | "ratio" | "advanced" | null;
 
 const historyWheelPoints = [
   { x: 120, y: "20.33%" },
@@ -58,6 +61,8 @@ const continuedGenerationImageSets = [
  * 渲染基础创作空态或结果态。
  *
  * @param props.showResults 是否展示模拟生成结果。
+ * @param props.referenceArtworkIds 当前附加到基础创作的参考图。
+ * @param props.onReferenceArtworkIdsChange 更新参考图列表。
  * @param props.onShowResults 登录完成或直接预览后切换到结果态。
  * @param props.onOpenGallery 打开私人图库视图。
  * @returns 完整基础创作工作台。
@@ -65,12 +70,16 @@ const continuedGenerationImageSets = [
 export function CreatePreview({
   showResults,
   authenticated,
+  referenceArtworkIds,
+  onReferenceArtworkIdsChange,
   onShowResults,
   onOpenGallery,
   onRequireAuthentication,
 }: {
   showResults: boolean;
   authenticated: boolean;
+  referenceArtworkIds: string[];
+  onReferenceArtworkIdsChange: (artworkIds: string[]) => void;
   onShowResults: () => void;
   onOpenGallery: () => void;
   onRequireAuthentication: (
@@ -176,7 +185,14 @@ export function CreatePreview({
               generatedAt={activeBatch?.time ?? "刚刚"}
               modelName={selectedModel?.name ?? "GPT Image 2"}
               onClose={() => setFocusedArtwork(null)}
-              onUseAsReference={() => setFocusedArtwork(null)}
+              onUseAsReference={() => {
+                onReferenceArtworkIdsChange(
+                  Array.from(
+                    new Set([...referenceArtworkIds, focusedArtwork.artworkId])
+                  ).slice(0, 4)
+                );
+                setFocusedArtwork(null);
+              }}
               onInpaint={() => setInpaintMode(true)}
               onOpenGallery={onOpenGallery}
             />
@@ -215,6 +231,8 @@ export function CreatePreview({
           <Composer
             prompt={prompt}
             onPromptChange={setPrompt}
+            referenceArtworkIds={referenceArtworkIds}
+            onReferenceArtworkIdsChange={onReferenceArtworkIdsChange}
             activePanel={activePanel}
             onPanelChange={setActivePanel}
             selectedModelId={selectedModelId}
@@ -259,11 +277,13 @@ export function CreatePreview({
 }
 
 /**
- * 渲染唯一生成输入器及其模型、比例和高级参数面板。
+ * 渲染唯一生成输入器及其参考图、模型、比例和高级参数面板。
  */
 function Composer({
   prompt,
   onPromptChange,
+  referenceArtworkIds,
+  onReferenceArtworkIdsChange,
   activePanel,
   onPanelChange,
   selectedModelId,
@@ -281,6 +301,8 @@ function Composer({
 }: {
   prompt: string;
   onPromptChange: (value: string) => void;
+  referenceArtworkIds: string[];
+  onReferenceArtworkIdsChange: (artworkIds: string[]) => void;
   activePanel: ComposerPanel;
   onPanelChange: (value: ComposerPanel) => void;
   selectedModelId: string;
@@ -296,10 +318,38 @@ function Composer({
   onGenerate: (generationCount: number) => void;
   concealed?: boolean;
 }) {
+  const [mentionOpen, setMentionOpen] = useState(false);
   const selectedModel =
     modelOptions.find((model) => model.id === selectedModelId) ??
     modelOptions[0];
   const totalCost = (selectedModel?.cost ?? 3) * count;
+
+  /** 更新提示词，并在输入独立 @ 字符时打开参考图候选。 */
+  const updatePrompt = (value: string) => {
+    onPromptChange(value);
+    const requestsMention = /(^|\s)@$/.test(value);
+    setMentionOpen(requestsMention && referenceArtworkIds.length > 0);
+    if (requestsMention) onPanelChange(null);
+  };
+
+  /** 把选中的参考图名称作为可读引用插入提示词。 */
+  const insertReferenceMention = (artworkId: string) => {
+    const artwork = getArtwork(artworkId);
+    const promptWithoutTrigger = prompt.endsWith("@")
+      ? prompt.slice(0, -1)
+      : `${prompt.trimEnd()}${prompt.trim() ? " " : ""}`;
+    onPromptChange(`${promptWithoutTrigger}@${artwork.title} `);
+    setMentionOpen(false);
+  };
+
+  /** 从基础创作移除一张参考图并关闭空的引用候选。 */
+  const removeReference = (artworkId: string) => {
+    const nextReferences = referenceArtworkIds.filter(
+      (referenceId) => referenceId !== artworkId
+    );
+    onReferenceArtworkIdsChange(nextReferences);
+    if (nextReferences.length === 0) setMentionOpen(false);
+  };
 
   return (
     <div
@@ -308,22 +358,111 @@ function Composer({
       data-concealed={concealed}
     >
       <div className={styles.composerTop}>
-        <textarea
-          className={styles.promptInput}
-          aria-label="创作提示词"
-          placeholder="描述你想创作的画面"
-          rows={1}
-          value={prompt}
-          onChange={(event) => onPromptChange(event.target.value)}
-        />
-        <button
-          type="button"
-          className={styles.tinyButton}
-          aria-label="添加参考图"
-          title="添加参考图"
-        >
-          <ImagePlus size={17} aria-hidden="true" />
-        </button>
+        {referenceArtworkIds.length > 0 && (
+          <div className={styles.referenceStrip}>
+            {referenceArtworkIds.map((artworkId) => {
+              const artwork = getArtwork(artworkId);
+              return (
+                <div className={styles.referenceThumb} key={artworkId}>
+                  <Image
+                    src={artwork.src}
+                    alt={artwork.alt}
+                    width={34}
+                    height={34}
+                    unoptimized
+                  />
+                  <button
+                    type="button"
+                    aria-label={`移除参考图${artwork.title}`}
+                    title="移除参考图"
+                    onClick={() => removeReference(artworkId)}
+                  >
+                    <X size={9} aria-hidden="true" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div className={styles.composerInputRow}>
+          <textarea
+            className={styles.promptInput}
+            aria-label="创作提示词"
+            placeholder="描述你想创作的画面"
+            rows={1}
+            value={prompt}
+            onChange={(event) => updatePrompt(event.target.value)}
+          />
+          <div className={styles.composerInputActions}>
+            <div className={styles.referenceControl}>
+              <button
+                type="button"
+                className={styles.tinyButton}
+                data-active={activePanel === "references"}
+                aria-label="添加参考图"
+                title="添加参考图"
+                onClick={() => {
+                  setMentionOpen(false);
+                  onPanelChange(
+                    activePanel === "references" ? null : "references"
+                  );
+                }}
+              >
+                <ImagePlus size={17} aria-hidden="true" />
+              </button>
+              {activePanel === "references" && (
+                <ReferencePicker
+                  selectedArtworkIds={referenceArtworkIds}
+                  onChange={onReferenceArtworkIdsChange}
+                  onClose={() => onPanelChange(null)}
+                />
+              )}
+            </div>
+            <button
+              type="button"
+              className={styles.tinyButton}
+              data-active={mentionOpen}
+              aria-label="引用参考图"
+              title="引用参考图"
+              onClick={() => {
+                if (referenceArtworkIds.length === 0) {
+                  onPanelChange("references");
+                  return;
+                }
+                onPanelChange(null);
+                setMentionOpen((current) => !current);
+              }}
+            >
+              <AtSign size={16} aria-hidden="true" />
+            </button>
+          </div>
+          {mentionOpen && (
+            <div className={styles.referenceMentionMenu}>
+              {referenceArtworkIds.map((artworkId) => {
+                const artwork = getArtwork(artworkId);
+                return (
+                  <button
+                    type="button"
+                    key={artworkId}
+                    onClick={() => insertReferenceMention(artworkId)}
+                  >
+                    <Image
+                      src={artwork.src}
+                      alt=""
+                      width={30}
+                      height={30}
+                      unoptimized
+                    />
+                    <span>
+                      <strong>@{artwork.title}</strong>
+                      <small>{artwork.category}</small>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
       <div className={styles.composerControls}>
         <div className={styles.controlGroup}>
@@ -429,6 +568,73 @@ function Composer({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * 渲染基础创作输入器的参考图库选择面板。
+ *
+ * @param props.selectedArtworkIds 当前已附加的参考图，最多四张。
+ * @param props.onChange 更新完整参考图列表。
+ * @param props.onClose 关闭选择面板。
+ * @returns 可多选的静态私人图库预览。
+ */
+function ReferencePicker({
+  selectedArtworkIds,
+  onChange,
+  onClose,
+}: {
+  selectedArtworkIds: string[];
+  onChange: (artworkIds: string[]) => void;
+  onClose: () => void;
+}) {
+  /** 在四张上限内切换一张图库作品。 */
+  const toggleArtwork = (artworkId: string) => {
+    if (selectedArtworkIds.includes(artworkId)) {
+      onChange(selectedArtworkIds.filter((id) => id !== artworkId));
+      return;
+    }
+    if (selectedArtworkIds.length >= 4) return;
+    onChange([...selectedArtworkIds, artworkId]);
+  };
+
+  return (
+    <section className={styles.referencePicker} aria-label="选择参考图">
+      <header>
+        <span>参考图片</span>
+        <span>{selectedArtworkIds.length}/4</span>
+      </header>
+      <div>
+        {artworks.slice(0, 8).map((artwork) => {
+          const selected = selectedArtworkIds.includes(artwork.id);
+          return (
+            <button
+              type="button"
+              key={artwork.id}
+              data-selected={selected}
+              aria-pressed={selected}
+              disabled={!selected && selectedArtworkIds.length >= 4}
+              onClick={() => toggleArtwork(artwork.id)}
+            >
+              <Image
+                src={artwork.src}
+                alt={artwork.alt}
+                width={84}
+                height={62}
+                unoptimized
+              />
+              <span>{artwork.title}</span>
+              {selected && <Check size={12} aria-hidden="true" />}
+            </button>
+          );
+        })}
+      </div>
+      <footer>
+        <button type="button" onClick={onClose}>
+          完成
+        </button>
+      </footer>
+    </section>
   );
 }
 
